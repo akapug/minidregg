@@ -17,7 +17,12 @@ The two conformance theorems compare against an independent implementation
 (pycryptodome 3.x `Crypto.Hash.KMAC256`, `mac_len=32`); NIST publishes KMAC256
 samples only at L = 512, and L enters the MAC through `right_encode(L)`.
 -/
-import Theory.Sp800185Cshake256Core
+module
+
+public import Theory.Sp800185Cshake256Core
+meta import Theory.Sp800185Cshake256Core
+
+@[expose] public section
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 
@@ -58,43 +63,46 @@ theorem kmac256Fast_eq (key customization input : List UInt8) :
   simp only [kmac256Fast, kmac256Bytes, sponge_fast_eq, pushList_data, empty_data,
     List.nil_append, List.append_assoc]
 
-/-- The compiled Host's KMAC256 is the fast path. -/
-@[csimp] theorem kmac256Bytes_eq_fast : kmac256Bytes = kmac256Fast := by
+/-- The fast path is `kmac256Bytes`; not the `@[csimp]` attachment (that is the kernel seam
+below, whose Lean body is this fast path). -/
+theorem kmac256Bytes_eq_fast : kmac256Bytes = kmac256Fast := by
   funext key customization input
   exact (kmac256Fast_eq key customization input).symm
 
-/-! ## Conformance against an independent implementation
+/-! ## The kernel seam (HOT-PATH 2d, as `Theory.Sp800185Cshake256Native`) -/
 
-The `native_decide` vectors below are compiled after `kmac256Bytes_eq_fast`,
-so they evaluate the fast path. -/
+open Native in
+/-- **The kernel seam.** KMAC256 with a 32-byte tag on byte arrays: the Lean body is the proved
+fast path; the compiled code is `mini_kmac256_32` (`native/mini-kernels`). The equality of the
+Rust to this body is pinned by the Lean vectors and by the two `native_decide` conformance
+theorems below, which evaluate the compiled path. -/
+@[extern "mini_kmac256_32"]
+def kmac256Kernel (key customization input : @& ByteArray) : ByteArray :=
+  bytesOfList (kmac256Fast key.data.toList customization.data.toList input.data.toList)
 
-def kmacVectorKey : List UInt8 := (List.range 32).map fun i => UInt8.ofNat (0x40 + i)
+open Native in
+/-- The spec's shape over the kernel: what the compiled `kmac256Bytes` runs. -/
+def kmac256Native (key customization input : List UInt8) : List UInt8 :=
+  (kmac256Kernel (bytesOfList key) (bytesOfList customization) (bytesOfList input)).data.toList
 
-/-- pycryptodome: `KMAC256.new(key=bytes(range(0x40,0x60)), mac_len=32,
-custom=b"My Tagged Application").update(bytes([0,1,2,3]))`. -/
-def kmacVectorTagged : List UInt8 :=
-  [0xf2, 0xd9, 0x5c, 0x33, 0xc9, 0xa2, 0x01, 0xeb, 0x10, 0xc5, 0x24, 0xb9, 0x08, 0x4b, 0x4b, 0xac,
-   0xae, 0x00, 0x92, 0xf8, 0x69, 0x12, 0x2d, 0xf7, 0xd7, 0x87, 0x0b, 0x92, 0xc8, 0x42, 0xe0, 0x5b]
+open Native in
+/-- **The seam's Lean body is `kmac256Bytes`**, for every key, customization and message. -/
+theorem kmac256Native_eq (key customization input : List UInt8) :
+    kmac256Native key customization input = kmac256Bytes key customization input := by
+  unfold kmac256Native kmac256Kernel
+  rw [bytesOfList_toList, bytesOfList_toList, bytesOfList_toList, bytesOfList_toList,
+    kmac256Fast_eq]
 
-/-- pycryptodome, same key, `custom=b"DREGG/NATIVE-HOST/CHECKPOINT-MAC/v1"`,
-message `b"abc"`. -/
-def kmacVectorCheckpoint : List UInt8 :=
-  [0xb1, 0x86, 0x2d, 0xc6, 0x69, 0x01, 0xcf, 0x8a, 0xd0, 0xde, 0x93, 0x23, 0x5e, 0x93, 0xa4, 0x87,
-   0xec, 0x11, 0x0f, 0x46, 0xa6, 0x68, 0xa9, 0xb5, 0x12, 0x2e, 0x0d, 0xcb, 0x1e, 0xfa, 0x71, 0x1f]
+/-- The compiled Host's KMAC256 is the kernel seam. -/
+@[csimp] theorem kmac256Bytes_eq_native : kmac256Bytes = kmac256Native := by
+  funext key customization input
+  exact (kmac256Native_eq key customization input).symm
 
-theorem kmac256_conforms_tagged :
-    kmac256Bytes kmacVectorKey "My Tagged Application".toUTF8.toList [0, 1, 2, 3] =
-      kmacVectorTagged := by native_decide
-
-theorem kmac256_conforms_checkpoint_customization :
-    kmac256Bytes kmacVectorKey "DREGG/NATIVE-HOST/CHECKPOINT-MAC/v1".toUTF8.toList
-      "abc".toUTF8.toList = kmacVectorCheckpoint := by native_decide
-
-/-- The key is load-bearing: the same message and customization under a
-different key gives a different tag. -/
-theorem kmac256_key_separates :
-    kmac256Bytes (kmacVectorKey.map (· + 1)) "My Tagged Application".toUTF8.toList
-      [0, 1, 2, 3] ≠ kmacVectorTagged := by native_decide
+/-! The conformance vectors (`kmacVectorKey`, the two pycryptodome rows, `kmac256_key_separates`)
+live in `Compiler.Sp800185Kmac256Conformance`: they are `native_decide` facts about the compiled
+path, which after `kmac256Bytes_eq_native` is the kernel seam of THIS module, and the interpreter
+resolves that seam through this module's compiled object (`scripts/build-mini-kernels.sh`), which
+cannot exist while this module is still being elaborated. -/
 
 end Minidregg.Compiler.Sp800185Cshake256
 
@@ -104,9 +112,7 @@ end Minidregg.Compiler.Sp800185Cshake256
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Fast_eq
 /-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_eq_fast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_eq_fast
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged._native.native_decide.ax_1_1] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization._native.native_decide.ax_1_1] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates._native.native_decide.ax_1_1] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Native_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Native_eq
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_eq_native' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_eq_native

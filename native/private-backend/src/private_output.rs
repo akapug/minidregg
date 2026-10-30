@@ -24,11 +24,7 @@ pub struct Message {
     pub dealer: u16,
     pub message: private_send::Message,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct RecipientResult {
     context: [u8; 32],
@@ -119,34 +115,21 @@ impl PrivateOutput {
             pool: Nat::from_be(&hash(&identity)),
             row: Nat::new(0),
         };
-        let _guard = custody::lock(&local.with_extension("output.lock"))?;
-        let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-        before.reserve(id.clone(), generation.clone(), Purpose::HolderPad)?;
         let mut req = vec![1];
         req.extend(crate::codec::request(&id, &generation, Purpose::HolderPad));
-        let confirmed = Journal::decode(&custody::rpc(anchor, &req)?)?;
-        if !confirmed.extends(&before)
-            || !confirmed.preserves_allocations(&before)
-            || !confirmed.allocations.iter().any(|a| {
-                a.id == id
-                    && a.generation == generation
-                    && a.purpose == Purpose::HolderPad
-                    && !a.consumed
-            })
-        {
-            return Err(bad("private output actual anchor retention"));
-        }
-        let mut receipt = b"DREGG.PRIVATE.OUTPUT.BURN\x01".to_vec();
-        bytes(&binding, &mut receipt);
-        bytes(&confirmed.encode(), &mut receipt);
-        custody::snapshot(local, &receipt)?;
-        if std::fs::read(local)? != receipt {
-            return Err(bad("private output durable readback"));
-        }
-        let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-        if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
-            return Err(bad("private output anchor regression"));
-        }
+        let mut prefix = b"DREGG.PRIVATE.OUTPUT.BURN\x01".to_vec();
+        bytes(&binding, &mut prefix);
+        let (confirmed, _) = custody::reserve_with_receipt(
+            &local.with_extension("output.lock"),
+            &req,
+            &[id.clone()],
+            &generation,
+            Purpose::HolderPad,
+            prefix,
+            anchor,
+            local,
+            "private output",
+        )?;
         let output = parent.output().unwrap();
         if output.context() != parent.context()
             || output.holder() != me
@@ -193,8 +176,7 @@ impl PrivateOutput {
         if hash(&binding) != context {
             return Err(bad("output exact public descriptor binding"));
         }
-        let mut child = g.clone();
-        child.invocation = Nat::from_be(&context);
+        let child = g.derived(&context);
         let length = 32 + 2 + 2 + count * 16;
         let deliveries = (0..n)
             .map(|d| PrivateSend::new(me, d as u16, n, f, &child, length))
@@ -396,18 +378,7 @@ impl PrivateOutput {
         let holder = c.u16()?;
         let target = c.u16()?;
         fn nat(c: &mut Cursor) -> Result<usize> {
-            let mut b = vec![];
-            loop {
-                let v = c.byte()?;
-                b.push(v);
-                if v == 255 {
-                    break;
-                }
-            }
-            let mut r = Reader::new(&b)?;
-            let n = usize::try_from(r.nat()?.value()?).map_err(|_| bad("output Nat capacity"))?;
-            r.finish()?;
-            Ok(n)
+            usize::try_from(c.nat()?.value()?).map_err(|_| bad("output Nat capacity"))
         }
         let n = nat(&mut c)?;
         let f = nat(&mut c)?;

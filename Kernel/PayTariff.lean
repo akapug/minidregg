@@ -15,13 +15,13 @@ A tariff is `valid` only when it names a real token: a positive version, a
 System Program, which is no mint), positive rate and cap, and a positive node
 week rate.
 
-Version 2 (`DREGG/PAY/TARIFF/v2`, PAY §11) adds self-enrollment:
+Version 2 (`DREGG/PAY/TARIFF/v2`, docs/PAY.md §11) adds self-enrollment:
 `nodeHourRate` (an hourly unit), `enrolIndex` (the book index whose observations go to
 the enrollment receiver; `none` = self-enrollment off) and `journalFloor`
 (atomic units below which an enrollment-index transfer is not admitted at
 all, so dust cannot buy a journal row).  A v1 tariff's bytes refuse to decode.
 
-Version 3 (`DREGG/PAY/TARIFF/v3`, COMPUTE §9 D4, lane C3 K-JOB-MONEY) adds the
+Version 3 (`DREGG/PAY/TARIFF/v3`, docs/COMPUTE.md §9 D4, lane C3 K-JOB-MONEY) adds the
 job market's slash split: `slashCallerPermille`, the share of a slashed bond
 minted back to the caller, in thousandths; the rest of the bond is never
 re-minted and stays in the well.  Valid only at most 1000.  The default is
@@ -38,8 +38,27 @@ default (`genesisDefault`) is deliberately invalid until the operator sets a
 tariff; while it is invalid, no deposit index is assigned
 (`PayAssignmentReceiver.assignment_requires_valid_tariff`).
 -/
-import Compiler.ResourceBirthCodec
-import Theory.AssertAxioms
+module
+
+public import Compiler.ResourceBirthCodec
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayTariff
 
@@ -86,7 +105,7 @@ structure Tariff where
   enrolIndex : Option Nat
   /-- Enrollment-index transfers below this many atomic units are refused. -/
   journalFloor : Nat
-  /-- Thousandths of a slashed job bond minted to the caller (COMPUTE §9 D4);
+  /-- Thousandths of a slashed job bond minted to the caller (docs/COMPUTE.md §9 D4);
   the remainder is never minted and stays in the well. -/
   slashCallerPermille : Nat
   deriving DecidableEq, Repr
@@ -147,26 +166,27 @@ def tariffStream : StreamCodec Tariff :=
       ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash⟩)
     (by intro t; cases t; rfl)
 
-/-- A frame-prefixed codec that refuses every non-canonical byte string. -/
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  { encode := fun value => frame ++ stream.encode value
-    decode := fun bytes => if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-    decode_encode := by
-      intro value
-      have exact := stream.toLawful.decode_encode value
-      change stream.toLawful.decode (stream.encode value) = some value at exact
-      simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  Minidregg.Compiler.ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec α)
     {bytes : List UInt8} {value : α} (accepted : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  Minidregg.Compiler.ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) accepted
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value accepted
 
-def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v4".toUTF8.toList
+theorem framed_decode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
+    (bytes : List UInt8) :
+    (framed frame stream).decode bytes =
+      if bytes.take frame.length = frame then stream.toLawful.decode (bytes.drop frame.length)
+      else none := by
+  by_cases prefixed : bytes.take frame.length = frame <;>
+    simp [framed, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap,
+      StreamCodec.product, StreamCodec.literal, prefixed]
+  cases stream.decodePrefix (bytes.drop frame.length) <;> simp
+
+def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v8".toUTF8.toList
 
 def tariffCodec : LawfulCodec Tariff := framed tariffFrame tariffStream
 
@@ -188,19 +208,7 @@ theorem tariff_v3_refused (rest : List UInt8) :
       "DREGG/PAY/TARIFF/v3".toUTF8.toList := by
     rw [← sameLength]
     exact List.take_left
-  have refused : (framedRaw tariffFrame tariffStream).decode
-      ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) = none := by
-    change (if _ = tariffFrame then _ else none) = none
-    rw [prefixIsV3]
-    exact if_neg differs
-  change (do
-      let value ← (framedRaw tariffFrame tariffStream).decode
-        ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest)
-      if Minidregg.Compiler.ResourceBirthCodec.bytesEqual
-          ((framedRaw tariffFrame tariffStream).encode value)
-          ("DREGG/PAY/TARIFF/v3".toUTF8.toList ++ rest) then some value else none) = none
-  rw [refused]
-  rfl
+  rw [tariffCodec, framed_decode, prefixIsV3, if_neg differs]
 
 /-! ## The genesis placeholder -/
 

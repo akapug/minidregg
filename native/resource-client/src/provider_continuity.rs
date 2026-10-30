@@ -401,7 +401,7 @@ pub(crate) fn guard(
     let payload = descriptor_payload(&descriptor, &evidence)?;
     create_private(&evidence.join("request.bin"), &payload)?;
     sync_directory_ancestors(&evidence)?;
-    let frame = session_invoke(host, socket, config, 17, &payload)?;
+    let frame = session_invoke(host, socket, config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     create_private(&evidence.join("reply.frame"), &frame)?;
     if frame.first() != Some(&17) {
         return Err("Host refused continuity; exact frame retained".into());
@@ -815,7 +815,7 @@ pub(crate) fn resolve_attempt(
     }
     let payload = resolution_payload(&payload, &old_prefix)?;
     create_private(&fresh_dir.join("request.bin"), &payload)?;
-    let frame = session_invoke(host, socket, &copied_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &copied_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     create_private(&fresh_dir.join("reply.frame"), &frame)?;
     if frame.first() != Some(&17) {
         return Err("fresh continuity refused; keep Pending".into());
@@ -1148,7 +1148,9 @@ mod tests {
         fs::create_dir(&directory).unwrap();
         let host = directory.join("host.sh");
         // Any prepare, submit, or pin-plan-height invocation fails this test.
-        fs::write(&host, b"#!/bin/sh\ncase \"$2\" in lookup) cp \"$3\" \"$4\" ;; inspect) printf '{\"type\":\"confirmed\"}' >\"$5\" ;; *) exit 91 ;; esac\n").unwrap();
+        let _codec = crate::client_consent::codec_test_lock();
+        fs::write(&host, format!("#!/bin/sh\ncase \"$2\" in\n lookup) cp \"$3\" \"$4\" ;;\n{} *) exit 91 ;;\nesac\n",
+            crate::client_consent::codec_loop_arm(r#"printf '{"type":"confirmed"}' > "$out""#))).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let config = directory.join("config.json");
         fs::write(&config, b"{}").unwrap();

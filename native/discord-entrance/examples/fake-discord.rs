@@ -25,7 +25,10 @@ use std::io::Read;
 use std::net::TcpListener;
 
 use ed25519_dalek::{Signer, SigningKey};
-use minidregg_discord_entrance::http::{client_request, read_request, write_response};
+#[path = "../tests/support/client.rs"]
+mod client;
+use client::client_request;
+use minidregg_discord_entrance::http::{read_request, write_response};
 use minidregg_discord_entrance::now_s;
 use minidregg_discord_entrance::signature::{hex_decode, hex_encode};
 use serde_json::json;

@@ -7,14 +7,12 @@ use crate::{
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::io;
+use crate::canonical::hex;
 
 pub(crate) const CAPTURE_HEADER: &str = "x-mini-export-capture";
 const RECEIPT_HEADER: &str = "X-Mini-Export-Receipt";
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Reject an unsupported export request before any Mini or physical call.
@@ -55,10 +53,7 @@ pub(crate) fn requested(
         ));
     }
     let id = capture.ok_or_else(|| invalid("export capture route requires a capture identity"))?;
-    if id.len() != 32
-        || !id
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    if !crate::canonical::lower_hex_of(&id, 16)
     {
         return Err(invalid("invalid export capture identity"));
     }
@@ -87,7 +82,11 @@ pub(crate) fn prepare(
     let header = std::str::from_utf8(&response[..end])
         .map_err(|_| invalid("export response header is not text"))?;
     if !header.starts_with("HTTP/1.1 200 ") {
-        return Err(invalid("export requires a successful representation"));
+        // The app's status line names why (no sheet, a moved route, an app error); it carries no
+        // credential, and is bounded and kept to printable ASCII.
+        let status: String = header.lines().next().unwrap_or("").chars()
+            .filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect();
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("export requires a successful representation; the app answered {status:?}")));
     }
     if header.lines().any(|line| {
         line.split_once(':')
@@ -144,6 +143,7 @@ mod tests {
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
+            edge_gid: None,
         };
         let id = "a".repeat(32);
         let capture = Some(id.as_str());
@@ -206,6 +206,7 @@ mod tests {
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
+            edge_gid: None,
         };
         let id = "b".repeat(32);
         let signed = vec![(CAPTURE_HEADER.to_owned(), id.clone())];

@@ -2,7 +2,7 @@
 an invocation key the request's basis did not declare is refused BY NAME on a REAL
 deployment Store, and the declared request prepares.
 
-The Store is the accepted fixture's (`Assurance.NativeAcceptedFixtureData`): the pinned
+The Store is the accepted fixture's (`Fixtures.NativeAcceptedFixtureData`): the pinned
 genesis seed, bootstrapped under the pinned config, then the fixture's journal prefix
 (`recordHexes`, each record bound by `IntentRecord.bind?` and committed by
 `DurableReceiverIO.receive`), so the Store is at the height where the native Host
@@ -18,11 +18,11 @@ The command is `objective-first`'s, decoded from the Host's call bytes.
     and before the signature is checked);
  3. control: the basis of `invocationKeys` (what `NativeHost.submitInvokeLight` reads)
     prepares (`.ok`, with its `PhysicalShape`); `recordedInvocation` on the declared basis answers "not recorded"; `withAcceptedOn`
-    on it does not refuse `undeclaredTransaction`: with VERIFIER it is accepted; without,
-    the missing verifier answers `unavailable` naming zero reply bytes (no panic).
+    on it does not refuse `undeclaredTransaction`: the linked native verifier accepts it,
+    whether or not the legacy VERIFIER argument is supplied.
 
 Usage: lake env lean --run scripts/kn2/invoke-undeclared.lean STORE-HELPER [VERIFIER] -/
-import Assurance.NativeAcceptedFixtureData
+import Fixtures.NativeAcceptedFixtureData
 import Kernel.NativeHostLight
 import Compiler.NativeHostCodec
 import Kernel.ObjectiveBendAuthenticatedInputs
@@ -33,7 +33,7 @@ open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.NativeHost
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableCheckpointCodec
-open Minidregg.Assurance.NativeAcceptedFixtureData
+open Minidregg.Fixtures.NativeAcceptedFixtureData
 
 namespace InvokeUndeclared
 
@@ -143,18 +143,9 @@ def run (binary : System.FilePath) (verifier : Option System.FilePath) (director
     ObjectiveBendAuthenticatedInputs.oracle
   require s!"a declared transaction id is not refused as undeclared (got {declaredResult})"
     (declaredResult != "rejected undeclaredTransaction")
-  match verifier with
-  | some _ =>
-    require s!"with the pinned verifier the declared request is accepted (got {declaredResult})"
-      (declaredResult == "accepted")
-  | none =>
-    -- No verifier: the signature check reaches a helper that cannot start, which answers
-    -- `unavailable` naming zero reply bytes (it panicked the probe before 2026-10-07:
-    -- scripts/kn2/coprocess-faults.lean).
-    let absent := NativeCoprocess.Failure.render (.closed 0)
-    require s!"with no verifier the declared request is unavailable as `{absent}` (got {declaredResult})"
-      ((declaredResult.splitOn absent).length > 1)
-  IO.println s!"control (withAcceptedOn, declared keys, verifier {verifier.isSome}): {declaredResult}"
+  require s!"the linked native verifier accepts the declared request (got {declaredResult})"
+    (declaredResult == "accepted")
+  IO.println "control (withAcceptedOn, declared keys, in-process native verifier): accepted"
   IO.println "PASS invoke undeclared: an undeclared marker and an undeclared transaction id, each refused by name; the declared request prepares and is accepted on the light ground"
 
 end InvokeUndeclared

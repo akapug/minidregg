@@ -11,7 +11,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "describe",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 1,
@@ -23,7 +24,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "authorized prepare",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 2,
@@ -35,7 +37,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 3,
@@ -47,7 +50,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 4,
@@ -59,7 +63,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "observation challenge",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 5,
@@ -71,7 +76,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "authorized query",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 6,
@@ -83,7 +89,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "profile",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 7,
@@ -95,7 +102,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "author",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 8,
@@ -107,7 +115,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "inspect",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 9,
@@ -119,7 +128,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "signatures",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 10,
@@ -131,7 +141,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "observation assemble",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 11,
@@ -143,7 +154,8 @@
       ],
       "owner": "kernel-client",
       "purpose": "call assemble",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 12,
@@ -155,19 +167,20 @@
       ],
       "owner": "fn-services",
       "purpose": "fn poll",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 13,
       "symbol": "FN_ACK",
       "status": "active",
       "routes": [
-        "public",
         "operator"
       ],
       "owner": "fn-services",
       "purpose": "fn ack",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 14,
@@ -179,19 +192,20 @@
       ],
       "owner": "fn-services",
       "purpose": "fn reply poll",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 15,
       "symbol": "FN_REPLY_ACK",
       "status": "active",
       "routes": [
-        "public",
         "operator"
       ],
       "owner": "fn-services",
       "purpose": "fn reply ack",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 16,
@@ -203,7 +217,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn origin outbox",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 17,
@@ -215,7 +230,8 @@
       ],
       "owner": "inference",
       "purpose": "provider continuity",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 18,
@@ -227,7 +243,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn origin outbox export",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 19,
@@ -239,7 +256,8 @@
       ],
       "owner": "inference",
       "purpose": "provider usage quote",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 20,
@@ -251,7 +269,8 @@
       ],
       "owner": "selected-release",
       "purpose": "selected release submit",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "append"
     },
     {
       "code": 21,
@@ -263,7 +282,8 @@
       ],
       "owner": "selected-release",
       "purpose": "selected release lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 22,
@@ -274,7 +294,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle begin submit",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "append"
     },
     {
       "code": 23,
@@ -285,7 +306,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle begin lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 24,
@@ -294,7 +316,8 @@
       "routes": [],
       "owner": "selected-release",
       "purpose": "selected source publish submit; currently Host stdio only, socket route not present",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "append"
     },
     {
       "code": 25,
@@ -303,7 +326,8 @@
       "routes": [],
       "owner": "selected-release",
       "purpose": "selected source publish lookup; currently Host stdio only, socket route not present",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 26,
@@ -314,7 +338,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle claim submit",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "append"
     },
     {
       "code": 27,
@@ -325,7 +350,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle claim lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 28,
@@ -337,7 +363,8 @@
       ],
       "owner": "spk",
       "purpose": "application share issue submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 29,
@@ -349,7 +376,8 @@
       ],
       "owner": "spk",
       "purpose": "application share issue lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 30,
@@ -361,7 +389,8 @@
       ],
       "owner": "spk",
       "purpose": "application current birth",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 31,
@@ -373,7 +402,8 @@
       ],
       "owner": "spk",
       "purpose": "Application session birth intent from verified current history",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 32,
@@ -384,7 +414,8 @@
       ],
       "owner": "spk",
       "purpose": "application share issue plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 33,
@@ -395,7 +426,8 @@
       ],
       "owner": "spk",
       "purpose": "application share issue assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 34,
@@ -406,7 +438,8 @@
       ],
       "owner": "spk",
       "purpose": "application dispatch submit",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "append"
     },
     {
       "code": 35,
@@ -417,7 +450,8 @@
       ],
       "owner": "spk",
       "purpose": "application dispatch lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 36,
@@ -428,7 +462,8 @@
       ],
       "owner": "spk",
       "purpose": "application dispatch plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 37,
@@ -439,7 +474,8 @@
       ],
       "owner": "spk",
       "purpose": "application dispatch assemble",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 38,
@@ -450,7 +486,8 @@
       ],
       "owner": "spk",
       "purpose": "application lifecycle completion submit",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "append"
     },
     {
       "code": 39,
@@ -461,7 +498,8 @@
       ],
       "owner": "spk",
       "purpose": "application lifecycle completion lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 40,
@@ -472,7 +510,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn namespace submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 41,
@@ -483,7 +522,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn namespace lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 42,
@@ -494,7 +534,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn namespace plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 43,
@@ -505,7 +546,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn namespace assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 44,
@@ -516,7 +558,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle completion plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 45,
@@ -527,7 +570,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle completion assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 46,
@@ -538,7 +582,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent paid dispatch submit",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "append"
     },
     {
       "code": 47,
@@ -549,7 +594,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent paid dispatch lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 48,
@@ -560,7 +606,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent paid dispatch plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 49,
@@ -571,7 +618,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent paid dispatch assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 50,
@@ -582,7 +630,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle begin plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 51,
@@ -593,7 +642,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle begin assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 52,
@@ -604,7 +654,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle claim plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 53,
@@ -615,7 +666,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application lifecycle claim assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 54,
@@ -626,18 +678,21 @@
       ],
       "owner": "spk",
       "purpose": "grain share issue submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 55,
       "symbol": "GRAIN_SHARE_ISSUE_LOOKUP",
       "status": "active",
       "routes": [
+        "public",
         "operator"
       ],
       "owner": "spk",
-      "purpose": "grain share issue lookup",
-      "receiver": "fnDispatch"
+      "purpose": "Read-only exact-ingress original event-22 receipt lookup from the verified history; no issue submit or current authority grant",
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 56,
@@ -648,7 +703,8 @@
       ],
       "owner": "spk",
       "purpose": "grain share issue plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 57,
@@ -659,7 +715,8 @@
       ],
       "owner": "spk",
       "purpose": "grain share issue assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 58,
@@ -670,7 +727,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent reserve plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 59,
@@ -681,7 +739,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent reserve assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 60,
@@ -692,7 +751,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn selected coverage submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 61,
@@ -703,7 +763,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn selected coverage lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 62,
@@ -714,7 +775,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn empty progress submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 63,
@@ -725,7 +787,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn empty progress lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 64,
@@ -736,7 +799,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn frontier plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 65,
@@ -747,7 +811,8 @@
       ],
       "owner": "fn-services",
       "purpose": "fn frontier assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 66,
@@ -758,7 +823,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application launch begin plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 67,
@@ -769,7 +835,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application launch begin assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 68,
@@ -780,7 +847,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application launch claim plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 69,
@@ -791,7 +859,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application launch claim assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 70,
@@ -802,7 +871,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application launch completion plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 71,
@@ -813,7 +883,8 @@
       ],
       "owner": "spk-lifecycle",
       "purpose": "application launch completion assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 72,
@@ -824,7 +895,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime grant submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 73,
@@ -835,7 +907,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime grant lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 74,
@@ -846,7 +919,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime grant plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 75,
@@ -857,7 +931,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime grant assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 76,
@@ -868,7 +943,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime dispatch submit",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "append"
     },
     {
       "code": 77,
@@ -879,7 +955,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime dispatch lookup",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 78,
@@ -890,7 +967,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime dispatch plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 79,
@@ -901,7 +979,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime dispatch assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 80,
@@ -912,7 +991,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime reserve plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 81,
@@ -923,7 +1003,8 @@
       ],
       "owner": "hermes",
       "purpose": "agent lifetime reserve assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 82,
@@ -934,7 +1015,8 @@
       ],
       "owner": "spk",
       "purpose": "application session enrollment plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 83,
@@ -945,7 +1027,8 @@
       ],
       "owner": "spk",
       "purpose": "application session enrollment assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 84,
@@ -956,7 +1039,8 @@
       ],
       "owner": "spk",
       "purpose": "application session enrollment submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 85,
@@ -967,7 +1051,8 @@
       ],
       "owner": "spk",
       "purpose": "application session enrollment lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 86,
@@ -979,7 +1064,8 @@
       ],
       "owner": "identity",
       "purpose": "participant key enrollment plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 87,
@@ -991,7 +1077,8 @@
       ],
       "owner": "identity",
       "purpose": "participant key enrollment assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 88,
@@ -1003,7 +1090,8 @@
       ],
       "owner": "identity",
       "purpose": "participant key enrollment submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 89,
@@ -1015,7 +1103,8 @@
       ],
       "owner": "identity",
       "purpose": "participant key enrollment lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 91,
@@ -1027,7 +1116,8 @@
       ],
       "owner": "world",
       "purpose": "current resource birth",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 92,
@@ -1039,7 +1129,8 @@
       ],
       "owner": "identity",
       "purpose": "participant provisioning plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 93,
@@ -1051,7 +1142,8 @@
       ],
       "owner": "identity",
       "purpose": "participant provisioning assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 94,
@@ -1063,7 +1155,8 @@
       ],
       "owner": "identity",
       "purpose": "participant provisioning submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 95,
@@ -1075,7 +1168,8 @@
       ],
       "owner": "identity",
       "purpose": "participant provisioning lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 96,
@@ -1087,7 +1181,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet turn plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 97,
@@ -1099,7 +1194,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet turn assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 98,
@@ -1111,7 +1207,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet turn submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 99,
@@ -1123,7 +1220,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet turn lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 100,
@@ -1135,7 +1233,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet topic poll",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 101,
@@ -1147,7 +1246,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet head",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 102,
@@ -1159,7 +1259,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet receipt",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 103,
@@ -1171,7 +1272,8 @@
       ],
       "owner": "payments",
       "purpose": "pay command plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 104,
@@ -1183,7 +1285,8 @@
       ],
       "owner": "payments",
       "purpose": "pay command assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 105,
@@ -1195,7 +1298,8 @@
       ],
       "owner": "payments",
       "purpose": "pay command submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 106,
@@ -1207,7 +1311,8 @@
       ],
       "owner": "payments",
       "purpose": "pay command lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 107,
@@ -1219,7 +1324,8 @@
       ],
       "owner": "payments",
       "purpose": "pay view",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 108,
@@ -1231,7 +1337,8 @@
       ],
       "owner": "payments",
       "purpose": "pay observation plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 109,
@@ -1243,7 +1350,8 @@
       ],
       "owner": "payments",
       "purpose": "pay observation assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 110,
@@ -1255,7 +1363,8 @@
       ],
       "owner": "payments",
       "purpose": "pay observation submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 111,
@@ -1267,7 +1376,8 @@
       ],
       "owner": "payments",
       "purpose": "pay observation lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 112,
@@ -1279,7 +1389,8 @@
       ],
       "owner": "payments",
       "purpose": "pay enrollment view",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 113,
@@ -1291,7 +1402,8 @@
       ],
       "owner": "payments",
       "purpose": "pay refill plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 114,
@@ -1303,7 +1415,8 @@
       ],
       "owner": "payments",
       "purpose": "pay refill assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 115,
@@ -1315,7 +1428,8 @@
       ],
       "owner": "payments",
       "purpose": "pay refill submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 116,
@@ -1327,7 +1441,8 @@
       ],
       "owner": "payments",
       "purpose": "pay refill lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 117,
@@ -1338,7 +1453,8 @@
       ],
       "owner": "payments",
       "purpose": "pay self enrollment plan; observer-signed operator route awaits payment integration",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 118,
@@ -1349,7 +1465,8 @@
       ],
       "owner": "payments",
       "purpose": "pay self enrollment assemble; observer-signed operator route awaits payment integration",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 119,
@@ -1360,7 +1477,8 @@
       ],
       "owner": "payments",
       "purpose": "pay self enrollment submit; observer-signed operator route awaits payment integration",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 120,
@@ -1371,7 +1489,8 @@
       ],
       "owner": "payments",
       "purpose": "pay self enrollment lookup; observer-signed operator route awaits payment integration",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 121,
@@ -1383,7 +1502,8 @@
       ],
       "owner": "payments",
       "purpose": "pay enrollment quote",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 123,
@@ -1395,7 +1515,8 @@
       ],
       "owner": "world",
       "purpose": "realm well plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 124,
@@ -1407,7 +1528,8 @@
       ],
       "owner": "world",
       "purpose": "realm well assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 125,
@@ -1419,7 +1541,8 @@
       ],
       "owner": "world",
       "purpose": "realm well submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 126,
@@ -1431,7 +1554,8 @@
       ],
       "owner": "clock",
       "purpose": "clock tick plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 127,
@@ -1443,7 +1567,8 @@
       ],
       "owner": "clock",
       "purpose": "clock tick assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 128,
@@ -1455,7 +1580,8 @@
       ],
       "owner": "clock",
       "purpose": "clock tick submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 129,
@@ -1467,7 +1593,8 @@
       ],
       "owner": "clock",
       "purpose": "clock view",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 130,
@@ -1479,7 +1606,8 @@
       ],
       "owner": "world",
       "purpose": "affordance dry run",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 131,
@@ -1491,7 +1619,8 @@
       ],
       "owner": "nock",
       "purpose": "nock program check",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 132,
@@ -1503,7 +1632,8 @@
       ],
       "owner": "nock",
       "purpose": "nock program show",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 133,
@@ -1515,7 +1645,8 @@
       ],
       "owner": "nock",
       "purpose": "nock sample",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 134,
@@ -1527,7 +1658,8 @@
       ],
       "owner": "nock",
       "purpose": "nock dry run",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 135,
@@ -1539,7 +1671,8 @@
       ],
       "owner": "nock",
       "purpose": "nock app poke dry run",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 136,
@@ -1551,7 +1684,8 @@
       ],
       "owner": "nock",
       "purpose": "nock app peek",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 137,
@@ -1563,7 +1697,8 @@
       ],
       "owner": "nock",
       "purpose": "nock app state",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 140,
@@ -1575,7 +1710,8 @@
       ],
       "owner": "identity",
       "purpose": "key rotation plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 141,
@@ -1587,7 +1723,8 @@
       ],
       "owner": "identity",
       "purpose": "key rotation assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 142,
@@ -1599,7 +1736,8 @@
       ],
       "owner": "identity",
       "purpose": "key rotation submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 143,
@@ -1611,7 +1749,8 @@
       ],
       "owner": "identity",
       "purpose": "key rotation lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 144,
@@ -1623,7 +1762,8 @@
       ],
       "owner": "identity",
       "purpose": "key rotation status",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 150,
@@ -1635,7 +1775,8 @@
       ],
       "owner": "laws",
       "purpose": "law sat",
-      "receiver": "dispatchSession"
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 151,
@@ -1647,7 +1788,8 @@
       ],
       "owner": "receipt-continuity",
       "purpose": "receipt continuity",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 152,
@@ -1658,7 +1800,8 @@
       ],
       "owner": "spk",
       "purpose": "Read-only signed stream authorization renewal",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "none"
     },
     {
       "code": 153,
@@ -1670,7 +1813,8 @@
       ],
       "owner": "checked-carry",
       "purpose": "Exact old-segment receipt metadata from original signed call; no historical content or submission",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 154,
@@ -1681,7 +1825,32 @@
       ],
       "owner": "spk",
       "purpose": "Read-only current application route inspection",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "none"
+    },
+    {
+      "code": 155,
+      "symbol": "APPLICATION_STOP_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only STOP custody join against the refreshed verified session",
+      "receiver": "dispatchSession",
+      "effect": "none"
+    },
+    {
+      "code": 156,
+      "symbol": "AGENT_LIFETIME_GRANT_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "spk",
+      "purpose": "Read-only accepted event27 projection against the refreshed verified session",
+      "receiver": "dispatchSession",
+      "effect": "none"
     },
     {
       "code": 160,
@@ -1693,7 +1862,8 @@
       ],
       "owner": "job-money",
       "purpose": "job money plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 161,
@@ -1705,7 +1875,8 @@
       ],
       "owner": "job-money",
       "purpose": "job money assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 162,
@@ -1717,7 +1888,8 @@
       ],
       "owner": "job-money",
       "purpose": "job money submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 163,
@@ -1729,7 +1901,8 @@
       ],
       "owner": "job-money",
       "purpose": "job money lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 164,
@@ -1740,7 +1913,8 @@
       ],
       "owner": "spk",
       "purpose": "Dispatch bound to the admitted application route before CAS",
-      "receiver": "serveFrame"
+      "receiver": "serveFrame",
+      "effect": "append"
     },
     {
       "code": 170,
@@ -1752,7 +1926,8 @@
       ],
       "owner": "history",
       "purpose": "certify plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 171,
@@ -1764,7 +1939,8 @@
       ],
       "owner": "history",
       "purpose": "certify assemble",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 172,
@@ -1776,7 +1952,8 @@
       ],
       "owner": "history",
       "purpose": "certify submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 173,
@@ -1788,7 +1965,8 @@
       ],
       "owner": "history",
       "purpose": "certify view",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 180,
@@ -1800,7 +1978,8 @@
       ],
       "owner": "fleet",
       "purpose": "fleet incoming ledger",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 181,
@@ -1812,7 +1991,8 @@
       ],
       "owner": "payments",
       "purpose": "Exact pending payment claim view",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 182,
@@ -1824,7 +2004,8 @@
       ],
       "owner": "payments",
       "purpose": "Quote current terms for a fixed deposited payment",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 183,
@@ -1836,7 +2017,8 @@
       ],
       "owner": "payments",
       "purpose": "Prepare signed accept-current-quote or pending-owner rotation",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 184,
@@ -1848,7 +2030,8 @@
       ],
       "owner": "payments",
       "purpose": "Assemble detached pending-claim signatures",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 185,
@@ -1860,7 +2043,8 @@
       ],
       "owner": "payments",
       "purpose": "Submit exact signed pending-claim command",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 186,
@@ -1872,7 +2056,8 @@
       ],
       "owner": "payments",
       "purpose": "Exact pending-claim receipt lookup",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 187,
@@ -1884,7 +2069,8 @@
       ],
       "owner": "identity",
       "purpose": "Source plan for participant adoption of a next-key commitment; bounded member self-service on activation, no route installed by reservation",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 188,
@@ -1896,7 +2082,8 @@
       ],
       "owner": "identity",
       "purpose": "Assemble current-key authorization and next-key proof of possession; bounded member self-service on activation, no route installed by reservation",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 189,
@@ -1908,7 +2095,8 @@
       ],
       "owner": "identity",
       "purpose": "Submit exact signed absent-to-present next-key commitment adoption; bounded member self-service on activation, no route installed by reservation",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 190,
@@ -1920,7 +2108,8 @@
       ],
       "owner": "identity",
       "purpose": "Exact receipt-only next-key commitment adoption lookup; bounded member self-service on activation, no route installed by reservation",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 191,
@@ -1932,7 +2121,8 @@
       ],
       "owner": "checked-carry/payments",
       "purpose": "Original paid-claim receipt metadata via fixed old186/inspect adapter; LE32 header length<=1024 with fixed algorithm and originIdentity plus exact signed claim<=4096; no submit or historical content",
-      "receiver": null
+      "receiver": null,
+      "effect": "none"
     },
     {
       "code": 192,
@@ -1944,7 +2134,8 @@
       ],
       "owner": "law-diagnostics",
       "purpose": "Same-image authorized law diagnostic over original signed prepare and at most32 separately signed current-policy queries; DREGG/NATIVE-HOST/LAW-DIAGNOSTIC/v1 wrapper. Read-only optional Refusal; no change to ordinary observation footprint. No endpoint until bounded receiver and routes qualify.",
-      "receiver": null
+      "receiver": null,
+      "effect": "none"
     },
     {
       "code": 193,
@@ -1956,7 +2147,8 @@
       ],
       "owner": "application-dispatch/member-workspace",
       "purpose": "Bounded canonical plan and participant signatures through current specialized verified app admission; read-only, no physical permit, CAS, append or app call",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 194,
@@ -1968,7 +2160,44 @@
       ],
       "owner": "application-dispatch/member-workspace",
       "purpose": "Member-authenticated exact app request planning after current signature and five full current resource-grant observations; operator preparation36 remains private",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 195,
+      "symbol": "TOOL_AUTHOR",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "host-tools",
+      "purpose": "Operator-only: the detached `author KIND IN OUT` verb as one in-session call; input and output cross the socket as bytes, never as paths; an output past the frame bound is answered too-large and the caller runs the detached verb",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 196,
+      "symbol": "TOOL_INSPECT",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "host-tools",
+      "purpose": "Operator-only: the detached `inspect KIND IN OUT` verb as one in-session call; bytes in and out, never paths; an output past the frame bound is answered too-large and the caller runs the detached verb",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 197,
+      "symbol": "TOOL_SIGNATURES",
+      "status": "active",
+      "routes": [
+        "operator"
+      ],
+      "owner": "host-tools",
+      "purpose": "Operator-only: the detached `signatures IN OUT` verb as one in-session call; bytes in and out, never paths",
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 201,
@@ -1980,7 +2209,8 @@
       ],
       "owner": "resource-reserve-birth",
       "purpose": "explicit reservation-capable resource birth authoring",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 202,
@@ -1992,7 +2222,8 @@
       ],
       "owner": "resource-reserve-birth",
       "purpose": "independent source and owner consent assembly",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 206,
@@ -2003,7 +2234,8 @@
       ],
       "owner": "spk-recovery",
       "purpose": "Prepare current-law recovery management signing plan",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 207,
@@ -2014,7 +2246,8 @@
       ],
       "owner": "spk-recovery",
       "purpose": "Assemble exact source-owned recovery ingress",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 208,
@@ -2025,7 +2258,8 @@
       ],
       "owner": "spk-recovery",
       "purpose": "Submit governed failed START reconciliation once",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 209,
@@ -2036,7 +2270,8 @@
       ],
       "owner": "spk-recovery",
       "purpose": "Lookup same recovery ingress exact retained receipt only",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 210,
@@ -2048,7 +2283,8 @@
       ],
       "owner": "activity-native",
       "purpose": "Kernel activity signed command: signing plan for one Turn (publish, create, birth, resolve, deliver, topUp, exhaust, abandon) under the object record; session-opened, bounded canonical plan, no state change",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 211,
@@ -2060,7 +2296,8 @@
       ],
       "owner": "activity-native",
       "purpose": "Kernel activity detached assembly: canonical plan plus exactly one 64-byte signature into the ingress; no session state read",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 212,
@@ -2072,7 +2309,8 @@
       ],
       "owner": "activity-native",
       "purpose": "Kernel activity submit: one signed command through the Objective activity receiver; the signature binds the decided outcome, a stale prepared delivery is refused",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 213,
@@ -2084,7 +2322,8 @@
       ],
       "owner": "activity-native",
       "purpose": "Kernel activity receipt-only lookup of the same ingress; retained receipt only, no submit",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 214,
@@ -2096,7 +2335,8 @@
       ],
       "owner": "activity-native",
       "purpose": "Public read-only kernel activity view: JSON object request (or empty), at most 65536 bytes, JSON reply; its quotes[{record, await}] answer {needed, escrow}, the heap a delivery or exhaustion of that await must declare, from the same resume point the turns heapUncovered refusal states (no wider than the cells the view already shows)",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 215,
@@ -2108,7 +2348,8 @@
       ],
       "owner": "seats-native",
       "purpose": "Seat signed command: signing plan for one seat Turn (publish, create, handOver, offer, invoke, exit) judged by Kernel.SeatReceiver; session-opened, bounded canonical plan, no state change",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 216,
@@ -2120,7 +2361,8 @@
       ],
       "owner": "seats-native",
       "purpose": "Seat signed command: detached assembly of a signing plan and its signature into the exact ingress bytes; no state change",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 217,
@@ -2132,7 +2374,8 @@
       ],
       "owner": "seats-native",
       "purpose": "Seat signed command: submit one ingress; the receiver re-decides it on the opened Store and commits or refuses by name",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "append"
     },
     {
       "code": 218,
@@ -2144,7 +2387,8 @@
       ],
       "owner": "seats-native",
       "purpose": "Seat signed command: receipt-only lookup of one ingress; absence never submits",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
     },
     {
       "code": 219,
@@ -2156,26 +2400,160 @@
       ],
       "owner": "seats-native",
       "purpose": "Public read-only seat view: JSON object request (or empty), at most 65536 bytes, JSON reply",
-      "receiver": "fnDispatch"
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 240,
+      "symbol": "PLATFORM_INSTALL_PLAN",
+      "status": "active",
+      "routes": ["operator"],
+      "owner": "platform",
+      "purpose": "platform install plan: the controller's signing plan (the signed header frame) on one opened image",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 241,
+      "symbol": "PLATFORM_INSTALL_ASSEMBLE",
+      "status": "active",
+      "routes": ["operator"],
+      "owner": "platform",
+      "purpose": "platform install assemble: the controller's signature and, for a custodian rotation, the custodian's cosignature over the plan's frame",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 242,
+      "symbol": "PLATFORM_INSTALL_SUBMIT",
+      "status": "active",
+      "routes": ["operator"],
+      "owner": "platform",
+      "purpose": "platform install submit: controller-signed, version-monotone platform record (PlatformInstallReceiver.receiveLoaded)",
+      "receiver": "fnDispatch",
+      "effect": "append"
+    },
+    {
+      "code": 243,
+      "symbol": "PLATFORM_INSTALL_LOOKUP",
+      "status": "active",
+      "routes": ["operator"],
+      "owner": "platform",
+      "purpose": "platform install receipt-only lookup",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 244,
+      "symbol": "METER_REFILL_PLAN",
+      "status": "active",
+      "routes": [],
+      "owner": "durable-meter",
+      "purpose": "plan a seed-meter refill: the controller's signing plan (the signed header frame) on one opened image",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 245,
+      "symbol": "METER_REFILL_ASSEMBLE",
+      "status": "active",
+      "routes": [],
+      "owner": "durable-meter",
+      "purpose": "assemble a seed-meter refill: the controller's signature over the plan's frame",
+      "receiver": "fnDispatch",
+      "effect": "none"
+    },
+    {
+      "code": 246,
+      "symbol": "METER_REFILL_SUBMIT",
+      "status": "active",
+      "routes": [],
+      "owner": "durable-meter",
+      "purpose": "submit a seed-meter refill: controller-signed, nullifier-only, charge-exempt intent whose credit raises the commit protocol's meter (MeterRefillReceiver.receiveLoaded; Kernel/PlatformCell.lean M2)",
+      "receiver": "fnDispatch",
+      "effect": "append"
+    },
+    {
+      "code": 247,
+      "symbol": "METER_REFILL_LOOKUP",
+      "status": "active",
+      "routes": [],
+      "owner": "durable-meter",
+      "purpose": "seed-meter refill receipt-only lookup",
+      "receiver": "fnDispatch",
+      "effect": "none"
     }
   ],
   "response_markers": [
     {
+      "code": 164,
+      "symbol": "PRIVATE_DISPATCH_NO_RECORD",
+      "purpose": "Private ordinary dispatch definitive no-record refusal; distinct from request164",
+      "request_reserved": false
+    },
+    {
+      "code": 253,
+      "symbol": "NO_RECORD",
+      "purpose": "Host proven no-append outcome: the payload decodes to a refused, contention or unavailable outcome a receiver decided before any append (never uncertain); the durable log is unchanged by the request and a fresh attempt is safe (Host/RequestRefusal.lean exceptionAnswer, returnedMarker; Host/Main.lean dispatchApplicationSubmitSession)",
+      "request_reserved": true
+    },
+    {
       "code": 254,
+      "symbol": "NEVER_FORWARDED",
       "purpose": "Transport refusal: request never forwarded",
       "request_reserved": true
     },
     {
       "code": 255,
-      "purpose": "Host refusal/outcome envelope",
+      "symbol": "HOST_OUTCOME",
+      "purpose": "Host outcome envelope for an outcome the Host has NOT proven to be no-append: uncertain, unavailable, contention, and a handler that threw after dispatch on an append operation (answered uncertain). Since lane/lean-critical never a proven refusal: those answer under NO_RECORD (253)",
       "request_reserved": true
-    },
-    {
-      "code": 164,
-      "purpose": "Private ordinary dispatch definitive no-record refusal; distinct from request164",
-      "request_reserved": false
     }
   ],
+  "consent_plans": [
+    "APPLICATION_SHARE_ISSUE_PLAN",
+    "APPLICATION_DISPATCH_PLAN",
+    "APPLICATION_LIFECYCLE_COMPLETION_PLAN",
+    "AGENT_PAID_DISPATCH_PLAN",
+    "APPLICATION_LIFECYCLE_BEGIN_PLAN",
+    "APPLICATION_LIFECYCLE_CLAIM_PLAN",
+    "AGENT_RESERVE_PLAN",
+    "APPLICATION_LAUNCH_BEGIN_PLAN",
+    "APPLICATION_LAUNCH_CLAIM_PLAN",
+    "APPLICATION_LAUNCH_COMPLETION_PLAN",
+    "AGENT_LIFETIME_GRANT_PLAN",
+    "AGENT_LIFETIME_DISPATCH_PLAN",
+    "AGENT_LIFETIME_RESERVE_PLAN",
+    "APPLICATION_SESSION_ENROLLMENT_PLAN",
+    "PARTICIPANT_KEY_ENROLLMENT_PLAN",
+    "PARTICIPANT_PROVISIONING_PLAN",
+    "FLEET_TURN_PLAN",
+    "PAY_COMMAND_PLAN",
+    "PAY_OBSERVATION_PLAN",
+    "PAY_REFILL_PLAN",
+    "PAY_SELF_ENROLLMENT_PLAN",
+    "REALM_WELL_PLAN",
+    "CLOCK_TICK_PLAN",
+    "KEY_ROTATION_PLAN",
+    "JOB_MONEY_PLAN",
+    "CERTIFY_PLAN",
+    "PAY_CLAIM_PLAN",
+    "RESERVE_RESOURCE_BIRTH_PLAN",
+    "APPLICATION_FAILED_START_RECOVERY_PREPARE",
+    "ACTIVITY_PLAN",
+    "SEAT_PLAN",
+    "NEXT_KEY_ADOPTION_PLAN",
+    "APPLICATION_DISPATCH_AUTHENTICATED_PLAN"
+  ],
+  "consent_exempt": {
+    "FN_NAMESPACE_PLAN": "operator-only fn-service route; the signer is the operator's fn tooling, not a member; not routed through the local consent provider (frame 222/224 has no arm for its plan codec). Owed: a specialized arm if a member ever signs it (Phase 3 C5, one wire)",
+    "GRAIN_SHARE_ISSUE_PLAN": "operator-only spk route; the signer is the operator's grain tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
+    "FN_FRONTIER_PLAN": "operator-only fn-service route; the signer is the operator's fn tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN",
+    "APPLICATION_DISPATCH_READY": "not a signing plan: `ApplicationDispatchReady.assembledReadyVerified` takes an already signed plan and its signatures and returns a Json record (`Host/ApplicationDispatchReady.lean:138`, type `IO Json`); nothing is signed after it. Named *_READY, listed here so the registry check does not read the suffix as a plan",
+    "AUTHORIZED_PREPARE": "the member's own ordinary signing plan: every submit routes it through the local consent provider's frame 222 (NativeClientConsent.checkIntentPlan against the retained intent), not through the operator-plan list; listed here so the check knows it is covered elsewhere",
+    "PLATFORM_INSTALL_PLAN": "Host-stdio platform route (no socket route yet); the signer is the deployment's factory controller through its operator tooling, not a member; not routed through the local consent provider. Owed as for FN_NAMESPACE_PLAN, and an operator socket route in native/resource-client/src/transport.rs when the controller's tooling needs it",
+    "METER_REFILL_PLAN": "Host-stdio meter route (no socket route yet); the signer is the deployment's factory controller through its operator tooling, not a member; not routed through the local consent provider. Owed as for PLATFORM_INSTALL_PLAN"
+  },
   "client_constants": [
     {
       "path": "native/resource-client/src/agent_lifetime_grant.rs",
@@ -2276,6 +2654,170 @@
       "path": "native/resource-client/src/member_app.rs",
       "constant": "READY_OP",
       "operation": "APPLICATION_DISPATCH_READY"
+    },
+    {
+      "path": "native/spk-host/src/lifecycle_v3_stop_claim_native.rs",
+      "constant": "STOP_INSPECT_OPERATION",
+      "operation": "APPLICATION_STOP_INSPECT"
+    }
+  ],
+  "consent_frames": [
+    {
+      "code": 236,
+      "symbol": "CONSENT_FULL_READY",
+      "purpose": "Explicit full independent history verification before lifecycle signing"
+    },
+    {
+      "code": 220,
+      "symbol": "CONSENT_INTENT",
+      "purpose": "the intent's headers a key may sign (Host/ClientConsentCore.lean consent 220)"
+    },
+    {
+      "code": 221,
+      "symbol": "CONSENT_OBSERVATION",
+      "purpose": "the operator challenge's headers an intent permits (221; a stale source is refused by name)"
+    },
+    {
+      "code": 222,
+      "symbol": "CONSENT_PLAN",
+      "purpose": "the operator plan's headers an intent permits (222)"
+    },
+    {
+      "code": 224,
+      "symbol": "CONSENT_OPERATOR_PLAN",
+      "purpose": "an operator (specialized) plan re-derived and compared exactly or pinned (224; registry consent_plans)"
+    },
+    {
+      "code": 226,
+      "symbol": "CONSENT_POSSESSION",
+      "purpose": "enrollment possession over the complete retained command (226)"
+    },
+    {
+      "code": 227,
+      "symbol": "CONSENT_OBJECTIVE",
+      "purpose": "the Objective's expected typed plan headers (227)"
+    },
+    {
+      "code": 228,
+      "symbol": "CONSENT_ANCHOR_OFFER",
+      "purpose": "offer the provider a retained admission anchor before admission (228)"
+    },
+    {
+      "code": 229,
+      "symbol": "CONSENT_ANCHOR_ADMITTED",
+      "purpose": "the anchor of what the provider admitted, retained by the client (229)"
+    },
+    {
+      "code": 230,
+      "symbol": "CONSENT_THIN_INTENT",
+      "purpose": "thin consent (no Store read): the intent (230)"
+    },
+    {
+      "code": 231,
+      "symbol": "CONSENT_THIN_OBSERVATION",
+      "purpose": "thin consent: the observation (231)"
+    },
+    {
+      "code": 232,
+      "symbol": "CONSENT_THIN_PLAN",
+      "purpose": "thin consent: the plan against the provider's command and the target views (232)"
+    },
+    {
+      "code": 233,
+      "symbol": "CONSENT_STORE_RECHECK",
+      "purpose": "re-check the Store before a connection's first frame (233, ConsentAnchor.recheckStore)"
+    },
+    {
+      "code": 234,
+      "symbol": "CONSENT_THIN_BIRTH_INTENT",
+      "purpose": "thin consent: a birth intent against the deployed authoring of the member's own source (234, Kernel.NativeThinBirth)"
+    },
+    {
+      "code": 235,
+      "symbol": "CONSENT_THIN_BIRTH_PLAN",
+      "purpose": "thin consent: a birth plan against the authored draft and the member's derivation of every branch (235, Kernel.NativeThinBirth)"
+    }
+  ],
+  "ordinary_headers": [
+    "cookie",
+    "accept",
+    "accept-encoding",
+    "content-type",
+    "user-agent",
+    "if-match",
+    "if-none-match",
+    "x-requested-with",
+    "x-csrftoken",
+    "x-csrf-token",
+    "oc-total-length",
+    "oc-chunk-size",
+    "x-oc-mtime",
+    "oc-fileid",
+    "oc-chunked",
+    "oc-checksum",
+    "oc-chunk-offset",
+    "oc-lazyops",
+    "content-encoding"
+  ],
+  "dav_methods": [
+    "PROPFIND",
+    "PROPPATCH",
+    "MKCOL",
+    "COPY",
+    "MOVE",
+    "LOCK",
+    "UNLOCK",
+    "REPORT",
+    "OPTIONS"
+  ],
+  "dav_headers": [
+    "depth",
+    "destination",
+    "overwrite",
+    "lock-token"
+  ],
+  "dav_header_rules": [
+    {
+      "name": "depth",
+      "methods": [
+        "PROPFIND",
+        "COPY",
+        "LOCK",
+        "REPORT"
+      ],
+      "values": [
+        "0",
+        "1",
+        "infinity"
+      ]
+    },
+    {
+      "name": "destination",
+      "methods": [
+        "COPY",
+        "MOVE"
+      ],
+      "values": []
+    },
+    {
+      "name": "overwrite",
+      "methods": [
+        "COPY",
+        "MOVE"
+      ],
+      "values": [
+        "T",
+        "F",
+        "t",
+        "f"
+      ]
+    },
+    {
+      "name": "lock-token",
+      "methods": [
+        "UNLOCK"
+      ],
+      "values": []
     }
   ]
 }

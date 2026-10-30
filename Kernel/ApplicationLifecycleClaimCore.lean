@@ -6,7 +6,28 @@ mutation and management authority are checked on the current ground. This module
 but never commits it or grants a host launch; a verified-history adapter must
 bind this conditional result to NativeHostReplay.Verified first.
 -/
-import Kernel.ApplicationLifecycleClaimCurrent
+module
+
+public import Kernel.ApplicationLifecycleClaimCurrent
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimCore
 
@@ -34,6 +55,14 @@ structure Conditional (config : NativeHost.Config) {store : StoreIdentity} (head
   current : ApplicationLifecycleClaimCurrent.Accepted config.deployment config.profile
     ⟨config.federation, config.genesisHeight + ground.height⟩
     ground ingress
+
+theorem Conditional.original_current_exact {config : NativeHost.Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment} {ingress : Ingress}
+    (conditional : Conditional config head ground ingress) :
+    conditional.original.selected.record =
+      DurableReceiver.IntentRecord.ofIntent conditional.original.admitted.intent ∧
+    ingress.source.currentWorldRoot = ground.worldRoot :=
+  ⟨conditional.original.original_record_exact, conditional.current.boundary⟩
 
 /-- `current` is the ground the claim is checked on (the light basis or, for the
 audit walk, the full shape); `reader` supplies the original BEGIN's record and
@@ -90,17 +119,15 @@ def intentFromCurrent {config : NativeHost.Config} {ground : Ground config.deplo
         [packageGuard ingress.source current.packageRead.selected.observed.before]
       nullifiers := ordinary.nullifiers ++
         [stableNullifier config.deployment.domain config.profile.semantics ingress.source]
-      exactCharge := fun dimension => match dimension with
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
         | .incidences => ordinary.exactCharge .incidences + 2
         | .turnBytes => wireBytes
         | .witnessBytes => wireBytes
         | .proofWork => ordinary.exactCharge .proofWork + 2
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 2
-        | .storageBytes => ordinary.exactCharge .storageBytes +
-            wireBytes +
-            (stableNullifier config.deployment.domain config.profile.semantics
-              ingress.source).canonicalBytes.length
-        | other => ordinary.exactCharge other
+        | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
+            wireEvent
+        | other => ordinary.exactCharge other)).toCharge
       event := wireEvent
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound

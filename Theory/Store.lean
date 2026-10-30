@@ -25,9 +25,28 @@ Byte codecs, key order and roots are deliberately absent: they are
 representations of a store, and live with the encoders (`Compiler/`) and the
 materializers (`Theory.CellState`).
 -/
-import Mathlib.Data.DFinsupp.Defs
-import Mathlib.Data.Finset.Basic
-import Mathlib.Tactic
+module
+
+public import Mathlib.Data.DFinsupp.Defs
+public import Mathlib.Data.Finset.Basic
+public import Mathlib.Tactic
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.Store
 

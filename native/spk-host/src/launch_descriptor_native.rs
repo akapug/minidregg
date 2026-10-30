@@ -6,6 +6,7 @@
 //! canonical descriptor codec and root.
 #![allow(dead_code)] // Resident v3 START caller follows the source-qualified route.
 
+use crate::io_context::IoContext;
 use sandstorm_package::manifest::Command as SpkCommand;
 use sandstorm_package::SpkManifest;
 use serde_json::{json, Value};
@@ -20,21 +21,13 @@ use std::time::{Duration, Instant};
 
 use crate::descriptor_native::{author_signed_package, SourceDescriptor, SourceStep, SourceTool};
 use crate::dispatch_native::{private_dir, write_new};
-use crate::materialize::qualify_bridge_spk;
 use crate::materialize::InstalledPackage;
+use crate::materialize::{qualify_bridge_spk_with_profile, ImportProfile};
 use serde::Deserialize;
+use crate::canonical::{decimal, hex};
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
 }
 
 const MAX_SOURCE_CONFIG: u64 = 65_536;
@@ -55,38 +48,13 @@ pub(crate) struct OfflineSourceHost {
 }
 
 fn read_private(path: &Path, bound: u64) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("source artifact parent absent"))?;
-    private_dir(parent)?;
-    let named = fs::symlink_metadata(path)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if !path.is_absolute()
-        || !opened.is_file()
-        || opened.len() == 0
-        || opened.len() > bound
-        || opened.uid() != unsafe { libc::geteuid() }
-        || opened.nlink() != 1
-        || opened.permissions().mode() & 0o777 != 0o600
-        || (named.dev(), named.ino()) != (opened.dev(), opened.ino())
-    {
-        return Err(invalid("offline source artifact identity or bound refused"));
-    }
-    let mut bytes = Vec::new();
-    file.by_ref().take(bound + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != opened.len() {
-        return Err(invalid("offline source artifact changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("source artifact parent absent"))?)?;
+    crate::private_file::read(path, bound, "offline source artifact identity or bound refused")
 }
 
 impl OfflineSourceHost {
     fn check_pin(&self) -> io::Result<()> {
-        let named = fs::symlink_metadata(&self.host)?;
+        let named = fs::symlink_metadata(&self.host).ctx("inspect", &self.host)?;
         if !self.host.is_absolute()
             || !named.is_file()
             || named.permissions().mode() & 0o022 != 0
@@ -97,7 +65,7 @@ impl OfflineSourceHost {
         let mut host = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(&self.host)?;
+            .open(&self.host).ctx("open", &self.host)?;
         let opened = host.metadata()?;
         if !opened.is_file() || (named.dev(), named.ino()) != (opened.dev(), opened.ino()) {
             return Err(invalid("offline Mini Host image changed before hash"));
@@ -113,9 +81,9 @@ impl OfflineSourceHost {
         }
         if self.host_sha256 != hex(&digest.finalize())
             || self.config_sha256
-                != hex(&Sha256::digest(read_private(
+                != hex(&Sha256::digest(crate::dispatch_native::read_pinned_input(
                     &self.config,
-                    MAX_SOURCE_CONFIG,
+                    MAX_SOURCE_CONFIG as usize,
                 )?))
         {
             return Err(invalid("offline Mini Host/config SHA-256 pin drift"));
@@ -182,8 +150,8 @@ impl OfflineSourceHost {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(output)?;
-        let named = fs::symlink_metadata(output)?;
+            .open(&output).ctx("open", &output)?;
+        let named = fs::symlink_metadata(&output).ctx("inspect", &output)?;
         let opened = file.metadata()?;
         let output_bound = if command == "inspect" {
             MAX_SOURCE_INSPECTION
@@ -226,6 +194,8 @@ impl OfflineSourceHost {
 struct QualificationConfig {
     protocol: String,
     source_spk: PathBuf,
+    #[serde(default)]
+    import_profile: Option<String>,
     mini_host: PathBuf,
     mini_host_sha256: String,
     mini_config: PathBuf,
@@ -234,10 +204,7 @@ struct QualificationConfig {
 }
 
 fn lowercase_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    crate::canonical::hex64(&value)
 }
 
 /// Pure pre-Store qualification entry point. The signed SPK is parsed once;
@@ -260,6 +227,11 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
     {
         return Err(invalid("offline launch qualification config refused"));
     }
+    let import_profile: ImportProfile = config
+        .import_profile
+        .as_deref()
+        .unwrap_or("standard-v1")
+        .parse()?;
     let source_host = OfflineSourceHost {
         host: config.mini_host,
         host_sha256: config.mini_host_sha256,
@@ -267,7 +239,7 @@ pub fn qualify_launch(config_path: &Path) -> io::Result<Value> {
         config_sha256: config.mini_config_sha256,
     };
     source_host.check_pin()?;
-    let (package, _) = qualify_bridge_spk(&config.source_spk)?;
+    let (package, _) = qualify_bridge_spk_with_profile(&config.source_spk, import_profile)?;
     let launch = author_signed_launch(&source_host, &package, &config.attempt_dir)?;
     if read_private(config_path, MAX_SOURCE_CONFIG)? != config_bytes {
         return Err(invalid("offline launch qualification input changed"));
@@ -351,13 +323,6 @@ fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("Mini launch descriptor inspection field absent"))
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn checked_command_echo(view: &Value, physical: &Value) -> io::Result<String> {
@@ -483,6 +448,19 @@ mod tests {
             config,
         };
         (root, source, input, output)
+    }
+
+    #[test]
+    fn offline_check_pin_reads_a_config_under_a_group_readable_parent_but_not_a_writable_one() {
+        let (root, source, _input, _output) = offline_fixture("#!/bin/sh\nexit 0\n");
+        // The hosted frame: the Host's deployment directory is 0710 for the mini-sessions group.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o710)).unwrap();
+        source.check_pin().unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o770)).unwrap();
+        let error = source.check_pin().unwrap_err().to_string();
+        assert!(error.contains("pinned input directory") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

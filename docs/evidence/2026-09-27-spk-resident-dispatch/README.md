@@ -10,7 +10,7 @@ Source SHA-256:
 | --- | --- |
 | `native/spk-host/Cargo.toml` | `eb191c795e4f061297c2f61cad09e975a63bff5640711f5585a7c73d38d038eb` |
 | `native/spk-host/Cargo.lock` | `8fc4fc1a81c2ab4da2903c2a4095c620ec647fe7f131cb6176f23e5c1c6b86a3` |
-| `native/spk-host/src/bin/spk-hostd.rs` | `d2bacb3eea7721d46816aea691c13a9ba0c44751615ba043c175a0b7c731b8fb` |
+| `spk-hostd.rs [deleted 469d69a5]` | `d2bacb3eea7721d46816aea691c13a9ba0c44751615ba043c175a0b7c731b8fb` |
 | `native/spk-host/src/dispatch_author.rs` | `8bce8953977da01f043f01a6aeed5c372ad5079685a4fb2fe5683985cc9f1380` |
 | `native/spk-host/src/dispatch_native.rs` | `e50b3bc322e09ccae35a19d2e08e9a00b09fe7336943b07895b1df4fe55032ac` |
 | `native/spk-host/src/dispatch_delivery.rs` | `b2537f156f543a474e3d4dbd77db23041969052256bdc712dfba051b76d4b59a` |

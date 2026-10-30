@@ -1,7 +1,6 @@
 //! One resident operator supervisor starts the app child and retains fd3.
 //! The source-owned lifecycle-v2 claim/descriptor adapter must construct the
 //! exact `VerifiedBegin` and package command before calling this module.
-#![allow(dead_code)] // Native lifecycle-v2 Host route is not linked yet.
 
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::hostd::{Journal, VerifiedBegin};
@@ -11,7 +10,7 @@ use crate::launch_descriptor_native::{
 use crate::materialize::{signed_schema_source, InstalledPackage};
 use crate::rpc_adapter::RpcDriver;
 use crate::sandbox::{
-    app_output, bwrap_args, directory_entry, inherited_fd, open_protected_directory,
+    app_output, bwrap_args_with_public_data, directory_entry, inherited_fd, open_protected_directory,
     verify_executable, verify_var_volume, AppOutput, AppOutputSummary, SandboxSpec,
 };
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
@@ -26,58 +25,19 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use crate::canonical::hex as hex_bytes;
 
 const MAX_RETAINED_DESCRIPTOR: u64 = 12_102_759;
 
 fn retained_descriptor_file(path: &Path) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("descriptor parent absent"))?;
-    private_dir(parent)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.nlink() != 1
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > MAX_RETAINED_DESCRIPTOR
-    {
-        return Err(invalid("retained signed descriptor file custody refused"));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.by_ref()
-        .take(MAX_RETAINED_DESCRIPTOR + 1)
-        .read_to_end(&mut bytes)?;
-    let after = file.metadata()?;
-    if bytes.len() as u64 != meta.len()
-        || after.dev() != meta.dev()
-        || after.ino() != meta.ino()
-        || after.len() != meta.len()
-        || after.mtime() != meta.mtime()
-        || after.mtime_nsec() != meta.mtime_nsec()
-    {
-        return Err(invalid("retained signed descriptor changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("descriptor parent absent"))?)?;
+    crate::private_file::read(path, MAX_RETAINED_DESCRIPTOR, "retained signed descriptor file custody refused")
 }
 
 fn source_text<'a>(view: &'a Value, name: &str) -> io::Result<&'a str> {
     view.get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("retained signed descriptor source field absent"))
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("hex String");
-    }
-    result
 }
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -137,14 +97,14 @@ impl<'a> SourceBoundLaunch<'a> {
             .as_deref()
             .ok_or_else(|| invalid("retained signed bridge absent"))?;
         let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
-        if bridge.save_identity_caps
-            || bridge.expect_app_hooks
-            || bridge
-                .api_path
-                .as_deref()
-                .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
+        // saveIdentityCaps and expectAppHooks are served (identity_custody, the
+        // SandstormApi save/restore/drop surface); an unchecked apiPath is not.
+        if bridge
+            .api_path
+            .as_deref()
+            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
         {
-            return Err(invalid("retained signed bridge outside resident mapping"));
+            return Err(invalid("retained signed bridge outside resident mapping: apiPath"));
         }
         let schema_source = signed_schema_source(&bridge, package.manifest.app_version);
         let schema = retained_descriptor_file(&package_dir.join("schema.bin"))?;
@@ -359,6 +319,8 @@ pub(crate) struct PreparedResident {
     _image: OwnedFd,
     _persistent_var: OwnedFd,
     _seccomp: OwnedFd,
+    public_data: Option<crate::shared_data::SharedDataHandle>,
+    _public_data_fd: Option<OwnedFd>,
     /// Write end of the app's stdout/stderr pipe; dropped once the gate has
     /// spawned so the pump sees EOF when the app's last writer exits.
     _output_writer: OwnedFd,
@@ -369,19 +331,16 @@ pub(crate) struct PreparedResident {
 pub(crate) struct ResidentProcess {
     pub rpc: RpcDriver,
     child: BoundedChild,
-    output: AppOutput,
+    /// Held for the generation: the pump ends when the app's writers close.
+    _output: AppOutput,
 }
 
 impl ResidentProcess {
     pub(crate) fn child_pid(&self) -> u32 {
         self.child.pid()
     }
-
-    /// A normal service shutdown drops the gate child, while systemd's exact
-    /// unit cgroup closes any descendants. No HTTP request owns this process.
-    pub(crate) fn wait(mut self) -> io::Result<(i32, AppOutputSummary)> {
-        let status = self.child.wait()?;
-        Ok((status, self.output.finish()?))
+    pub(crate) fn open_www_file(&mut self, components: &[String]) -> io::Result<crate::resident_privilege::WwwFile> {
+        self.child.open_www_file(components)
     }
 }
 
@@ -392,10 +351,20 @@ impl PreparedResident {
         app_gid: u32,
         bwrap_sha256: &str,
     ) -> io::Result<Self> {
+        Self::prepare_with_public_data(spec, app_uid, app_gid, bwrap_sha256, None)
+    }
+
+    pub(crate) fn prepare_with_public_data(
+        spec: &SandboxSpec,
+        app_uid: u32,
+        app_gid: u32,
+        bwrap_sha256: &str,
+        public_data: Option<crate::shared_data::SharedDataHandle>,
+    ) -> io::Result<Self> {
         if app_uid == 0 || app_gid == 0 || unsafe { libc::geteuid() } == app_uid {
             return Err(invalid("resident supervisor must be separate from app UID"));
         }
-        let args = bwrap_args(spec)?;
+        let args = bwrap_args_with_public_data(spec, public_data.is_some())?;
         let image = open_protected_directory(&spec.image_root, app_uid, false)?;
         let persistent_var = open_protected_directory(&spec.persistent_var, app_uid, true)?;
         if spec.persistent_var.starts_with(&spec.image_root)
@@ -406,6 +375,11 @@ impl PreparedResident {
         for mountpoint in ["var", "tmp", "proc", "dev"] {
             directory_entry(image.as_raw_fd(), mountpoint)?;
         }
+        let public_data_fd = if let Some(data) = &public_data {
+            directory_entry(image.as_raw_fd(), "opt/oracle-data")?;
+            data.recheck()?;
+            Some(inherited_fd(data.root_fd().as_raw_fd())?)
+        } else { None };
         verify_var_volume(
             &spec.persistent_var,
             persistent_var.as_raw_fd(),
@@ -433,6 +407,7 @@ impl PreparedResident {
                 persistent_var: persistent_var.as_raw_fd(),
                 seccomp: seccomp.as_raw_fd(),
                 output: output_writer.as_raw_fd(),
+                public_data: public_data_fd.as_ref().map(AsRawFd::as_raw_fd),
             }),
         };
         Ok(Self {
@@ -441,6 +416,8 @@ impl PreparedResident {
             _image: image,
             _persistent_var: persistent_var,
             _seccomp: seccomp,
+            public_data,
+            _public_data_fd: public_data_fd,
             _output_writer: output_writer,
             output,
             launch,
@@ -458,6 +435,7 @@ impl PreparedResident {
     /// Repeat the fixed handoff/FD5 check at the last physical boundary before
     /// consuming the journal's one-shot spawn. This does not mint Mini launch
     /// authority or promise cancellation of a later operator mount change.
+    /// `resident_service::run` starts every resident through this.
     pub(crate) fn start_attested(
         self,
         journal: &Journal,
@@ -476,15 +454,23 @@ impl PreparedResident {
         journal: &Journal,
         begin: &VerifiedBegin,
     ) -> io::Result<ResidentProcess> {
+        if let Some(data) = &self.public_data { data.recheck()?; }
         let child = journal.enter_and_spawn(begin, &self.launch)?;
-        let rpc = RpcDriver::from_connected_stream(begin.app, begin.generation, self.host_rpc)?;
-        Ok(ResidentProcess { rpc, child, output: self.output })
+        // Saved identities belong to the app, not the generation: apps/<app>/identities.
+        let identities = journal
+            .directory()
+            .parent()
+            .ok_or_else(|| invalid("generation journal has no app directory"))?
+            .join("identities");
+        let rpc = RpcDriver::from_connected_stream_at(begin.app, begin.generation, self.host_rpc, Some(identities))?;
+        Ok(ResidentProcess { rpc, child, _output: self.output })
     }
 
     /// `start` without the journal: the identical gate call and descriptor
     /// lifetimes, for the root-only sandbox audit.
     #[cfg(test)]
     fn spawn_for_audit(self) -> io::Result<(BoundedChild, UnixStream, AppOutput)> {
+        if let Some(data) = &self.public_data { data.recheck()?; }
         let child = crate::spawn_gate::spawn_bounded(&self.launch)?;
         Ok((child, self.host_rpc, self.output))
     }
@@ -508,6 +494,7 @@ mod tests {
             argv: vec!["/bin/true".into()],
             environ: vec![],
             app_output: "/missing/app-output.log".into(),
+            ifaddrs_shim: false,
         };
         assert!(PreparedResident::prepare(
             &spec,
@@ -526,8 +513,10 @@ mod tests {
         bwrap_sha256: String,
     }
 
+    /// The audit runs as the operator (never root), through the production
+    /// bootstrap: mapped namespace, launch worker, `spawn_bounded`.
     fn audit_inputs(output_name: &str) -> Audit {
-        assert_eq!(unsafe { libc::geteuid() }, 0, "the resident sandbox audit runs as root");
+        assert_ne!(unsafe { libc::geteuid() }, 0, "the resident sandbox audit runs as the operator");
         let var = |key: &str| std::env::var(key).unwrap_or_else(|_| panic!("{key} unset"));
         let dir = std::path::PathBuf::from(var("SPK_AUDIT_DIR"));
         Audit {
@@ -539,6 +528,7 @@ mod tests {
                 argv: vec!["/spk-sandbox-probe".into()],
                 environ: vec![("SPK_PROBE".into(), "resident".into())],
                 app_output: dir.join(output_name),
+                ifaddrs_shim: false,
             },
             uid: var("SPK_AUDIT_UID").parse().unwrap(),
             gid: var("SPK_AUDIT_GID").parse().unwrap(),
@@ -546,9 +536,39 @@ mod tests {
         }
     }
 
+    /// The resident enters its user namespace as a fresh, single-threaded process
+    /// (`spk-host resident-bootstrap`). The libtest harness runs every test on a
+    /// spawned thread, and the kernel refuses setns(CLONE_NEWUSER) from a thread
+    /// group of more than one (EINVAL), so the audit body runs in a forked child,
+    /// single-threaded by construction: the production shape, not a harness
+    /// setting (`--test-threads=1` still spawns the test thread). A panic in the
+    /// child is reported on the real stderr and becomes a nonzero exit; the test
+    /// thread waits and asserts it.
+    fn in_single_threaded_child(body: impl FnOnce()) {
+        use std::io::Write as _;
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork: {}", io::Error::last_os_error());
+        if pid == 0 {
+            std::panic::set_hook(Box::new(|info| {
+                let _ = writeln!(std::io::stderr(), "audit child panicked: {info}");
+            }));
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+            let _ = std::io::stdout().flush();
+            let _ = std::io::stderr().flush();
+            unsafe { libc::_exit(if outcome.is_ok() { 0 } else { 1 }) }
+        }
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid, "waitpid: {}", io::Error::last_os_error());
+        assert!(
+            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+            "the audit child failed (wait status {status:#x}); its report is on stderr above"
+        );
+    }
+
     /// Launch the probe as the app; return its wait status and parsed report lines.
     fn run_probe(prepared: PreparedResident, log: &Path) -> (i32, Vec<Value>) {
         let (mut child, _host_rpc, output) = prepared.spawn_for_audit().unwrap();
+        println!("sandbox-app-child-pid={}", child.pid());
         let status = child.wait().unwrap();
         let summary = output.finish().unwrap();
         let text = std::fs::read_to_string(log).unwrap();
@@ -576,52 +596,157 @@ mod tests {
     /// The exit gate of the sandbox floor: the probe, run as the app through the
     /// production preparation and spawn gate, reports every check held.
     #[test]
-    #[ignore = "root only; run by scripts/spk-platform/sandbox-floor-audit.sh"]
-    fn root_probe_holds_inside_resident_sandbox() {
+    #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
+    fn operator_probe_holds_inside_production_resident_sandbox() {
         let audit = audit_inputs("app-output-floor.log");
-        let prepared =
-            PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+        in_single_threaded_child(move || {
+            crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+                .unwrap();
+            let prepared =
+                PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+            let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+            // bwrap must START under the unit's hardening before any floor check
+            // means anything (bwrap >= 0.11 dies at its first mount if a unit
+            // seccomp layer returns ENOSYS for openat2).
+            assert!(
+                !lines.is_empty(),
+                "bwrap did not start the probe under the resident unit's hardening (status {status:#x}); see the app output"
+            );
+            assert_eq!(verdict(&lines), Some("floor-held"));
+            for check in [
+                "fd-census-self", "dotdot-from-inherited-fd", "network-public-connect",
+                "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
+                "capabilities-all-zero", "web-app-positive-control", "seccomp-refused",
+                "prctl-set-seccomp-refused", "io_setup-refused", "vmsplice-refused",
+                "socket-netlink-route-refused", "ifaddrs-shim-absent",
+                "set_mempolicy-refused", "hostname-sandbox", "dev-minimal", "rlimit-nofile-bounded",
+            ] {
+                assert_eq!(held(&lines, check), Some(true), "{check}");
+            }
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
+        });
+    }
+
+    /// Operator fixture: a published `probe.txt` containing `public fixture\n`,
+    /// a Python-bearing image and the same separate /var used by the floor audit.
+    #[test]
+    #[ignore = "root Linux only; SPK_AUDIT_* plus SPK_PUBLIC_DATA_STORE and SPK_PUBLIC_DATA_DECLARATION"]
+    fn root_public_data_mount_is_read_only_and_fd7_is_consumed() {
+        let mut audit = audit_inputs("app-output-public-data.log");
+        // Start the actual unprivileged receiver before prepare creates its output thread.
+        let worker_pid = crate::resident_privilege::initialize_mount_audit_worker(audit.uid, audit.gid).unwrap();
+        println!("mount-audit-worker-pid={worker_pid}");
+        let declaration = std::fs::read(std::env::var("SPK_PUBLIC_DATA_DECLARATION").unwrap()).unwrap();
+        let requirement = crate::shared_data::parse_signed_attachment(&declaration).unwrap();
+        let store = std::path::PathBuf::from(std::env::var("SPK_PUBLIC_DATA_STORE").unwrap());
+        let data = crate::shared_data::open_published(&store, &requirement, audit.uid).unwrap();
+        crate::resident_privilege::check_public_data_access(data.root_fd()).unwrap();
+        audit.spec.argv = vec!["/usr/bin/python3.12".into(), "-B".into(), "-c".into(), r#"
+import os,errno,json
+assert open('/opt/oracle-data/probe.txt','rb').read() == b'public fixture\n'
+assert os.statvfs('/opt/oracle-data').f_flag & os.ST_RDONLY
+write_errnos=[]
+for path in ['/opt/oracle-data/probe.txt','/opt/oracle-data/new-file']:
+    try:
+        fd=os.open(path,os.O_WRONLY|os.O_CREAT,0o600)
+    except OSError as error:
+        assert error.errno in (errno.EACCES, errno.EROFS), error
+        write_errnos.append(error.errno)
+    else:
+        os.close(fd)
+        raise AssertionError('public dataset accepted a write')
+try:
+    os.unlink('/opt/oracle-data/probe.txt')
+except OSError as error:
+    assert error.errno == errno.EROFS, error
+else:
+    raise AssertionError('public dataset accepted an unlink')
+try:
+    os.fstat(7)
+except OSError as error:
+    assert error.errno == errno.EBADF, error
+else:
+    raise AssertionError('raw public-data fd7 escaped bubblewrap')
+with open('/var/public-data-positive','w') as out: out.write('private')
+print(json.dumps({'verdict':'public-data-held','mount_read_only':True,'write_open_errnos':write_errnos,'unlink_errno':errno.EROFS,'fd7_closed':True,'private_var_write':True}))
+"#.into()];
+        let prepared = PreparedResident::prepare_with_public_data(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256, Some(data)).unwrap();
         let (status, lines) = run_probe(prepared, &audit.spec.app_output);
-        assert_eq!(verdict(&lines), Some("floor-held"));
-        for check in [
-            "fd-census-self", "dotdot-from-inherited-fd", "network-public-connect",
-            "userns-unshare-refused", "userns-clone-refused", "seccomp-filter-active",
-            "capabilities-all-zero", "web-app-positive-control",
-        ] {
-            assert_eq!(held(&lines, check), Some(true), "{check}");
+        assert_eq!(verdict(&lines), Some("public-data-held"));
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
+        // run_probe dropped the Client: its channel closes and its direct worker
+        // must already have been reaped, not merely left to systemd's timeout.
+        assert_eq!(unsafe { libc::waitpid(worker_pid, std::ptr::null_mut(), libc::WNOHANG) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+        assert!(!Path::new(&format!("/proc/{worker_pid}")).exists());
+        println!("mount-audit-worker-reaped=true");
+    }
+
+    /// The platform shim, through the production gate: a declared package's app sees the shim mounted
+    /// read-only at /tmp/libifaddrs-lo.so, LD_PRELOAD naming it, and getifaddrs answering exactly lo;
+    /// the floor is unchanged (fd census, seccomp, no netlink).
+    #[test]
+    #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
+    fn operator_probe_holds_with_platform_shim() {
+        let mut audit = audit_inputs("app-output-shim.log");
+        audit.spec.ifaddrs_shim = true;
+        audit.spec.environ.push(("SPK_PROBE_SHIM".into(), "expect".into()));
+        {
+            use sha2::{Digest, Sha256};
+            let digest: String = Sha256::digest(crate::sandbox::IFADDRS_SHIM).iter().map(|b| format!("{b:02x}")).collect();
+            audit.spec.environ.push(("SPK_PROBE_SHIM_SHA256".into(), digest));
         }
-        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
+        in_single_threaded_child(move || {
+            crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+                .unwrap();
+            let prepared =
+                PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+            let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+            assert_eq!(verdict(&lines), Some("floor-held"));
+            for check in [
+                "fd-census-self", "seccomp-filter-active", "capabilities-all-zero", "socket-netlink-route-refused",
+                "socket-netlink-refused", "ifaddrs-shim-loopback-only", "ifaddrs-shim-read-only", "ifaddrs-shim-bytes-pinned",
+            ] {
+                assert_eq!(held(&lines, check), Some(true), "{check}");
+            }
+            assert!(held(&lines, "ifaddrs-shim-absent").is_none(), "the absence check must not run with the shim");
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0, "status {status}");
+        });
     }
 
     /// Negative control: the same gate and probe with the pre-floor argument
     /// list (abe988d). The probe must report a breach, so the audit can go red.
     #[test]
-    #[ignore = "root only; run by scripts/spk-platform/sandbox-floor-audit.sh"]
-    fn root_probe_breaches_under_pre_floor_arguments() {
+    #[ignore = "operator with a subuid grant; run by scripts/spk-platform/sandbox-floor-audit.sh"]
+    fn operator_probe_breaches_under_pre_floor_arguments() {
         let audit = audit_inputs("app-output-pre-floor.log");
-        let mut prepared =
-            PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
-        let mut legacy: Vec<String> = [
-            "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid",
-            "--unshare-ipc", "--unshare-uts", "--unshare-cgroup", "--unshare-net",
-            "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
-            "--size", "134217728", "--tmpfs", "/tmp", "--proc", "/proc",
-            "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
-            "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        legacy.extend(["--setenv", "SPK_PROBE", "pre-floor", "--", "/spk-sandbox-probe"].map(str::to_owned));
-        prepared.launch.args = legacy;
-        let (status, lines) = run_probe(prepared, &audit.spec.app_output);
-        assert_eq!(verdict(&lines), Some("floor-breached"));
-        for check in [
-            "seccomp-filter-active", "fd-census-self", "socket-netlink-refused",
-            "userns-unshare-refused",
-        ] {
-            assert_eq!(held(&lines, check), Some(false), "{check} did not fail");
-        }
-        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 1, "status {status}");
+        in_single_threaded_child(move || {
+            crate::resident_privilege::bootstrap_for_audit(&audit.spec.bwrap, &audit.bwrap_sha256, audit.uid, audit.gid)
+                .unwrap();
+            let mut prepared =
+                PreparedResident::prepare(&audit.spec, audit.uid, audit.gid, &audit.bwrap_sha256).unwrap();
+            let mut legacy: Vec<String> = [
+                "--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid",
+                "--unshare-ipc", "--unshare-uts", "--unshare-cgroup", "--unshare-net",
+                "--clearenv", "--ro-bind-fd", "4", "/", "--bind-fd", "5", "/var",
+                "--size", "134217728", "--tmpfs", "/tmp", "--proc", "/proc",
+                "--dev", "/dev", "--chdir", "/", "--setenv", "HOME", "/var",
+                "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
+            ]
+            .map(str::to_owned)
+            .to_vec();
+            legacy.extend(["--setenv", "SPK_PROBE", "pre-floor", "--", "/spk-sandbox-probe"].map(str::to_owned));
+            prepared.launch.args = legacy;
+            let (status, lines) = run_probe(prepared, &audit.spec.app_output);
+            assert_eq!(verdict(&lines), Some("floor-breached"));
+            for check in [
+                "seccomp-filter-active", "fd-census-self", "socket-netlink-refused", "socket-netlink-route-refused",
+                "userns-unshare-refused",
+            ] {
+                assert_eq!(held(&lines, check), Some(false), "{check} did not fail");
+            }
+            assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 1, "status {status}");
+        });
     }
 
     #[test]
@@ -650,6 +775,7 @@ mod tests {
             signed_manifest_sha256: [0xbb; 32],
             signed_bridge_config_sha256: None,
             signed_bridge_config: None,
+            signed_data_config: None,
             manifest,
         };
         let launch = SourceLaunchDescriptor {

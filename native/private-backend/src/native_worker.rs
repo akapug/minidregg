@@ -15,9 +15,8 @@ use crate::{
 use sha2::{Digest, Sha256, Sha512};
 use std::{
     fs::File,
-    io::{Read, Result, Write},
+    io::{Read, Result},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
 };
 const DISPATCH: &[u8] = b"DREGG.PRIVATE.WORKER.DISPATCH\x01";
 const CONFIG: &[u8] = b"DREGG.PRIVATE.WORKER.CONFIG\x01";
@@ -279,75 +278,12 @@ impl SourcePartyAuthority for NativeAuthority {
         Ok(())
     }
 }
-fn invoke_native(
-    config: &Config,
-    request: &InnerCredentialRequest,
-) -> Result<InnerCredentialOutcome> {
-    // Keep the hashed image open and execute that descriptor on Linux. This
-    // avoids replacing the path between digest verification and exec. The
-    // deployment must pin the actual source-compiled image/config, not a test
-    // executable emitting successful bytes.
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (config, request);
-        return Err(bad(
-            "closed native worker requires Linux descriptor execution",
-        ));
-    }
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::fd::AsRawFd;
-        let mut image = File::open(&config.native_program)?;
-        let mut hash = Sha256::new();
-        let mut buffer = [0u8; 65536];
-        loop {
-            let count = image.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            hash.update(&buffer[..count]);
-        }
-        if hash.finalize().as_slice() != config.native_image_sha256 {
-            return Err(bad("native verifier image pin refused"));
-        }
-        let fd = image.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let mut child = Command::new("/usr/bin/timeout")
-            .arg("45s")
-            .arg(format!("/proc/self/fd/{fd}"))
-            .args(&config.native_argv)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()?;
-        let raw = request.encode()?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| bad("native stdin absent"))?
-            .write_all(&raw)?;
-        let mut reply = vec![];
-        child
-            .stdout
-            .take()
-            .ok_or_else(|| bad("native stdout absent"))?
-            .take(crate::source_endpoint::MAX_LOCAL_INNER as u64 + 1)
-            .read_to_end(&mut reply)?;
-        if !child.wait()?.success() {
-            return Err(bad("actual native original-prefix verifier refused"));
-        }
-        drop(image);
-        InnerCredentialOutcome::decode(&reply)
-    }
-}
 /// Explicit successor worker profile. This holds the actual sealed verifier and
 /// original settings for the whole synchronous invocation. Construction is only
 /// from protected operator Config and original protected settings bytes; source
 /// enrollment/worker image activation is a separate required deployment step.
-/// The legacy worker CLI and its frozen source image remain unchanged.
+/// The one native invocation path: the worker CLI builds this from the config
+/// and the protected settings file's bytes.
 pub struct SealedNative {
     invocation: crate::pinned_execution::SealedInvocation,
     config_bytes: Vec<u8>,
@@ -382,29 +318,26 @@ impl SealedNative {
         InnerCredentialOutcome::decode(&reply)
     }
 }
-// Closed local selector; no requester callback or successful-byte oracle.
-enum NativeInvocation<'a> { Legacy, Sealed(&'a SealedNative) }
-impl NativeInvocation<'_> {
-    fn invoke(&self, config: &Config, request: &InnerCredentialRequest) -> Result<InnerCredentialOutcome> {
-        match self {
-            Self::Legacy => invoke_native(config, request),
-            Self::Sealed(held) => held.invoke(config, request),
-        }
-    }
-}
-/// Explicit sealed successor consumer. It shares the exact original-prefix
-/// authority comparison and durable receiver with the legacy path. A new source
-/// worker image/profile must activate this path; the existing CLI uses Legacy.
-pub fn receive_sealed(config: &Config, dispatch: &DispatchClaim, held: &SealedNative) -> Result<Vec<u8>> {
-    receive_with_invocation(config, dispatch, NativeInvocation::Sealed(held))
+/// The ONLY production caller of `RecipientKeyCustody::adopt_current`: feeds the
+/// Host's current-recipient readback (`inspect current-recipient` output, taken
+/// under the client custody lock) into the worker's key custody, re-checked
+/// against the pinned scope.
+pub fn adopt_current_recipient(
+    config: &Config,
+    readback: &[u8],
+    scope: &crate::current_recipient::ReadbackScope,
+) -> Result<()> {
+    let record = crate::current_recipient::VerifiedCurrentRecipient::from_host_readback(readback, scope)?;
+    let mut keys =
+        RecipientKeyCustody::open(&config.key_wal, &config.key_identity, config.key_capacity)?;
+    keys.adopt_current(&record)
 }
 /// Actual native-image verification followed by actual private receiver WAL.
 /// Response is pending local egress, not source Qualified/terminal YES or an
 /// encrypted audience release. All recursive plaintext stays in private WAL.
-pub fn receive(config: &Config, dispatch: &DispatchClaim) -> Result<Vec<u8>> {
-    receive_with_invocation(config, dispatch, NativeInvocation::Legacy)
-}
-fn receive_with_invocation(config: &Config, dispatch: &DispatchClaim, invocation: NativeInvocation<'_>) -> Result<Vec<u8>> {
+/// The native verifier runs only from the sealed image and settings held by
+/// `held`; the receiver shares its authority comparison and durable receiver.
+pub fn receive(config: &Config, dispatch: &DispatchClaim, held: &SealedNative) -> Result<Vec<u8>> {
     if dispatch.worker_profile != config.worker_profile
         || dispatch.enrollment_bytes.is_empty()
         || dispatch.source_record_bytes.is_empty()
@@ -422,19 +355,14 @@ fn receive_with_invocation(config: &Config, dispatch: &DispatchClaim, invocation
     }
     let keys =
         RecipientKeyCustody::open(&config.key_wal, &config.key_identity, config.key_capacity)?;
-    let opened = keys.open_capsule(
-        &capsule,
-        &capsule.party,
-        capsule.sequence,
-        &capsule.recipient,
-    )?;
+    let opened = keys.open_current(&capsule, &capsule.party, capsule.sequence)?;
     let native_request = InnerCredentialRequest::from_opened(
         &request,
         &opened,
         dispatch.source_index.clone(),
         dispatch.certificate_bytes.clone(),
     )?;
-    let native = invocation.invoke(config, &native_request)?;
+    let native = held.invoke(config, &native_request)?;
     if !native.matches_opened(&native_request, &opened)? {
         return Err(bad("native original credential refused"));
     }
@@ -503,7 +431,7 @@ fn receive_with_invocation(config: &Config, dispatch: &DispatchClaim, invocation
         Initial::load(&pending_base, b"DREGG.PRIVATE.WORKER.PENDING.KEY\x01")?
     } else {
         let mut random = [0u8; 32];
-        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        crate::entropy::os_fill(&mut random)?;
         Initial::create(
             &pending_base,
             b"DREGG.PRIVATE.WORKER.PENDING.KEY\x01",
@@ -527,6 +455,7 @@ fn receive_with_invocation(config: &Config, dispatch: &DispatchClaim, invocation
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use crate::{authenticated_ingress::Context, codec::Generation};
     fn config(program: &str, digest: [u8; 32]) -> Config {
         Config {
@@ -638,10 +567,16 @@ mod tests {
             credential: vec![3],
         };
         let mut cfg = config("/usr/bin/false", [0; 32]);
-        assert!(invoke_native(&cfg, &request).is_err());
+        cfg.native_argv = vec!["/protected/original-settings".into()];
+        assert!(
+            SealedNative::new(&cfg, b"settings").is_err(),
+            "a wrong image pin never yields a held verifier"
+        );
         cfg.native_image_sha256 = Sha256::digest(std::fs::read("/usr/bin/false").unwrap()).into();
         assert!(
-            invoke_native(&cfg, &request).is_err(),
+            SealedNative::new(&cfg, b"settings")
+                .and_then(|held| held.invoke(&cfg, &request))
+                .is_err(),
             "actual pinned child refusal never yields NativeAuthority"
         );
     }
@@ -654,9 +589,7 @@ mod tests {
             credential: vec![3],
         };
         let bytes = request.encode().unwrap();
-        assert!(bytes.len() > crate::source_endpoint::MAX_COMPLETE_NATIVE_REQUEST);
         assert_eq!(InnerCredentialRequest::decode(&bytes).unwrap(), request);
-        assert!(crate::source_endpoint::admit_complete_transport_frame(&bytes, &[]).is_err());
         let claim = DispatchClaim {
             request_bytes: vec![1],
             source_index: request.source_index,
@@ -670,10 +603,18 @@ mod tests {
             DispatchClaim::decode(&claim.encode()).unwrap().encode(),
             claim.encode()
         );
-        assert!(
-            receive(&config("/usr/bin/false", [0; 32]), &claim).is_err(),
-            "no key/output path read before missing source binding refusal"
-        );
+        #[cfg(target_os = "linux")]
+        {
+            let mut cfg = config("/usr/bin/false", [0; 32]);
+            cfg.native_argv = vec!["/protected/original-settings".into()];
+            cfg.native_image_sha256 =
+                Sha256::digest(std::fs::read("/usr/bin/false").unwrap()).into();
+            let held = SealedNative::new(&cfg, b"settings").unwrap();
+            assert!(
+                receive(&cfg, &claim, &held).is_err(),
+                "no key/output path read before missing source binding refusal"
+            );
+        }
         let mut trailing = claim.encode();
         trailing.push(0);
         assert!(DispatchClaim::decode(&trailing).is_err());

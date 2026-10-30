@@ -4,9 +4,28 @@ The requested index names a retry BEGIN-v4 in the same verified replay history.
 The request never supplies an app state, resource root, grant, header, or the
 recovery selector: the selector is the one retained in the admitted BEGIN-v4.
 -/
-import Host.ApplicationLifecycleClaimOperator
-import Kernel.ApplicationLifecycleRetryClaimV4Core
-import Kernel.NativeHostReplay
+module
+
+public import Host.ApplicationLifecycleClaimOperator
+public import Kernel.ApplicationLifecycleRetryClaimV4Core
+public import Kernel.NativeHostReplay
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryClaimV4Authoring
 
@@ -96,7 +115,7 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.managementSubject.value == pin.managementSubject &&
       beginSource.capability == pin.appCapability do
     throw "historical retry BEGIN differs from fixed claim operator pin"
-  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.expectedSeed begin.begin do
+  unless begin.shape && ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin.begin do
     throw "historical retry BEGIN is outside resident host profile"
   let opened := verified.opened
   let some retained := opened.durable.image.accepted[prior.index]?
@@ -104,7 +123,7 @@ def prepareVerified (config : Config) {target : Durable}
   unless DurableReceiverCodec.intentStream.encode retained ==
       DurableReceiverCodec.intentStream.encode prior.record do
     throw "original retry BEGIN record differs from verified history"
-  let some originalReceipt := verified.receipts[prior.index]?
+  let some originalReceipt := verified.receiptAt prior.index
     | throw "original retry BEGIN receipt absent from verified chronology"
   unless originalReceipt.transactionId == prior.record.transactionId &&
       originalReceipt.eventId == prior.record.event.eventId &&

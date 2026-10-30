@@ -87,10 +87,10 @@ snapshot retains earlier versions of separately owned `rpc_adapter.rs`,
 
 | File | SHA-256 |
 | --- | --- |
-| `native/spk-host/src/resident_begin_native.rs` | `8fbeebef8a91c0b815059e511f6701ca387a1615bcc9879e79e6f6561aa2859b` |
+| `resident_begin_native.rs [deleted dd97fcc6]` | `8fbeebef8a91c0b815059e511f6701ca387a1615bcc9879e79e6f6561aa2859b` |
 | `native/spk-host/src/materialize.rs` | `87f959e8a301fe4f599d0068b9f75584867e83e88039458d98cc5337a86425b2` |
 | `native/spk-host/src/main.rs` | `cd450ef6019a625c87e155f15fb27474665fbe349b624c529781acefb8d17aea` |
-| `native/spk-host/src/claim_descriptor.rs` | `c1b5685c9d0864f26d4d91f0a84c3b42d7af7f16a5fdfc019eeeee8a912045af` |
-| `native/spk-host/src/claim_native.rs` | `788c90cdba4f86a597b52509171e363a8c0e34f0309ed99ff13aa80467a1b3f3` |
+| `claim_descriptor.rs [deleted 5816bff1]` | `c1b5685c9d0864f26d4d91f0a84c3b42d7af7f16a5fdfc019eeeee8a912045af` |
+| `claim_native.rs [deleted dd97fcc6]` | `788c90cdba4f86a597b52509171e363a8c0e34f0309ed99ff13aa80467a1b3f3` |
 | `native/spk-host/src/lib.rs` | `4b793736142a40be9a5babaea3a030ea4bda1e270c840948d484500020e7c1b7` |
 | `deploy/spk-host/spk-qualify` | `d2d9f52bfdd28dfad29cf93f0508e68befd2d05c67b051c999752a4b3fdd537d` |

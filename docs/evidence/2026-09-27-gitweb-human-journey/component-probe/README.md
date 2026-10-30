@@ -13,7 +13,7 @@ test callback does not issue a Mini dispatch permit or claim resident START.
 
 The test additions were `native/spk-host/src/http_entrance.rs` SHA-256
 `5b76139edd2fc114734654009ff2505ca59a78d8ab69d98a990ea05fc9f43366`
-and new `native/spk-host/src/http_entrance_gitweb_probe.rs` SHA-256
+and new `http_entrance_gitweb_probe.rs [deleted 68b2214d]` SHA-256
 `27401a4b61396a388fe2fa24acd890b15e233645448faaf538e66f382e21c3ce`.
 The isolated test target was compiled from committed `9d84b6e` plus only
 those two test files with `cargo test --locked --offline --lib --no-run`.

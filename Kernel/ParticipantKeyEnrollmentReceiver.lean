@@ -1,6 +1,27 @@
 /- A canonical new signing principal and operation marker publish in one CAS. -/
-import Compiler.DurableReceiverIO
-import Kernel.ParticipantKeyEnrollment
+module
+
+public import Compiler.DurableReceiverIO
+public import Kernel.ParticipantKeyEnrollment
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ParticipantKeyEnrollmentReceiver
 
@@ -86,6 +107,15 @@ structure AcceptedEnrollment [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : ParticipantKeyEnrollment.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedEnrollment.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedEnrollment deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (ParticipantKeyEnrollment.policyConfig accepted.prepared).portal
+        accepted.prepared.authority.snapshot.authState
+        (ParticipantKeyEnrollment.request deployment accepted.prepared.authority.snapshot profile.semantics ambient
+          ingress.command)) ∧
+      PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, ⟨accepted.accepted.semantic.authorization⟩, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -107,7 +137,9 @@ def charge (accepted : AcceptedEnrollment deployment profile ambient durable ing
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.sponsorEnvelope.length +
       ingress.ingress.possessionSignature.length + ingress.ingress.nextPublicKey.length +
       ingress.ingress.nextPossessionSignature.length
@@ -120,7 +152,7 @@ def intent (accepted : AcceptedEnrollment deployment profile ambient durable ing
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   subject := some ingress.command.sponsor
   postRootsBound := writes_roots_bound accepted.prepared

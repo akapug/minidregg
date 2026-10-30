@@ -16,8 +16,28 @@ commitment it compared, never a value it parses. Native admission
 (`ObjectiveActivity.publish`, `loadProgram`) both hold this token, and both require the
 package to name this front end, so the package's `frontEnd` pin is not a label the
 publisher asserts: it names the computation the receiver performs. -/
-import Compiler.ObjectiveSourcePackage
-import Compiler.ObjectiveBendFrontEndIdentity
+module
+
+public import Compiler.ObjectiveSourcePackage
+public import Compiler.ObjectiveBendFrontEndIdentity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendPublication
 open Lean
 open Minidregg.Compiler.ObjectiveBendFrontEnd
@@ -173,9 +193,21 @@ theorem Replayed.core_replayed {p : ObjectiveSourcePackage.Package} {typedCore :
   simp only [String.toUTF8] at core
   simp [r.replayExact, r.accepted.proposed, bind, Except.bind, Except.toOption, pure, Except.pure, core]
 
+/-- **What a replay token guarantees about its indices**: the offered typed core is the one
+`replayedCore` computes from package `p`, the offered laws are the ones `publishedLaws` reads from
+`p`, and the checker fuel of the accepted lowering — the lowering `replay p` produces — is within the
+receiver's `maxFuel`. -/
+theorem Replayed.sound {p : ObjectiveSourcePackage.Package} {typedCore : List UInt8}
+    {laws : List (String × ObjectiveBendLaw.LawExpr)} {maxFuel : Nat}
+    (r : Replayed p typedCore laws maxFuel) :
+    ObjectiveBendPublication.replayedCore p = some typedCore ∧ publishedLaws p = .ok laws ∧
+      replay p = .ok r.lowering ∧ r.accepted.packet.fuel ≤ maxFuel :=
+  ⟨r.core_replayed, r.laws_replayed, r.replayExact, r.fuelWithin⟩
+
 #assert_axioms replayedCore_is_lowering
 #assert_axioms replay_select
 #assert_axioms Replayed.replayExact
 #assert_axioms Replayed.core_replayed
 #assert_axioms Replayed.laws_replayed
+#assert_axioms Replayed.sound
 end Minidregg.Compiler.ObjectiveBendPublication

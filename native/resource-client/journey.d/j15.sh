@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j15.sh — P-STORY (PLACE §2.8, item 8; journey step J15): a story is a
+# journey.d/j15.sh — P-STORY (docs/PLACE.md §2.8, §5 item 8; journey step J15): a story is a
 # table its author seals, and then the table is the law on every player's cell.
 #
 #   author    alice: `story law tale` prints the law sealing will install;
@@ -36,7 +36,7 @@ umask 077
 SD=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 H=$SD/h; WS=$SD/w; L=$SD/log
-TALE=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/shell/templates/story/tale" && pwd)
+TALE=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/story/tale" && pwd)
 mkdir -p -m 700 "$H" "$WS" "$L"
 TABLE=$SD/j15.tsv
 printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"

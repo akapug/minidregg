@@ -4,21 +4,19 @@
 //! Native authorization, successor privateRecovery or permission to dispatch.
 use crate::{
     circuit_batch::Plan,
-    codec::{bad, bytes, Nat},
+    codec::{bad, bytes},
     consensus_wire::Cursor,
     custody,
-    field_network::{self, Engine, Message, Send},
+    field_network::{Message, Send},
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{Read, Result, Write},
-    os::unix::fs::OpenOptionsExt,
+    fs::File,
+    io::{Read, Result},
     path::{Path, PathBuf},
 };
 mod runtime_seal {
     pub trait Sealed {}
-    impl Sealed for super::Engine {}
     impl Sealed for crate::field_network_layers::LayerEngine {}
 }
 /// Closed runtime family, not a callback-based cryptographic qualification.
@@ -34,41 +32,6 @@ pub trait FieldRuntime: runtime_seal::Sealed + Clone {
     fn decode_message(b: &[u8]) -> Result<Message>;
     fn wal_domain() -> &'static [u8];
     fn file_domain() -> &'static [u8];
-}
-impl FieldRuntime for Engine {
-    fn plan(&self) -> &Plan {
-        Engine::plan(self)
-    }
-    fn holder(&self) -> u16 {
-        Engine::holder(self)
-    }
-    fn roster(&self) -> (usize, usize) {
-        Engine::roster(self)
-    }
-    fn initial_bytes(&self) -> Result<Vec<u8>> {
-        Engine::initial_bytes(self)
-    }
-    fn restore_initial(b: &[u8], p: &Plan, h: u16, a: &Path) -> Result<Self> {
-        Engine::restore_initial(b, p, h, a)
-    }
-    fn start(&mut self) -> Result<Vec<Send>> {
-        Engine::start(self)
-    }
-    fn receive(&mut self, s: u16, m: Message) -> Result<Vec<Send>> {
-        Engine::receive(self, s, m)
-    }
-    fn encode_message(m: &Message) -> Vec<u8> {
-        field_network::encode_message(m)
-    }
-    fn decode_message(b: &[u8]) -> Result<Message> {
-        field_network::decode_message(b)
-    }
-    fn wal_domain() -> &'static [u8] {
-        b"DREGG.PRIVATE.FIELD.PARTY.WAL\x01"
-    }
-    fn file_domain() -> &'static [u8] {
-        b"DREGG.PRIVATE.FIELD.INIT.FILE\x01"
-    }
 }
 impl FieldRuntime for crate::field_network_layers::LayerEngine {
     fn plan(&self) -> &Plan {
@@ -109,51 +72,11 @@ impl FieldRuntime for crate::field_network_layers::LayerEngine {
 pub struct RuntimeMachine<R: FieldRuntime> {
     pub state: R,
 }
-pub type FieldMachine = RuntimeMachine<Engine>;
 fn outbox<R: FieldRuntime>(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&R::encode_message(&p.message), &mut b);
-    }
-    b
-}
-pub fn decode_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    decode_outbox_for::<Engine>(b, n)
+    crate::consensus_wire::put_outbox(ps, R::encode_message)
 }
 fn decode_outbox_for<R: FieldRuntime>(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let mut ds = vec![];
-    loop {
-        let v = c.byte()?;
-        ds.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&ds)?;
-    let count = r.count()?;
-    r.finish()?;
-    if count > 65536 {
-        return Err(bad("field outbox count"));
-    }
-    let mut ps = vec![];
-    for _ in 0..count {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("field outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: R::decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox::<R>(&ps) != b {
-        return Err(bad("field outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(b, n, 65536, "field", R::decode_message, R::encode_message)
 }
 impl<R: FieldRuntime> Machine for RuntimeMachine<R> {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
@@ -195,7 +118,6 @@ pub struct RuntimeStore<R: FieldRuntime> {
     _initial_lock: File,
     n: usize,
 }
-pub type Store = RuntimeStore<Engine>;
 pub type LayerStore = RuntimeStore<crate::field_network_layers::LayerEngine>;
 fn initial_path(path: &Path) -> PathBuf {
     path.with_extension("initial")
@@ -222,22 +144,7 @@ impl<R: FieldRuntime> RuntimeStore<R> {
             return Err(bad("field initial framed capacity"));
         }
         let initial_file = initial_path(path);
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&initial_file)?;
-        f.write_all(&framed)?;
-        f.sync_all()?;
-        File::open(
-            initial_file
-                .parent()
-                .ok_or_else(|| bad("field initial parent"))?,
-        )?
-        .sync_all()?;
-        if fs::read(&initial_file)? != framed {
-            return Err(bad("field initial durable readback"));
-        }
+        crate::private_initial::write_new_durable(&initial_file, &framed)?;
         let n = state.roster().0;
         let journal = Journal::open(path, &identity::<R>(&initial), RuntimeMachine { state })?;
         Ok(Self {
@@ -302,9 +209,10 @@ impl<R: FieldRuntime> RuntimeStore<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field_network_layers::LayerEngine;
+    use std::fs;
     use crate::reconstruction::Field;
     use std::{
-        collections::VecDeque,
         time::{SystemTime, UNIX_EPOCH},
     };
     fn path(label: &str) -> PathBuf {
@@ -320,109 +228,60 @@ mod tests {
         dir.join("events")
     }
     #[test]
-    fn actual_field_machine_restart_replays_original_outbox_and_completes() {
-        let (engines, anchors) = crate::field_network::tests::engine_nodes(Field(1), Field(1));
-        let plans = engines.iter().map(|e| e.plan().clone()).collect::<Vec<_>>();
-        let paths = (0..4)
-            .map(|i| path(&format!("node-{i}")))
-            .collect::<Vec<_>>();
-        let mut stores = engines
-            .into_iter()
-            .enumerate()
-            .map(|(i, e)| Some(Store::create(&paths[i], e).unwrap()))
-            .collect::<Vec<_>>();
-        let mut q = VecDeque::new();
-        let mut old = vec![];
-        for (i, s) in stores.iter_mut().enumerate() {
-            let ps = s.as_mut().unwrap().start().unwrap();
-            if i == 1 {
-                old = ps.clone();
-            }
-            q.extend(ps.into_iter().map(|p| (i as u16, p)));
-        }
-        let length = fs::metadata(&paths[1]).unwrap().len();
-        drop(stores[1].take());
-        let mut wrong = plans[1].clone();
-        wrong.generation.command.push(0);
-        assert!(Store::reopen(&paths[1], &wrong, 1, anchors[1].socket()).is_err());
-        assert!(Store::reopen(&paths[1], &plans[1], 2, anchors[1].socket()).is_err());
-        let reopened = Store::reopen(&paths[1], &plans[1], 1, anchors[1].socket()).unwrap();
-        assert_eq!(reopened.replay_outboxes().unwrap(), old);
-        assert_eq!(fs::metadata(&paths[1]).unwrap().len(), length);
-        // Retained retransmit, no rerandomization or new material reservation.
-        q.extend(old.into_iter().map(|p| (1, p)));
-        stores[1] = Some(reopened);
-        let mut steps = 0;
-        while let Some((from, p)) = q.pop_front() {
-            steps += 1;
-            assert!(steps < 200000);
-            let to = p.to;
-            q.extend(
-                stores[to as usize]
-                    .as_mut()
-                    .unwrap()
-                    .receive(from, &p.message)
-                    .unwrap()
-                    .into_iter()
-                    .map(|p| (to, p)),
-            );
-        }
-        for (i, s) in stores.iter().enumerate() {
-            assert!(s.as_ref().unwrap().state().output().is_some());
-            assert_eq!(
-                crate::codec::Journal::decode(&custody::rpc(anchors[i].socket(), &[0]).unwrap())
-                    .unwrap()
-                    .allocations
-                    .len(),
-                3
-            );
-        }
-        let points = stores
-            .iter()
-            .take(2)
-            .enumerate()
-            .map(|(i, s)| {
-                (
-                    i as u16,
-                    s.as_ref()
-                        .unwrap()
-                        .state()
-                        .output()
-                        .unwrap()
-                        .shares()
-                        .to_vec(),
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            crate::acss_id::polynomial(&points, 1).unwrap()[0][0],
-            Field(1)
-        );
-        drop(stores[1].take());
-        let mut reopened = Store::reopen(&paths[1], &plans[1], 1, anchors[1].socket()).unwrap();
-        assert!(reopened.state().output().is_some());
-        assert!(
-            reopened.start().unwrap().is_empty(),
-            "complete replay must not emit another masked opening"
-        );
-    }
-    #[test]
     fn original_initialization_corruption_or_missing_anchor_refuses_recovery() {
         let (mut engines, anchors) = crate::field_network::tests::engine_nodes(Field(1), Field(0));
         let engine = engines.remove(0);
         let plan = engine.plan().clone();
         let p = path("initial");
-        drop(Store::create(&p, engine).unwrap());
+        drop(LayerStore::create(&p, LayerEngine::new(engine).unwrap()).unwrap());
         let initial = fs::read(initial_path(&p)).unwrap();
         let mut changed = initial.clone();
         let index = changed.len() - 40;
         changed[index] ^= 1;
         fs::write(initial_path(&p), changed).unwrap();
-        assert!(Store::reopen(&p, &plan, 0, anchors[0].socket()).is_err());
+        assert!(LayerStore::reopen(&p, &plan, 0, anchors[0].socket()).is_err());
         fs::write(initial_path(&p), &initial).unwrap();
         let (_empty, socket, _root) =
             crate::triple_king::tests::evaluator_anchor("missing-field-prefix");
-        assert!(Store::reopen(&p, &plan, 0, &socket).is_err());
-        assert!(Store::reopen(&p, &plan, 0, anchors[0].socket()).is_ok());
+        assert!(LayerStore::reopen(&p, &plan, 0, &socket).is_err());
+        assert!(LayerStore::reopen(&p, &plan, 0, anchors[0].socket()).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: crate::field_network::Body::Bits { holder: 1, phase: PinPhase::Echo(vec![1]) } } },
+            Send { to: 3, message: Message { context: [7; 32], body: crate::field_network::Body::Bits { holder: 1, phase: PinPhase::Ready(vec![1]) } } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox::<crate::field_network_layers::LayerEngine>(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = <crate::field_network_layers::LayerEngine as FieldRuntime>::encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(decode_outbox_for::<crate::field_network_layers::LayerEngine>(&b, 4).unwrap(), ps);
+        assert!(decode_outbox_for::<crate::field_network_layers::LayerEngine>(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(decode_outbox_for::<crate::field_network_layers::LayerEngine>(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(decode_outbox_for::<crate::field_network_layers::LayerEngine>(&b, 4).is_err(), "an absurd count refuses");
     }
 }

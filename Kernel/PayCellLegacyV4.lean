@@ -1,4 +1,5 @@
-/- Frozen v4 payload codec for the explicit v4→v5 paid-claim carry. Never decode old bytes using the v5 wire. -/
+/- Frozen v4 payload codec for the explicit v4→v5 paid-claim carry. Never decode old bytes using the v5 wire.
+It spells the v4 cell's OLD codec names. -/
 /-
 # Kernel.PayCell — the pay cell: tariff, deposit address book, assignment, enrolment
 
@@ -14,7 +15,7 @@ domain (`physicalId`), with six namespaces on `Theory.Store`:
 | `sshIndex`   | ssh blob (51 B)  | Mini key                  | append-only |
 | `journal`    | nullifier bytes  | `Unattributed`            | append-only |
 
-The last three are PAY §11's self-enrollment state (layout v2).  An
+The last three are docs/PAY.md §11's self-enrollment state (layout v2).  An
 `enrolment` row is written once by an enrollment and rewritten only by a
 renewal of the same key (its lease grows, `PayEnrolDecision`); `sshIndex`
 makes an ssh key belong to at most one Mini key, and the law ties the two
@@ -31,7 +32,7 @@ same intent as the credits it reports; the pay cell keeps no clock.
 Both indexed namespaces are append-only, so an index is written once
 (`Store.Op.allocate_enabled_fresh`).  The index an observation names resolves
 to both its address (`bookAt`) and its account (`assignmentAt`); a payment
-nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
+nullifier covering signature ‖ address (docs/PAY.md §10 erratum 1) reads the address
 from `bookAt`.
 
 Wire: the store codec with layout name `DREGG/PAY/CELL/v4` (its frame commits
@@ -41,9 +42,28 @@ clock: namespace tag 3 (the clock) is retired and decodes to nothing.  v4 = v3
 with the tariff at `DREGG/PAY/TARIFF/v3` (C3's `slashCallerPermille`).  A v1,
 v2 or v3 cell refuses to decode.
 -/
-import Compiler.StoreCodec
-import Kernel.PayTariff
-import Kernel.PayEnrolMemo
+module
+
+public import Compiler.StoreCodec
+public import Kernel.PayTariff
+public import Kernel.PayEnrolMemo
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayCellLegacyV4
 
@@ -88,7 +108,7 @@ def chainTipStream : StreamCodec ChainTip :=
     (fun (slot, blockTime) => ⟨slot, blockTime⟩)
     (by intro tip; cases tip; rfl)
 
-/-- A self-enrolled Mini key's record (PAY §11.4), keyed by the 32-byte Mini
+/-- A self-enrolled Mini key's record (docs/PAY.md §11.4), keyed by the 32-byte Mini
 key.  `leaseUntil` is a chain hour (`blockTime / 3600`): the node membership
 the key has paid for runs while `clock hour < leaseUntil`. -/
 structure EnrolRecord where

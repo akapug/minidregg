@@ -4,7 +4,11 @@ must be joined by Replay, then the caller must win this exact physical CAS and
 validate the complete successor. A recovered/already-present exact image is
 receipt evidence, never another fd3 delivery permit.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchProjection
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchProjection
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchReceiver
 
@@ -35,12 +39,12 @@ structure Permit (config : Config) where
 def Permit.verified {config : Config} (permit : Permit config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) :=
   NativeHostReplay.extendExact permit.reader permit.old permit.readback
 
 def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.Receipt :=
   let candidate := NativeHostReplay.exactCandidate permit.old
-    permit.readback.derived permit.readback.ready
+    permit.readback.derived permit.readback.ready permit.readback.tag
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     permit.old.opened.durable.height + 1,
@@ -51,6 +55,15 @@ theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
+
+/-- The exact readback installs the intent of the lifetime dispatch admitted at
+`old.opened`, and the post-CAS image is the `config`-validated successor of
+`old` extended by it. -/
+theorem Permit.validated_successor {config : Config} (permit : Permit config) :
+    permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
+  ⟨permit.derivedExact, permit.readback.validated⟩
 
 private def permitCodec : LawfulCodec
     (ApplicationAgentLifetimeDispatchProjection.Paid × NativeHostCodec.Receipt) :=

@@ -22,9 +22,30 @@ Descendants die by the existing lineage rule. The operation marker is a durable
 nullifier, so an exact retry replays its receipt; a second renounce under a new
 nonce reaches the gate and is refused `alreadyRevoked`.
 -/
-import Kernel.CapabilityRevocationController
-import Compiler.ServedBasis
-import Theory.Renounce
+module
+
+public import Kernel.CapabilityRevocationController
+public import Compiler.ServedBasis
+public import Theory.Renounce
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CapabilityRenounce
 
@@ -70,21 +91,11 @@ def commandStream : StreamCodec Command :=
 
 def commandFrame : List UInt8 := "DREGG/CAPABILITY/RENOUNCE".toUTF8.toList ++ [1]
 
-def rawCommandCodec : LawfulCodec Command where
-  encode command := commandFrame ++ commandStream.encode command
-  decode bytes := if bytes.take commandFrame.length = commandFrame then
-    commandStream.toLawful.decode (bytes.drop commandFrame.length) else none
-  decode_encode := by
-    intro command
-    have decoded := commandStream.toLawful.decode_encode command
-    change commandStream.toLawful.decode (commandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec Command := (StreamCodec.framed commandFrame commandStream).toLawful
 
 theorem command_decode_canonical {bytes : List UInt8} {command : Command}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- One operation per (signer, nonce): a substituted capability under the same
 nonce is a transaction-identity conflict, never a second admission. -/
@@ -150,20 +161,10 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressFrame : List UInt8 := "DREGG/CAPABILITY/RENOUNCE/SIGNED-INGRESS".toUTF8.toList ++ [1]
 
-def rawIngressCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec rawIngressCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : Command
   commandExact : commandCodec.encode command = ingress.commandBytes
@@ -303,6 +304,14 @@ structure Accepted (prepared : Prepared deployment semantics ambient ground comm
     command.subject = .ok victim
   validated : ValidatedPatch AuthorityMaterializer ground.authority.cell
     ground.authority.cell.root (prepared.declaration.patch ground.authority.logical)
+theorem Accepted.sound {prepared : Prepared deployment semantics ambient ground command}
+    {envelope : List UInt8} (accepted : Accepted prepared envelope) :
+    accepted.receipt.envelopeBytes = envelope ∧
+    CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
+      prepared.request accepted.receipt = true ∧
+    Renounce.gateAt ground.authority.cell command.kind command.capability
+      command.subject = .ok accepted.victim :=
+  ⟨accepted.envelopeExact, accepted.bound, accepted.gated⟩
 
 /-- A gate refusal carries the checked signature that preceded it. It is said
 only to the authenticated signer, and it is about the signer's own holding:
@@ -318,6 +327,14 @@ structure HolderRefusal (prepared : Prepared deployment semantics ambient ground
   reason : Renounce.Reject
   gated : Renounce.gateAt ground.authority.cell command.kind command.capability
     command.subject = .error reason
+theorem HolderRefusal.sound {prepared : Prepared deployment semantics ambient ground command}
+    {envelope : List UInt8} (refusal : HolderRefusal prepared envelope) :
+    refusal.receipt.envelopeBytes = envelope ∧
+    CredentialSignatureAdmission.verifySignature ground.authority prepared.marker
+      prepared.request refusal.receipt = true ∧
+    Renounce.gateAt ground.authority.cell command.kind command.capability
+      command.subject = .error refusal.reason :=
+  ⟨refusal.envelopeExact, refusal.bound, refusal.gated⟩
 
 inductive Admission (prepared : Prepared deployment semantics ambient ground command)
     (envelope : List UInt8) where
@@ -412,6 +429,13 @@ structure AcceptedRenounce (deployment : Deployment) (semantics : Digest) (ambie
   prepared : Prepared deployment semantics ambient ground ingress.command
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape accepted
+theorem AcceptedRenounce.sound {ingress : DecodedIngress}
+    (accepted : AcceptedRenounce deployment semantics ambient ground ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelopeBytes ∧
+    Renounce.gateAt ground.authority.cell ingress.command.kind ingress.command.capability
+      ingress.command.subject = .ok accepted.accepted.victim ∧
+    PhysicalShape accepted.accepted :=
+  ⟨accepted.accepted.envelopeExact, accepted.accepted.gated, accepted.physical⟩
 
 inductive DecodedAdmission (deployment : Deployment) (semantics : Digest) (ambient : Ambient)
     (ground : Ground deployment) (ingress : DecodedIngress) where
@@ -440,7 +464,9 @@ def charge (accepted : AcceptedRenounce deployment semantics ambient ground ingr
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.accepted).length + (readGuards accepted.accepted).length
-  | .storageBytes => ((writes accepted.accepted).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge ground.view
+      (writes accepted.accepted)
+      (event deployment.domain semantics ingress)
   | .witnessBytes => ingress.ingress.envelopeBytes.length
   | .proofWork => 1
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -451,7 +477,7 @@ def intent (accepted : AcceptedRenounce deployment semantics ambient ground ingr
   writes := writes accepted.accepted
   readGuards := readGuards accepted.accepted
   nullifiers := [nullifier deployment.domain semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain semantics ingress
   subject := some ingress.command.subject
   postRootsBound := writes_roots_bound accepted.accepted

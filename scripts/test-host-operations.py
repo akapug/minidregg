@@ -23,9 +23,7 @@ class GateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         data, _ = ops.load(ROOT)
-        paths = {ops.REGISTRY, ops.GENERATED, Path("Host/Main.lean"), Path("native/resource-client/src/transport.rs")}
-        paths.update(Path(binding["path"]) for binding in data["client_constants"])
-        for path in paths:
+        for path in ops.inputs(ROOT, data):
             (self.root / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / path, self.root / path)
 
@@ -48,6 +46,14 @@ class GateTests(unittest.TestCase):
     def test_actual_sources_match_registry(self):
         result = ops.check(self.root)
         self.assertGreater(result["active"], 100)
+
+    def test_dav_header_rules_refuse_unknown_methods(self):
+        self.registry(lambda data: data["dav_header_rules"][0]["methods"].append("ACL"))
+        self.rejects("invalid DAV method/header rule")
+
+    def test_dav_generated_vocabulary_cannot_drift(self):
+        self.edit("Effects/Revival/HostedDav.lean", '"PROPFIND", "COPY"', '"PROPFIND", "MOVE"')
+        self.rejects("generated hosted DAV vocabulary drift")
 
     def test_duplicate_reservation_cannot_take_job_money_161(self):
         def mutate(data):
@@ -166,23 +172,56 @@ class GateTests(unittest.TestCase):
         self.edit("native/resource-client/src/transport.rs", "_ => false,", "_ => true,")
         self.rejects("unknown fallback")
 
-    def test_registered_client_constant_drift_refuses(self):
+    def bound_constant(self):
+        """The first registered client constant and its source spelling (it names the generated constant)."""
         data, ids = ops.load(self.root)
         binding = data["client_constants"][0]
         entry = next(e for e in ids.values() if e["symbol"] == binding["operation"])
-        self.edit(binding["path"], f"{binding['constant']}: u8 = {entry['code']};", f"{binding['constant']}: u8 = 161;")
+        return binding, entry, f"{binding['constant']}: u8 = mini_sdk::host_operations::{entry['symbol']};"
+
+    def test_registered_client_constant_drift_refuses(self):
+        binding, entry, named = self.bound_constant()
+        other = next(e for e in ops.load(self.root)[1].values() if e["symbol"] != entry["symbol"])
+        self.edit(binding["path"], named, f"{binding['constant']}: u8 = mini_sdk::host_operations::{other['symbol']};")
         self.rejects("client constant drift")
 
+    def test_client_constant_spelled_as_a_literal_refuses(self):
+        binding, entry, named = self.bound_constant()
+        self.edit(binding["path"], named, f"{binding['constant']}: u8 = {entry['code']};")
+        self.rejects("literal Host operation bytes")
+
+    def test_reply_marker_compared_by_index_or_first_refuses(self):
+        # The form grain-runtime's prepare-refusal check used (`frame[0] != 255`), which hid a stale
+        # marker after c5e268ebd moved decided refusals to NO_RECORD.
+        path = "native/grain-runtime/src/main.rs"
+        self.edit(path, "frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD", "frame[0] != 255")
+        self.rejects("literal Host operation bytes")
+
+    def test_reply_marker_compared_through_first_refuses(self):
+        path = "native/resource-client/src/transport.rs"
+        self.edit(path, "Some(&mini_sdk::host_operations::RESPONSE_NEVER_FORWARDED)", "Some(&254)")
+        self.rejects("literal Host operation bytes")
+
     def test_generated_constant_reference_is_checked(self):
-        data, ids = ops.load(self.root)
-        binding = data["client_constants"][0]
-        entry = next(e for e in ids.values() if e["symbol"] == binding["operation"])
-        self.edit(binding["path"], f"{binding['constant']}: u8 = {entry['code']};", f"{binding['constant']}: u8 = crate::host_operations::{entry['symbol']};")
+        binding, entry, named = self.bound_constant()
+        self.edit(binding["path"], named, f"{binding['constant']}: u8 = crate::host_operations::{entry['symbol']};")
         ops.check(self.root)
 
     def test_generated_output_drift_refuses(self):
         with (self.root / ops.GENERATED).open("a") as file: file.write("// stale\n")
         self.rejects("generated request constants drift")
+
+    def test_consent_plan_must_be_an_active_operation(self):
+        def unknown(data):
+            data["consent_plans"].append("NO_SUCH_PLAN")
+        self.registry(unknown)
+        self.rejects("consent plan is not an active operation: NO_SUCH_PLAN")
+
+    def test_consent_plan_is_listed_once(self):
+        def duplicate(data):
+            data["consent_plans"].append(data["consent_plans"][0])
+        self.registry(duplicate)
+        self.rejects("duplicate consent plan")
 
     def test_echoed_response_and_payload_literals_are_not_allocations(self):
         # This test asserts the gate's scope, not correctness of the deliberately

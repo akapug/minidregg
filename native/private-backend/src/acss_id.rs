@@ -7,34 +7,23 @@ use crate::{
     asks::{Bracha, PhaseMessage},
     codec::{bad, Generation, Nat},
     custody::hash,
+    entropy::Entropy,
     dzk::{self, Dzk, RejectedProof, Verification, VerifiedShares},
     private_send::{self, PrivateSend},
-    reconstruction::Field,
+    reconstruction::{eval, interpolate_at, polynomial, Field},
 };
 use std::{
     collections::BTreeMap,
     io::{Error, ErrorKind, Result},
 };
-fn eval(p: &[Field], x: Field) -> Field {
-    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
-}
 fn child(g: &Generation, context: [u8; 32], tag: u8, index: usize) -> Generation {
     let mut b = b"DREGG.ACSS.ID.CHILD.V1".to_vec();
     b.extend(context);
     b.push(tag);
     b.extend((index as u64).to_le_bytes());
-    let mut h = g.clone();
-    h.invocation = Nat::from_be(&hash(&b));
-    h
+    g.derived(&hash(&b))
 }
-fn random(seed: [u8; 32], context: [u8; 32], tag: u8, index: usize) -> [u8; 32] {
-    let mut b = b"DREGG.ACSS.ID.RANDOM.V1".to_vec();
-    b.extend(seed);
-    b.extend(context);
-    b.push(tag);
-    b.extend((index as u64).to_le_bytes());
-    hash(&b)
-}
+const RANDOM: &[u8] = b"DREGG.ACSS.ID.RANDOM.V1";
 #[derive(Clone)]
 pub struct AcceptedSharing {
     context: [u8; 32],
@@ -112,11 +101,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublicReconstruction {
     context: [u8; 32],
@@ -317,7 +302,7 @@ impl AcssId {
                     (0..=self.f)
                         .map(|i| {
                             Field(u128::from_le_bytes(
-                                random(seed, self.context, 0, j * 32 + k * 16 + i)[..16]
+                                Entropy::derive(RANDOM, seed, self.context, 0, j * 32 + k * 16 + i)[..16]
                                     .try_into()
                                     .unwrap(),
                             ))
@@ -339,7 +324,7 @@ impl AcssId {
                         .collect()
                 })
                 .collect::<Vec<Vec<Field>>>();
-            let ps = self.columns[j].dealer(&col, random(seed, self.context, 1, j))?;
+            let ps = self.columns[j].dealer(&col, Entropy::derive(RANDOM, seed, self.context, 1, j))?;
             out.extend(self.column_out(j as u16, ps));
         }
         self.started = true;
@@ -714,57 +699,6 @@ fn valid_one(p: &PhaseMessage, init: bool) -> Result<()> {
     }
     Ok(())
 }
-fn interpolate_at(points: &[(u16, Vec<Field>)], at: Field, count: usize) -> Result<Vec<Field>> {
-    let mut out = vec![Field(0); count];
-    for (i, (holder, values)) in points.iter().enumerate() {
-        if values.len() != count {
-            return Err(bad("point vector"));
-        }
-        let xi = Field(*holder as u128 + 1);
-        let mut coefficient = Field(1);
-        for (j, (other, _)) in points.iter().enumerate() {
-            if i != j {
-                let xj = Field(*other as u128 + 1);
-                coefficient = coefficient.mul(at.add(xj)).mul(xi.add(xj).inv()?);
-            }
-        }
-        for k in 0..count {
-            out[k] = out[k].add(coefficient.mul(values[k]));
-        }
-    }
-    Ok(out)
-}
-pub(crate) fn polynomial(points: &[(u16, Vec<Field>)], count: usize) -> Result<Vec<Vec<Field>>> {
-    let mut out = vec![vec![Field(0); points.len()]; count];
-    for (i, (holder, values)) in points.iter().enumerate() {
-        if values.len() != count {
-            return Err(bad("polynomial vector"));
-        }
-        let xi = Field(*holder as u128 + 1);
-        let mut basis = vec![Field(1)];
-        let mut denominator = Field(1);
-        for (j, (other, _)) in points.iter().enumerate() {
-            if i != j {
-                let xj = Field(*other as u128 + 1);
-                denominator = denominator.mul(xi.add(xj));
-                let mut next = vec![Field(0); basis.len() + 1];
-                for (k, c) in basis.iter().enumerate() {
-                    next[k] = next[k].add(c.mul(xj));
-                    next[k + 1] = next[k + 1].add(*c);
-                }
-                basis = next;
-            }
-        }
-        let inverse = denominator.inv()?;
-        for ell in 0..count {
-            let scale = values[ell].mul(inverse);
-            for k in 0..basis.len() {
-                out[ell][k] = out[ell][k].add(basis[k].mul(scale));
-            }
-        }
-    }
-    Ok(out)
-}
 pub(crate) fn correct_polynomials(
     points: &BTreeMap<u16, Vec<Field>>,
     degree: usize,
@@ -1107,5 +1041,66 @@ mod tests {
                 [Field(42), Field(91), Field(17)]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    fn pin_p() -> Vec<Field> {
+        vec![Field(0x0123456789abcdeffedcba9876543210), Field(0x00112233445566778899aabbccddeeff), Field(0xdeadbeefcafebabe0badf00dfeedface)]
+    }
+    fn pin_points() -> Vec<(u16, Vec<Field>)> {
+        let p = pin_p();
+        vec![(0, vec![p[0], p[1]]), (2, vec![p[1], p[2]]), (3, vec![p[2], p[0]])]
+    }
+    #[test]
+    fn pin_interpolate_at() {
+        let ps = pin_points();
+        assert_eq!(interpolate_at(&ps, Field(0x00000000000000000000000000000000), 2).unwrap(), vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0xe44d91f9ec1c941f3017f93978914e3d)]);
+        assert_eq!(interpolate_at(&ps, Field(0x00000000000000000000000000000004), 2).unwrap(), vec![Field(0xdeadbeefcafebabe0badf00dfeedface), Field(0x0123456789abcdeffedcba9876543210)]);
+        assert_eq!(interpolate_at(&ps, Field(0xfeedfacefeedfacefeedfacefeedface), 2).unwrap(), vec![Field(0x95844b0b3d3980ac6e40c6d4bddd27e3), Field(0xdbc3cacdf3726a8790c50c391d382dde)]);
+    }
+    #[test]
+    fn pin_polynomial() {
+        let ps = pin_points();
+        assert_eq!(
+            polynomial(&ps, 2).unwrap(),
+            vec![
+                vec![Field(0xe6fcc0defa32b3efe5af2d2474f13231), Field(0x3ae217b780bb674404bc9d274805a5af), Field(0xdd3d920ef32219441fcf0a9b4aa0a58e)],
+                vec![Field(0xe44d91f9ec1c941f3017f93978914e3d), Field(0x1d5d18a90d42066c907d8635d080c6c8), Field(0xf901ab63a50bf40428f3d5b764cc660a)],
+            ]
+        );
+        assert!(polynomial(&ps, 3).is_err());
+    }
+    #[test]
+    fn pin_acss_seeded_prg() {
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 0, 0), [0x72, 0x31, 0x93, 0x44, 0xa0, 0x06, 0xcd, 0x63, 0x5b, 0x0b, 0xf8, 0x29, 0xcb, 0x81, 0xc3, 0x1b, 0xa8, 0x49, 0x63, 0x5d, 0x8f, 0x00, 0xea, 0x06, 0xa7, 0x01, 0x6e, 0xda, 0x54, 0x45, 0xda, 0x0c]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 1, 0), [0x4b, 0x10, 0x13, 0x27, 0xa6, 0x8b, 0x24, 0x0e, 0xe7, 0x44, 0xdb, 0xd8, 0xcc, 0x51, 0xab, 0xba, 0x98, 0xc6, 0xc2, 0xf4, 0x7d, 0x0a, 0x9a, 0xbc, 0x31, 0x22, 0x25, 0xc5, 0x95, 0x07, 0x0d, 0xcf]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 3, 7), [0xbc, 0x0e, 0x16, 0x7e, 0x88, 0x62, 0x51, 0x6b, 0x65, 0xf2, 0x0a, 0x05, 0x2f, 0x4c, 0x7c, 0x15, 0xa3, 0xdf, 0xab, 0xf0, 0xff, 0x06, 0x75, 0xd0, 0xdd, 0x85, 0x1e, 0xec, 0x27, 0x71, 0x19, 0x23]);
+    }
+}
+
+#[cfg(test)]
+mod pin_child {
+    use super::*;
+    #[test]
+    fn pin_acss_child_generation() {
+        let g = Generation {
+            invocation: Nat::new(19),
+            command: vec![3, 4],
+            attempt: Nat::new(2),
+            generation: Nat::new(1),
+            configuration: Nat::new(5),
+        };
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        let c = child(&g, ctx, 0, 0);
+        assert_eq!(c.invocation.digits(), &[62, 105, 9, 199, 180, 227, 65, 32, 188, 5, 242, 128, 148, 77, 168, 197, 195, 141, 153, 100, 207, 216, 71, 213, 150, 131, 117, 220, 56, 46, 5, 218][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
+        let c = child(&g, ctx, 1, 7);
+        assert_eq!(c.invocation.digits(), &[86, 231, 249, 207, 46, 80, 164, 218, 34, 126, 158, 214, 233, 157, 136, 115, 251, 124, 113, 159, 106, 69, 225, 182, 178, 4, 84, 245, 46, 194, 88, 117][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
     }
 }

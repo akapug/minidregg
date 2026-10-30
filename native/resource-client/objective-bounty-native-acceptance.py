@@ -132,10 +132,9 @@ BOB, CAROL = '40', '41'
 enrollment = []
 for name, subject, key_id, caps in [('bob', BOB, '4000', ('4002', '4003', '4004')),
                                     ('carol', CAROL, '4010', ('4012', '4013', '4014'))]:
-    sh(f'keygen-{subject}', mini, 'keygen', '--secret', root / f'subject{subject}.key', '--public',
-       root / f'subject{subject}.pub')
+    # the key is the fixture's (NEWPARTICIPANT_EXTRA_SUBJECTS -> W/extra/SUBJECT.key): no per-run key in the genesis
     enrollment.append({'key': {'keyId': key_id, 'keyEpoch': '2', 'algorithm': '1', 'subject': subject,
-                               'publicKey': (root / f'subject{subject}.pub').read_bytes().hex(), 'activeFrom': '0',
+                               'activeFrom': '0',
                                'activeUntil': '1000000', 'nextKeyDigest': None},
                        'accountId': subject, 'spendCapabilityId': caps[0], 'controlCapabilityId': caps[1],
                        'factoryObserveCapabilityId': caps[2], 'initialBalance': '100000',
@@ -145,7 +144,7 @@ W = root / 'w'
 sock = W / 'public' / 'mini.sock'
 sh('genesis', 'sh', HERE / 'newparticipant-acceptance.sh', host, mini, store, verifier, W, sock,
    env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
-        'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-40.json'),
+        'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-40.json'),
         'NEWPARTICIPANT_SPONSOR_BALANCE': '1000000000'})
 config = W / 'deployment' / 'pinned-config.json'
 alice_ws = W / 'sponsor'
@@ -155,7 +154,7 @@ for subject in [BOB, CAROL]:
     ws.mkdir(mode=0o700)
     (ws / 'workspace.json').write_text(json.dumps({
         'type': 'minidregg-participant-workspace-v1', 'host': str(host), 'socket': str(sock), 'config': str(config),
-        'key': str(root / f'subject{subject}.key'), 'subject': subject}))
+        'key': str(W / 'extra' / f'{subject}.key'), 'subject': subject}))
     participants[subject] = ws
 bob_ws, carol_ws = participants[BOB], participants[CAROL]
 params = json.loads((W / 'genesis-params.json').read_text())
@@ -176,13 +175,19 @@ sh('create-realm', mini, 'workspace', '--action', 'create', '--dir', alice_ws, '
 for name in ['gold', 'receipt']:
     sh(f'well-new-{name}', mini, 'well', '--action', 'new', '--dir', alice_ws, '--name', name, '--in', 'bazaar',
        '--law', permit)
+# Issuance is capped: a well's own floor is its cap (a floor command on the well, verb mintAsset).
+for name in ['gold', 'receipt']:
+    sh(f'cap-{name}', mini, 'well', '--action', 'floor', '--dir', alice_ws, '--well', name, '--account', name,
+       '--amount', '1000000')
 X = json.loads((alice_ws / 'refs' / 'gold.json').read_text())['target']
 D = json.loads((alice_ws / 'refs' / 'receipt.json').read_text())['target']
 
 
 def mint(asset_name, account, amount):
+    # `--again true`: the same mint request made once more (a receipt per claim) is this journey's decision,
+    # not a rerun; the client would otherwise answer locally that the first one is retained.
     sh(f'mint-{asset_name}-{account}-{amount}', mini, 'well', '--action', 'mint', '--dir', alice_ws,
-       '--well', asset_name, '--account', account, '--amount', str(amount))
+       '--well', asset_name, '--account', account, '--amount', str(amount), '--again', 'true')
 
 
 objects = {}

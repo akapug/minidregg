@@ -1,5 +1,5 @@
 /-
-# Theory.Channel — constant-rate ordered broadcast domains (CHANNELS.md §2, revision 2)
+# Theory.Channel — constant-rate ordered broadcast domains (docs/CHANNELS.md §2, revision 2)
 
 * `Theory.Channel.Cell` — the class `(C, r, E, δ, δ_relay, μ)`, P0/P1/P1-phone/P2; the fixed-size cell
   (regular `8 | C−24 | 16`, duty `8 | 96 | 32 | 32 | C−184 | 16`) and its canonical codec; the sealed
@@ -11,6 +11,11 @@
   sealing hypotheses `PayloadHidden` / `FillHidden`, `observable_trace_depends_only_on_membership`,
   `member_view_independent_of_presence`, and every pole on a concrete instance.
 -/
-import Theory.Channel.Cell
-import Theory.Channel.Lease
-import Theory.Channel.Trace
+module
+
+public import Theory.Channel.Cell
+public import Theory.Channel.Lease
+public import Theory.Channel.Trace
+
+@[expose] public section
+

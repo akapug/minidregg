@@ -11,10 +11,29 @@ terms become immutable pending value; requested duration is never silently
 changed. Pending-custody rotation is distinct from initial enrollment and never
 causes this decision to replace the current custody row with the original key.
 -/
-import Kernel.PayObservation
-import Kernel.PayEnrolPricing
-import Kernel.PayEnrolMemoV2
-import Compiler.CredentialAuthorityDomain
+module
+
+public import Kernel.PayObservation
+public import Kernel.PayEnrolPricing
+public import Kernel.PayEnrolMemoV2
+public import Compiler.CredentialAuthorityDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolV2Decision
 

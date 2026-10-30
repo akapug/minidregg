@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-3 (PAY.md P3): observed payments become Book credit, on a fresh private Store.
+# J-PAY-3 (PAY P3): observed payments become Book credit, on a fresh private Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
 # MINI, STORE, VERIFIER and JOURNEY_STEP_DIR exported; it starts its OWN Host on
@@ -93,12 +93,16 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "factoryControllerSubject": str(EMBER),
            "factoryControllerCapability": str(FACTORY_CONTROL),
            "clockTickers": [],
-           "tailBound": "1000000",
+           "tailBound": "1000000", "issuanceCap":"1000000000000000",
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
+           "payControlCapability": str(OBSERVER_CAP + 1),
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(OBSERVER_CAP + 1),
+                           
                            "enrolCapability": str(OBSERVER_CAP + 2)}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True,

@@ -1,0 +1,223 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "simple-chat",
+  "interfaceVersion": 1,
+  "appId": "yp9xt15y8s0rsuntnhgnr510qpcvm2tatd9mn1gzwr2au8h2n4p0",
+  "packageId": "91ae6a99735aabe28fe283995b6f5173",
+  "appVersion": "0.6.1",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "messages.append": {
+      "description": "Append a single-line message to this member\u2019s room log.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 16384,
+            "pattern": "^[^\\n]*$"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "chats"
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          302,
+          303
+        ],
+        "text": {
+          "arg": "text"
+        },
+        "headers": {
+          "content-type": "text/plain;charset=utf-8"
+        }
+      }
+    },
+    "messages.read": {
+      "description": "Read the append-only room log as text.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "chats"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    },
+    "topic.set": {
+      "description": "Set a single-line topic, recording the change in the room log.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\n]*$"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "topic"
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          302,
+          303
+        ],
+        "text": {
+          "arg": "text"
+        },
+        "headers": {
+          "content-type": "text/plain;charset=utf-8"
+        }
+      }
+    },
+    "topic.read": {
+      "description": "Read the current room topic.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1024
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "topic"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "topic",
+      "op": "topic.set",
+      "args": {
+        "text": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "readTopic",
+      "op": "topic.read",
+      "args": {},
+      "assert": [
+        {
+          "path": [],
+          "equals": {
+            "context": "runId"
+          }
+        }
+      ]
+    },
+    {
+      "id": "append",
+      "op": "messages.append",
+      "args": {
+        "text": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "readMessages",
+      "op": "messages.read",
+      "args": {},
+      "assert": [
+        {
+          "path": [],
+          "containsText": {
+            "context": "runId"
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/wholezero/simple-chat/blob/master/src/serve.c++",
+    "scripts/spk-platform/market-writes/b7.sh"
+  ],
+  "$defs": {}
+}

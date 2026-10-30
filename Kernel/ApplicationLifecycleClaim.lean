@@ -4,7 +4,26 @@ application lifecycle BEGIN. A claim changes the app's pending phase to a
 claimed phase in Mini; it does not assert a host effect or permit a retry after
 uncertain physical execution.
 -/
-import Kernel.ApplicationLifecycleBeginIngress
+module
+
+public import Kernel.ApplicationLifecycleBeginIngress
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaim
 
@@ -105,17 +124,7 @@ def sourceStream : StreamCodec Source :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/LIFECYCLE-CLAIM/v2".toUTF8.toList
 
-private def rawCodec : LawfulCodec Source where
-  encode source := frame ++ sourceStream.encode source
-  decode bytes := if bytes.take frame.length = frame then
-    sourceStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro source
-    have decoded := sourceStream.toLawful.decode_encode source
-    change sourceStream.toLawful.decode (sourceStream.encode source) = some source at decoded
-    simp [decoded]
-
-def codec : LawfulCodec Source := strictCodec rawCodec
+def codec : LawfulCodec Source := (StreamCodec.framed frame sourceStream).toLawful
 
 def Source.canonicalBytes (source : Source) : List UInt8 := codec.encode source
 
@@ -124,7 +133,7 @@ theorem decode_encode (source : Source) :
 
 theorem decoded_canonical {bytes : List UInt8} {source : Source}
     (decoded : codec.decode bytes = some source) :
-    source.canonicalBytes = bytes := strictCodec_canonical rawCodec decoded
+    source.canonicalBytes = bytes := StreamCodec.toLawful_canonical _ _ _ decoded
 
 def sourceDigest (domain semantics : Digest) (source : Source) : Digest :=
   (Sp800185Cshake256.hash "DREGG/APPLICATION/LIFECYCLE-CLAIM-SOURCE/v1".toUTF8.toList

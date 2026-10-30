@@ -1,0 +1,58 @@
+# /etc/systemd/system/mini-web.service — the Mini web front end's gateway (minidregg
+# docs/WEB-FRONTEND-2026-10-27.md §2). Loopback HTTP behind Caddy; uid mini-web; no key, no Store,
+# no socket path but the helper's. Everything about a member it learns from mini-web-spawn by an
+# opaque session id. The demo box adds host/systemd/mini-web.service.d/60-demo-confine.conf
+# (deploy/web-frontend/demo/).
+[Unit]
+Description=Mini web front end (gateway, uid mini-web)
+After=network.target mini-web-spawn.socket
+Requires=mini-web-spawn.socket
+[Service]
+Type=simple
+User=mini-web
+Group=mini-web
+EnvironmentFile=-/etc/mini/web.env
+# MINI_WEB_ORIGIN is the one origin browsers address (https://demo.dregg.online);
+# MINI_WEB_SHUTDOWN the sentence on every footer; MINI_WEB_FRAME_SRC the grain origins L13 names.
+ExecStart=/bin/sh -c 'exec /usr/local/bin/mini-web --listen 127.0.0.1:8797 --helper /run/mini-web-spawn.sock --origin "${MINI_WEB_ORIGIN:-https://demo.dregg.online}" --shutdown "${MINI_WEB_SHUTDOWN:-11 November 2026}" --frame-src "${MINI_WEB_FRAME_SRC:-}" --registry /var/lib/mini/candidate/current/protocol/host-operations.json --defaults /var/lib/mini/candidate/current/deploy/shell/templates/defaults'
+Restart=on-failure
+RestartSec=2
+Slice=mini.slice
+Nice=5
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=localhost
+StateDirectory=mini-web
+StateDirectoryMode=0700
+ReadOnlyPaths=/var/lib/mini/candidate/current/protocol /var/lib/mini/candidate/current/deploy/shell/templates
+InaccessiblePaths=-/run/user -/run/dbus -/etc/mini/credentials.key -/var/lib/mini-keys -/var/lib/mini/sessions -/var/lib/mini/credentials -/var/lib/mini-backups -/var/lib/mini/store -/var/lib/mini-web-spawn -/run/mini-web-spawn
+MemoryMax=512M
+TasksMax=128
+[Install]
+WantedBy=multi-user.target

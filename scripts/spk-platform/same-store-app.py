@@ -3,6 +3,7 @@
 All births/share/enrollment use supplied owner/member authority and pinned sockets.
 
   same-store-app.py INPUT                       attach, or continue the same attachment
+  same-store-app.py prepare INPUT               install/routes, leave START to composed journey
   same-store-app.py status INPUT                retained step ledger; no native call
   same-store-app.py settle INPUT STEP absent|confirmed EVIDENCE REASON
   same-store-app.py adopt-adapter INPUT REASON  pin repaired adapter bytes for this root
@@ -128,6 +129,28 @@ def delegate_lifecycle(x,c):
     x.f['lifecycleDelegation']={'request':delegation,'result':result,'selectorSha256':sha(selector)};x.write_state()
     return selector
 
+def share_delegation(x,c):
+    """The share ticket's issuer is the manager, so the manager must HOLD the capability the ticket cites:
+    the owner delegates it a child of appOwnerCapability (the shape apps.rs delegate_share uses: propose,
+    submit, publish-delegation in the owner's workspace). The ticket then cites that child."""
+    delegation=c['lifecycleDelegation'];workspace=absolute(delegation['ownerWorkspace'])
+    name='spk-'+hashlib.sha256(x.app.encode()).hexdigest()[:12]+'-app'
+    pid='share-'+hashlib.sha256(x.app.encode()).hexdigest()[:12]
+    budget=x.authority['template']['ownerBudget']
+    request=x.fresh('share-delegation-request.json')
+    save(request,{'type':'minidregg-workspace-proposal-v1','action':'delegate','name':name,'recipient':delegation['manager'],
+        'verbs':['observe','mutate','delegate','append','place'],'maxCost':str(budget)})
+    mini=x.m['mini']['path'];attempt=workspace/'attempts'/pid;proposal=workspace/'proposals'/pid
+    reference=proposal/'recipient-reference.json'
+    if not reference.exists():
+        x.run([mini,'workspace','--action','propose','--dir',workspace,'--request',request,'--proposal-id',pid])
+        x.run([mini,'workspace','--action','submit','--dir',workspace,'--intent',proposal/'intent.json','--attempt',attempt])
+        x.run([mini,'workspace','--action','publish-delegation','--dir',workspace,'--proposal-id',pid,'--attempt',attempt])
+    ref=load(reference)
+    require(ref.get('type')=='minidregg-delegated-reference-v1' and ref.get('target')==x.app and ref.get('recipient')==delegation['manager'] and ref.get('capability'),'share delegation reference differs from app/manager')
+    x.f['shareDelegation']={'capability':ref['capability'],'reference':str(reference)};x.write_state()
+    return ref['capability']
+
 # The Host replays history inside INSTALL and START; these bound a hung helper,
 # not an ordinary slow one. An interrupted INSTALL preparation cannot be
 # repeated, so its bound is far above any measured run (1605 s on the first
@@ -183,9 +206,11 @@ def runtime_ready(x):
     # broker runs its exact pinned SPK runtime. Establish both before the first
     # source write instead of after an app is born and installed.
     profile=load(x.profile)
-    for role in ['bwrap','spkHost']:
+    # The custody each consumer enforces: bwrap root-owned (namespace_identity.rs physical bwrap);
+    # the spkHost runtime root- or operator-owned, the broker's pinned_root_executable (broker.rs).
+    for role,owners in [('bwrap',{0}),('spkHost',{0,os.geteuid()})]:
         meta=os.lstat(profile[role])
-        require(stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and not meta.st_mode&0o022 and sha(profile[role])==profile[role+'Sha256'],'native profile pins a '+role+' outside root custody')
+        require(stat.S_ISREG(meta.st_mode) and meta.st_uid in owners and not meta.st_mode&0o022 and sha(profile[role])==profile[role+'Sha256'],'native profile pins a '+role+' outside its custody')
     _,out,_=x.run([x.m['spkHost']['path'],'grain','runtime-status',x.profile],timeout=120)
     status=load(out)
     require(status.get('protocol')=='mini-spk-runtime-status-v1' and status.get('brokerProtocol')=='mini-spk-broker-runtime-v1'
@@ -212,7 +237,7 @@ def enter(path):
     c=load(path);m,artifacts=validate(c)
     root=absolute(c['root']);f.protected_parent(root.parent)
     # Validate native Store/profile provenance before creating any app or member.
-    state,profile,profile_value=f.discover_profile(root,absolute(c['miniConfig']),absolute(c['grainsRoot']),artifacts,c.get('brokerSocket','/run/mini-spk-broker.sock'),absolute(c['profileResult']),absolute(c['initStoreResult']))
+    state,profile,profile_value=f.discover_profile(root,absolute(c['miniConfig']),absolute(c['grainsRoot']),artifacts,c.get('brokerSocket'),absolute(c['profileResult']),absolute(c['initStoreResult']))
     require(profile_value['miniOperatorSocket']==c['privateSocket'],'profile points at a different private Store owner')
     if c.get('lifecycleDelegation') is not None:require(c['lifecycleDelegation']['manager']==profile_value['managementSubject'],'lifecycle delegated manager differs from native profile')
     elif c['authority']['owner']!=profile_value['managementSubject']:raise RuntimeError('member-owned hosting requires explicit lifecycleDelegation before app birth')
@@ -228,17 +253,29 @@ def enter(path):
     save(staging/'source-inputs.json',{str(path):sha(path) for path in [HERE/'same-store-app.py',HERE/'ws-continuity-fixture.py',Path(f.step_ledger.__file__).resolve()]})
     value={'schema':f.SCHEMA,'root':str(root),'app':c['application']['app'],'application':c['application'],
         'authority':c['authority'],'keys':c['keys'],'artifacts':artifacts,'state':str(state),'profilePath':str(profile),
-        'grainsRoot':c['grainsRoot'],'brokerSocket':c.get('brokerSocket','/run/mini-spk-broker.sock'),'candidateSource':m['sourceCommit'],
+        'grainsRoot':c['grainsRoot'],'brokerSocket':str(f.broker_endpoint(absolute(c['grainsRoot']))),'candidateSource':m['sourceCommit'],
         'attachment':{k:c[k] for k in ['workspace','miniConfig','miniConfigSha256','publicSocket','privateSocket','genesis','profileResult','initStoreResult']},
         'delegates':c['delegates'],'leaseSeconds':profile_value.get('wsAuthorityLeaseSeconds',120)}
     save(staging/'fixture.json',value)
     os.rename(staging,root)
     return c,root,f.Fixture(root/'fixture.json')
 
-def attach(path):
+def prepared_application(x):
+    """Export retained native birth/ticket paths for an existing-controller attachment."""
+    common={'birthSource':x.f['applicationSource'],
+            'birthAttempt':str(Path(x.f['applicationReceipt']).parent),
+            'packageDirectory':str(x.pkg)}
+    applications={}
+    for label,d in x.f['delegates'].items():
+        require('issueRequest' in d,'bootstrap request was not retained; use the original ticket request, never reissue')
+        applications[label]=dict(common,bootstrapTicketRequest=d['issueRequest'],bootstrapTicketAttempt=d['issue'])
+    return {'protocol':'mini-spk-same-store-prepared-v1','appId':x.app,
+            'fixture':str(x.path),'profilePath':str(x.profile),'applications':applications}
+
+def attach(path, prepare_only=False):
     c,root,x=enter(path)
     retained=root/'attachment-result.json'
-    if retained.exists():return load(retained)
+    if retained.exists():return prepared_application(x) if prepare_only else load(retained)
     host=x.m['spkHost']['path']
     x.step('observe-world',lambda:observe_world(x,c),reentrant=True)
     x.step('runtime-ready',lambda:runtime_ready(x),reentrant=True)
@@ -246,6 +283,7 @@ def attach(path):
     x.step('app:reserve',lambda:x.reserve(app_reserve(x)),effect_only=True)
     x.step('app:birth',lambda:birth_app(x))
     if c.get('lifecycleDelegation') is not None:x.step('lifecycle',lambda:delegate_lifecycle(x,c),reentrant=True)
+    if c.get('lifecycleDelegation') is not None:x.step('share-delegation',lambda:share_delegation(x,c),reentrant=True)
     x.step('install',lambda:install_app(x,c),reentrant=True)
     for label,d in x.f['delegates'].items():
         k='member:'+label+':'
@@ -255,8 +293,12 @@ def attach(path):
         x.step(k+'package-observe',lambda d=d:x.delegate(x.package_manifest,x.pkgcap,d['pkgObserve'],d['subject']),effect_only=True)
         x.step(k+'ticket-reserve',lambda:x.reserve(3),effect_only=True)
         x.step(k+'ticket',lambda d=d:x.issue(d,reserve=False,observe=False))
-        x.step(k+'ticket-observe',lambda d=d:x.delegate(d['ticket'],d['ticketOwner'],d['ticketObserve'],d['subject']),effect_only=True)
+        x.step(k+'ticket-observe',lambda d=d:x.delegate(d['ticket'],d['ticketOwner'],d['ticketObserve'],d['subject'],by=x.creator),effect_only=True)
         x.step(k+'route',lambda label=label,d=d:x.route(route_name(label),d))
+    if prepare_only:
+        result=prepared_application(x)
+        save(root/'prepared-application.json',result)
+        return result
     x.step('start',lambda:x.run([host,'grain','start',x.profile,x.app],timeout=START_TIMEOUT),reentrant=True)
     for label,d in x.f['delegates'].items():
         x.step('member:'+label+':enrollment',lambda d=d:x.enroll(d))
@@ -286,6 +328,7 @@ def main():
     os.umask(0o077);p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('words',nargs='+');words=p.parse_args().words
     if words[0]=='status' and len(words)==2:result=status(words[1])
+    elif words[0]=='prepare' and len(words)==2:result=attach(words[1],prepare_only=True)
     elif words[0]=='settle' and len(words)==6:
         result=f.Fixture(retained_fixture(words[1])/'fixture.json').settle(words[2],words[3],words[4],words[5])
     elif words[0]=='adopt-adapter' and len(words)==3:result=f.adopt_adapter(retained_fixture(words[1]),words[2])

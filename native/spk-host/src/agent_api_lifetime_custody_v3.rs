@@ -1,53 +1,23 @@
 //! Protected stable lifetime route and the exact first GitWeb HTTP projection.
 //! Current generations and physical roots come only from the op80 source plan.
-#![allow(dead_code)] // Resident v3 listener is enabled in a later cut.
 
 use crate::agent_api_lifetime_v3::{LifetimeBinding, LifetimeLineage};
 use crate::agent_api_lifetime_wire_v3::Request;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_author::SignerPin;
 use crate::hostd::Record;
-use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io;
+use crate::canonical::{decimal, hex};
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(refused("lifetime signature hex refused"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| refused("lifetime hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| refused("lifetime signature hex refused"))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -71,6 +41,8 @@ pub(crate) struct PayerPin {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LifetimeCustodyV3 {
     pub protocol: String,
+    #[serde(default)]
+    pub route: Option<crate::agent_api_lifetime_v3::HostedRoute>,
     pub lineage: LifetimeLineage,
     pub package_manifest: String,
     pub snapshot_manifest: String,
@@ -93,7 +65,12 @@ pub(crate) struct LifetimeCustodyV3 {
 impl LifetimeCustodyV3 {
     pub(crate) fn validate(&self) -> io::Result<()> {
         self.lineage.validate()?;
-        if self.protocol != "mini-spk-agent-lifetime-custody-v3"
+        let route_valid = match (self.protocol.as_str(), &self.route) {
+            ("mini-spk-agent-lifetime-custody-v3", None) => true,
+            ("mini-spk-agent-lifetime-custody-v4", Some(route)) => route.validate().is_ok(),
+            _ => false,
+        };
+        if !route_valid
             || ![
                 &self.package_manifest,
                 &self.snapshot_manifest,
@@ -132,11 +109,7 @@ impl LifetimeCustodyV3 {
             if ![&pin.role, &pin.index, &pin.key_id, &pin.key_epoch]
                 .into_iter()
                 .all(|value| decimal(value))
-                || pin.public_key_hex.len() != 64
-                || !pin
-                    .public_key_hex
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                || !crate::canonical::hex64(&pin.public_key_hex)
                 || !pin.seed_path.is_absolute()
                 || self.app_signers[..index]
                     .iter()
@@ -291,7 +264,12 @@ impl LifetimeCustodyV3 {
             let signature_bytes: [u8; 64] = unhex(signature)?
                 .try_into()
                 .map_err(|_| refused("lifetime payer signature length"))?;
-            key.verify(&header, &Signature::from_bytes(&signature_bytes))
+            // Plain `verify` accepts a signature made without any secret under a small-order key (identity
+            // key, R = identity, S = 0): refuse a weak pin by name, then verify strictly.
+            if key.is_weak() {
+                return Err(refused("weak lifetime payer public key"));
+            }
+            key.verify_strict(&header, &Signature::from_bytes(&signature_bytes))
                 .map_err(|_| refused("lifetime payer signature differs from source slot"))?;
         }
         Ok(())
@@ -307,10 +285,14 @@ impl LifetimeCustodyV3 {
         if record.app().to_string() != self.lineage.app_resource {
             return Err(refused("lifetime app differs from running incarnation"));
         }
+        if let Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) = &self.route {
+            if signed_prefix != signed_api_path { return Err(refused("hosted API prefix differs from signed package")); }
+        }
         let binding = LifetimeBinding {
-            protocol: "mini-spk-agent-lifetime-binding-v3".into(),
+            protocol: if self.route.is_some() { "mini-spk-agent-lifetime-binding-v4" } else { "mini-spk-agent-lifetime-binding-v3" }.into(),
             lineage: self.lineage.clone(),
-            signed_api_path: signed_api_path.to_owned(),
+            signed_api_path: if self.route.is_some() { String::new() } else { signed_api_path.to_owned() },
+            route: self.route.clone(),
             host_unit: record.unit().to_owned(),
             host_invocation: record
                 .invocation_id()
@@ -352,8 +334,10 @@ impl LifetimeCustodyV3 {
         let http = json!({
             "operationId":operation_id,
             "methodHex":hex(method.as_bytes()),
-            "pathHex":hex(minidregg_signed_api_path::route(signed_api_path, path)
-                .map_err(refused)?.as_bytes()),
+            "pathHex":hex(match &self.route {
+                Some(route) => route.project_path(path)?,
+                None => minidregg_signed_api_path::route(signed_api_path, path).map_err(refused)?,
+            }.as_bytes()),
             "queryHex":hex(query.as_bytes()),
             "headers":ordered,
             "bodyHex":body_hex,
@@ -392,6 +376,7 @@ impl LifetimeCustodyV3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Verifier;
     use crate::agent_api_lifetime_wire_v3::OrdinaryHeader;
     use std::fs::{self, DirBuilder, OpenOptions};
     use std::io::Write;
@@ -557,5 +542,28 @@ mod tests {
         assert!(custody.sign_grant_slot(&inspection, plan).is_err());
         fs::remove_file(seed).unwrap();
         fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn weak_lifetime_payer_key_forgery_is_refused_by_name() {
+        let mut custody = custody();
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1; // R = identity, S = 0
+        custody.payer_pins[0].public_key_hex = hex(&identity);
+        let plan = b"source paid plan";
+        let inspection = json!({
+            "type":"application-agent-lifetime-paid-plan-v3",
+            "canonicalPlanHex":hex(plan),
+            "payerSlots":[
+                {"role":"4","index":"0","headerHex":hex(b"any header at all"),
+                    "signing":{"decoded":true,"keyId":"5","keyEpoch":"6","algorithm":"1"}},
+            ],
+        });
+        let error = custody
+            .verify_payer_slots(&inspection, plan, &[hex(&forged)])
+            .expect_err("a signature under a weak payer key must not approve a header");
+        assert!(error.to_string().contains("weak lifetime payer public key"), "{error}");
     }
 }

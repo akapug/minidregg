@@ -1,27 +1,37 @@
 # Working on Mini
 
-Read [HANDOFF.md](HANDOFF.md) first for the current agent-grain construction
-record and suite handoff. The suite's graph owns task status; dated build/runtime
-evidence is scoped to its exact source. Read relevant source before asserting
-that older architecture or status text is current.
+Read [HANDOFF.md](HANDOFF.md) first, then the plan
+[docs/DEMO-PREFIX-2026-10-26.md](docs/DEMO-PREFIX-2026-10-26.md) and
+[docs/COORDINATION-2026-10-27.md](docs/COORDINATION-2026-10-27.md), which describes how this
+project is developed (what we optimise, the gates and their verdicts, how a lane and the
+orchestrator work, the boxes, the cadence). Read the source before trusting older
+architecture or status text.
 
-- Mini is the New World's construction home. Lean owns semantics and admission;
-  Rust provides the physical client/custody boundary. Do not introduce a Python
-  platform or reimplement semantic decisions in a transport wrapper.
+- Lean owns semantics and admission; Rust provides the physical client and custody
+  boundary. Do not introduce a Python platform or reimplement semantic decisions in a
+  transport wrapper.
 - Existing grants face current rules; policy revision is distinct from revocation.
   Deliberate management lockout is permitted; do not add an owner recovery bypass.
-- Preserve unrelated WIP. Root owns Git in shared trees, on current `main`;
-  subagents edit only their assigned files. No stash/reset, branch/worktree changes,
-  or blanket staging. Inspect full-file diffs before committing named paths.
-- Use `scripts/build-native-host.sh` for the recorded native route, and the
-  journey (`native/resource-client/journey.sh`) for acceptance. Read their help first. Build in independent
-  snapshots with independent writable package state. At most two local Lean
-  compiler seats; `LEAN_NUM_THREADS` alone does not bound Lake process fanout.
+- One worktree per lane on a `lane/<name>` branch; the integrator merges in
+  dependency order and builds the whole tree once on `dregg-build`. Never the main
+  worktree, never `git stash`, never blanket staging; inspect full-file diffs before
+  committing named paths.
+- Linux checks run on `dregg-build` (`ssh dregg-build`, `/build/lanes/<lane>`,
+  `swarm-build` around every build). `scripts/build-native-host.sh` is the recorded
+  native route (its seats bound Lean fan-out: `MINIDREGG_LEAN_SEATS`, default 2;
+  `LEAN_NUM_THREADS` alone does not); the journey (`native/resource-client/journey.sh`)
+  is acceptance. Read their help first.
 - Preserve admitted-history, current-authority, exact-preimage and uncertain-reply
   semantics when optimizing. General proofs and actual receiving-path evidence
   are separate obligations; a source check does not establish deployment.
-- Publish scoped checkpoints regularly. Ember allows per-commit unsigned fallback
-  when unavailable for 1Password signing; do not change global signing settings.
-- Keep recipient-specific team communications outside Git (for example,
-  `~/workbox`); commit reusable technical contracts and evidence instead.
-  Persvati and hbox are development/build machines, not Pug's homelab.
+- Reds are named in a run's output, never kept in a ledger, and no lane runs a "was it
+  red before me" baseline. Performance is published, never a gate. The gate is the tour
+  (`jtour` plus the composed scenario); standing rows are the nightly's (COORDINATION §6).
+- Per-lane `CARGO_TARGET_DIR`, scratch subdirectory and PID file for every started
+  process; no foreground waits (`box-wait` in one background call); REPL-first Lean;
+  no whole-file `Read` over 2,000 lines (COORDINATION §3).
+- Report in ≤ 20 lines: branch tip, what was verified and where, reds by name, one
+  BATCH FOR THE PARENT for what could not run where you are. Decisions by default,
+  recorded; only money, dates and credentials go to ember.
+- Unsigned commits are fine when 1Password is unavailable; do not change global
+  signing settings. Keep recipient-specific team communications outside Git.

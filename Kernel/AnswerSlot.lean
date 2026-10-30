@@ -44,9 +44,28 @@ awaiting activity's declared response type before it is ever written
 (`ObjectiveActivity.resolve`); `expired` becomes the `timedOut` outcome and
 `broken` the `broken` outcome of the activity. Upgrade-driven `upgraded` and
 kernel-driven `conflict` are outcomes of the activity, never slot decisions. -/
-import Kernel.ObjectiveActivityWire
-import Kernel.ObjectiveActivityCell
-import Kernel.Inbox
+module
+
+public import Kernel.ObjectiveActivityWire
+public import Kernel.ObjectiveActivityCell
+public import Kernel.Inbox
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.AnswerSlot
 open Minidregg.Theory Minidregg.Compiler

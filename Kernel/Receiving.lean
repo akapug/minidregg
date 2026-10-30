@@ -36,12 +36,33 @@ says about the loaded snapshot), `shape_lawful` (an admitted patch's every
 written cell is lawful), `receive_committed_lawful` and
 `kernelOnly_writers_sound` (the same, for a committed outcome).
 -/
-import Compiler.DurableReceiverIO
-import Compiler.CredentialSignatureIO
-import Compiler.CredentialSignatureAdmission
-import Compiler.ResourceBirthCodec
-import Theory.Receiving
-import Kernel.ReceivingLaw
+module
+
+public import Compiler.DurableReceiverIO
+public import Compiler.CredentialSignatureIO
+public import Compiler.CredentialSignatureAdmission
+public import Compiler.ResourceBirthCodec
+public import Theory.Receiving
+public import Kernel.ReceivingLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Receiving
 
@@ -50,7 +71,7 @@ open Minidregg.Kernel.DurableDataIntent
 open Minidregg.Theory.ResourceCost (Charge Lane)
 open Minidregg.Theory.TypedAuthorization (Digest SubjectId)
 open Minidregg.Theory.Receiving (SigQuery Journal Recorded Refusal Receiver Vouchers)
-open Minidregg.Compiler.CredentialSignatureAdmission (Received receiverVerify)
+open Minidregg.Compiler.CredentialSignatureAdmission (Received receiverVerifier)
 open Minidregg.Kernel.ReceivingLaw (Laws LawFault Lawful)
 open Minidregg.Compiler.CanonicalCellRegistry (FamilyId Kind LawClass)
 open Minidregg.Compiler.CanonicalPolicyAdmission (PolicyStepContext PolicyCompilerProfile)
@@ -257,7 +278,7 @@ def charge (laws : Laws Durable) (env : F.Env) (durable : Durable) (ingress : F.
   | .incidences => 1
   | .turnBytes => (F.bytes ingress).length
   | .memoryTouches => (F.writes prepared).length + (readGuards laws prepared).length
-  | .storageBytes => ((F.writes prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (F.writes prepared) (F.event env ingress)
   | .witnessBytes => F.witnessBytes ingress
   | .proofWork =>
       (match F.claims env durable ingress with
@@ -272,16 +293,17 @@ def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F
     (prepared : F.Prepared env durable (F.command ingress)) : Payload where
   writes := F.writes prepared
   readGuards := readGuards laws prepared
-  exactCharge := F.charge laws env durable ingress prepared
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+    (F.charge laws env durable ingress prepared)).toCharge
   subject := F.subject ingress
   spent := F.spent prepared
   postRootsBound := F.writes_bound prepared
   guardsReadOnly := fun _ member => Receiver.guardsOff_readonly member
 
 /-- The family as a `Theory.Receiving.Receiver` over the deployed journal,
-judged by `laws`, its claims verified by `oracle` (`receiverVerify`). -/
+judged by `laws`, its claims verified by `oracle` (`receiverVerifier`). -/
 def receiver (laws : Laws Durable) {m : Type → Type} (oracle : CredentialSignatureIO.Oracle m) :
-    Receiver journal (receiverVerify oracle) where
+    Receiver journal (receiverVerifier oracle) where
   Env := F.Env
   Ingress := F.Ingress
   Command := F.Command
@@ -495,8 +517,8 @@ theorem kernelOnly_writers_sound {laws : Laws Durable}
 family (any oracle, any monad) was prepared by `F.prepare` given exactly the
 admission's vouchers under the receiver's own oracle, and every claim the family
 named is among them.  A family reads a signature only through that `Received`
-value (`Vouchers` has a private constructor, and `admitVia` is its only
-producer), so a gate holds a signature verdict only when the oracle gave it. -/
+value (a `Vouchers` carries the proposition that the oracle answered each claim, and
+`admitVia` obtains it from `Verifier.ask`), so a gate holds a signature verdict only when the oracle gave it. -/
 theorem admitted_prepared_received {laws : Laws Durable} {m : Type → Type}
     {oracle : CredentialSignatureIO.Oracle m} {env : F.Env} {durable : Durable}
     {ingress : F.Ingress} (admission : (F.receiver laws oracle).Admitted env durable ingress) :
@@ -506,8 +528,20 @@ theorem admitted_prepared_received {laws : Laws Durable} {m : Type → Type}
         ∀ claim ∈ claims, claim ∈ admission.vouchers.verified :=
   admission.prepared
 
+/-- **Top-level, at the live verifier**: every claim the deployed `IO` receiver of any family prepared
+under was answered `true` by the pinned process (`Ran`), and every observation it holds was answered as
+recorded.  Stated at `receiverVerifier (.live config)`, the one verifier Host receivers are indexed by. -/
+theorem admitted_live_ran {laws : Laws Durable} {config : CredentialSignatureIO.NativeConfig}
+    {env : F.Env} {durable : Durable} {ingress : F.Ingress}
+    (admission : (F.receiver laws (.live config)).Admitted env durable ingress) :
+    (∀ claim ∈ admission.vouchers.verified, CredentialSignatureAdmission.Ran config claim true) ∧
+      ∀ answered ∈ admission.vouchers.observed,
+        CredentialSignatureAdmission.Ran config answered.1 answered.2 :=
+  admission.vouchers.answered
+
 end Family
 
+#assert_axioms Family.admitted_live_ran
 #assert_axioms lookup_install
 #assert_axioms execute_accepted_install
 #assert_axioms Family.shape_sound

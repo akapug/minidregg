@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/jdocuverse.sh — J-DOCUVERSE (DEOS §8 J19–J24 on one Store): two
+# journey.d/jdocuverse.sh — J-DOCUVERSE (docs/DEOS.md §8 J19–J24 on one Store): two
 # friends write a paper together in their own `mini shell` sessions, and every
 # docuverse verb is a line one of them types.
 #

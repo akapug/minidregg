@@ -1,6 +1,27 @@
 /- One provisioned factory-observation grant and its operation marker publish in one CAS. -/
-import Compiler.DurableReceiverIO
-import Kernel.ParticipantFactoryProvisioning
+module
+
+public import Compiler.DurableReceiverIO
+public import Kernel.ParticipantFactoryProvisioning
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ParticipantFactoryProvisioningReceiver
 
@@ -90,6 +111,15 @@ structure AcceptedProvisioning [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : ParticipantFactoryProvisioning.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedProvisioning.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedProvisioning deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (ParticipantFactoryProvisioning.policyConfig accepted.prepared).portal
+        accepted.prepared.authority.snapshot.authState
+        (ParticipantFactoryProvisioning.request deployment accepted.prepared.template accepted.prepared.authority.snapshot
+          profile.semantics ambient ingress.command)) ∧
+      PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, ⟨accepted.accepted.semantic.authorization⟩, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -111,7 +141,9 @@ def charge (accepted : AcceptedProvisioning deployment profile ambient durable i
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.sponsorEnvelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -123,7 +155,7 @@ def intent (accepted : AcceptedProvisioning deployment profile ambient durable i
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical

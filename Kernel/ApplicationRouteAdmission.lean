@@ -1,8 +1,29 @@
 /- Read-only current authority to register a new immutable resident route.
 This does not open an app stream. Every later request still requires dispatch.
 Its challenge domain is distinct from continuation of an existing lease. -/
-import Compiler.ApplicationReceivingDomain
-import Kernel.ApplicationStreamContinuity
+module
+
+public import Compiler.ApplicationReceivingDomain
+public import Kernel.ApplicationStreamContinuity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationRouteAdmission
 
@@ -112,6 +133,12 @@ structure Attestation (config : Config) where
   human : ingress.dispatch.dispatch.session.origin = .human
   signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge
   selectorExact : select (bindingFor admitted) ingress.dispatch.dispatch.session.kind = challenge.selector
+theorem Attestation.sound {config : Config} (a : Attestation config) :
+    (a.challenge.domain = config.deployment.domain ∧
+      a.challenge.semantics = config.profile.semantics) ∧
+    a.ingress.dispatch.dispatch.request = probeRequest a.challenge ∧
+    select (bindingFor a.admitted) a.ingress.dispatch.dispatch.session.kind = a.challenge.selector :=
+  ⟨a.namespaceExact, a.signedChallenge, a.selectorExact⟩
 
 def Attestation.verified {config : Config} (a : Attestation config) :
     NativeHostReplay.Verified config a.target := a.old

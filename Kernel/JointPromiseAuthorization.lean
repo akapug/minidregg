@@ -2,7 +2,29 @@
 The original selected effect is admitted normally. EVERY target must additionally
 admit the exact install promise under independently scoped reserve authority.
 No ordinary grant, old AcceptedInvocation, or client Boolean mints this token. -/
-import Kernel.JointInvocationCandidate
+module
+
+public import Kernel.JointInvocationCandidate
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointPromiseAuthorization
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -262,6 +284,22 @@ def admit (native : CredentialSignatureIO.NativeConfig)
       else return .error .wrongEnvelopeCount
     else return .error .physicalPreparation
   else return .error .malformedCommand
+
+/-- **What an accepted promise permission binds.** The signed declaration names exactly
+the selected command's signed bytes under `deployment`'s domain and `profile`'s semantics,
+exactly `ground`'s encoded source image, and one capability and one envelope per target of
+`command`; and the prepared invocation's physical shape holds. -/
+theorem Accepted.bound {prepared : PreparedInvocation deployment profile ambient ground command}
+    {selected : SignedCommand} {signed : Signed} (accepted : Accepted prepared selected signed) :
+    signed.declaration.selectedSignedBytes =
+        signedBytes deployment.domain profile.semantics selected ∧
+      ground.sourceImage.map DurableReceiverCodec.imageStream.encode =
+        some signed.declaration.sourceImageBytes ∧
+      signed.declaration.capabilities.length = command.targets.length ∧
+      signed.targetEnvelopes.length = command.targets.length ∧
+      PhysicalShape prepared :=
+  ⟨accepted.selectedExact, accepted.sourceExact, accepted.targetCount, accepted.envelopeCount,
+    accepted.shape⟩
 
 end Minidregg.Kernel.JointPromiseAuthorization
 namespace Minidregg.Kernel.JointPromiseAuthorization

@@ -1,5 +1,4 @@
 use mini_private_backend::{codec::*, custody::*};
-use std::os::unix::fs::OpenOptionsExt;
 use std::{
     io::{Read, Write},
     path::Path,
@@ -39,33 +38,50 @@ fn run() -> std::io::Result<()> {
    if parse_request(&frames[1])?!=(id,g,Purpose::HolderPad)||Journal::decode(&frames[2])?!=journal||mini_private_backend::allocation_receipt::AllocationReceipt::decode(&frames[3])?!=expected{return Err(bad("native/Rust decoded values differ"));}
    println!("PRIVATE-BACKEND NATIVE/RUST WIRE PASS (four canonical frames, arbitrary Nat digests)");Ok(())
   }
+  Some("check-plan-fixture") if a.len()==3=>{
+   // The single JSON line Host/PrivateCircuitPlanFixture.lean prints: {"valid":..,"bytes":[..],"schedule":[[t,g],..],"rowCount":n}.
+   let input=std::fs::read_to_string(&a[2])?;
+   if input.len()>MAX{return Err(bad("fixture capacity"));}
+   let field=|key:&str|->std::io::Result<&str>{
+    let at=input.find(&format!("\"{key}\":")).ok_or_else(||bad("fixture field"))?+key.len()+3;
+    let rest=&input[at..];
+    let end=if rest.starts_with('['){let mut depth=0;rest.char_indices().find_map(|(i,c)|{match c{'['=>depth+=1,']'=>{depth-=1;if depth==0{return Some(i+1);}}_=>{}}None})}else{rest.find(|c|c==','||c=='}')};
+    Ok(&rest[..end.ok_or_else(||bad("fixture field end"))?])
+   };
+   let numbers=|text:&str|->std::io::Result<Vec<u64>>{
+    text.split(|c:char|!c.is_ascii_digit()).filter(|x|!x.is_empty()).map(|x|x.parse::<u64>().map_err(|_|bad("fixture number"))).collect()
+   };
+   if field("valid")?!="true"{return Err(bad("native plan is not valid"));}
+   let bytes=numbers(field("bytes")?)?.into_iter().map(|x|u8::try_from(x).map_err(|_|bad("fixture byte"))).collect::<std::io::Result<Vec<u8>>>()?;
+   let plan=mini_private_backend::circuit_batch::Plan::decode(&bytes)?;
+   if plan.encode()!=bytes{return Err(bad("native/Rust Plan bytes differ"));}
+   let flat=numbers(field("schedule")?)?;
+   let native:Vec<(u64,u64)>=flat.chunks(2).map(|c|(c[0],c[1])).collect();
+   let rust:Vec<(u64,u64)>=plan.assignments().iter().map(|(t,g,_)|(*t,*g as u64)).collect();
+   if native!=rust{return Err(bad("native/Rust Plan schedule differs"));}
+   if numbers(field("rowCount")?)?!=vec![plan.rows.len() as u64]{return Err(bad("native/Rust Plan row count differs"));}
+   println!("PRIVATE-BACKEND NATIVE/RUST PLAN PASS (canonical Plan bytes and schedule)");Ok(())
+  }
   Some("worker") if a.len()==3=>{
    let config=mini_private_backend::native_worker::Config::load(Path::new(&a[2]))?;
    let mut input=vec![];std::io::stdin().take(MAX as u64+1).read_to_end(&mut input)?;
    let dispatch=mini_private_backend::native_worker::DispatchClaim::decode(&input)?;
-   let pending=mini_private_backend::native_worker::receive(&config,&dispatch)?;
+   let settings=std::fs::read(config.native_argv.first().ok_or_else(||bad("worker native settings argument absent"))?)?;
+   let held=mini_private_backend::native_worker::SealedNative::new(&config,&settings)?;
+   let pending=mini_private_backend::native_worker::receive(&config,&dispatch,&held)?;
    std::io::stdout().write_all(&pending)?;Ok(())
   }
+  Some("adopt-current-recipient") if a.len()==9=>{
+   // CONFIG READBACK DOMAIN SEMANTICS MEMBER ROOM KEYS_CELL (decimal), READBACK = the Host inspect output.
+   let config=mini_private_backend::native_worker::Config::load(Path::new(&a[2]))?;
+   let readback=std::fs::read(&a[3])?;
+   if readback.len()>8192{return Err(bad("readback capacity"));}
+   let n=|i:usize|->std::io::Result<u64>{a[i].parse().map_err(|_|bad("scope number"))};
+   let scope=mini_private_backend::current_recipient::ReadbackScope{domain:Nat::new(n(4)?),semantics:Nat::new(n(5)?),member:Nat::new(n(6)?),room:n(7)?,keys_cell:n(8)?};
+   mini_private_backend::native_worker::adopt_current_recipient(&config,&readback,&scope)?;
+   println!("current recipient epoch adopted");Ok(())
+  }
   Some("anchor") if a.len()==4=>run_anchor(Path::new(&a[2]),Path::new(&a[3])),
-  Some("provision-test") if a.len()==4=>{
-   let n:usize=a[3].parse().map_err(|_|bad("count"))?;
-   if n==0||n>10000{return Err(bad("count bound"));}
-   let mut random=std::fs::File::open("/dev/urandom")?;
-   let mut rows=vec![vec![0;32];n];for row in &mut rows{random.read_exact(row)?;}
-   let p=Pool::provision(Path::new(&a[2]),&rows)?;println!("provisioned {} rows; poolNatDigits={:?}",p.len(),p.id.digits());Ok(())
-  }
-  Some("reserve") if a.len()==8=>{
-   let pool=Pool::open(Path::new(&a[2]))?;
-   let row:u64=a[3].parse().map_err(|_|bad("row"))?;
-   // Source receiving will supply these exact native bytes, not this test fixture.
-   let g=Generation{invocation:Nat::new(7),command:vec![9],attempt:Nat::new(0),generation:Nat::new(1),configuration:Nat::new(2)};
-   let crash=match a[7].as_str(){"none"=>Cut::None,"before-anchor"=>Cut::BeforeAnchor,"after-anchor"=>Cut::AfterAnchor,"after-snapshot"=>Cut::AfterSnapshot,"after-secret-read"=>Cut::AfterSecretRead,_=>return Err(bad("crash cut"))};
-   let secret=reserve_release(&pool,row,g,Purpose::HolderPad,Path::new(&a[4]),Path::new(&a[5]),crash)?;
-   // Explicit test output destination. CLI never prints secret material.
-   let mut f=std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&a[6])?;f.write_all(&secret)?;f.sync_all()?;println!("released once after durable reservation");Ok(())
-  }
-  Some("recover") if a.len()==4=>{let j=recover_snapshot(Path::new(&a[2]),Path::new(&a[3]))?;println!("recovered {} permanent tombstones",j.spent.len());Ok(())}
-  Some("journal-empty")=>{for b in Journal::default().encode(){print!("{b:02x}");}println!();Ok(())}
-  _=>Err(bad("usage: anchor ROOT FRESH_SOCKET | provision-test POOL COUNT | reserve POOL ROW SOCKET LOCAL OUTPUT CUT | recover SOCKET LOCAL | journal-empty"))
+  _=>Err(bad("usage: anchor ROOT FRESH_SOCKET | adopt-current-recipient CONFIG READBACK DOMAIN SEMANTICS MEMBER ROOM KEYS_CELL"))
  }
 }

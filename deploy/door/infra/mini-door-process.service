@@ -1,0 +1,32 @@
+# /etc/systemd/system/mini-door-process.service — the door's root processor, one pass.
+# The ONLY writer of door accounts, hosted keys, the door's roster entries and the Discord
+# roster (minidregg deploy/door/README.md). Root, because it runs the box's own operator
+# render (useradd, authorized_keys.d), the session's lines as mini-s-NAME (setpriv) and
+# mini-reenroll; no network, no setuid program, a wall on each pass.
+[Unit]
+Description=Mini door: the root processor (one pass)
+After=mini-store.service
+ConditionPathExists=/etc/mini/door.json
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/mini/candidate/current/bin/mini-door-process
+Slice=mini.slice
+UMask=0077
+TimeoutStartSec=20min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+InaccessiblePaths=-/var/lib/mini-keys -/var/lib/mini-backups -/etc/mini/credentials.key
+MemoryMax=1G
+TasksMax=256

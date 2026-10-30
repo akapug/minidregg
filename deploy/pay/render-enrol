@@ -2,11 +2,18 @@
 """Render every consumer of the self-enrollment terms from the ONE source, enrol-terms.json.
 
   render-enrol --out DIR --version N --control CAP --observer-capability C --enrol-capability E
+               --enrol-address-file PUB --network mainnet|devnet
                [--terms enrol-terms.json] [--book-extra FILE] [--mint BASE58 --token-program BASE58]
 
-enrol-terms.json holds the two operator-ruled values (the receiving address, the price of a
-node week) and the rest of the tariff they sit in. Nothing else in the repo states them. This
-script writes, into a NEW directory DIR:
+enrol-terms.json holds the operator-ruled price of a node week and the rest of the tariff it sits
+in. The receiving address is NOT in the repo: it is a deployment parameter, the public half of the
+fresh key `mini-enrol-keygen` makes on the box at install time (`--enrol-address-file`, the raw
+32-byte public key; the secret stays in /var/lib/mini-core/secret, mini-core 0600). `mini pay book`
+signs it into the book, and every consumer reads it from there or from the pins rendered here.
+
+--network chooses the Solana cluster. mainnet uses the terms' DREGG mint. devnet has no DREGG
+mint, so it needs the devnet mint and token program given explicitly (--mint, --token-program);
+there is no silent default. This script writes, into a NEW directory DIR:
 
   book.json        `mini pay book --dir EMBER-WS --source book.json`: the receiving address at book
                    row 0 (plus any --book-extra rows) and tariff version N, enrolIndex null
@@ -28,8 +35,8 @@ friend sees the Host's own quote (op 121), never a number computed here.
 the terms and refuses unless its week rate is exactly the asked week price, its mint and token
 program are the terms' (or the --mint/--token-program override), and it carries no hourly rate.
 
---mint/--token-program override the terms for a rehearsal on devnet with a throwaway Token-2022
-mint; the override is printed in report.txt. The receiving address is never overridden.
+--mint/--token-program give the devnet mint (or override the terms for a mainnet rehearsal);
+the choice is printed in report.txt.
 Python 3 standard library only.
 """
 import argparse
@@ -39,7 +46,7 @@ import sys
 
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 HERE = Path(__file__).resolve().parent
-EXPECTED_KEYS = {"type", "enrolAddress", "enrolIndex", "mint", "tokenProgram", "decimals", "weekPriceAtomic",
+EXPECTED_KEYS = {"type", "enrolIndex", "mint", "tokenProgram", "decimals", "weekPriceAtomic",
                  "creditPerAtomic", "maxPerObservation", "journalFloor", "minTickSlots", "slashCallerPermille",
                  "operatorSocket", "login"}
 
@@ -125,8 +132,12 @@ def verify_tariff(terms, path, mint=None, program=None):
 
 
 def render(terms, args):
-    address = terms["enrolAddress"]
-    b58_decode32(address, "enrolAddress")
+    raw = Path(args.enrol_address_file).read_bytes()
+    if len(raw) != 32 or raw == b"\0" * 32:
+        die(f"--enrol-address-file {args.enrol_address_file} is not a 32-byte non-zero public key (mini-enrol-keygen's enrol.pub)")
+    address = b58_encode(raw)
+    if args.network == "devnet" and not (args.mint and args.token_program):
+        die("--network devnet has no DREGG mint in the terms: give the devnet mint and token program (--mint, --token-program)")
     mint = args.mint or terms["mint"]
     program = args.token_program or terms["tokenProgram"]
     b58_decode32(mint, "mint")
@@ -174,15 +185,15 @@ def render(terms, args):
         "# the tick reads them from the Host's signed pay view (the tariff and book `mini pay book` installed).",
         "PAY_OBSERVER_WS=/var/lib/mini/pay/observer",
         f"PAY_OBSERVER_CAPABILITY={args.observer_capability}",
-        f"PAY_ENROL_INDEX={index}",
-        f"PAY_JOURNAL_FLOOR={floor_}",
+        "PAY_WATCH_ENROL=yes",
         f"PAY_ENROL_CAPABILITY={args.enrol_capability}",
         f"PAY_OPERATOR_SOCKET={terms['operatorSocket']}",
         ""])
     week_total_note = (f"enrollment total = the box's one-time birth fee + {rate // int(terms['creditPerAtomic'])} atomic; "
                        f"the friend pays the amount `mini join --solana` prints from the Host quote (op 121)")
     report = "\n".join([
-        f"enrolAddress        {address}  (book row {index}; also the join pin)",
+        f"network             {args.network}",
+        f"enrolAddress        {address}  (book row {index}; also the join pin; from {args.enrol_address_file})",
         f"mint                {mint}" + ("  (OVERRIDE: rehearsal)" if args.mint else ""),
         f"tokenProgram        {program}" + ("  (OVERRIDE: rehearsal)" if args.token_program else ""),
         f"decimals            {decimals}  (1 token = 10^{decimals} atomic units)",
@@ -206,13 +217,15 @@ def main():
     parser.add_argument("--book-extra")
     parser.add_argument("--verify-tariff", metavar="FILE",
                         help="refuse FILE (a rendered book.json/tariff-on.json or a bare tariff) unless its week is exactly the terms' price; writes nothing")
+    parser.add_argument("--enrol-address-file", help="the raw 32-byte public key mini-enrol-keygen wrote (enrol.pub)")
+    parser.add_argument("--network", choices=("mainnet", "devnet"))
     parser.add_argument("--mint")
     parser.add_argument("--token-program")
     args = parser.parse_args()
     if args.verify_tariff:
         verify_tariff(load_terms(args.terms), args.verify_tariff, args.mint, args.token_program)
         return
-    for name in ("out", "version", "control", "observer_capability", "enrol_capability"):
+    for name in ("out", "version", "control", "observer_capability", "enrol_capability", "enrol_address_file", "network"):
         if getattr(args, name) is None:
             die("--" + name.replace("_", "-") + " is required (unless --verify-tariff)")
     if args.version < 1:

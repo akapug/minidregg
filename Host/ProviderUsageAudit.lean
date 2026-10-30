@@ -38,12 +38,18 @@ private def echoPrefix : String := echoEvent echoChoice ++ "\n\n"
 private def doneFrame : String := "data: [DONE]\n\n"
 private def echoStream (event : String) : String := echoPrefix ++ event ++ "\n\n" ++ doneFrame
 
+/-- The basis, the detail and the amount of a quote, or the refusal. -/
+private def classify (result : Result Quoted) : Except String (Basis × Option String × Nat) :=
+  result.map (fun quoted => (quoted.quote.basis, quoted.detail, quoted.quote.amount))
+
 private def checkTerminalEcho : IO Unit := do
   let terminal := echoEvent echoChoice echoUsage
-  let positive := (quoteResponse tariff .pool request (echoStream terminal).toUTF8.toList
-    "text/event-stream" 200 3120).map (fun quote => (quote.usage, quote.amount))
-  unless positive == .ok (some ⟨3042, 38, 3080⟩, 3120) do
+  let positive := classify (quoteResponse tariff .pool .complete request
+    (echoStream terminal).toUTF8.toList "text/event-stream" 200 3120)
+  unless positive == .ok (.reported ⟨3042, 38, 3080⟩, none, 3120) do
     throw (IO.userError s!"inert terminal echo changed: {repr positive}")
+  -- A complete 200 whose record the parser refuses is no longer a refusal of the
+  -- settle: it is quoted at the hold, undecided, with the parser's reason as detail.
   let vectors : List (String × String × String) := [
     ("changed index", echoStream (terminal.replace r#""index":0"# r#""index":1"#),
       "SSE choice index is not zero"),
@@ -78,39 +84,89 @@ private def checkTerminalEcho : IO Unit := do
       "usage precedes finish reason"),
     ("echo without usage", echoStream (echoEvent echoChoice), "missing usage")]
   for (label, response, expected) in vectors do
-    let result := (quoteResponse tariff .pool request response.toUTF8.toList
-      "text/event-stream" 200 3120).map (·.amount)
-    unless result == .error expected do
+    let result := classify (quoteResponse tariff .pool .complete request response.toUTF8.toList
+      "text/event-stream" 200 3120)
+    unless result == .ok (.undecided .truncated, some expected, 3120) do
       throw (IO.userError s!"terminal echo {label} changed: {repr result}")
 
+-- Z.AI's coding-plan Chat Completions stream, as measured on 2026-10-27
+-- (`api.z.ai/api/coding/paas/v4`, glm-5.3-flash, max_tokens 8): reasoning
+-- chunks whose choice carries no `finish_reason` key at all, and the usage
+-- record on the finishing chunk itself, with token details beside the three
+-- counts. An absent `finish_reason` before the finish reads as null.
+private def zaiTariff : Tariff := ⟨1, "glm-5.3-flash", 4, ⟨2, 1000000, 2000000⟩, ⟨0, 1000000, 2000000⟩⟩
+private def zaiRequest : List UInt8 :=
+  "{\"model\":\"glm-5.3-flash\",\"stream\":true}".toUTF8.toList
+private def zaiStream : String :=
+  r#"data: {"id":"z","created":1,"object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Let"}}]}"# ++ "\n\n" ++
+  r#"data: {"id":"z","created":1,"object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{"index":0,"finish_reason":"length","delta":{"role":"assistant","content":""}}],"usage":{"prompt_tokens":14,"completion_tokens":8,"total_tokens":22,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":5}}}"# ++ "\n\n" ++
+  doneFrame
+
+private def checkZaiStream : IO Unit := do
+  let result := classify (quoteResponse zaiTariff .pool .complete zaiRequest zaiStream.toUTF8.toList
+    "text/event-stream" 200 500)
+  -- Pool fee 2 + ⌈(14·10⁶ + 8·2·10⁶)/10⁶⌉ = 32.
+  unless result == .ok (.reported ⟨14, 8, 22⟩, none, 32) do
+    throw (IO.userError s!"Z.AI coding-plan stream changed: {repr result}")
+  -- Data after the terminal usage is still refused.
+  let echoed := zaiStream.replace doneFrame
+    (r#"data: {"id":"z","created":1,"object":"chat.completion.chunk","model":"glm-5.3-flash","choices":[{"index":0,"delta":{"content":""}}]}"# ++ "\n\n" ++ doneFrame)
+  let refused := classify (quoteResponse zaiTariff .pool .complete zaiRequest echoed.toUTF8.toList
+    "text/event-stream" 200 500)
+  unless refused == .ok (.undecided .truncated, some "SSE data follows terminal usage", 500) do
+    throw (IO.userError s!"Z.AI data after usage changed: {repr refused}")
+
 /-- Executable parser regression gate. Its closed examples do not replace the
-general arithmetic theorem in `Kernel.ProviderMetering`. It raises an error
-during this module's narrow Lean check if any framing/refusal result changes. -/
+general theorems in `Kernel.ProviderMetering` (`failed_leg_settle_decided`). It raises
+an error during this module's narrow Lean check if any framing or classification
+result changes. -/
 def check : IO Unit := do
   checkTerminalEcho
-  let positive := (quoteResponse tariff .pool request complete
-    "text/event-stream; charset=UTF-8" 200 7).map (·.amount)
-  unless positive == .ok 7 do
+  checkZaiStream
+  let positive := classify (quoteResponse tariff .pool .complete request complete
+    "text/event-stream; charset=UTF-8" 200 7)
+  unless positive == .ok (.reported ⟨1, 2, 3⟩, none, 7) do
     throw (IO.userError s!"complete stream changed: {repr positive}")
-  let truncatedResult := (quoteResponse tariff .pool request truncated
-    "text/event-stream" 200 5).map (·.amount)
-  unless truncatedResult == .error "SSE final data event lacks a blank-line terminator" do
+  -- A truncated 200 and a 200 without a usage record are quoted at the hold, undecided.
+  let truncatedResult := classify (quoteResponse tariff .pool .complete request truncated
+    "text/event-stream" 200 5)
+  unless truncatedResult == .ok (.undecided .truncated,
+      some "SSE final data event lacks a blank-line terminator", 5) do
     throw (IO.userError s!"truncated stream changed: {repr truncatedResult}")
-  let absentResult := (quoteResponse tariff .pool request absent
-    "text/event-stream" 200 5).map (·.amount)
-  unless absentResult == .error "SSE completion lacks one terminal usage record" do
+  let absentResult := classify (quoteResponse tariff .pool .complete request absent
+    "text/event-stream" 200 5)
+  unless absentResult == .ok (.undecided .truncated,
+      some "SSE completion lacks one terminal usage record", 5) do
     throw (IO.userError s!"missing usage changed: {repr absentResult}")
-  let overResult := (quoteResponse tariff .pool request complete
-    "text/event-stream" 200 6).map (·.amount)
+  -- Reported usage above the hold is still the one refusal (impossible for a lawful reserve).
+  let overResult := classify (quoteResponse tariff .pool .complete request complete
+    "text/event-stream" 200 6)
   unless overResult == .error "reported usage quote exceeds the held allowance or tariff bound" do
     throw (IO.userError s!"over-reserve changed: {repr overResult}")
+  -- The four failure classes on the pool route (fee 2): a refused reply is the fee;
+  -- timeout, truncated and lost are the hold.
+  let refused := classify (quoteResponse tariff .pool .complete request
+    "{\"error\":\"rate limited\"}".toUTF8.toList "application/json" 429 500)
+  unless refused == .ok (.refusedReply 429, none, 2) do
+    throw (IO.userError s!"429 settle changed: {repr refused}")
+  for (leg, label) in [(Leg.timeout, "timeout"), (Leg.truncated, "truncated"), (Leg.lost, "lost")] do
+    let result := classify (quoteResponse tariff .pool leg request [] "" 0 500)
+    unless result == .ok (.undecided leg, none, 500) do
+      throw (IO.userError s!"{label} settle changed: {repr result}")
+  -- A homelab refused reply at a zero fee settles at zero (the law admits a zero charge).
+  let homelab := classify (quoteResponse tariff .homelab .complete request [] "text/plain" 503 9)
+  unless homelab == .ok (.refusedReply 503, none, 0) do
+    throw (IO.userError s!"homelab 503 settle changed: {repr homelab}")
   -- The user route charges the fee alone, reads no usage, and refuses a hold
   -- below the fee.
-  let user := (quoteResponse tariff .user request absent "text/plain" 429 4).map (·.amount)
-  unless user == .ok 4 do
+  let user := classify (quoteResponse tariff .user .complete request absent "text/plain" 429 4)
+  unless user == .ok (.perOperation, none, 4) do
     throw (IO.userError s!"user fee changed: {repr user}")
-  let userOver := (quoteResponse tariff .user request complete
-    "text/event-stream" 200 3).map (·.amount)
+  let userLost := classify (quoteResponse tariff .user .lost request [] "" 0 4)
+  unless userLost == .ok (.perOperation, none, 4) do
+    throw (IO.userError s!"user lost-leg fee changed: {repr userLost}")
+  let userOver := classify (quoteResponse tariff .user .complete request complete
+    "text/event-stream" 200 3)
   unless userOver == .error "reported usage quote exceeds the held allowance or tariff bound" do
     throw (IO.userError s!"user over-reserve changed: {repr userOver}")
 

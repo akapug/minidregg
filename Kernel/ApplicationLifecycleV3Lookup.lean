@@ -3,7 +3,11 @@ Receipt-only lookup for launch-bound event23 BEGIN and event24 claim. The same
 verifier walk that admitted the complete historical image supplies records
 and receipts; these selectors never mint a physical launch reservation.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleV3Lookup
 
@@ -30,7 +34,7 @@ private def select {config : Config} {target : Durable}
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | .error .nativeHistoryUnavailable
   if record.event == event && record.nullifiers.contains nullifier &&
       receipt.transactionId == transactionId &&

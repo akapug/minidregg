@@ -44,7 +44,7 @@
 //! the Host renders them (`Compiler/RefusalReason.lean` `renderClause`):
 //! `field 7 before <= slot "clock/now"`, `field 14 <= slot "clock/now" + -1`.
 //! A slot-pair atom is false when either slot is absent, so `field 15 == field 15`
-//! is "field 15 is present" (the job law, `deploy/shell/templates/job/law.job.shell`).
+//! is "field 15 is present" (the job law, `native/resource-client/templates/job/law.job.shell`).
 //!
 //! `field 17 opens (field 18, field 19) with field 20` is commit–reveal of a tuple
 //! (`Pred.hashEq`, `Pred/HashEq.lean`): field 17 must hold
@@ -613,13 +613,13 @@ mod tests {
         assert!(parse("field 17 opens (field 18) with field 20 + 1").unwrap_err().contains("expected `;`"));
     }
 
-    /// The job law (COMPUTE §2.3, `Kernel/Job.lean`): the shell grammar text
+    /// The job law (docs/COMPUTE.md §2.3, `Kernel/Job.lean`): the shell grammar text
     /// `law.job.shell` (the Host's rendering of every clause, written by
     /// `scripts/gen-joblaw.py`) parses to exactly `law.job.json`, both with the
     /// same placeholder binding.
     #[test]
     fn job_law_grammar_is_the_template_json() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../deploy/shell/templates/job/");
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates/job/");
         let bind = |s: String| {
             s.replace("{CALLER}", "7")
                 .replace("{PROGRAM}", "42")

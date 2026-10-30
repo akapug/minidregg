@@ -9,6 +9,7 @@
 use std::fmt;
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -67,6 +68,11 @@ impl CustodyGate {
             return Ok(None);
         };
         let pid = child.id();
+        // The child leads its own process group (see spawn below) and is
+        // unreaped while tracked here, so the PGID cannot be stale.
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+        }
         match child.kill() {
             Ok(()) => Ok(Some(pid)),
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => Ok(Some(pid)),
@@ -80,18 +86,31 @@ impl CustodyGate {
         self.child.lock().map(|slot| slot.is_none()).unwrap_or(false)
     }
 
+    /// Bounded by `crate::deadline::NATIVE_CALL`: a child that outlives it is
+    /// killed with its process group and reported `Uncertain(TimedOut)`,
+    /// exactly like a lost reply.
     pub fn run_capture(
         &self,
         cancelled: &AtomicBool,
         command: &mut Command,
     ) -> Result<Output, CustodyError> {
-        self.run_capture_with_hooks(cancelled, command, || {}, |_| {})
+        self.run_capture_until(cancelled, command, crate::deadline::NATIVE_CALL)
+    }
+
+    pub fn run_capture_until(
+        &self,
+        cancelled: &AtomicBool,
+        command: &mut Command,
+        limit: Duration,
+    ) -> Result<Output, CustodyError> {
+        self.run_capture_with_hooks(cancelled, command, limit, || {}, |_| {})
     }
 
     fn run_capture_with_hooks(
         &self,
         cancelled: &AtomicBool,
         command: &mut Command,
+        limit: Duration,
         before_check: impl FnOnce(),
         after_spawn: impl FnOnce(u32),
     ) -> Result<Output, CustodyError> {
@@ -109,7 +128,7 @@ impl CustodyGate {
             if slot.is_some() {
                 return Err(io::Error::other("another Mini custody child is active").into());
             }
-            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            command.process_group(0).stdout(Stdio::piped()).stderr(Stdio::piped());
             let mut child = command.spawn()?;
             let stdout = child
                 .stdout
@@ -136,7 +155,14 @@ impl CustodyGate {
         let mut err_eof = false;
         let mut fault: Option<io::Error> = None;
         let mut exited: Option<(std::process::ExitStatus, Instant)> = None;
+        let started = Instant::now();
         loop {
+            if exited.is_none() && fault.is_none() && started.elapsed() >= limit {
+                fault = Some(io::Error::new(io::ErrorKind::TimedOut, format!(
+                    "Mini child exceeded its {}s deadline; killed; exact attempt uncertain",
+                    limit.as_secs())));
+                let _ = self.cancel();
+            }
             if !out_eof {
                 match drain_nonblocking(&mut stdout, &mut out_bytes) {
                     Ok((eof, overflow)) => {
@@ -300,6 +326,7 @@ mod tests {
             run_gate.run_capture_with_hooks(
                 &run_cancelled,
                 Command::new("/bin/sleep").arg("30"),
+                crate::deadline::NATIVE_CALL,
                 || {
                     at_boundary.send(()).unwrap();
                     proceed.recv().unwrap();
@@ -331,6 +358,7 @@ mod tests {
             run_gate.run_capture_with_hooks(
                 &run_cancelled,
                 Command::new("/bin/sleep").arg("30"),
+                crate::deadline::NATIVE_CALL,
                 || {},
                 |pid| {
                     spawned.send(pid).unwrap();
@@ -378,5 +406,20 @@ mod tests {
         );
         assert!(matches!(result, Err(CustodyError::Uncertain(_))));
         assert_eq!(gate.cancel().unwrap(), None);
+    }
+
+    #[test]
+    fn deadline_turns_a_hung_custody_child_into_an_uncertain_timeout() {
+        let gate = CustodyGate::new();
+        let cancelled = AtomicBool::new(false);
+        let start = Instant::now();
+        let result = gate.run_capture_until(&cancelled,
+            Command::new("/bin/sh").args(["-c", "sleep 30 & sleep 30"]), Duration::from_millis(300));
+        match result {
+            Err(CustodyError::Uncertain(error)) => assert_eq!(error.kind(), io::ErrorKind::TimedOut),
+            other => panic!("expected an uncertain timeout, got {other:?}"),
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+        assert!(gate.is_idle());
     }
 }

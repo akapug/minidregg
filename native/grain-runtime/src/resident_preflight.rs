@@ -3,15 +3,6 @@
 //! started/unknown request or authorize a model, payment, or native effect.
 use crate::*;
 
-#[derive(Deserialize)]
-#[serde(rename_all="camelCase",deny_unknown_fields)]
-struct Ready {
-    #[serde(rename="type")]
-    kind:String,
-    task:String,
-    config_sha256:String,
-    binding_sha256:String,
-}
 fn config_digest(config:&Config)->Result<String> {
     sha256_bytes(&serde_json::to_vec(config).map_err(|e|e.to_string())?)
 }
@@ -22,15 +13,6 @@ fn response(config:&Config,path:&Path)->Result<Value> {
     Ok(json!({"type":"mini-resident-preflight-ready-v1","task":config.task,
         "configSha256":config_digest(config)?,"bindingSha256":binding_digest(config,path)?}))
 }
-fn checked(config:&Config,path:&Path,text:&str)->Result<()> {
-    let ready:Ready=serde_json::from_str(text).map_err(|_|format!("resident preflight refused before prompt dispatch: {text}"))?;
-    if ready.kind!="mini-resident-preflight-ready-v1" || ready.task!=config.task
-        || ready.config_sha256!=config_digest(config)? || ready.binding_sha256!=binding_digest(config,path)? {
-        return Err("resident preflight differs from exact controller configuration".into());
-    }
-    Ok(())
-}
-
 fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
     let value:Value=serde_json::from_slice(text).map_err(|_|"private operator preflight did not return one JSON response")?;
     if value["format"]!="mini-operator-drain-v1" || value["phase"]!="serving"
@@ -39,18 +21,32 @@ fn checked_operator(config:&Config,text:&[u8])->Result<Value> {
         || value["hostProcessId"].as_u64().is_none_or(|pid|pid==0 || pid>u32::MAX as u64)
         || value["instanceId"].as_str().is_none_or(|id|!resident_origin::valid_digest(id))
         || value["requestNonce"].as_str().is_none_or(|id|!resident_origin::valid_digest(id))
-        || value["hostSha256"]!=sha256_file(&config.host)? || value["configSha256"]!=sha256_file(&config.host_config)? {
+        || value["hostSha256"]!=sha256_pinned_file(&config.host)? || value["configSha256"]!=sha256_file(&config.host_config)? {
         return Err("controller requires serving private operator with exact Host/config pins and current process identity".into());
     }
     Ok(value)
 }
+fn operator_status_command(config:&Config)->Result<Command> {
+    // Dispatch custody already names a controller-private, peer-pinned route.
+    // Its status-only control listener proves the same upstream operator while
+    // ordinary room traffic continues through the participant transport.
+    let dispatch=config.dispatch_task.as_ref().filter(|task|task.operator_socket.is_some());
+    let socket=dispatch.and_then(|task|task.operator_socket.as_deref()).or(config.host_socket.as_deref())
+        .ok_or("resident controller requires private native operator socket")?;
+    let mut command=Command::new(&config.mini);
+    command.args(["operator-status","--socket"]).arg(socket)
+        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config);
+    if let Some(uid)=dispatch.and_then(|task|task.operator_peer_uid) {
+        command.arg("--operator-peer-uid").arg(uid.to_string());
+    }
+    Ok(command)
+}
 /// The native Mini control command proves the current owner-private transport
 /// role and response nonce. An operator path or stale mode file cannot do so.
 pub(crate) fn require_private_operator(config:&Config)->Result<Value> {
-    let socket=config.host_socket.as_deref().ok_or("resident controller requires private native operator socket")?;
-    let result=Command::new(&config.mini).args(["operator-status","--socket"]).arg(socket)
-        .arg("--host").arg(&config.host).arg("--config").arg(&config.host_config)
-        .stdin(Stdio::null()).output().map_err(|e|format!("private operator preflight: {e}"))?;
+    let mut command=operator_status_command(config)?;
+    let result=crate::deadline::output(&mut command,crate::deadline::NATIVE_CALL)
+        .map_err(|e|crate::deadline::describe("private operator preflight",e))?;
     if !result.status.success() || result.stdout.len()>65_536 {
         return Err(format!("private operator preflight refused: {}",String::from_utf8_lossy(&result.stderr).chars().take(2048).collect::<String>()));
     }
@@ -126,7 +122,6 @@ impl Runtime {
         Ok(value)
     }
     pub(crate) fn retained_preparation(&self,id:&str,sha:&str)->Result<(Value,String)> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident preparation lookup identity".into());}
         let bytes=bounded_regular_file(&preparation_path(&self.config,id),65_536)
             .map_err(|_|"prompt has no exact source-issued preparation; old unknown work cannot be classified as unadmitted")?;
@@ -166,7 +161,6 @@ impl Runtime {
         File::open(&self.config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())
     }
     pub(crate) fn resident_admission(&self,id:&str,sha:&str)->Result<Value> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         if !resident_origin::valid_digest(id) || !resident_origin::valid_digest(sha) {return Err("invalid resident admission identity".into());}
         let file=refusal_path(&self.config,id);
         if !file.try_exists().map_err(|e|e.to_string())? {
@@ -182,7 +176,6 @@ impl Runtime {
         check_refusal(&self.config,&self.config_path,id,sha,value)
     }
     pub(crate) fn preflight_resident_prompt(&self)->Result<Value> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
         let status=self.quiescence_status()?;
         if !status.active.is_empty() || !status.retained.is_empty() {
             return Err("resident preflight requires recovery of retained or active service work".into());
@@ -211,20 +204,27 @@ pub(crate) fn fixture_retain_preparation(rt:&Runtime,id:&str,sha:&str) {
     write_new(&preparation_path(&rt.config,id),&serde_json::to_vec_pretty(&value).unwrap()).unwrap();
 }
 #[cfg(test)]
-pub(crate) fn fixture_response(config:&Config,path:&Path)->Value {response(config,path).unwrap()}
-#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn preflight_refusal_and_substitution_do_not_grant_prompt_admission() {
-        let (root,rt)=crate::tests::restart_resolution_fixture("preflight-identity");
-        let good=fixture_response(&rt.config,&rt.config_path);
-        checked(&rt.config,&rt.config_path,&good.to_string()).unwrap();
-        for key in ["task","configSha256","bindingSha256","type"] {
-            let mut v=good.clone();v[key]=json!("different");
-            assert!(checked(&rt.config,&rt.config_path,&v.to_string()).is_err());
-        }
-        assert!(checked(&rt.config,&rt.config_path,"error: launcher protocol absent").is_err());
+    fn dispatch_preflight_uses_private_status_route_and_exact_activation_peer() {
+        let (root,mut rt)=crate::tests::restart_resolution_fixture("dispatch-status-route");
+        rt.config.host_socket=Some(root.join("public.sock"));
+        let args=|command:Command|command.get_args().map(|v|v.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        assert_eq!(args(operator_status_command(&rt.config).unwrap())[2],root.join("public.sock").to_str().unwrap());
+        rt.config.dispatch_task=Some(serde_json::from_value(json!({
+            "task":"7500","subject":"12","capability":"121","queryCapability":"122",
+            "custodyKey":root.join("payer.key"),"parentCapability":"1204","parentObserveCapability":"1205",
+            "reserve":"1","charge":"1","socketPath":root.join("dispatch.sock"),"hostUid":1001,
+            "operatorSocket":root.join("operator/mini.sock"),"operatorPeerUid":0
+        })).unwrap());
+        let selected=args(operator_status_command(&rt.config).unwrap());
+        assert_eq!(selected[2],root.join("operator/mini.sock").to_str().unwrap());
+        assert_eq!(&selected[selected.len()-2..],["--operator-peer-uid","0"]);
+        assert!(!selected.iter().any(|a|a==root.join("public.sock").to_str().unwrap()));
+        assert_eq!(rt.config.host_socket,Some(root.join("public.sock")),"public transport binding stays unchanged");
+        rt.config.dispatch_task.as_mut().unwrap().operator_peer_uid=None;
+        assert!(!args(operator_status_command(&rt.config).unwrap()).contains(&"--operator-peer-uid".into()));
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

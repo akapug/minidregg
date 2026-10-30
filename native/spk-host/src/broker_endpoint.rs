@@ -1,4 +1,5 @@
 //! Explicit broker transport custody. No environment-selected endpoint or fallback.
+use crate::io_context::IoContext;
 use super::*;
 use minidregg_compatible_upgrade_custody as custody;
 use std::os::unix::fs::FileTypeExt;
@@ -26,22 +27,28 @@ pub(super) fn resolve(root: &Path, configured: Option<&Path>) -> io::Result<Path
     Ok(socket.to_owned())
 }
 fn socket_custody(path: &Path, uid: u32) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(path).ctx("inspect broker socket", path)?;
     if !meta.file_type().is_socket() || meta.uid() != uid || meta.mode() & 0o7777 != 0o600 {
         return Err(invalid("broker socket custody refused"));
     }
     Ok(())
 }
+#[cfg(test)]
+pub(crate) fn connect_for_test(path: &Path) -> io::Result<UnixStream> { connect(path, unsafe { libc::geteuid() }) }
 fn connect(path: &Path, uid: u32) -> io::Result<UnixStream> {
     socket_custody(path, uid)?;
-    let stream = UnixStream::connect(path)?;
+    let stream = UnixStream::connect(path).ctx("connect", path)?;
     if peer_credentials(&stream)?.uid != uid {
         return Err(invalid("broker peer is not the operator"));
     }
     Ok(stream)
 }
 fn exchange(mut stream: UnixStream, request: &Request) -> io::Result<Value> {
-    stream.set_read_timeout(Some(Duration::from_secs(600)))?;
+    // The operator appliance importer has a 30-minute unit deadline. Waiting
+    // less than that abandons a still-running import with an uncertain reply.
+    // This changes only physical transport; it does not retry or grant a request.
+    let seconds = if matches!(request, Request::Ingest { .. }) { 1860 } else { 600 };
+    stream.set_read_timeout(Some(Duration::from_secs(seconds)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     let mut line = serde_json::to_vec(request)?;
     line.push(b'\n');
@@ -88,13 +95,13 @@ pub(super) fn call_at(root: &Path, socket: Option<&Path>, request: &Request) -> 
     protected_chain(root)?;
     protected_chain(path.parent().ok_or_else(||invalid("broker runtime parent"))?)?;
     let uid=unsafe{libc::geteuid()};
-    let parent=fs::symlink_metadata(path.parent().unwrap())?;
+    let parent=fs::symlink_metadata(path.parent().unwrap()).ctx("inspect", &(path.parent().unwrap()))?;
     if !parent.is_dir() || parent.uid()!=uid || parent.mode()&0o7777!=0o700 { return Err(invalid("broker runtime directory custody refused")); }
     selected_call(root,&path,request,uid)
 }
 fn protected_chain(path: &Path)->io::Result<()> {
     for ancestor in path.ancestors() {
-        let meta=fs::symlink_metadata(ancestor)?;
+        let meta=fs::symlink_metadata(ancestor).ctx("inspect", ancestor)?;
         if !meta.is_dir() || meta.file_type().is_symlink() || meta.mode()&0o022!=0
             || (!crate::namespace_identity::root_owned(ancestor,&meta) && meta.uid()!=unsafe{libc::geteuid()}) {
             return Err(invalid("broker endpoint ancestor custody refused"));
@@ -118,7 +125,7 @@ fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, Fi
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&lock_path)?;
+        .open(&lock_path).ctx("open", &lock_path)?;
     let meta = lock.metadata()?;
     if !meta.is_file() || meta.uid() != owner || meta.nlink() != 1 || meta.mode() & 0o7777 != 0o600
     {
@@ -133,7 +140,7 @@ fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, Fi
             match UnixStream::connect(path) {
                 Ok(_) => return Err(invalid("broker socket is occupied; refusing to unlink it")),
                 Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-                    fs::remove_file(path)?
+                    fs::remove_file(path).ctx("remove", path)?
                 }
                 Err(error) => return Err(error),
             }
@@ -141,10 +148,10 @@ fn bind_owned(path: &Path, gid: u32, owner: u32) -> io::Result<(UnixListener, Fi
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let listener = UnixListener::bind(path)?;
-    let meta=fs::symlink_metadata(path)?;
+    let listener = UnixListener::bind(path).ctx("bind", path)?;
+    let meta=fs::symlink_metadata(path).ctx("inspect", path)?;
     if meta.uid()!=owner || meta.gid()!=gid { return Err(invalid("operator socket ownership differs")); }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).ctx("set permissions", &path)?;
     Ok((listener, lock))
 }
 

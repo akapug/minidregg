@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-EVAL (EVAL.md §7, lanes E2/E3): the evaluator registry, end to end.
+# J-EVAL (docs/EVAL.md §7, lanes E2/E3): the evaluator registry, end to end.
 #
 # Journey hook contract (journey.sh header): HOST, MINI, STORE, VERIFIER and
 # JOURNEY_STEP_DIR exported; it bootstraps its OWN fresh Stores under
@@ -48,7 +48,11 @@ NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-4000000} NEWPARTICIPA
   >"$DIR/bootstrap-b.out" 2>"$DIR/bootstrap-b.err" || { echo "jeval: bootstrap B failed: $(tail -1 "$DIR/bootstrap-b.err")" >&2; exit 1; }
 set +e
 python3 - "$DIR" "$WA" "$WB" <<'PY'
-import json, os, re, socket, struct, subprocess, sys, time
+import hashlib, json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, WA, WB = sys.argv[1], sys.argv[2], sys.argv[3]
 MINI, NOCK_RUN, TPL = os.environ["MINI"], os.environ["NOCK_RUN"], os.environ["NOCK_TEMPLATES"]
 SUBJECT = 7
@@ -65,11 +69,13 @@ class World:
         self.sock = os.path.join(root, "public", "mini.sock")
         self.ws = os.path.join(root, "sponsor")
         self.cfg = open(self.config, "rb").read()
+        global HOST_PIN
+        HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
         self.counter = 0
     def op(self, code, payload):
         def frame(b): return struct.pack("<I", len(b)) + b
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(self.sock)
-        s.sendall(frame(bytes([1]) + struct.pack("<I", len(self.cfg)) + self.cfg + bytes([code]) + payload))
+        s.sendall(frame(bytes([2]) + struct.pack("<I", len(self.cfg)) + self.cfg + HOST_PIN + bytes([code]) + payload))
         def exact(n):
             out = b""
             while len(out) < n:
@@ -108,7 +114,7 @@ class World:
         last = last_line(r, attempt)
         outcome = os.path.join(attempt, "outcome.json")
         if "exact outcome evidence was retained" in last and os.path.exists(outcome):
-            o = json.load(open(outcome))
+            o = attempt_answer(outcome)
             last = "outcome " + o.get("type", "?") + " | " + bytes.fromhex(o.get("phase", "")).decode("latin1") \
                 + " | " + bytes.fromhex(o.get("detail", "")).decode("latin1")
         return r.returncode, last

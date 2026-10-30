@@ -9,7 +9,11 @@ composite operation's markers are both checked unspent in the durable consumed
 set here and consumed there by the receiver's intent (`replayMarkers`); neither
 is written to the cell.
 -/
-import Compiler.CredentialAuthorityDomainReceiver
+module
+
+public import Compiler.CredentialAuthorityDomainReceiver
+
+@[expose] public section
 
 namespace Minidregg.Compiler.GrainResourceBirthAuthority
 
@@ -99,6 +103,24 @@ theorem Prepared.post_logical
       setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) := by
   change Patch.run loaded.snapshot.logical (patch loaded.snapshot descriptor) = _
   rw [patch, run_assignAll]
+
+/-- **What a prepared grain-birth authority guarantees about its indices**: the birth's authority
+nullifier differs from `operationMarker`, `descriptor` is batch-ready at `loaded`'s authority
+snapshot (slots and grant ids distinct, initial policies fresh, the authority nullifier unspent,
+every grant ready, parent rows absent), `operationMarker` is unspent there, and every initial policy
+decodes to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`. -/
+theorem Prepared.sound
+    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    descriptor.authorityNullifier ≠ operationMarker ∧
+      CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot descriptor ∧
+      loaded.snapshot.spent operationMarker = false ∧
+      ∀ initial ∈ descriptor.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record :=
+  ⟨prepared.markersDistinct, prepared.birthReady, prepared.operationMarkerFresh,
+    fun initial member => by
+      obtain ⟨record, _, decoded, facts⟩ := prepared.initialSources.record_of_member initial member
+      exact ⟨record, decoded, facts⟩⟩
 
 end Prepared
 

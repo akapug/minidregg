@@ -26,8 +26,7 @@ instance : FromJson JointConsensusSettings where
       throw "jointConsensus must use canonical lowercase hex"
     let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
       | throw "jointConsensus is not a canonical Context"
-    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
-        context.wellFormed do
+    unless context.wellFormed do
       throw "jointConsensus Context is noncanonical or committee is not well formed"
     pure ⟨context⟩
 
@@ -73,7 +72,8 @@ def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit 
     if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
-def Settings.config (settings : Settings) : NativeHost.Config where
+def Settings.config (settings : Settings) : NativeHost.Config :=
+  NativeHost.Config.ofInputs {
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   disabledEvaluators := settings.disabledEvaluatorIds
@@ -90,7 +90,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
       checkpointEvery := settings.checkpointEvery.getD 64 }
   signature := ⟨settings.signatureBinary⟩
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
-  jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
+  jointConsensus := settings.jointConsensus.map JointConsensusSettings.context }
 
 def Settings.checkJointConsensus (settings : Settings) : Except String Unit := do
   let some pin := settings.jointConsensus | return ()
@@ -121,7 +121,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "genesisHeight", "expectedSeed", "storageBinary",
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
-    "jointConsensus", "nockFSync", "disabledEvaluators"]
+    "jointConsensus", "nockFSync", "disabledEvaluators", "requestRate"]
   unless object.foldl (init := true) (fun valid key _ => valid && allowed.contains key) do
     throw (IO.userError "unsupported settings in ordinary source-agreement reader")
   let settings : Settings ← IO.ofExcept (fromJson? json)
@@ -159,7 +159,13 @@ def profileDescription (config : NativeHost.Config)
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false)]
   Lean.Json.mkObj base
 
-def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
+/-- The deployment's description on the loaded image. A grain birth is offered while that
+image's platform record prices it (`record.grainBirth`), the same record the grain receiver
+reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
+def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+    Lean.Json := Id.run do
+  let grainBirth := ((PlatformCellDomain.recordOn config.deployment opened.durable.snapshot).bind
+    (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
@@ -172,7 +178,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("operations", toJson
        ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "source-agreement-reader"] : List String) ++
-         if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
+         if grainBirth then ["grain-birth"] else [])),
      ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
@@ -194,7 +200,7 @@ def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   return ((payload.drop 4).take width, payload.drop (4 + width))
 
 def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
-  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+  let signaturesCodec := (StreamCodec.list bytesStream).toLawful
   let some signatures := signaturesCodec.decode bytes
     | throw (RequestRefusal.malformed "noncanonical signature list")
   return signatures
@@ -223,20 +229,11 @@ def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8)
   output.write (lengthBytes response.size ++ response)
   output.flush
 
+/-- Live signature checks use the linked native kernel. The configured artifact
+path remains available to carry pins, not to a launch-time helper process. -/
 def withPinnedSignature {α : Type} (config : NativeHost.Config)
     (body : NativeHost.Config → IO α) : IO α :=
-  IO.FS.withTempDir fun directory => do
-    let pinned := directory / "credential-verifier"
-    let bytes ← IO.FS.readBinFile config.signature.binary
-    IO.FS.writeBinFile pinned bytes
-    let permission ← IO.Process.output
-      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
-    unless permission.exitCode == 0 do
-      throw (IO.userError "cannot make pinned credential verifier executable")
-    -- A launch failure is detected before the first semantic replay. The
-    -- verifier's usage exit here is expected; it has no arguments yet.
-    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
-    body { config with signature := ⟨pinned⟩ }
+  body config
 
 
 def opened (config : NativeHost.Config) : IO (NativeHost.Opened config) := do
@@ -250,8 +247,7 @@ def dispatch (config : NativeHost.Config) (operation : UInt8)
   match operation with
   | 0 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      discard <| opened config
-      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+      return (0, (descriptionLoaded config (← opened config)).compress.toUTF8.toList)
   | 1 =>
       match ← NativeHost.prepareAuthorizedLoaded config (← opened config)
           (← IO.ofExcept (← NativeHostLight.start config)) payload with

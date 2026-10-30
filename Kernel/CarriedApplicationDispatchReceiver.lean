@@ -1,9 +1,13 @@
 /- A physical dispatch receiver for an authenticated carried service. Both old
 and new tickets retain their actual typed current admission. One exact CAS
 extends the suffix; only its fresh winner can hand a physical permit to Host. -/
-import Kernel.ApplicationDispatchReceiver
-import Kernel.CarriedDispatchAdmission
-import Kernel.ApplicationDispatchLookup
+module
+
+public import Kernel.ApplicationDispatchReceiver
+public import Kernel.CarriedDispatchAdmission
+public import Kernel.ApplicationDispatchLookup
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CarriedApplicationDispatchReceiver
 
@@ -159,6 +163,26 @@ theorem Committed.postRecord_exact {config : Config} {anchor : Opened config}
       (DurableReceiver.IntentRecord.ofIntent committed.admitted.intent) :=
   committed.appended.entryExact
 
+/-- The retained receipt is the recomputed receipt at `old`'s height (past the
+anchor's prefix) of the suffix that `config` natively admitted from `anchor` up
+to the post-CAS image. -/
+theorem Committed.receipt_admitted_suffix {config : Config} {anchor : Opened config}
+    (committed : Committed config anchor) :
+    anchor.durable.image.accepted.length ≤ committed.old.opened.durable.height ∧
+      committed.verified.receipts[committed.old.opened.durable.height -
+        anchor.durable.image.accepted.length]? = some committed.receipt ∧
+      NativeHostReplay.AdmittedSuffix config anchor
+        (committed.appended.next.image.accepted.drop anchor.durable.image.accepted.length)
+        committed.verified.opened committed.verified.receipts := by
+  have exact := committed.receiptExact
+  unfold NativeHostReplay.SuffixVerified.receiptAt at exact
+  rw [DurableReceiverIO.Loaded.height_eq anchor.durable] at exact
+  by_cases within : anchor.durable.image.accepted.length ≤ committed.old.opened.durable.height
+  · rw [if_pos within, PersistentHistory.get?_eq] at exact
+    exact ⟨within, exact, committed.verified.accepted_suffix⟩
+  · rw [if_neg within] at exact
+    cases exact
+
 /-- Only the physical fresh-winner branch below can construct this. Recovered,
 already-present and historical outcomes retain receipts, never this value. -/
 structure Permit (config : Config) (anchor : Opened config) where
@@ -253,7 +277,7 @@ private def receiveAdmitted {config : Config} {anchor : Opened config} {target :
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ => return .uncertain "dispatch lacks exact post-CAS readback"
-      | .rejected _ => return .rejected "durable dispatch refused"
+      | .rejected reason => return .rejected s!"durable dispatch refused: {repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail

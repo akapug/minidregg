@@ -1,4 +1,4 @@
-//! PAY P4: the client side of the payment rail (PAY.md §2.2–§2.5, §3.4, §5).
+//! PAY P4: the client side of the payment rail (docs/PAY.md §2.2–§2.5, §3.4, §5).
 //!
 //! Every verb runs through a participant workspace (`mini workspace --action init`) whose
 //! session socket reaches the Host's pay operations:
@@ -25,7 +25,7 @@
 //!   This is the directory the watcher reads as its receipts (`pay-watcher` `load_receipts`);
 //! - `pay/quarantine/SIGNATURE.ADDRESS.json`: a record the kernel refused on its own merits.
 //!
-//! Records at the tariff's enrollment index (PAY §11) never go into a report: the observation
+//! Records at the tariff's enrollment index (docs/PAY.md §11) never go into a report: the observation
 //! receiver refuses them (`enrolIndexNeedsReceiver`). Each one is submitted ALONE through ops
 //! 117-120 under the observer's `C_enrol`, and the kernel's `decideEnrol` decides enrol, renew or
 //! journal. The client carries bytes and reads the answer; it decides nothing about the payment.
@@ -52,10 +52,10 @@ const ENROL_OPS: Ops = Ops {
     submit: 119,
     lookup: 120,
 };
-const VIEW_OP: u8 = 107;
+const VIEW_OP: u8 = mini_sdk::host_operations::PAY_VIEW;
 /// The public clock view (K-CLOCK): the deployment clock's `{now, slot}`.
-const CLOCK_VIEW_OP: u8 = 129;
-const ENROLMENT_VIEW_OP: u8 = 112;
+const CLOCK_VIEW_OP: u8 = mini_sdk::host_operations::CLOCK_VIEW;
+const ENROLMENT_VIEW_OP: u8 = mini_sdk::host_operations::PAY_ENROLLMENT_VIEW;
 
 /// The durable preflight's refusal of a spent nullifier, exactly as the Host renders it
 /// (phase `durable`). On a report whose tip is newer than the clock it can only be an
@@ -213,7 +213,7 @@ fn publish_decision_json(path: &Path, value: &Value) -> Result<()> {
 fn frame_body(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [actual, body @ ..] if *actual == operation => Ok(body),
-        [255, body @ ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, body @ ..] => Err(format!(
             "Host refused op{operation} before a decision: {}",
             String::from_utf8_lossy(body)
         )),
@@ -235,18 +235,16 @@ fn number(value: &Value, field: &str) -> Result<u128> {
         Some(Value::Number(number)) => number.to_string(),
         _ => return Err(format!("{field} must be an unsigned integer")),
     };
-    if raw.is_empty() || (raw.len() > 1 && raw.starts_with('0')) {
-        return Err(format!("{field} must be a canonical unsigned integer"));
-    }
-    raw.parse::<u128>()
-        .map_err(|_| format!("{field} must be an unsigned integer below 2^128"))
+    // The Host's rule (`toString n == raw`): `+5` and `05` are refused, not read as 5.
+    mini_sdk::decimal::parse::<u128>(&raw)
+        .ok_or_else(|| format!("{field} must be a canonical unsigned integer below 2^128"))
 }
 
 fn hex_exact(value: &str, bytes: usize, field: &str) -> Result<Vec<u8>> {
     if value.len() != bytes * 2 || value.bytes().any(|b| b.is_ascii_uppercase()) {
         return Err(format!("{field} must be {bytes} bytes of lowercase hex"));
     }
-    decode_hex(value).map_err(|_| format!("{field} must be {bytes} bytes of lowercase hex"))
+    mini_sdk::hex::decode(value).map_err(|_| format!("{field} must be {bytes} bytes of lowercase hex"))
 }
 
 fn base58(bytes: &[u8]) -> String {
@@ -366,7 +364,7 @@ fn hex_text(value: &Value, field: &str) -> String {
     value
         .get(field)
         .and_then(Value::as_str)
-        .and_then(|text| decode_hex(text).ok())
+        .and_then(|text| mini_sdk::hex::decode(text).ok())
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_default()
 }
@@ -461,13 +459,13 @@ fn prepare(
     if text(&plan_view, "commandBytes")? != hex(&command_bytes) {
         return Err("the Host's plan is not for the authored command".into());
     }
-    let header = decode_hex(
+    let header = mini_sdk::hex::decode(
         plan_view
             .get("header")
             .and_then(|header| header.get("canonical"))
             .and_then(Value::as_str)
             .ok_or("the Host's plan has no canonical header")?,
-    )?;
+    ).map_err(|e| e.0)?;
     let signature = read_secret(&session.key)?.sign(&header).to_bytes();
     create_private(&directory.join("signature.bin"), &signature)?;
     let length: u32 = plan.len().try_into().map_err(|_| "plan too large")?;
@@ -851,7 +849,22 @@ struct WatchOptions {
     min_endpoints: Option<u128>,
     max_pages: Option<u128>,
     page_size: Option<u128>,
-    enrol: Option<(u128, u128)>,
+    /// Watch the tariff's enrollment row with the tariff's journal floor (both from the
+    /// signed view, never from flags: an operator floor that drifted from the tariff's
+    /// skipped real enrollments for good).
+    enrol: bool,
+}
+
+/// The enrollment row and journal floor the watcher uses: the signed tariff's, or none.
+fn tariff_enrol(view: &Value, enrol: bool) -> Result<Option<(u128, u128)>> {
+    if !enrol {
+        return Ok(None);
+    }
+    let index = enrol_index_of(view)?.ok_or(
+        "--enrol: the signed tariff has no enrolIndex (self-enrollment is off); install a tariff naming the enrollment row first",
+    )?;
+    let tariff = view.get("tariff").ok_or("pay view lacks its tariff")?;
+    Ok(Some((index, number(tariff, "journalFloor")?)))
 }
 
 /// The watcher's configuration, derived from the signed pay view: the tariff's asset, the
@@ -871,8 +884,8 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
     let assigned: usize = text(&view, "nextFree")?
         .parse()
         .map_err(|_| "nextFree out of range")?;
-    let enrol_index = options
-        .enrol
+    let enrol = tariff_enrol(&view, options.enrol)?;
+    let enrol_index = enrol
         .map(|(index, _)| usize::try_from(index).map_err(|_| "enrol index out of range"))
         .transpose()?;
     let mut book = Vec::new();
@@ -884,7 +897,7 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
     }
     if let Some(index) = enrol_index {
         if index >= rows.len() {
-            return Err("--enrol-index names no book row".into());
+            return Err("the tariff's enrolIndex names no book row".into());
         }
     }
     let mut config = json!({
@@ -904,7 +917,7 @@ fn watch_config(session: &Session, out: &Path, options: WatchOptions) -> Result<
             config[field] = json!(value as u64);
         }
     }
-    if let Some((index, floor)) = options.enrol {
+    if let Some((index, floor)) = enrol {
         config["enrol"] = json!({"index":index as u64,"journalFloor":floor as u64,
             "cursorFile":utf8_path(&session.pay_dir().join("enrol-cursor.json"))?});
     }
@@ -966,7 +979,7 @@ struct Tally {
     already: usize,
     quarantined: usize,
     waiting: Option<String>,
-    /// Self-enrollment submissions and the kernel's decisions (PAY §11).
+    /// Self-enrollment submissions and the kernel's decisions (docs/PAY.md §11).
     enrol_submissions: usize,
     enrolled: usize,
     renewed: usize,
@@ -993,6 +1006,26 @@ fn clock_slot(view: &Value) -> Result<u128> {
         .filter(|clock| !clock.is_null())
         .ok_or_else(|| "the pay cell has no clock".to_owned())
         .and_then(|clock| number(clock, "slot"))
+}
+
+/// Whether an `alreadyConsumed` refusal at `tip` may have spent the tip's TICK nullifier
+/// rather than a record's own. The tick nullifier is spent by the report that moves the clock
+/// to the tip, so: if the view read before the submit, or a view read after the refusal
+/// (retained in `attempt/after-refusal/`), has its clock at or past the tip, the refusal is
+/// not attributable to the record and the record waits for a newer tip. A competing report
+/// (a manual heartbeat, a second observer) that committed between the first read and the
+/// submit is always visible in the second read, which closes the false "already credited"
+/// receipt of resource-client C F4.
+fn tick_may_be_spent(session: &Session, attempt: &Path, before: &Value, tip: &Tip) -> Result<bool> {
+    if clock_slot(before)? >= tip.slot {
+        return Ok(true);
+    }
+    let directory = attempt.join("after-refusal");
+    if !directory.exists() {
+        workspace::make_private_dir(&directory)?;
+    }
+    let after = read_view(session, &directory)?;
+    Ok(clock_slot(&after)? >= tip.slot)
 }
 
 fn receipt_path(session: &Session, record: &Record) -> PathBuf {
@@ -1185,7 +1218,7 @@ fn probe(
                     credited(session, &attempt, single, tally)?;
                     return Ok(Step::Done);
                 }
-                (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+                (_, Some("alreadyConsumed")) if tick_may_be_spent(session, &attempt, &view, tip)? => {
                     decide(&attempt, "waiting", &result)?;
                     waiting(tally, "tipReported", tip, &view);
                     return Ok(Step::Stop);
@@ -1355,7 +1388,7 @@ fn observe(
     Ok(())
 }
 
-// ---------------------------------------------------------------- self-enrollment (PAY §11)
+// ---------------------------------------------------------------- self-enrollment (docs/PAY.md §11)
 
 /// The tariff's enrollment index, from the public pay view; `None` = self-enrollment off.
 fn enrol_index_of(view: &Value) -> Result<Option<u128>> {
@@ -1385,7 +1418,7 @@ fn memo_key(session: &Session, record: &Record, directory: &Path) -> Result<Opti
     };
     let bin = directory.join("memo.bin");
     if !bin.exists() {
-        create_private(&bin, &decode_hex(memo)?)?;
+        create_private(&bin, &mini_sdk::hex::decode(memo).map_err(|e| e.0)?)?;
     }
     let parsed = session.inspect("pay-enrol-memo", &bin, &directory.join("memo.json"))?;
     Ok(if parsed.get("accepted").and_then(Value::as_bool) == Some(true) {
@@ -1402,7 +1435,7 @@ fn v2_memo_identity(record: &Record) -> Result<Option<String>> {
     let Some(encoded) = record.value.get("memo").and_then(Value::as_str) else {
         return Ok(None);
     };
-    let bytes = decode_hex(encoded)?;
+    let bytes = mini_sdk::hex::decode(encoded).map_err(|e| e.0)?;
     let Ok(text) = std::str::from_utf8(&bytes) else { return Ok(None); };
     Ok(crate::pay_memo_v2::SignedMemo::parse(text).ok()
         .map(|memo| hex(&memo.unsigned.identity_key)))
@@ -1458,8 +1491,8 @@ fn v2_enrol_decision(session: &Session, attempt: &Path, record: &Record)
         workspace::bounded_json(&path)?
     } else {
         let payload = serde_json::to_vec(&request).map_err(|e| e.to_string())?;
-        let frame = session.call(181, &payload)?;
-        let body = frame_body(&frame, 181)?;
+        let frame = session.call(mini_sdk::host_operations::PAY_CLAIM_VIEW, &payload)?;
+        let body = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_VIEW)?;
         if body.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
         serde_json::from_slice(body).map_err(|e| format!("invalid source paid status: {e}"))?
     };
@@ -1614,8 +1647,8 @@ fn enrol_records(
                     tally.enrol_pending = records.len() - position - 1;
                     return Ok(Step::Done);
                 }
-                // At a tip equal to the clock the spent nullifier may be the tick's.
-                (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+                // At a tip the clock has reached the spent nullifier may be the tick's.
+                (_, Some("alreadyConsumed")) if tick_may_be_spent(session, &attempt, &view, tip)? => {
                     decide(&attempt, "waiting", &result)?;
                     waiting(tally, "tipReported", tip, &view);
                     tally.enrol_pending = records.len() - position;
@@ -1819,9 +1852,9 @@ fn observe_records(
                 waiting(tally, reason, tip, &view);
                 return Ok(Step::Stop);
             }
-            // The tick nullifier of a tip at the clock is spent by the report that set the
-            // clock; a newer tip's cannot be, so there the spent nullifier is a record's.
-            (_, Some("alreadyConsumed")) if clock_slot(&view)? == tip.slot => {
+            // The tick nullifier of a tip the clock has reached (before the submit, or in a
+            // view read after the refusal) may be the spent one; otherwise it is a record's.
+            (_, Some("alreadyConsumed")) if tick_may_be_spent(session, &attempt, &view, tip)? => {
                 decide(&attempt, "waiting", &result)?;
                 waiting(tally, "tipReported", tip, &view);
                 return Ok(Step::Stop);
@@ -1855,7 +1888,7 @@ fn observe_records(
 
 /// The credit a confirmed report minted, from its retained records and the tariff of the view
 /// it pinned (the report's expected pay root fixes the tariff it was decided under):
-/// `creditFor amount = min amount maxPerObservation * creditPerAtomic` (PAY §2.3).
+/// `creditFor amount = min amount maxPerObservation * creditPerAtomic` (docs/PAY.md §2.3).
 fn report_credit(attempt: &Path) -> Result<(u128, u128, usize)> {
     let view = workspace::bounded_json(&attempt.join("view.json"))?;
     let tariff = view
@@ -1928,8 +1961,8 @@ fn v2_audit_source(session: &Session, origins: &[(Record, String)], offline: boo
         let mut statuses = Vec::new();
         for request in &requests {
             let payload = serde_json::to_vec(request).map_err(|e|e.to_string())?;
-            let frame = session.call(181, &payload)?;
-            let bytes = frame_body(&frame, 181)?;
+            let frame = session.call(mini_sdk::host_operations::PAY_CLAIM_VIEW, &payload)?;
+            let bytes = frame_body(&frame, mini_sdk::host_operations::PAY_CLAIM_VIEW)?;
             if bytes.len() > 8192 { return Err("source paid status exceeds its bound".into()); }
             let value = serde_json::from_slice(bytes).map_err(|e|format!("source paid status: {e}"))?;
             statuses.push(crate::pay_status::parse(&value, request)?);
@@ -2279,13 +2312,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 min_endpoints: decimal_flag(&mut args, "min-endpoints")?,
                 max_pages: decimal_flag(&mut args, "max-pages")?,
                 page_size: decimal_flag(&mut args, "page-size")?,
-                enrol: match (
-                    decimal_flag(&mut args, "enrol-index")?,
-                    decimal_flag(&mut args, "journal-floor")?,
-                ) {
-                    (Some(index), Some(floor)) => Some((index, floor)),
-                    (None, None) => None,
-                    _ => return Err("--enrol-index and --journal-floor go together".into()),
+                // `--enrol tariff`: the row and floor are the signed tariff's; there is no
+                // operator value to give.
+                enrol: match args.optional("enrol") {
+                    None => false,
+                    Some(value) if value == "tariff" => true,
+                    Some(_) => return Err("--enrol takes the one value `tariff`: the enrollment row and journal floor come from the signed tariff".into()),
                 },
             };
             args.finish()?;
@@ -2530,6 +2562,13 @@ mod tests {
     #[test]
     fn the_enrollment_index_comes_from_the_tariff_or_is_off() {
         assert_eq!(enrol_index_of(&json!({"tariff": null})).unwrap(), None);
+        assert_eq!(
+            tariff_enrol(&json!({"tariff": {"enrolIndex": "2", "journalFloor": "500000"}}), true).unwrap(),
+            Some((2, 500000))
+        );
+        assert_eq!(tariff_enrol(&json!({"tariff": {"enrolIndex": "2", "journalFloor": "1"}}), false).unwrap(), None);
+        assert!(tariff_enrol(&json!({"tariff": {"enrolIndex": null, "journalFloor": "1"}}), true).is_err());
+        assert!(tariff_enrol(&json!({"tariff": {"enrolIndex": "0"}}), true).is_err());
         assert_eq!(enrol_index_of(&json!({"tariff": {"enrolIndex": null}})).unwrap(), None);
         assert_eq!(enrol_index_of(&json!({"tariff": {"enrolIndex": "0"}})).unwrap(), Some(0));
         assert!(enrol_index_of(&json!({"tariff": {"enrolIndex": "01"}})).is_err());

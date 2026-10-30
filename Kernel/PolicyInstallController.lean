@@ -11,13 +11,34 @@ physical handler must stage the immutable source blob and atomically install
 that one cell with the remaining hyperedge participants before publishing the
 result.
 -/
-import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.TypedCellHyperedgeArtifact
-import Compiler.CanonicalRuntimeProfileCore
-import Theory.PolicyInstall
-import Compiler.PhysicalLawResolution
-import Compiler.CandidateLawResolution
-import Kernel.ReceivingLaw
+module
+
+public import Compiler.CredentialAuthorityPolicyRegistry
+public import Compiler.TypedCellHyperedgeArtifact
+public import Compiler.CanonicalRuntimeProfileCore
+public import Theory.PolicyInstall
+public import Compiler.PhysicalLawResolution
+public import Compiler.CandidateLawResolution
+public import Kernel.ReceivingLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PolicyInstallController
 
@@ -86,41 +107,47 @@ def declarationFrame : List UInt8 := "LOOM/POLICY/INSTALL".toUTF8.toList ++ [2]
 def encodeDeclaration (declaration : Declaration) : List UInt8 :=
   declarationFrame ++ declarationTupleStream.encode (declarationTuple declaration)
 
-def decodeDeclarationRaw (bytes : List UInt8) : Option Declaration :=
+theorem declarationTuple_of_tuple {tuple : DeclarationTuple} {declaration : Declaration}
+    (decoded : declarationOfTuple tuple = some declaration) :
+    declarationTuple declaration = tuple := by
+  obtain ⟨root, expected, nonce, sourceBytes⟩ := tuple
+  simp only [declarationOfTuple, Option.bind_eq_bind, Option.bind_eq_some_iff,
+    Option.some.injEq] at decoded
+  obtain ⟨source, sourceOk, rfl⟩ := decoded
+  simp [declarationTuple, policyRecordCodec_canonical sourceOk]
+
+/-- The frame, a fully consumed tuple, and a canonical policy record: one
+spelling per declaration (`decodeDeclaration_canonical`), with no re-encode. -/
+def decodeDeclaration (bytes : List UInt8) : Option Declaration :=
   if bytes.take declarationFrame.length = declarationFrame then do
     let tuple ← declarationTupleStream.toLawful.decode (bytes.drop declarationFrame.length)
     declarationOfTuple tuple
   else none
 
-@[simp] theorem decodeDeclarationRaw_encode (declaration : Declaration) :
-    decodeDeclarationRaw (encodeDeclaration declaration) = some declaration := by
+@[simp] theorem decodeDeclaration_encode (declaration : Declaration) :
+    decodeDeclaration (encodeDeclaration declaration) = some declaration := by
   have payload := declarationTupleStream.toLawful.decode_encode (declarationTuple declaration)
   change declarationTupleStream.toLawful.decode
     (declarationTupleStream.encode (declarationTuple declaration)) =
       some (declarationTuple declaration) at payload
-  simp [decodeDeclarationRaw, encodeDeclaration, payload]
-
-def decodeDeclaration (bytes : List UInt8) : Option Declaration := do
-  let declaration ← decodeDeclarationRaw bytes
-  if encodeDeclaration declaration = bytes then some declaration else none
-
-@[simp] theorem decodeDeclaration_encode (declaration : Declaration) :
-    decodeDeclaration (encodeDeclaration declaration) = some declaration := by
-  simp [decodeDeclaration]
+  simp [decodeDeclaration, encodeDeclaration, payload]
 
 theorem decodeDeclaration_canonical {bytes : List UInt8} {declaration : Declaration}
     (decoded : decodeDeclaration bytes = some declaration) :
     encodeDeclaration declaration = bytes := by
   unfold decodeDeclaration at decoded
-  cases raw : decodeDeclarationRaw bytes with
-  | none => simp [raw] at decoded
-  | some selected =>
-      simp only [raw, bind, Option.bind] at decoded
-      split at decoded
-      next canonical =>
-        cases Option.some.inj decoded
-        exact canonical
-      next => contradiction
+  split at decoded
+  · rename_i prefixed
+    cases payload : declarationTupleStream.toLawful.decode (bytes.drop declarationFrame.length) with
+    | none => simp [payload] at decoded
+    | some tuple =>
+        simp only [payload, bind, Option.bind] at decoded
+        have exact := declarationTupleStream.toLawful_canonical _ _ payload
+        change declarationFrame ++ declarationTupleStream.encode (declarationTuple declaration) = bytes
+        rw [declarationTuple_of_tuple decoded, exact]
+        conv => rhs; rw [← List.take_append_drop declarationFrame.length bytes]
+        rw [prefixed]
+  · cases decoded
 
 def declarationCodec : LawfulCodec Declaration where
   encode := encodeDeclaration

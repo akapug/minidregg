@@ -1,8 +1,8 @@
 //! Source-owned v3 launch claim plan, detached assembly, and fresh op26
 //! committed callback inspection. Physical INSTALL/START remains gated until
 //! the linked source receiver, completion, and volume joins qualify.
-#![allow(dead_code)] // Awaiting the physical v3 lifecycle caller.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
@@ -239,9 +239,10 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op68-requested.json", &active)?;
     write_new(parent, CLAIM_ACTIVE_MARKER, &active)?;
-    let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 68, PLAN_TAG)?;
+    crate::lifecycle_v3_native::host_refusal(operator, attempt_dir, "op68-claim-plan", false, &reply)?;
+    let plan = framed_payload("launch claim plan", &reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -278,9 +279,10 @@ pub(crate) fn assemble_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op69-requested.bin", &pair)?;
-    let reply = operator.invoke(69, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op69-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 69, INGRESS_TAG)?.to_vec();
+    crate::lifecycle_v3_native::host_refusal(operator, attempt_dir, "op69-claim-assemble", false, &reply)?;
+    let ingress = framed_payload("launch claim assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, CLAIM_INGRESS_FILE, &ingress)?;
     Ok(AssembledLaunchClaim {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -447,9 +449,10 @@ pub(crate) fn submit_fresh_once(
         "op26-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(26, &assembled.ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, &assembled.ingress)?;
     write_new(attempt_dir, "op26-frame.bin", &reply)?;
-    let committed = framed_payload(&reply, 26, COMMITTED_TAG)?.to_vec();
+    crate::lifecycle_v3_native::host_refusal(operator, attempt_dir, "op26-claim-submit", true, &reply)?;
+    let committed = crate::lifecycle_v3_native::committed_payload(operator, attempt_dir, "op26-claim-submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let inspection = operator.tool(
         "inspect",
@@ -528,8 +531,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v3 claim attempt parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join("lifecycle-claim-v3-active.json"))? != assembled.active_marker
-        || fs::read(attempt_dir.join("claim-v3.bin"))? != assembled.ingress
+    if fs::read(parent.join("lifecycle-claim-v3-active.json")).ctx("read", &(parent.join("lifecycle-claim-v3-active.json")))? != assembled.active_marker
+        || fs::read(attempt_dir.join("claim-v3.bin")).ctx("read", &(attempt_dir.join("claim-v3.bin")))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.descriptor_sha256 != hex(&Sha256::digest(&launch.descriptor().canonical))
     {
@@ -566,6 +569,7 @@ mod tests {
             signed_manifest_sha256: [0xbb; 32],
             signed_bridge_config_sha256: None,
             signed_bridge_config: None,
+            signed_data_config: None,
             manifest,
         };
         package.manifest.actions.push(Action {
@@ -618,11 +622,11 @@ mod tests {
         frame.push(69);
         frame.extend_from_slice(INGRESS_TAG);
         frame.push(1);
-        assert!(framed_payload(&frame, 69, INGRESS_TAG).is_ok());
+        assert!(framed_payload("launch claim assemble", &frame, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, INGRESS_TAG).is_ok());
         assert!(
-            framed_payload(&frame, 69, b"DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v2").is_err()
+            framed_payload("launch claim assemble", &frame, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, b"DREGG/APPLICATION/LIFECYCLE-CLAIM-INGRESS/v2").is_err()
         );
-        assert!(framed_payload(&frame, 53, INGRESS_TAG).is_err());
+        assert!(framed_payload("lifecycle claim assemble", &frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_ASSEMBLE, INGRESS_TAG).is_err());
     }
 
     #[test]

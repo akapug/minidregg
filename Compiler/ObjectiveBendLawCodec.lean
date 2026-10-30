@@ -4,17 +4,39 @@ A law travels as a postfix token stream (the way `PolicyRecordCodec` carries a `
 node is one token after its children, and decoding runs the tokens on a stack. The codec is
 lawful (`lawStream`, `lawsStream`): a law's bytes are a function of the law, and the artifact
 identity that hashes them commits exactly the laws. -/
-import Compiler.ObjectiveBendLaw
-import Compiler.PolicyRecordCodec
-import Compiler.IntStream
+module
+
+public import Compiler.ObjectiveBendLaw
+public import Compiler.PolicyRecordCodec
+public import Compiler.IntStream
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ObjectiveBendLawCodec
 open Minidregg.Compiler.ObjectiveBendLaw
 open Minidregg.Compiler.Tower256ConcreteBackend
 set_option autoImplicit false
 
+/-- A reference: a field by name, or one of four context words by index. The
+index table has a default arm, so only the indices `0`–`3` are accepted
+(`retract`); every larger index is refused rather than read as `turn`. -/
 def refStream : StreamCodec LawRef :=
-  StreamCodec.xmap (StreamCodec.sum PolicyRecordCodec.stringStream StreamCodec.nat)
+  StreamCodec.retract (StreamCodec.sum PolicyRecordCodec.stringStream StreamCodec.nat)
     (fun ref => match ref with
       | .field name => .inl name
       | .subject => .inr 0
@@ -101,10 +123,56 @@ theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
     decodeToken (encodeToken token ++ suffix) = some (token, suffix) := by
   cases token <;> simp [encodeToken, decodeToken, StreamCodec.decodePrefix_encode]
 
+set_option hygiene false in
+/-- One arm of `decodeToken`: each payload decode read back as the encoding it
+consumed. -/
+local macro "token_arm" : tactic => `(tactic| (
+  simp only [decodeToken, Option.bind_eq_bind] at decoded
+  repeat' (
+    rw [Option.bind_eq_some_iff] at decoded
+    obtain ⟨⟨_, _⟩, ok, decoded⟩ := decoded
+    have okBytes := StreamCodec.encode_decodePrefix _ _ _ _ ok
+    subst okBytes
+    try dsimp only at decoded)
+  simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+  obtain ⟨rfl, rfl⟩ := decoded
+  simp [encodeToken, List.append_assoc]))
+
+theorem encodeToken_decodeToken (bytes : List UInt8) (value : Token) (suffix : List UInt8)
+    (decoded : decodeToken bytes = some (value, suffix)) : encodeToken value ++ suffix = bytes := by
+  rcases bytes with _ | ⟨tag, bytes⟩
+  · cases decoded
+  by_cases t0 : tag = 0
+  · subst t0; token_arm
+  by_cases t1 : tag = 1
+  · subst t1; token_arm
+  by_cases t2 : tag = 2
+  · subst t2; token_arm
+  by_cases t3 : tag = 3
+  · subst t3; token_arm
+  by_cases t4 : tag = 4
+  · subst t4; token_arm
+  by_cases t5 : tag = 5
+  · subst t5; token_arm
+  by_cases t6 : tag = 6
+  · subst t6; token_arm
+  by_cases t7 : tag = 7
+  · subst t7; token_arm
+  by_cases t8 : tag = 8
+  · subst t8; token_arm
+  by_cases t9 : tag = 9
+  · subst t9; token_arm
+  by_cases t10 : tag = 10
+  · subst t10; token_arm
+  by_cases t11 : tag = 11
+  · subst t11; token_arm
+  simp [decodeToken, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11] at decoded
+
 def tokenStream : StreamCodec Token where
   encode := encodeToken
   decodePrefix := decodeToken
   decodePrefix_encode := decodeToken_encode
+  encode_decodePrefix := encodeToken_decodeToken
 
 def step : Token → List LawExpr → Option (List LawExpr)
   | .eqC ref value, stack => some (.eqC ref value :: stack)
@@ -171,6 +239,49 @@ def decodeLaw (tokens : List Token) : Option LawExpr := do
 @[simp] theorem decodeLaw_encode (law : LawExpr) : decodeLaw (encodeLaw law) = some law := by
   simp [decodeLaw, encodeLaw, runTokens_tokensInto, runTokens]
 
+/-- A stack as the postfix tokens that build it from empty, deepest law first,
+ahead of `rest`. -/
+def stackInto : List LawExpr → List Token → List Token
+  | [], rest => rest
+  | law :: stack, rest => stackInto stack (tokensInto law rest)
+
+/-- Every accepted step appends exactly its token to the stack's spelling. -/
+theorem step_stackInto {token : Token} {stack next : List LawExpr}
+    (stepped : step token stack = some next) (rest : List Token) :
+    stackInto stack (token :: rest) = stackInto next rest := by
+  unfold step at stepped
+  split at stepped <;> first | (cases stepped; rfl) | cases stepped
+
+theorem runTokens_stackInto (tokens : List Token) {stack next : List LawExpr}
+    (ran : runTokens tokens stack = some next) (rest : List Token) :
+    stackInto stack (tokens ++ rest) = stackInto next rest := by
+  induction tokens generalizing stack with
+  | nil =>
+      simp only [runTokens, Option.some.injEq] at ran
+      subst ran
+      rfl
+  | cons token tokens ih =>
+      cases stepped : step token stack with
+      | none => simp [runTokens, stepped] at ran
+      | some middle =>
+          simp only [runTokens, stepped, bind, Option.bind] at ran
+          rw [List.cons_append, step_stackInto stepped, ih ran]
+
+/-- Postfix decoding is canonical: a token list that decodes to a law is that
+law's encoding. -/
+theorem encodeLaw_decodeLaw {tokens : List Token} {law : LawExpr}
+    (decoded : decodeLaw tokens = some law) : encodeLaw law = tokens := by
+  unfold decodeLaw at decoded
+  cases ran : runTokens tokens [] with
+  | none => simp [ran] at decoded
+  | some stack =>
+      have built := runTokens_stackInto tokens ran []
+      simp only [ran, bind, Option.bind] at decoded
+      split at decoded
+      · cases decoded
+        simpa [stackInto, encodeLaw] using built.symm
+      · cases decoded
+
 def lawStream : StreamCodec LawExpr where
   encode law := (StreamCodec.list tokenStream).encode (encodeLaw law)
   decodePrefix bytes := do
@@ -180,6 +291,20 @@ def lawStream : StreamCodec LawExpr where
   decodePrefix_encode := by
     intro law suffix
     simp [StreamCodec.decodePrefix_encode, decodeLaw_encode]
+  encode_decodePrefix := by
+    intro bytes law suffix decoded
+    cases listed : (StreamCodec.list tokenStream).decodePrefix bytes with
+    | none => simp [listed] at decoded
+    | some pair =>
+      obtain ⟨tokens, rest⟩ := pair
+      cases inner : decodeLaw tokens with
+      | none => simp [listed, inner] at decoded
+      | some decodedLaw =>
+        simp only [listed, inner, bind, Option.bind, pure, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [encodeLaw_decodeLaw inner]
+        exact StreamCodec.encode_decodePrefix _ _ _ _ listed
 
 /-- A package's laws, in declaration order. -/
 def lawsStream : StreamCodec (List (String × LawExpr)) :=
@@ -194,5 +319,7 @@ theorem lawsStream_injective {a b : List (String × LawExpr)} (same : lawsStream
 #assert_axioms decodeToken_encode
 #assert_axioms runTokens_tokensInto
 #assert_axioms decodeLaw_encode
+#assert_axioms encodeToken_decodeToken
+#assert_axioms encodeLaw_decodeLaw
 #assert_axioms lawsStream_injective
 end Minidregg.Compiler.ObjectiveBendLawCodec

@@ -8,9 +8,29 @@ and `frontEnd` names the one Lean front end (`ObjectiveBendFrontEndIdentity.iden
 whose output on these sources the receiver recomputes and requires
 (`ObjectiveBendPublication.publishedCore`, `ObjectiveBendNativeAdmission.SourceSelection`).
 An edition-2 package (three tool pins, stored ASTs) does not decode. -/
-import Compiler.NativeInvocationStatement
-import Compiler.PolicyRecordCodec
-import Theory.AssertAxioms
+module
+
+public import Compiler.NativeInvocationStatement
+public import Compiler.PolicyRecordCodec
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveSourcePackage
 open Minidregg.Theory Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
@@ -52,18 +72,15 @@ def stream : StreamCodec Package :=
     (fun p => ⟨p.1,p.2.1,p.2.2.1,p.2.2.2⟩)
     (by intro p; cases p; rfl)
 def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-PACKAGE".toUTF8.toList ++ [3]
-def rawCodec : LawfulCodec Package where
-  encode p := frame ++ stream.encode p
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro p
-    have exact := stream.toLawful.decode_encode p
-    change stream.toLawful.decode (stream.encode p) = some p at exact
-    simp [exact]
-def codec : LawfulCodec Package := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Package := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
+
+/-- `decode` straight from a file's buffer, with no list in between (`decodeBytes_eq`). -/
+def decodeBytes (bytes : ByteArray) : Option Package := (StreamCodec.framed frame stream).decodeBytes bytes
+
+theorem decodeBytes_eq (bytes : ByteArray) : decodeBytes bytes = decode bytes.toList :=
+  (StreamCodec.framed frame stream).decodeBytes_eq bytes
 
 def identity (p : Package) : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-PACKAGE/v3".toUTF8.toList (encode p)).digest
@@ -91,7 +108,7 @@ theorem encode_injective {a b : Package} (same : encode a = encode b) : a = b :=
   simpa only [roundtrip,Option.some.injEq] using decoded
 theorem decoded_canonical {bytes : List UInt8} {p : Package}
     (accepted : decode bytes = some p) : encode p = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 #assert_axioms roundtrip
 #assert_axioms encode_injective
 #assert_axioms decoded_canonical

@@ -5,8 +5,12 @@ before a read-guarded event-only CAS. Exact historical retry selects the
 accepted packet/envelope without reapplying changed current law. Fn transport
 may only attribute source authorization to an accepted event, not preparation.
 -/
-import Kernel.FnSelectiveReleaseSourceAuthority
-import Kernel.NativeHostContext
+module
+
+public import Kernel.FnSelectiveReleaseSourceAuthority
+public import Kernel.NativeHostContext
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseSourceReceiver
 
@@ -42,11 +46,14 @@ def replay {config : NativeHost.Config} (opened : NativeHost.Opened config) (ing
         some (.ok (receipt ingress))
       else some (.error ())
 
-def charge (ingress : Ingress) : ResourceCost.Charge
+/-- The turn's charge: it writes nothing, so its storage lane is the World's
+storage of its guards and its retained event (`DeployedCharge.storageCharge`). -/
+def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (guards : List ReadGuard)
+    (ingress : Ingress) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => (ingressCodec.encode ingress).length
   | .memoryTouches => 1
-  | .storageBytes => (ingressCodec.encode ingress).length
+  | .storageBytes => DeployedCharge.storageCharge snap [] (event ingress)
   | .witnessBytes => (ingressCodec.encode ingress).length
   | .proofWork => 1
   | .sideEffectCount => 1
@@ -59,6 +66,13 @@ structure Accepted (config : NativeHost.Config) (opened : NativeHost.Opened conf
     (sourceContext config opened) config.profile config.federation
     (NativeHost.logicalHeight config opened.durable) ingress.spec
   checked : FnSelectiveReleaseSourceAuthority.Checked prepared ingress.nativeEnvelope
+theorem Accepted.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {ingress : Ingress} (accepted : Accepted config opened ingress) :
+    accepted.checked.signature.envelopeBytes = ingress.nativeEnvelope ∧
+    FnSelectiveReleaseSourceAuthority.authorize accepted.prepared accepted.checked.signature =
+      some accepted.checked.authorization ∧
+    ingress.spec.packet.release.source.parent = accepted.prepared.root :=
+  ⟨accepted.checked.envelopeExact, accepted.checked.authorized, accepted.prepared.sourceRoot⟩
 
 def admitLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : Ingress) : IO (Except String (Accepted config opened ingress)) := do
@@ -78,12 +92,14 @@ is external and cannot be inferred from this Mini receipt. -/
 def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : Ingress) (accepted : Accepted config opened ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
+  let guards := FnSelectiveReleaseSourceAuthority.readGuards accepted.prepared ++
+    (sourceContext config opened).authorityReadGuards
   { transactionId := transactionId ingress.spec
     writes := []
-    readGuards := FnSelectiveReleaseSourceAuthority.readGuards accepted.prepared ++
-      (sourceContext config opened).authorityReadGuards
+    readGuards := guards
     nullifiers := [nullifier ingress.spec]
-    exactCharge := charge ingress
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+      (charge opened.durable.snapshot guards ingress)).toCharge
     event := event ingress
     subject := some ⟨ingress.spec.packet.release.owner.subject⟩
     postRootsBound := by intro write present; cases present

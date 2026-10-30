@@ -3,8 +3,9 @@
 //
 //   Profile → Intent (typed cut) → explain() → Confirmation → sign → submit → Receipt | lookup
 //
-// It builds and signs; it never executes, proves, or re-derives a plan. The plan check is the
-// member's local Lean consent process (reached from a browser through a native-messaging bridge).
+// It builds and signs; it never executes, proves, or re-derives a plan. It has NO transport: nothing
+// here reaches a Host, a node, or the member's local Lean consent process (the plan check). The caller
+// brings the Host-returned header bytes and carries the signed result wherever it goes.
 export { SdkError, hex, unhex, sha256 } from "./bytes.ts";
 export { call, core, installCore, type Core } from "./core.ts";
 export { BREAD_PATH, derive, ed25519Signer, miniPath, Profile, PUBLIC_KEY_LEN, SCHEMES, SIGNATURE_LEN, signRaw, verify, type Key, type Scheme, type Signer } from "./profile.ts";

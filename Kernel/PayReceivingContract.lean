@@ -6,7 +6,11 @@ the PayCell schema. Numeric public operation allocation belongs to the native
 control registry; this leaf does not claim that routing metadata is a
 runtime-profile input.
 -/
-import Init
+module
+
+public import Init
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayReceivingContract
 
@@ -24,10 +28,10 @@ def receivingVersion : List UInt8 :=
 @[simp] def memoPossession : List UInt8 := "DREGG/PAY/ENROL/POSSESSION/v2".toUTF8.toList
 @[simp] def sshNamespace : List UInt8 := "dregg-enrol@v2".toUTF8.toList
 @[simp] def observationFrame : List UInt8 := "DREGG/PAY/CLAIM/OBSERVATION/v1".toUTF8.toList
-@[simp] def claimFrame : List UInt8 := "DREGG/PAY/CLAIM/v2".toUTF8.toList
-@[simp] def pendingOwnerFrame : List UInt8 := "DREGG/PAY/PENDING-OWNER/v1".toUTF8.toList
+@[simp] def claimFrame : List UInt8 := "DREGG/PAY/CLAIM/v6".toUTF8.toList
+@[simp] def pendingOwnerFrame : List UInt8 := "DREGG/PAY/PENDING-OWNER/v5".toUTF8.toList
 @[simp] def acceptRequestFrame : List UInt8 := "DREGG/PAY/CLAIM/ACCEPT/v1".toUTF8.toList
-@[simp] def consumptionFrame : List UInt8 := "DREGG/PAY/CLAIM/CONSUMPTION/v2".toUTF8.toList
+@[simp] def consumptionFrame : List UInt8 := "DREGG/PAY/CLAIM/CONSUMPTION/v6".toUTF8.toList
 @[simp] def commandFrame : List UInt8 := "DREGG/PAY/CLAIM/COMMAND/v1".toUTF8.toList
 @[simp] def claimPossession : List UInt8 := "DREGG/PAY/CLAIM/POSSESSION/v1".toUTF8.toList
 @[simp] def ingressFrame : List UInt8 := "DREGG/PAY/CLAIM/SIGNED/v1".toUTF8.toList

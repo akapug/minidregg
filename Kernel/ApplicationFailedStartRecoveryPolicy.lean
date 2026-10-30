@@ -1,6 +1,27 @@
 /- Current management policy admission for a verified failed START custody report. Only the dedicated checked reconciliation slot changes the policy projection; current per-incidence signature, grant, revision and epoch admission remain decisive. -/
-import Kernel.ApplicationFailedStartRecoveryReport
-import Kernel.DeclaredResourceController
+module
+
+public import Kernel.ApplicationFailedStartRecoveryReport
+public import Kernel.DeclaredResourceController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedStartRecoveryPolicy
 
@@ -242,6 +263,37 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   legs : (incidence : DeclaredResourceController.Incidence command) →
     DeclaredResourceController.incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple physical incidence (signed.envelope command incidence)
+
+/-- The signed command bytes encode the prepared command, and every incidence but an
+observe-only read target has a signature over exactly `signed`'s envelope for that
+incidence whose leg this policy's `authorizeLeg` admits over `prepared`, the prepared
+tuple and the `physical` report. -/
+theorem Accepted.legs_admitted {F : Type} [Field F] [DecidableEq F]
+    {deployment : CanonicalCellRegistry.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : DeclaredResourceController.Ambient}
+    {ground : Ground deployment}
+    {command : DeclaredResourceController.Command}
+    {prepared : DeclaredResourceController.PreparedInvocation
+      deployment profile ambient ground command}
+    {signed : DeclaredResourceController.SignedCommand}
+    {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
+    {physical : Checked domain semantics publicKey begin}
+    (accepted : Accepted prepared signed physical) :
+    DeclaredResourceController.commandCodec.encode command = signed.commandBytes ∧
+      ∀ incidence : DeclaredResourceController.Incidence command,
+        DeclaredResourceController.incidenceObserveOnly command incidence = false →
+        ∃ (receipt : CredentialSignatureAdmission.CheckedSignature ground.authority)
+          (authorization : Authorized (portals prepared accepted.tuple physical incidence)
+            ground.authority.authState (accepted.tuple.request incidence).2),
+          receipt.envelopeBytes = signed.envelope command incidence ∧
+            authorizeLeg prepared accepted.tuple incidence physical receipt = .ok authorization :=
+  ⟨accepted.ingressExact, fun incidence observeOnly =>
+    ⟨(accepted.legs incidence observeOnly).receipt,
+      (accepted.legs incidence observeOnly).authorization,
+      (accepted.legs incidence observeOnly).envelopeExact,
+      (accepted.legs incidence observeOnly).admitted⟩⟩
 
 def admit {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}

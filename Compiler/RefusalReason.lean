@@ -38,11 +38,35 @@ the intent's bytes is checked against its current key before a target is read
 Blind submission keeps its uniform refusal (`undisclosed`); see
 `NativeHost.publicSubmissionOutcome`.
 -/
-import Compiler.Tower256ConcreteBackend
-import Compiler.CredentialSignatureAdmission
-import Theory.AuthorizationDeclaration
-import Compiler.PolicyRecordCodec
-import Pred.Leaf
+module
+
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.CredentialSignatureAdmission
+public import Theory.AuthorizationDeclaration
+public import Compiler.PolicyRecordCodec
+public import Pred.Leaf
+meta import Compiler.Tower256ConcreteBackend
+meta import Compiler.CredentialSignatureAdmission
+meta import Theory.AuthorizationDeclaration
+meta import Compiler.PolicyRecordCodec
+meta import Pred.Leaf
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 
@@ -93,6 +117,20 @@ inductive RefusalReason where
   reached only after the requester's read authority is established; a blind
   submission still tells it as `undisclosed`. -/
   | audienceTransition
+  /-- A value the request carries or derives is past a static limit
+  (`Kernel.Bounds`): a frame past its bound, or an intent past a leg, touched
+  cell, cell byte or nullifier bound. The detail names the bound, the value and
+  the limit (`Kernel.Bounds.Refusal.render`). Like every admission branch it is
+  told as `undisclosed` on a blind submission. -/
+  | overBound
+  /-- The requesting subject has used its request rate for the current window
+  (`Kernel.SubjectRate`): told on the subject the request claims, before its
+  signature is checked and before any Store work, so it discloses only that the
+  claimed subject's window is full (its activity level, never a state fact about a
+  target). The detail names the milliseconds until the window reopens
+  (`retry-after-ms N`). A forged request never charges the window it claims
+  (`SubjectRate.charge_other`). -/
+  | rateLimited
   deriving DecidableEq, Repr, Inhabited
 
 namespace RefusalReason
@@ -114,6 +152,8 @@ def name : RefusalReason → String
   | .undisclosed => "undisclosed"
   | .tailBound => "tail-bound"
   | .audienceTransition => "audience-transition"
+  | .overBound => "over-bound"
+  | .rateLimited => "rate-limited"
 
 /-- Fixed friend-facing text. It depends on the reason only. -/
 def describe : RefusalReason → String
@@ -132,11 +172,13 @@ def describe : RefusalReason → String
   | .undisclosed => "request refused; a blind submission discloses no reason"
   | .tailBound => "the node is past its tail bound; no write is admitted until the next checkpoint"
   | .audienceTransition => "a holder of the object's current audience epoch no longer stands; the owner rotates the epoch before new protected bytes"
+  | .overBound => "a value in the request is past a static bound; the detail names the bound, the value and the limit"
+  | .rateLimited => "this subject has used its request rate for now; the detail names the milliseconds until it may retry"
 
 def all : List RefusalReason :=
   [.malformed, .unknownKey, .staleRoot, .badSignature, .noGrant, .revoked,
     .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed,
-    .lawInputRange, .tailBound, .audienceTransition]
+    .lawInputRange, .tailBound, .audienceTransition, .overBound, .rateLimited]
 
 theorem mem_all (reason : RefusalReason) : reason ∈ all := by
   cases reason <;> decide
@@ -164,6 +206,8 @@ def stream : StreamCodec RefusalReason where
     | .lawInputRange => [12]
     | .tailBound => [13]
     | .audienceTransition => [14]
+    | .overBound => [15]
+    | .rateLimited => [16]
   decodePrefix
     | 0 :: suffix => some (.malformed, suffix)
     | 1 :: suffix => some (.unknownKey, suffix)
@@ -180,11 +224,13 @@ def stream : StreamCodec RefusalReason where
     | 12 :: suffix => some (.lawInputRange, suffix)
     | 13 :: suffix => some (.tailBound, suffix)
     | 14 :: suffix => some (.audienceTransition, suffix)
+    | 15 :: suffix => some (.overBound, suffix)
+    | 16 :: suffix => some (.rateLimited, suffix)
     | _ => none
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (15 :: suffix) = none := rfl
+    stream.decodePrefix (17 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the
@@ -419,14 +465,27 @@ open Minidregg.Pred
 /-- The write guard (`request/verb` 2 is `write`, `CredentialAuthorityEntryCodec.verbTag`). -/
 def writeGuard : Pred := .not (.eq "request/verb" 2)
 
-/-- The clause as its author wrote it: a disjunction's write guards are dropped, and a
-guarded single clause is that clause. On a refused write every guard is false, so it is
-never the reason. -/
-def explained : Pred → Pred
+/-- The selector guard of a neutral law component (`LawComposition.neutralComponent`, the lift
+every installed law goes through: `Component.guarded` is `any [ not selector, law ]`). Its
+selector selects every step, so the guard is false on every step and never the reason. -/
+def neutralGuard : Pred := .not (Minidregg.Theory.LawComposition.Selector.predicate {})
+
+/-- One step of `explained`: a disjunction's write guards and neutral selector guards are
+dropped, and a guarded single clause is that clause. -/
+def explainedStep : Pred → Pred
   | .anyL ps =>
-      match ps.toList.filter (· != writeGuard) with
+      match ps.toList.filter (fun q => q != writeGuard && q != neutralGuard) with
       | [clause] => if ps.toList.length = 1 then .anyL ps else clause
       | rest => if rest.length = ps.toList.length then .anyL ps else Pred.any rest
+  | clause => clause
+
+/-- The clause as its author wrote it. On a refused write every write guard is false, and a
+neutral selector guard is false on every step, so neither is ever the reason. An installed
+law is its author's clause under the neutral component's guard (`any [ not (all [ open, open,
+open ]), any [ not (verb == write), field 2 <= 3 ] ]`), so the guard is dropped first and the
+author's own guarded clause then explained (`field 2 <= 3`). -/
+def explained : Pred → Pred
+  | .anyL ps => explainedStep (explainedStep (.anyL ps))
   | clause => clause
 
 /-- The slot an explained clause reads: an atom's, or a negated atom's. -/
@@ -574,6 +633,20 @@ def predStream : StreamCodec Pred where
   decodePrefix_encode := by
     intro clause suffix
     simp [StreamCodec.decodePrefix_encode, PolicyRecordCodec.decodePred_encode]
+  encode_decodePrefix := by
+    intro bytes clause suffix decoded
+    cases listed : (StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix bytes with
+    | none => simp [listed] at decoded
+    | some pair =>
+      obtain ⟨tokens, rest⟩ := pair
+      cases inner : PolicyRecordCodec.decodePred tokens with
+      | none => simp [listed, inner] at decoded
+      | some decodedClause =>
+        simp only [listed, inner, bind, Option.bind, pure, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PolicyRecordCodec.encodePred_decodePred inner]
+        exact StreamCodec.encode_decodePrefix _ _ _ _ listed
 
 def stream : StreamCodec LawLeaf :=
   StreamCodec.xmap
@@ -1037,6 +1110,26 @@ theorem owner_told_value :
     narrowed none vaultLaw (write 1 4242) (write 1 4242) =
       some ⟨[], vaultLaw, some 4242, some 4242⟩ := by
   decide
+
+/-- `vaultLaw` as the kernel installs it: the one neutral component of a law with no
+selector (`LawComposition.neutralComponent`, `effective` over one node). -/
+def installedVaultLaw : Pred :=
+  Pred.all [(Minidregg.Theory.LawComposition.neutralComponent vaultLaw).guarded]
+
+/-- **The owner is told the author's clause and its value on the law as installed** (JDISCLOSE
+narrow-owner). The neutral selector guard the installation adds is not the reason, so the
+owner reads `field 2 <= 3 (value 9)`, not the guarded wrapper with no value. -/
+theorem owner_told_value_installed :
+    (narrowed none installedVaultLaw (write 1 9) (write 1 9)).map render =
+      some "field 2 <= 3 (value 9)" := by
+  native_decide
+
+/-- The narrowed requester still learns nothing over field 2 on the installed law, whatever
+field 2 holds. -/
+theorem narrowed_hides_uncovered_installed :
+    narrowed bobFields installedVaultLaw (write 1 4242) (write 1 4242) = none ∧
+      narrowed bobFields installedVaultLaw (write 1 5) (write 1 5) = none := by
+  native_decide
 
 end NarrowSample
 

@@ -8,8 +8,18 @@ use std::process::{Child, Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod support;
+
+/// The crash and hold fixtures' child (`support`): a no-op unless re-executed as one.
+#[test]
+fn fixture_child() {
+    support::run_if_child()
+}
+
+// The 14-byte recovery record Lean authors (Assurance.HyperdocumentLinkLocalFileStore.recoveryFixture;
+// regenerate with `lake env lean --run scripts/EmitHyperdocumentLinkRecoveryFixture.lean OUTPUT`).
 const LEAN_FIXTURE: &[u8] =
-    include_bytes!("../../hyperdocument-link-store/fixtures/hyperdocument-link-recovery-v1.bin");
+    include_bytes!("hyperdocument-link-recovery-v1.bin");
 
 struct TempDir(PathBuf);
 
@@ -52,11 +62,8 @@ fn input_file(temp: &TempDir, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 fn crash_publish(root: &Path, input: &Path, phase: &str) -> ExitStatus {
-    Command::new(binary())
-        .args(["publish-crash"])
-        .arg(root)
-        .arg(input)
-        .arg(phase)
+    support::fixture(&[std::ffi::OsStr::new("publish-crash"), root.as_os_str(), input.as_os_str(), phase.as_ref()])
+        .stdout(std::process::Stdio::null())
         .status()
         .expect("run crash publisher")
 }
@@ -120,12 +127,8 @@ fn concurrent_conflicting_transaction_waits_then_fails_without_overwrite() {
     let ready = temp.path().join("ready");
     let release = temp.path().join("release");
 
-    let mut holder = Command::new(binary())
-        .arg("publish-hold")
-        .arg(temp.path())
-        .arg(&first)
-        .arg(&ready)
-        .arg(&release)
+    let mut holder = support::fixture(&[std::ffi::OsStr::new("publish-hold"), temp.path().as_os_str(), first.as_os_str(), ready.as_os_str(), release.as_os_str()])
+        .stdout(std::process::Stdio::null())
         .spawn()
         .expect("spawn holding transaction");
     wait_for(&ready, &mut holder);
@@ -247,12 +250,8 @@ fn update_crash_before_commit_preserves_old_image_after_commit_preserves_new() {
         drop(store);
         let before = input_file(&temp, "before.bin", b"whole-before-image");
         let after = input_file(&temp, "after.bin", b"whole-after-image-with-all-cells");
-        let status = Command::new(binary())
-            .arg("cas-crash")
-            .arg(temp.path())
-            .arg(before)
-            .arg(after)
-            .arg(phase)
+        let status = support::fixture(&[std::ffi::OsStr::new("cas-crash"), temp.path().as_os_str(), before.as_os_str(), after.as_os_str(), phase.as_ref()])
+            .stdout(std::process::Stdio::null())
             .status()
             .unwrap();
         assert!(!status.success());

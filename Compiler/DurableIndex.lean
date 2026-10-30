@@ -21,17 +21,41 @@ with one root. This module pins its deployed shape:
   security floor is therefore cSHAKE256's COLLISION resistance at a 256-bit
   output (about 2^128 work), not its second-preimage resistance.
 -/
-import Theory.AuthTrieRange
-import Compiler.Sp800185Cshake256
-import Kernel.WorldRoot
-import Compiler.DurableReceiverCodec
-import Theory.AssertCompiled
+module
+
+public import Theory.AuthTrieRange
+public import Compiler.Sp800185Cshake256
+public import Kernel.WorldRoot
+public import Compiler.DurableReceiverCodec
+public import Theory.AssertCompiled
+meta import Theory.AuthTrieRange
+meta import Compiler.Sp800185Cshake256
+meta import Kernel.WorldRoot
+meta import Compiler.DurableReceiverCodec
+meta import Theory.AssertCompiled
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableIndex
 
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Theory.AuthTrie (NodeIn Collision WF entries tree)
+open Minidregg.Theory.AuthTrie (NodeIn Collision CollisionAmong TreeNode ClimbNode WF entries tree)
 
 set_option autoImplicit false
 
@@ -126,13 +150,10 @@ theorem nodeBytes_injective {a b : NodeIn IndexKey (List UInt8) Digest}
 def dig (node : NodeIn IndexKey (List UInt8) Digest) : Digest :=
   (Sp800185Cshake256.hash nodeCustomization (nodeBytes node)).digest
 
-/-- **A node collision is a cSHAKE256 collision**: two different inputs under the
-node customization with one 32-byte output. -/
-theorem collision_is_cshake (collision : Collision dig) :
-    ∃ x y : List UInt8, x ≠ y ∧
-      Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
-  obtain ⟨a, b, differ, same⟩ := collision
-  refine ⟨nodeBytes a, nodeBytes b, fun eq => differ (nodeBytes_injective eq), ?_⟩
+/-- One node digest is one cSHAKE256 output over the node bytes. -/
+theorem hash_eq_of_dig_eq {a b : NodeIn IndexKey (List UInt8) Digest} (same : dig a = dig b) :
+    Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+      Sp800185Cshake256.hash nodeCustomization (nodeBytes b) := by
   have bytesEq := congrArg Sp800185Cshake256.digestBytesLE same
   simp only [dig, Sp800185Cshake256.Output.digest] at bytesEq
   rw [Sp800185Cshake256.digestBytesLE_digestOfBytesLE _ (Sp800185Cshake256.hash _ _).length_exact,
@@ -144,22 +165,46 @@ theorem collision_is_cshake (collision : Collision dig) :
   subst bytesEq
   rfl
 
+/-- **A node collision is a cSHAKE256 collision**: two different inputs under the
+node customization with one 32-byte output. -/
+theorem collision_is_cshake (collision : Collision dig) :
+    ∃ x y : List UInt8, x ≠ y ∧
+      Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
+  obtain ⟨a, b, differ, same⟩ := collision
+  exact ⟨nodeBytes a, nodeBytes b, fun eq => differ (nodeBytes_injective eq), hash_eq_of_dig_eq same⟩
+
+/-- **A scoped node collision is a scoped cSHAKE256 collision**: the two colliding
+cSHAKE256 inputs are the node bytes of two of the named nodes. -/
+theorem collisionAmong_is_cshake {S : NodeIn IndexKey (List UInt8) Digest → Prop}
+    (collision : CollisionAmong dig S) :
+    ∃ a b, S a ∧ S b ∧ nodeBytes a ≠ nodeBytes b ∧
+      Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+        Sp800185Cshake256.hash nodeCustomization (nodeBytes b) := by
+  obtain ⟨a, b, ha, hb, differ, same⟩ := collision
+  exact ⟨a, b, ha, hb, fun eq => differ (nodeBytes_injective eq), hash_eq_of_dig_eq same⟩
+
 /-! ## Soundness at the deployed shape -/
 
 /-- The canonical root of a logical map (key ↦ value bytes). -/
 def rootOf (kvs : List (IndexKey × List UInt8)) : Digest := tree dig 520 (entries bitsOf kvs)
 
 /-- **A verified single answer is the map's** (presence with its value, or verified
-absence), or a cSHAKE256 collision is exhibited. -/
+absence), or a cSHAKE256 collision between the node bytes of two nodes the
+canonical tree or this opening's climb hashed. -/
 theorem lookup_sound (kvs : List (IndexKey × List UInt8)) (wf : WF 520 (entries bitsOf kvs))
     (k : IndexKey) (answer : Option (List UInt8))
     (opening : Theory.AuthTrie.Opening IndexKey (List UInt8) Digest)
     (accepted : Theory.AuthTrie.verify dig bitsOf (rootOf kvs) k answer opening = true) :
     answer = Theory.AuthTrie.lookup (entries bitsOf kvs) k ∨
-      ∃ x y : List UInt8, x ≠ y ∧
-        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y :=
+      ∃ a b, (TreeNode dig 520 (entries bitsOf kvs) a ∨
+          ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings a) ∧
+        (TreeNode dig 520 (entries bitsOf kvs) b ∨
+          ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings b) ∧
+        nodeBytes a ≠ nodeBytes b ∧
+        Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+          Sp800185Cshake256.hash nodeCustomization (nodeBytes b) :=
   (Theory.AuthTrie.verify_sound dig bitsOf 520 bitsOf_length kvs wf k answer opening accepted).imp_right
-    collision_is_cshake
+    collisionAmong_is_cshake
 
 /-- **A verified reveal answers exactly the members under its prefix** — none
 omitted (so an empty answer is a verified absence of the whole family member
@@ -262,14 +307,21 @@ def Answer.height {root : Digest} {k : IndexKey} (answer : Answer root k) : Opti
   answer.value.bind heightOf
 
 /-- **The verified answer is the map's** (at the deployed shape): whatever opening
-was accepted, its value is the logical map's lookup, or cSHAKE256 collides. -/
+was accepted, its value is the logical map's lookup, or that accepted opening's
+climb and the canonical tree hashed two nodes whose bytes collide under cSHAKE256. -/
 theorem Answer.sound {kvs : List (IndexKey × List UInt8)} {k : IndexKey}
     (wf : WF 520 (entries bitsOf kvs)) (answer : Answer (rootOf kvs) k) :
     answer.value = Theory.AuthTrie.lookup (entries bitsOf kvs) k ∨
-      ∃ x y : List UInt8, x ≠ y ∧
-        Sp800185Cshake256.hash nodeCustomization x = Sp800185Cshake256.hash nodeCustomization y := by
+      ∃ opening : Opening, verify (rootOf kvs) k answer.value opening = true ∧
+        ∃ a b, (TreeNode dig 520 (entries bitsOf kvs) a ∨
+            ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings a) ∧
+          (TreeNode dig 520 (entries bitsOf kvs) b ∨
+            ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings b) ∧
+          nodeBytes a ≠ nodeBytes b ∧
+          Sp800185Cshake256.hash nodeCustomization (nodeBytes a) =
+            Sp800185Cshake256.hash nodeCustomization (nodeBytes b) := by
   obtain ⟨opening, accepted⟩ := answer.opens
-  exact lookup_sound kvs wf k answer.value opening accepted
+  exact (lookup_sound kvs wf k answer.value opening accepted).imp_right fun c => ⟨opening, accepted, c⟩
 
 theorem empty_absent (k : IndexKey) : verify emptyDigest k none ⟨[], .empty⟩ = true := by
   simp [verify, Theory.AuthTrie.verify, Theory.AuthTrie.climb, Theory.AuthTrie.Terminal.input, emptyDigest]
@@ -313,11 +365,46 @@ def Row.digest : Row → Digest
   | .leaf k v => dig (.leaf k v)
   | .branch l r => dig (.branch l r)
 
+/-- One octet of bits, most significant first and zero-padded on the right. -/
+def packByte (chunk : List Bool) : UInt8 :=
+  UInt8.ofNat (chunk.foldl (fun acc bit => acc * 2 + (if bit then 1 else 0)) (0 : Nat) * 2 ^ (8 - chunk.length))
+
 /-- Bits packed eight to an octet, most significant first (the last octet zero-padded). -/
 def packBits (bits : List Bool) : List UInt8 :=
-  (List.range ((bits.length + 7) / 8)).map fun i =>
-    let chunk := (bits.drop (8 * i)).take 8
-    UInt8.ofNat (chunk.foldl (fun acc bit => acc * 2 + (if bit then 1 else 0)) (0 : Nat) * 2 ^ (8 - chunk.length))
+  (List.range ((bits.length + 7) / 8)).map fun i => packByte ((bits.drop (8 * i)).take 8)
+
+/-- One pass over the bits: each step consumes only the next octet, rather than
+re-dropping the whole prefix for every output byte. -/
+def packBitsFast : List Bool → List UInt8
+  | [] => []
+  | b :: rest => packByte ((b :: rest).take 8) :: packBitsFast ((b :: rest).drop 8)
+termination_by bits => bits.length
+decreasing_by
+  simp only [List.length_drop, List.length_cons]
+  omega
+
+theorem packBits_cons (b : Bool) (rest : List Bool) :
+    packBits (b :: rest) = packByte ((b :: rest).take 8) :: packBits ((b :: rest).drop 8) := by
+  have count : ((b :: rest).length + 7) / 8 = (((b :: rest).drop 8).length + 7) / 8 + 1 := by
+    simp only [List.length_cons, List.length_drop]
+    omega
+  rw [packBits, count, List.range_succ_eq_map]
+  simp only [List.map_cons, List.map_map, Nat.mul_zero, List.drop_zero, Function.comp_apply]
+  congr 1
+  rw [packBits]
+  apply List.map_congr_left
+  intro i _
+  simp only [Nat.mul_add, Nat.mul_one, List.drop_drop]
+  change packByte (((b :: rest).drop (8 * (i + 1))).take 8) =
+    packByte (((b :: rest).drop (8 + 8 * i)).take 8)
+  rw [show 8 * (i + 1) = 8 + 8 * i by omega]
+
+/-- Compiled row keys use the single-pass packer; the specification is unchanged. -/
+@[csimp] theorem packBits_eq_packBitsFast : @packBits = @packBitsFast := by
+  funext bits
+  induction bits using packBitsFast.induct with
+  | case1 => simp [packBits, packBitsFast]
+  | case2 b rest ih => rw [packBits_cons, packBitsFast, ih]
 
 /-- The Store key of the row at a bit prefix: its length, then its packed bits. -/
 def rowKey (prefixBits : List Bool) : List UInt8 :=
@@ -1063,6 +1150,7 @@ end Probe
 #assert_axioms key_injective
 #assert_axioms family_disjoint
 #assert_axioms bitsOf_length
+#assert_axioms packBits_eq_packBitsFast
 #assert_axioms nodeBytes_injective
 #assert_axioms collision_is_cshake
 #assert_axioms lookup_sound

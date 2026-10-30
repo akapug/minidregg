@@ -2,8 +2,27 @@
 The caller must be the restricted native Host route that runs the pinned fn
 binary, checks its exact scope/control identity, and supplies its fenced
 position/status. These numbers are not portable evidence or remote proof. -/
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Lean.Data.Json
+module
+
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.FnConsumerNamespacePlan
 
@@ -58,9 +77,7 @@ def planStream : StreamCodec Plan :=
     (by intro plan; cases plan; rfl)
 
 def planCodec : LawfulCodec Plan :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-PLAN/v1".toUTF8.toList
-      planStream)
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-NAMESPACE-PLAN/v1".toUTF8.toList planStream
 
 theorem plan_decode_encode (plan : Plan) :
     planCodec.decode (planCodec.encode plan) = some plan :=
@@ -198,7 +215,7 @@ def inspectPlanBytes (bytes : List UInt8) : Except String Lean.Json := do
     throw "fn consumer namespace plan exceeds strict frame"
   let some plan := planCodec.decode bytes
     | throw "fn consumer namespace plan is not canonical"
-  unless planCodec.encode plan == bytes && plan.spec.valid &&
+  unless plan.spec.valid &&
       plan.spec.initialPosition == 0 && plan.spec.legacyAnchor.isNone &&
       !plan.signingHeader.isEmpty && plan.signingHeader.length ≤ 4096 do
     throw "fn consumer namespace plan is not fresh or canonical"

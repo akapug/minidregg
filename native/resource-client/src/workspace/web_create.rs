@@ -179,7 +179,8 @@ pub(crate) fn load(root: &Path, workspace: &Value, id: &str) -> Result<Value> {
     Ok(out)
 }
 fn record_error(d: &Path, attempt: &Path, error: String) -> Result<()> {
-    let status = if crate::take_host_decision().is_some() {
+    // Only a decoded refusal is "refused"; an undecided 255 frame keeps the exact call ("uncertain").
+    let status = if crate::take_host_decision().is_some_and(|d| d.is_refusal()) {
         "refused"
     } else if attempt.join("call.bin").exists() {
         "uncertain"

@@ -5,8 +5,8 @@
 //! laws are computed from counts and byte sizes only (`Kernel/ContentResource.lean`,
 //! `project`), so nothing here is checked by the host. Members hold the room key;
 //! the operator holds ciphertext, the epoch, the commitment and a size class: every
-//! envelope is a whole number of 64-byte blocks (`envelope_len`). Design:
-//! PRIVACY.md §3.1, §3.6; operator view and key-loss policy: `docs/PRIVATE-CELL.md`.
+//! envelope is a whole number of 64-byte blocks (`envelope_len`). Design, operator
+//! view and key-loss policy: `docs/PRIVATE-CELL.md`.
 //!
 //! v1 -> v2 (lane PRIVATE-ROOMS): v1 padded the value to 64 bytes inside a 133-byte
 //! overhead, so envelopes were 133 + 64k bytes. v2 pads so the WHOLE envelope is a
@@ -212,7 +212,7 @@ impl Keyring {
         self.rooms.get(room).map(|e| e.keys().copied().collect()).unwrap_or_default()
     }
 
-    /// Delete one epoch locally and remember it as forgotten (PRIVACY §3.6 `forget`).
+    /// Delete one epoch locally and remember it as forgotten (`forget`: the ciphertext stays in the log; this client stops holding its key).
     pub(crate) fn forget(&mut self, room: &str, epoch: u32) -> bool {
         let held = self
             .rooms
@@ -516,10 +516,10 @@ fn load_enc_ring(key: &Path) -> Result<Vec<RingEntry>> {
     let mut out = Vec::new();
     for entry in value.get("keys").and_then(Value::as_array).ok_or("keyring lacks keys")? {
         let epoch = entry.get("keyEpoch").and_then(Value::as_str).ok_or("keyring entry lacks keyEpoch")?;
-        let x25519: [u8; 32] = crate::decode_hex(entry.get("x25519").and_then(Value::as_str).ok_or("keyring entry lacks x25519")?)?
+        let x25519: [u8; 32] = mini_sdk::hex::decode(entry.get("x25519").and_then(Value::as_str).ok_or("keyring entry lacks x25519")?).map_err(|e| e.0)?
             .try_into()
             .map_err(|_| "a keyring X25519 secret is 32 bytes")?;
-        let kem: [u8; KEM_SEED_LEN] = crate::decode_hex(entry.get("kemSeed").and_then(Value::as_str).ok_or("keyring entry lacks kemSeed")?)?
+        let kem: [u8; KEM_SEED_LEN] = mini_sdk::hex::decode(entry.get("kemSeed").and_then(Value::as_str).ok_or("keyring entry lacks kemSeed")?).map_err(|e| e.0)?
             .try_into()
             .map_err(|_| "a keyring ML-KEM seed is 64 bytes")?;
         out.push((epoch.to_owned(), Zeroizing::new(x25519), Zeroizing::new(kem)));
@@ -754,7 +754,7 @@ pub(crate) fn load_cache(path: &Path, passphrase: &[u8]) -> Result<Keyring> {
             .ok_or("key cache room must be an object")?
         {
             let epoch: u32 = epoch.parse().map_err(|_| "key cache epoch")?;
-            let mut raw = crate::decode_hex(key.as_str().ok_or("key cache key must be hex")?)?;
+            let mut raw = mini_sdk::hex::decode(key.as_str().ok_or("key cache key must be hex")?).map_err(|e| e.0)?;
             let key = fixed::<KEY>(&raw, "room key")?;
             raw.zeroize();
             keys.insert(room, &RoomKey::from_parts(epoch, key));
@@ -802,8 +802,8 @@ pub(crate) fn legacy_content(lowered: Value) -> Result<Value> {
                 if before["kind"] != private_kind {
                     return Err("private strike requires a ciphertext before record".into());
                 }
-                PrivateEnvelope::from_bytes(&crate::decode_hex(before["payload"].as_str()
-                    .ok_or("private edit before lacks payload")?)?)?;
+                PrivateEnvelope::from_bytes(&mini_sdk::hex::decode(before["payload"].as_str()
+                    .ok_or("private edit before lacks payload")?).map_err(|e| e.0)?)?;
                 // Striking a line retains its existing encrypted body: it neither
                 // publishes a supplied plaintext nor re-seals the old envelope.
                 if action["payload"] != before["payload"] {
@@ -834,7 +834,7 @@ pub(crate) fn opened_text(atom: &Value) -> Result<Option<Vec<u8>>> {
         return Ok(Some(text.as_bytes().to_vec()));
     }
     if let Some(bytes) = atom["private"]["hex"].as_str() {
-        return Ok(Some(crate::decode_hex(bytes)?));
+        return Ok(Some(mini_sdk::hex::decode(bytes).map_err(|e| e.0)?));
     }
     Err("private line has no authenticated opening; unlock its room key before editing".into())
 }
@@ -893,7 +893,7 @@ fn private_note(
         .get("payload")
         .and_then(Value::as_str)
         .ok_or_else(|| "private atom lacks payload".to_string())
-        .and_then(crate::decode_hex)
+        .and_then(|payload| mini_sdk::hex::decode(payload).map_err(|e| e.0))
         .and_then(|bytes| PrivateEnvelope::from_bytes(&bytes))
     {
         Ok(envelope) => envelope,
@@ -1218,15 +1218,12 @@ mod tests {
         assert_ne!(hybrid_kem::combine(KEK_LABEL, &[0x22; 32], &[0x11; 32], &transcript)[..], kek[..]);
     }
 
-    /// Independent known answers (pure-Python FIPS 203 `kyber-py` `_keygen_internal(d, z)`
-    /// and pycryptodome `cSHAKE256`, neither of which is the code under test): the
-    /// seeded ML-KEM-768 key AWS-LC derives from a FIPS 203 seed, and the whole chain
-    /// member seed -> cSHAKE256 -> (X25519 secret, ML-KEM seed) -> encapsulation key.
+    /// Independent known answers (pycryptodome `cSHAKE256` and pure-Python FIPS 203
+    /// `kyber-py`, neither the code under test): the whole chain member seed ->
+    /// cSHAKE256 -> (X25519 secret, ML-KEM seed) -> encapsulation key. The bare
+    /// seed -> key known answer lives in `hybrid_kem.rs`'s own tests.
     #[test]
-    fn the_seeded_ml_kem_key_matches_an_independent_fips_203_implementation() {
-        let seed: [u8; KEM_SEED_LEN] = std::array::from_fn(|i| i as u8);
-        let (_, ek) = hybrid_kem::ml_kem_768_from_seed(&seed).unwrap();
-        assert_eq!(hex(&Sha256::digest(ek)), "0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9");
+    fn the_member_seed_chain_matches_independent_known_answers() {
         let member = [7u8; 32];
         assert_eq!(hex(&cshake_xof::<KEM_SEED_LEN>(KEM_SEED_LABEL, &[&member])),
             "6dced71e0350ea6f8bc7260011db1c96f00818159ffdde14bef9829680fd16156c7d305aad5baa12d55253580e0c96d153650bd0ce23e0a8067a7699d7e3bc07");

@@ -7,8 +7,24 @@ pub const MAX: usize = 16 * 1024 * 1024;
 pub fn bad(s: &str) -> Error {
     Error::new(ErrorKind::InvalidData, s)
 }
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Nat(Vec<u8>);
+/// Numeric order. The digits are little-endian and canonical (no trailing zero
+/// digit), so a longer digit string is larger and equal lengths compare from
+/// the most significant digit; the derived lexicographic order was not numeric.
+impl Ord for Nat {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .len()
+            .cmp(&other.0.len())
+            .then_with(|| self.0.iter().rev().cmp(other.0.iter().rev()))
+    }
+}
+impl PartialOrd for Nat {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 impl Nat {
     pub fn digits(&self) -> &[u8] {
         &self.0
@@ -52,6 +68,13 @@ impl Nat {
 pub fn bytes(b: &[u8], o: &mut Vec<u8>) {
     Nat::new(b.len() as u64).put(o);
     o.extend(b);
+}
+/// One addressed message of a party's outbox. Each protocol module names its
+/// own `Send` as `Packet<its Message>`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Packet<M> {
+    pub to: u16,
+    pub message: M,
 }
 pub struct Reader<'a> {
     b: &'a [u8],
@@ -116,6 +139,14 @@ pub struct Generation {
     pub configuration: Nat,
 }
 impl Generation {
+    /// The same generation with its invocation replaced by the Nat of `digest`
+    /// (big-endian): how every protocol names the instance it nests.
+    pub fn derived(&self, digest: &[u8; 32]) -> Generation {
+        Generation {
+            invocation: Nat::from_be(digest),
+            ..self.clone()
+        }
+    }
     pub fn put(&self, o: &mut Vec<u8>) {
         self.invocation.put(o);
         bytes(&self.command, o);
@@ -286,6 +317,24 @@ impl Journal {
         // The original canonical ordering is part of the source-native codec.
         j.spent.shrink_to_fit();
         Ok(j)
+    }
+    /// True when every id is already allocated to exactly this generation and
+    /// purpose: the batch an earlier request already reserved, whose reply may
+    /// have been lost. Consumption is not compared; a caller that needs an
+    /// unconsumed row checks that itself.
+    pub fn holds_batch(&self, ids: &[Correlation], generation: &Generation, purpose: Purpose) -> bool {
+        let indexed = self
+            .allocations
+            .iter()
+            .map(|a| (&a.id, a))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        !ids.is_empty()
+            && ids.iter().collect::<BTreeSet<_>>().len() == ids.len()
+            && ids.iter().all(|id| {
+                indexed
+                    .get(id)
+                    .is_some_and(|a| a.generation == *generation && a.purpose == purpose)
+            })
     }
     pub fn extends(&self, old: &Self) -> bool {
         let spent = self.spent.iter().collect::<BTreeSet<_>>();

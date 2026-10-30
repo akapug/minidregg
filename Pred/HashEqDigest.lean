@@ -29,8 +29,27 @@ Imports: Init and the leaf `Theory.Sp800185Cshake256Core` (itself Init only, no 
 code). The cSHAKE256 definition lives in the Theory tier, so `Pred` imports no `Compiler` module
 (the Pred row of scripts/check-import-boundary.sh no longer admits one).
 -/
-import Theory.Sp800185Cshake256Core
-import Theory.HashBytes
+module
+
+public import Theory.Sp800185Cshake256Core
+public import Theory.HashBytes
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Pred.HashEqDigest
 
@@ -268,14 +287,16 @@ theorem deployedFast_eq : deployedFast = deployed := by
 /-- The compiled `hashEq` atom runs the fast path; `deployed` stays the definition. -/
 @[csimp] theorem deployed_eq_fast : deployed = deployedFast := deployedFast_eq.symm
 
-/-- **Binds or collides.** Two admissible openings with equal digests are equal, or `H` has a
-collision. Nothing about cSHAKE is assumed here; the disjunct is where its collision resistance
-enters. -/
+/-- **Binds or collides.** Two admissible openings with equal digests are equal, or `H`
+collides on exactly their two preimages. Nothing about cSHAKE is assumed here; the disjunct is
+where its collision resistance enters. -/
 theorem binds_or_collides (H : Hash) {a b : Opening} (ha : a.Admissible) (hb : b.Admissible)
-    (h : digestWith H a = digestWith H b) : a = b ∨ Collision H := by
+    (h : digestWith H a = digestWith H b) :
+    a = b ∨ CollisionAmong H (fun x => x = a.preimage ∨ x = b.preimage) := by
   by_cases hab : a = b
   · exact .inl hab
-  · refine .inr ⟨a.preimage, b.preimage, fun hp => hab (preimage_injective ha hb hp), ?_⟩
+  · refine .inr ⟨a.preimage, b.preimage, .inl rfl, .inr rfl,
+      fun hp => hab (preimage_injective ha hb hp), ?_⟩
     simpa [digestWith, Int.ofNat_inj] using h
 
 /-! ## §5. The refutable pole: a length hash -/

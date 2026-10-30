@@ -168,11 +168,15 @@ struct Binding {
 
 fn binding(broker: &Broker) -> Result<Binding, String> {
     let c = broker.config.credentials.as_ref().ok_or("credentials-not-configured")?;
+    let mut key = std::fs::read(&c.key).map_err(|_| "credential key unavailable")?;
+    let key_sha = native::sha256_hex(&key);
+    wire::zero(&mut key);
     Ok(Binding {
-        host_sha: native::host_sha256(&c.host)?,
+        // The pinned digest; the image is re-hashed only if the file changed.
+        host_sha: broker.host.as_ref().ok_or("credentials-not-configured")?.current()?,
         config: native::host_config(&c.host_config)?,
         table_sha: super::provider_table(&c.providers, broker.config.trust_owner)?.sha256,
-        key_sha: native::sha256_hex(&std::fs::read(&c.key).map_err(|_| "credential key unavailable")?),
+        key_sha,
     })
 }
 
@@ -259,7 +263,7 @@ pub fn exchange(broker: &Broker, _peer: &Peer, stream: &mut UnixStream, note: &m
             }
             let _custody = store.member_service_lock_until(&owner, end)?;
             still(broker, &captured)?;
-            let epoch = native::current_epoch(&native::key_status(&c.public_socket, &captured.config, &captured.host_sha, &owner, end)?, &owner)?;
+            let epoch = native::current_epoch(&native::key_status(&c.public_socket, c.public_socket_uid, &captured.config, &captured.host_sha, &owner, end)?, &owner)?.epoch;
             still(broker, &captured)?;
             if let Some((helper, sha)) = &c.namespace_helper {
                 helper_pinned(helper, sha, broker.config.trust_owner)?;
@@ -267,7 +271,7 @@ pub fn exchange(broker: &Broker, _peer: &Peer, stream: &mut UnixStream, note: &m
                 still(broker, &captured)?;
             }
             // Provisioning made metadata only: re-ask the Store immediately before any mutation.
-            let epoch_now = native::current_epoch(&native::key_status(&c.public_socket, &captured.config, &captured.host_sha, &owner, end)?, &owner)?;
+            let epoch_now = native::current_epoch(&native::key_status(&c.public_socket, c.public_socket_uid, &captured.config, &captured.host_sha, &owner, end)?, &owner)?.epoch;
             if epoch_now != epoch {
                 return Err("owner key epoch changed during exchange".into());
             }
@@ -279,7 +283,13 @@ pub fn exchange(broker: &Broker, _peer: &Peer, stream: &mut UnixStream, note: &m
         })();
         scrub(&mut action);
         response.map_err(|e| {
-            let code = if e == "owner-not-current" { "owner-not-current" } else if e.starts_with(credentials::REFUSED) { "provider-refused" } else { "member-action" };
+            let code = if e == "owner-not-current" {
+                "owner-not-current"
+            } else if e.starts_with(credentials::REFUSED) {
+                "provider-refused"
+            } else {
+                "member-action"
+            };
             (code.to_owned(), e)
         })
     })();

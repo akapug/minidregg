@@ -26,8 +26,8 @@ set_option autoImplicit false
 theorem admitted_source_semantics {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
     {prepared : PreparedInvocation deployment profile ambient ground command}
-    {ingress : List UInt8} {writes : List DataWrite} {guards : List ReadGuard}
-    (admitted : Admitted prepared ingress writes guards) :
+    {event : StableEvent} {writes : List DataWrite} {guards : List ReadGuard}
+    (admitted : Admitted prepared event writes guards) :
     runBounded (limits admitted.claim.capacity) (budget admitted.claim.capacity).ticks
         (initial admitted.core.applied.term) =
       .finished admitted.output.execution.value admitted.output.execution.state ∧
@@ -47,8 +47,8 @@ theorem admitted_data_unique {F : Type} [Field F] [DecidableEq F]
     {command command' : Command}
     {prepared : PreparedInvocation deployment profile ambient ground command}
     {prepared' : PreparedInvocation deployment' profile' ambient' ground' command'}
-    {ingress ingress' : List UInt8} {writes writes' : List DataWrite} {guards guards' : List ReadGuard}
-    (admitted : Admitted prepared ingress writes guards) (other : Admitted prepared' ingress' writes' guards')
+    {event event' : StableEvent} {writes writes' : List DataWrite} {guards guards' : List ReadGuard}
+    (admitted : Admitted prepared event writes guards) (other : Admitted prepared' event' writes' guards')
     (same : admitted.core.applied.term = other.core.applied.term) :
     admitted.output.execution.extraction.result.value = other.output.execution.extraction.result.value := by
   have deep : DeepEvaluates admitted.core.applied.term _ := (execution_deepEvaluates
@@ -97,8 +97,8 @@ admitted on the strength of a label, and no core bytes are parsed on the way. -/
 theorem admitted_front_end {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
     {prepared : PreparedInvocation deployment profile ambient ground command}
-    {ingress : List UInt8} {writes : List DataWrite} {guards : List ReadGuard}
-    (admitted : Admitted prepared ingress writes guards) :
+    {event : StableEvent} {writes : List DataWrite} {guards : List ReadGuard}
+    (admitted : Admitted prepared event writes guards) :
     admitted.core.source.package.package.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧
     ∃ (l : ObjectiveBendFrontEnd.Lowering) (a : ObjectiveBendFrontEnd.Accepted l),
       ObjectiveBendPublication.replay admitted.core.source.package.package = .ok l ∧

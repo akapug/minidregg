@@ -4,9 +4,13 @@ The JSON is not authority: the physical host must retain the raw op26 callback
 bytes, compare the echoed frame byte-for-byte, and check the descriptor
 against one signature-verified SPK parse before launching its pinned unit.
 -/
-import Kernel.ApplicationLifecycleClaimProjection
-import Kernel.ApplicationLifecycleResidentProfile
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationLifecycleClaimProjection
+public import Kernel.ApplicationLifecycleResidentProfile
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleClaimInspection
 
@@ -44,7 +48,7 @@ private def interface (value : Interface) : Json := .mkObj
 
 /-- Strictly decode v2 only. This is a structural view of the full canonical
 frame, not proof that a caller obtained it from a fresh-tip op26 response.
-`store` is the inspecting Host's `Config.expectedSeed`. -/
+`store` is the inspecting Host's `Config.storeIdentity`. -/
 def inspect (store : Minidregg.Theory.TypedAuthorization.Digest) (bytes : List UInt8) : Except String Json := do
   let some value := ApplicationLifecycleClaimProjection.codecV2.decode bytes
     | throw "noncanonical descriptor-bound lifecycle claim frame"

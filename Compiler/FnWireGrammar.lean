@@ -31,8 +31,27 @@ exceeds the caller's bound; refused before any decoding work).
 The base64 is `Kernel.Base64` (the tree's one codec, with its own two round trips); the
 frame digest is `Compiler.Blake3.hash`, used here only through its length.
 -/
-import Kernel.Base64
-import Compiler.Blake3
+module
+
+public import Kernel.Base64
+public import Compiler.Blake3
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FnWire
 
@@ -476,6 +495,188 @@ def decode : Grammar → List UInt8 → Except Refusal (Value × List UInt8)
         | .ok _ => .error .malformed
         | .error e => .error e
       else .error .malformed
+
+/-! ### The executable decoder
+
+`decode` measures `xs.length`, the WHOLE remaining input, at every `uint`, `bytes`,
+`enum`, `tagArm` and `sized` field (and `(xs.drop w).length` again for a declared
+length), so a message of `m` fields in `n` octets decodes in `O(m·n)`. `decodeTR` takes
+exactly the octets a field declares and checks only that prefix (`takeExact`), so each
+field costs its own width; `decodeTR_eq` proves it equal to `decode` for every grammar
+and input, and `@[csimp]` runs it in its place. -/
+
+/-- The first `w` octets and the rest, if at least `w` are present; `O(w)`. -/
+def takeExact (w : Nat) (xs : List UInt8) : Option (List UInt8 × List UInt8) :=
+  let split := xs.splitAt w
+  if split.1.length = w then some split else none
+
+theorem takeExact_eq (w : Nat) (xs : List UInt8) :
+    takeExact w xs = if w ≤ xs.length then some (xs.take w, xs.drop w) else none := by
+  unfold takeExact
+  simp only [List.splitAt_eq, List.length_take]
+  by_cases fits : w ≤ xs.length
+  · simp [fits]
+  · have short : min w xs.length ≠ w := by omega
+    simp [fits, short]
+
+def decodeTR : Grammar → List UInt8 → Except Refusal (Value × List UInt8)
+  | .const o, xs =>
+      if xs.take o.length = o then .ok (.null, xs.drop o.length) else .error .malformed
+  | .uint w lo hi, xs =>
+      match takeExact w xs with
+      | some (field, rest) =>
+          if lo ≤ beValue field ∧ beValue field ≤ hi then .ok (.nat (beValue field), rest)
+          else .error .malformed
+      | none => .error .malformed
+  | .bytes w lo hi c, xs =>
+      match takeExact w xs with
+      | some (field, rest) =>
+          if lo ≤ beValue field ∧ beValue field ≤ hi then
+            match takeExact (beValue field) rest with
+            | some (body, after) =>
+                if classOk c body = true then .ok (.octets body, after) else .error .malformed
+            | none => .error .malformed
+          else .error .malformed
+      | none => .error .malformed
+  | .rest lo hi c, xs =>
+      if classOk c xs = true ∧ lo ≤ xs.length ∧ xs.length ≤ hi then .ok (.octets xs, [])
+      else .error .malformed
+  | .line lo hi c, xs =>
+      if (xs.dropWhile (· != 13)).take 2 = [13, 10] ∧
+          classOk c (xs.takeWhile (· != 13)) = true ∧
+          lo ≤ (xs.takeWhile (· != 13)).length ∧ (xs.takeWhile (· != 13)).length ≤ hi then
+        .ok (.octets (xs.takeWhile (· != 13)), (xs.dropWhile (· != 13)).drop 2)
+      else .error .malformed
+  | .base64Lines width lo hi, xs =>
+      if lines width (unlines width xs) = xs then
+        match Base64.decode (unlines width xs) with
+        | some v => if lo ≤ v.length ∧ v.length ≤ hi then .ok (.octets v, []) else .error .malformed
+        | none => .error .malformed
+      else .error .malformed
+  | .enum w base names, xs =>
+      match takeExact w xs with
+      | some (field, rest) =>
+          if h : base ≤ beValue field ∧ beValue field < base + names.length then
+            .ok (.name (names[beValue field - base]'(by omega)), rest)
+          else .error .malformed
+      | none => .error .malformed
+  | .seqNil, xs => .ok (.list [], xs)
+  | .seqCons h t, xs =>
+      match decodeTR h xs with
+      | .ok (v, r) =>
+          match decodeTR t r with
+          | .ok (.list vs, r') => .ok (.list (v :: vs), r')
+          | .ok _ => .error .malformed
+          | .error e => .error e
+      | .error e => .error e
+  | .tagNil _, _ => .error .malformed
+  | .tagArm w code name arm more, xs =>
+      match takeExact w xs with
+      | some (field, rest) =>
+          if beValue field = code then
+            match decodeTR arm rest with
+            | .ok (v, r) => .ok (.tagged name v, r)
+            | .error e => .error e
+          else decodeTR more xs
+      | none => decodeTR more xs
+  | .maybe g, xs =>
+      match xs with
+      | [] => .ok (.list [], [])
+      | x :: xs' =>
+          match decodeTR g (x :: xs') with
+          | .ok (v, r) => .ok (.list [v], r)
+          | .error e => .error e
+  | .where_ g cs, xs =>
+      match decodeTR g xs with
+      | .ok (v, r) => if checksHold v cs then .ok (v, r) else .error .whereFailed
+      | .error e => .error e
+  | .frame magic version kind max g, xs =>
+      match xs with
+      | m0 :: m1 :: m2 :: m3 :: ver :: knd :: l0 :: l1 :: l2 :: l3 :: body =>
+          if [m0, m1, m2, m3] = magic ∧ ver = version ∧ knd = kind ∧
+              beValue [l0, l1, l2, l3] ≤ max ∧ beValue [l0, l1, l2, l3] + 32 ≤ body.length then
+            if (body.drop (beValue [l0, l1, l2, l3])).take 32 =
+                Blake3.hash ([m0, m1, m2, m3] ++ ver :: knd ::
+                  ([l0, l1, l2, l3] ++ body.take (beValue [l0, l1, l2, l3]))) then
+              match decodeTR g (body.take (beValue [l0, l1, l2, l3])) with
+              | .ok (v, []) => .ok (v, (body.drop (beValue [l0, l1, l2, l3])).drop 32)
+              | .ok _ => .error .malformed
+              | .error e => .error e
+            else .error .trailer
+          else .error .malformed
+      | _ => .error .malformed
+  | .sized w lo hi g, xs =>
+      match takeExact w xs with
+      | some (field, rest) =>
+          if lo ≤ beValue field ∧ beValue field ≤ hi then
+            match takeExact (beValue field) rest with
+            | some (inner, after) =>
+                match decodeTR g inner with
+                | .ok (v, []) => .ok (v, after)
+                | .ok _ => .error .malformed
+                | .error e => .error e
+            | none => .error .malformed
+          else .error .malformed
+      | none => .error .malformed
+
+theorem decodeTR_eq (g : Grammar) (xs : List UInt8) : decodeTR g xs = decode g xs := by
+  induction g generalizing xs with
+  | const o => simp only [decodeTR, decode]
+  | uint w lo hi =>
+      simp only [decodeTR, decode, takeExact_eq]
+      by_cases fits : w ≤ xs.length <;> simp [fits]
+  | bytes w lo hi c =>
+      simp only [decodeTR, decode, takeExact_eq]
+      by_cases fits : w ≤ xs.length
+      · simp only [fits, if_true]
+        by_cases bounds : lo ≤ beValue (List.take w xs) ∧ beValue (List.take w xs) ≤ hi
+        · by_cases room : beValue (List.take w xs) ≤ (List.drop w xs).length
+          · have room' : beValue (List.take w xs) ≤ xs.length - w := by simpa using room
+            simp [bounds, room']
+          · have room' : ¬ beValue (List.take w xs) ≤ xs.length - w := by simpa using room
+            simp [bounds, room']
+        · simp only [bounds, if_false]
+          simp only [true_and]
+          rw [if_neg]
+          intro both; exact bounds ⟨both.1, both.2.1⟩
+      · simp [fits]
+  | rest lo hi c => simp only [decodeTR, decode]
+  | line lo hi c => simp only [decodeTR, decode]
+  | base64Lines width lo hi => simp only [decodeTR, decode]
+  | enum w base names =>
+      simp only [decodeTR, decode, takeExact_eq]
+      by_cases fits : w ≤ xs.length <;> simp [fits]
+  | seqNil => simp only [decodeTR, decode]
+  | seqCons h t ihh iht =>
+      simp only [decodeTR, decode, ihh, iht]
+  | tagNil n => simp only [decodeTR, decode]
+  | tagArm w code name arm more iharm ihmore =>
+      simp only [decodeTR, decode, takeExact_eq, iharm, ihmore]
+      by_cases fits : w ≤ xs.length <;> simp [fits]
+  | maybe g ih =>
+      cases xs with
+      | nil => simp only [decodeTR, decode]
+      | cons x xs' => simp only [decodeTR, decode, ih]
+  | where_ g cs ih => simp only [decodeTR, decode, ih]
+  | frame magic version kind max g ih =>
+      simp only [decodeTR, decode, ih]
+  | sized w lo hi g ih =>
+      simp only [decodeTR, decode, takeExact_eq, ih]
+      by_cases fits : w ≤ xs.length
+      · by_cases bounds : lo ≤ beValue (List.take w xs) ∧ beValue (List.take w xs) ≤ hi
+        · by_cases room : beValue (List.take w xs) ≤ (List.drop w xs).length
+          · have room' : beValue (List.take w xs) ≤ xs.length - w := by simpa using room
+            simp [fits, bounds, room']
+          · have room' : ¬ beValue (List.take w xs) ≤ xs.length - w := by simpa using room
+            simp [fits, bounds, room']
+        · simp only [fits, if_true, bounds, if_false, true_and]
+          rw [if_neg]
+          intro both; exact bounds ⟨both.1, both.2.1⟩
+      · simp [fits]
+
+@[csimp] theorem decode_eq_decodeTR : @decode = @decodeTR := by
+  funext g xs
+  exact (decodeTR_eq g xs).symm
 
 /-- A whole message: one value and nothing left over. -/
 def decodeAll (g : Grammar) (xs : List UInt8) : Except Refusal Value :=

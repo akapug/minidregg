@@ -95,6 +95,7 @@ def genesis (creatorKey ownerKey : List UInt8) (factory : Minidregg.Pred.Pred) :
   tailBound := 1000
   clockGenesisNow := 0
   clockMaxStepSeconds := 300
+  issuanceCap := 1000000000000000
 
 
 def describe : ResourceBirthReceiver.Result → String

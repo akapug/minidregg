@@ -5,8 +5,27 @@ Only generic `StreamCodec` products/lists are used. Full consumption and exact
 re-encoding reject aliases and trailing bytes. All ten metering lanes, payload
 bytes, read guards, nullifiers, and event envelopes survive persistence.
 -/
-import Kernel.DurableReceiver
-import Compiler.Tower256ConcreteBackend
+module
+
+public import Kernel.DurableReceiver
+public import Compiler.Tower256ConcreteBackend
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableReceiverCodec
 
@@ -93,11 +112,11 @@ def intentStream : StreamCodec IntentRecord :=
           (StreamCodec.product (StreamCodec.list nullifierStream)
             (StreamCodec.product chargeStream
               (StreamCodec.product eventStream
-                (StreamCodec.option subjectStream)))))))
+                (StreamCodec.product (StreamCodec.option subjectStream) chargeStream)))))))
     (fun record => (record.transactionId, record.writes, record.readGuards,
-      record.nullifiers, record.exactCharge, record.event, record.subject))
+      record.nullifiers, record.exactCharge, record.event, record.subject, record.credit))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2.1, tuple.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def seedStream : StreamCodec Seed :=
@@ -111,38 +130,34 @@ def seedStream : StreamCodec Seed :=
 def imageStream : StreamCodec Image :=
   StreamCodec.xmap (StreamCodec.product seedStream (StreamCodec.list intentStream))
     (fun image => (image.seed, image.accepted))
-    (fun tuple => ⟨tuple.1, tuple.2⟩) (by intro value; cases value; rfl)
+    (fun tuple => Image.ofAccepted tuple.1 tuple.2) (by
+      intro value
+      cases value
+      simp [Image.ofAccepted, Image.accepted])
 
-/-- Version 2: every record carries its signing subject. A version-1 image
-refuses (the frame is compared exactly). -/
-def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
+/-- Version 3: every record carries its signing subject and its meter credit. A
+version-1 or version-2 image refuses (the frame is compared exactly). -/
+def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [3]
 
-/-- A fixed frame is recovered only if the final canonical check succeeds. -/
+/-- The frame is CHECKED: its octets (the length-prefixed `wireFrame`, as
+before) must match exactly, so a version-1 or foreign frame is refused by the
+stream decoder itself. -/
 def framedStream : StreamCodec Image :=
-  StreamCodec.xmap (StreamCodec.product bytesStream imageStream)
-    (fun image => (wireFrame, image)) Prod.snd (by intro image; rfl)
+  StreamCodec.framed (bytesStream.encode wireFrame) imageStream
 
 def encode (image : Image) : List UInt8 := framedStream.encode image
 
-def decode (bytes : List UInt8) : Option Image := do
-  let image ← framedStream.toLawful.decode bytes
-  if encode image = bytes then some image else none
+/-- The framed stream's own decoder: it is canonical (`decode_canonical`), so
+it refuses every second spelling and trailing byte without re-encoding. -/
+def decode (bytes : List UInt8) : Option Image :=
+  framedStream.toLawful.decode bytes
 
-@[simp] theorem decode_encode (image : Image) : decode (encode image) = some image := by
-  have roundtrip := framedStream.toLawful.decode_encode image
-  change framedStream.toLawful.decode (encode image) = some image at roundtrip
-  simp [decode, roundtrip]
+@[simp] theorem decode_encode (image : Image) : decode (encode image) = some image :=
+  framedStream.toLawful.decode_encode image
 
 theorem decode_canonical {bytes : List UInt8} {image : Image}
-    (accepted : decode bytes = some image) : encode image = bytes := by
-  unfold decode at accepted
-  cases raw : framedStream.toLawful.decode bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
-      split at accepted
-      next canonical => cases Option.some.inj accepted; exact canonical
-      next => contradiction
+    (accepted : decode bytes = some image) : encode image = bytes :=
+  framedStream.toLawful_canonical bytes image accepted
 
 def codec : LawfulCodec Image where
   encode := encode

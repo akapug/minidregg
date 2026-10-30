@@ -4,12 +4,34 @@ This joins the verified original v3 claim, the separately pinned physical
 custodian, current installed law and capabilities, and exact current app and
 package content. It produces no CAS or host permit by itself.
 -/
-import Kernel.ApplicationLifecycleCompletionV2History
-import Kernel.ApplicationLifecycleCompletionV2Ingress
-import Kernel.ApplicationLifecycleCompletionV2Policy
-import Kernel.ApplicationLifecycleClaimCurrent
-import Kernel.PhysicalResourceReadGuard
-import Kernel.ResourceObservationAdmission
+module
+
+public import Kernel.ApplicationLifecycleCompletionV2History
+public import Kernel.ApplicationLifecycleCompletionV2Ingress
+public import Kernel.ApplicationLifecycleCompletionV2Policy
+public import Kernel.ApplicationLifecycleClaimCurrent
+public import Kernel.CompletionCustodianKey
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.ResourceObservationAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionV2Admission
 
@@ -194,6 +216,30 @@ structure PackageRead (config : Config) (ground : Ground config.deployment)
         (ApplicationLifecycleClaimCurrent.observationGuard
           source.originalBegin.base.source.packageManifest cell).cellId
 
+/-- The `cell` index is the cell present in the prepared invocation's read directory
+at the package request's target, its root is the request's expected root, the
+signature checked for the read is over exactly the `envelope` index, and the
+package observation guard built from `cell` is current at `ground`. -/
+theorem PackageRead.sound {config : Config} {ground : Ground config.deployment}
+    {source : ApplicationLifecycleCompletionV2Source.Source}
+    {prepared : DeclaredResourceController.PreparedInvocation config.deployment
+      config.profile ⟨config.federation, config.genesisHeight + ground.height⟩
+      ground (source.command config.deployment.domain config.profile.semantics)}
+    {cell : PackedCell CanonicalCellRegistry.registry} {envelope : List UInt8}
+    (read : PackageRead config ground source prepared cell envelope) :
+    (DeclaredResourceController.readContext prepared).directory.slots
+        (packageRequest config ground source prepared).target.value = .present cell ∧
+      (packageRequest config ground source prepared).preStateRoot = cell.payload.root ∧
+      read.checked.signature.envelopeBytes = envelope ∧
+      (ApplicationLifecycleClaimCurrent.observationGuard
+        source.originalBegin.base.source.packageManifest cell).expectedRoot =
+        ground.view.model.roots
+          (ApplicationLifecycleClaimCurrent.observationGuard
+            source.originalBegin.base.source.packageManifest cell).cellId := by
+  refine ⟨?_, ?_, read.checked.envelopeExact, read.physicalCurrent⟩
+  · rw [← read.observedExact]; exact read.selected.observed.present
+  · rw [← read.observedExact]; exact read.selected.observed.rootExact
+
 def checkPackage (config : Config) (ground : Ground config.deployment)
     (source : ApplicationLifecycleCompletionV2Source.Source)
     (prepared : DeclaredResourceController.PreparedInvocation config.deployment
@@ -225,7 +271,7 @@ def checkPackage (config : Config) (ground : Ground config.deployment)
 
 /-- This conditional candidate is not constructed from a valid report alone. It also
 re-admits the exact claim at a structural prefix of the same Store, uses the custodian key
-pinned into today's NativeHost profile, checks current app/package content,
+of the platform record on this ground (guarded at its root), checks current app/package content,
 and admits the source-derived management command under current signatures.
 Only Replay may bind its structural historical prefix to an admitted walk. -/
 structure Candidate (config : Config) {store : StoreIdentity} (head : Head store)
@@ -235,10 +281,9 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   profileExact : ingress.domain = config.deployment.domain ∧
     ingress.semantics = config.profile.semantics
   sourceValid : ingress.source.valid = true
-  key : List UInt8
-  keyPinned : config.completionCustodianKey = some key
+  custodian : CompletionCustodianKey.Read config.deployment ground
   physical : ApplicationLifecycleCompletionV2Report.Checked
-    config.deployment.domain config.profile.semantics key
+    config.deployment.domain config.profile.semantics custodian.key
     ingress.source.originalBegin
   historical : ApplicationLifecycleCompletionV2History.Candidate config head ingress.source
   prepared : DeclaredResourceController.PreparedInvocation
@@ -267,6 +312,8 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
     (ApplicationLifecycleClaimCurrent.observationGuard
       ingress.source.originalBegin.base.source.packageManifest packageCell).cellId ∉
       (DeclaredResourceController.writes prepared).map DataWrite.cellId
+  platformReadOnly : custodian.guard.cellId ∉
+    (DeclaredResourceController.writes prepared).map DataWrite.cellId
   invocation : ApplicationLifecycleCompletionV2Policy.Accepted prepared
     ingress.signed physical
 
@@ -279,12 +326,10 @@ def prepareConditional (config : Config) {store : StoreIdentity}
   if profileExact : ingress.domain = config.deployment.domain ∧
       ingress.semantics = config.profile.semantics then
     if sourceValid : ingress.source.valid = true then
-      let keySelected ← match requirePresent config.completionCustodianKey
-          "physical custodian key unavailable" with
-        | .error detail => return .error detail
+      let custodian ← match CompletionCustodianKey.select config.deployment ground with
+        | .error reason => return .error reason.describe
         | .ok selected => pure selected
-      let key := keySelected.val
-      have keyPinned : config.completionCustodianKey = some key := keySelected.property
+      let key := custodian.key
       let physical ← match ← ApplicationLifecycleCompletionV2Report.check config.signature
           config.deployment.domain config.profile.semantics key
           ingress.source.originalBegin ingress.source.physical with
@@ -331,15 +376,18 @@ def prepareConditional (config : Config) {store : StoreIdentity}
                   if packageGuardReadOnly : ingress.source.needsPackageWrite = false →
                       (ApplicationLifecycleClaimCurrent.observationGuard resource packageCell).cellId ∉
                         (DeclaredResourceController.writes prepared).map DataWrite.cellId then
-                    match ← ApplicationLifecycleCompletionV2Policy.admit config.signature
-                        prepared ingress.signed physical with
-                    | .error reason => return .error s!"completion current signed policy admission refused: {repr reason}"
-                    | .ok invocation =>
-                        return .ok ⟨profileExact, sourceValid, key, keyPinned,
-                          physical, historical, prepared, linked, shape,
-                          appCell, appCurrent, appExact, packageCell, packageCurrent,
-                          packageAtomExact, installed, markers, packageRead,
-                          packageGuardReadOnly, invocation⟩
+                    if platformReadOnly : custodian.guard.cellId ∉
+                        (DeclaredResourceController.writes prepared).map DataWrite.cellId then
+                      match ← ApplicationLifecycleCompletionV2Policy.admit config.signature
+                          prepared ingress.signed physical with
+                      | .error reason => return .error s!"completion current signed policy admission refused: {repr reason}"
+                      | .ok invocation =>
+                          return .ok ⟨profileExact, sourceValid, custodian,
+                            physical, historical, prepared, linked, shape,
+                            appCell, appCurrent, appExact, packageCell, packageCurrent,
+                            packageAtomExact, installed, markers, packageRead,
+                            packageGuardReadOnly, platformReadOnly, invocation⟩
+                    else return .error "completion would write the platform cell"
                   else return .error "completion package read/write overlap refused"
                 else return .error "completion creation marker state refused"
               else return .error "current installed package differs from descriptor"

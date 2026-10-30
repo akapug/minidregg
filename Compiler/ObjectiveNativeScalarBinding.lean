@@ -1,9 +1,29 @@
 /- Objective-only native scalar/read binding. Exact native constructors and guards;
 no old language AST, checked Book, source evaluator, or authority constructor. -/
-import Compiler.ServedBasis
-import Compiler.BendWorldPlan
-import Compiler.CredentialAuthorityDomainReceiver
-import Kernel.PhysicalResourceReadGuard
+module
+
+public import Compiler.ServedBasis
+public import Compiler.BendWorldPlan
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Kernel.PhysicalResourceReadGuard
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveNativeScalarBinding
 open Minidregg.Compiler Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization Minidregg.Theory.EffectDeclaration
@@ -28,7 +48,7 @@ structure NativePlan where
   effects : List Scalar
   deriving DecidableEq, Repr
 
-def rootCodec : LawfulCodec Digest := ResourceBirthCodec.strictCodec digestStream.toLawful
+def rootCodec : LawfulCodec Digest := digestStream.toLawful
 def writeKey (ref : Ref) (write : Write) : StateKey :=
   .objectField ⟨ref.resourceID⟩ ⟨write.field⟩
 def action (ref : Ref) (write : Write) : DeclaredActionLowering.Action :=
@@ -69,6 +89,19 @@ structure BoundScalar (deployment : CanonicalCellRegistry.Deployment)
   /-- Native sequential guards: each expected value is checked at the
   exact store obtained from its preceding native source-derived writes. -/
   guardsExact : Patch.ValidFrom pre.logical (sourcePatch scalar.ref scalar.writes)
+/-- The scalar is bound at its command target, read from the loaded directory, selected
+by the deployment at its current root, and its writes' guards hold there. -/
+theorem BoundScalar.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {command : Command} {scalar : Scalar}
+    (bound : BoundScalar deployment loaded command scalar) :
+    indexOf command scalar.ref.resourceID = some bound.index ∧
+      loaded.slots scalar.ref.resourceID = .present bound.packed ∧
+      CanonicalCellRegistry.selectDeclared deployment scalar.ref.resourceID .object bound.packed =
+        some bound.pre ∧
+      bound.pre.root = scalar.ref.root ∧
+      Patch.ValidFrom bound.pre.logical (sourcePatch scalar.ref scalar.writes) :=
+  ⟨bound.indexExact, bound.present, bound.selected, bound.currentRoot, bound.guardsExact⟩
 
 def bindScalar (deployment : CanonicalCellRegistry.Deployment)
     (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)
@@ -125,6 +158,13 @@ structure BoundRead (loaded : Minidregg.Theory.CellRegistry.Directory Nat Canoni
   packed : PackedCell CanonicalCellRegistry.registry
   present : loaded.slots ref.resourceID = .present packed
   logicalRoot : packed.payloadRoot = ref.root
+/-- The bound cell is the loaded directory's present cell for the ref, whose payload
+root is the ref's root. -/
+theorem BoundRead.sound
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {ref : Ref} (bound : BoundRead loaded ref) :
+    loaded.slots ref.resourceID = .present bound.packed ∧ bound.packed.payloadRoot = ref.root :=
+  ⟨bound.present, bound.logicalRoot⟩
 
 def BoundRead.guard {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry} {ref : Ref}
     (bound : BoundRead loaded ref) : Minidregg.Kernel.DurableDataIntent.ReadGuard :=
@@ -273,6 +313,16 @@ theorem ordered_correspondence {deployment : CanonicalCellRegistry.Deployment}
   induction ordered with
   | nil => exact .nil
   | cons bound tail ih => exact .cons ⟨bound, rfl⟩ ih
+/-- Every plan effect is a scalar bound at the command and loaded directory, and the
+plan's effects are exactly the command's. -/
+theorem BoundPlan.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {command : Command} {source : NativePlan}
+    (bound : BoundPlan deployment loaded command source) :
+    List.Forall₂ (fun scalar native => ∃ b : BoundScalar deployment loaded command scalar,
+        native = effect b.index.val scalar) source.effects bound.plan.effects ∧
+      bound.plan.effects = BendWorldPlan.effectsOf command :=
+  ⟨ordered_correspondence bound.ordered, exact_native_effects bound⟩
 
 
 #assert_axioms BoundRead.guard_current

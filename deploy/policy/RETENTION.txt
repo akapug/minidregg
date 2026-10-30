@@ -1,0 +1,1 @@
+Data is not retained after the 11 November 2026 deletion, except in encrypted backups that expire within 22 days and that only the operator can open, unless you choose to contribute it for research, in which case you dedicate it to the public domain (CC0). Data is sent to providers such as OpenRouter and Z.ai when you use AI model features.

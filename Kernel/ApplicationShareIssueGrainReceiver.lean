@@ -4,8 +4,29 @@ grain birth and the older bare share-issue event have different retained
 carriers and nullifier sets. Historical lookup selects only the exact event;
 semantic replay must re-admit this receiver at its original prefix.
 -/
-import Kernel.ApplicationShareIssueGrainAdmission
-import Kernel.GrainResourceBirthReceiver
+module
+
+public import Kernel.ApplicationShareIssueGrainAdmission
+public import Kernel.GrainResourceBirthReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainReceiver
 
@@ -90,15 +111,15 @@ def charge (accepted : Accepted profile config pins durable ambient ingress) : C
   | .witnessBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => GrainResourceBirthReceiver.charge accepted.grainAccepted .proofWork + 1
-  | .storageBytes => GrainResourceBirthReceiver.charge accepted.grainAccepted .storageBytes +
-      ingress.canonicalBytes.length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => GrainResourceBirthReceiver.charge accepted.grainAccepted .sideEffectCount + 1
   | .feeDebit => GrainResourceBirthReceiver.charge accepted.grainAccepted .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
 
 theorem charge_fee_source_quoted
     (accepted : Accepted profile config pins durable ambient ingress) :
-    charge accepted .feeDebit = accepted.decoded.source.birth.quotedFee config.tariff := by
+    charge accepted .feeDebit =
+      accepted.decoded.source.birth.quotedFee accepted.grainAccepted.pending.record.creation := by
   change accepted.decoded.source.birth.fee.amount = _
   exact accepted.special_fee_bound
 
@@ -108,11 +129,16 @@ def intent (accepted : Accepted profile config pins durable ambient ingress) :
   writes := writes accepted
   readGuards := readGuards accepted
   nullifiers := nullifiers config.deployment.domain ingress accepted.decoded accepted.tariff
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event config.deployment.domain ingress
   subject := some accepted.decoded.source.birth.creator
   postRootsBound := writes_roots_bound accepted
   guardsReadOnly := readGuards_readonly accepted
+
+/-- The retained finite charge is exactly the specified charge, lane by lane. -/
+theorem intent_exactCharge (accepted : Accepted profile config pins durable ambient ingress) :
+    (intent accepted).exactCharge = charge accepted :=
+  Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed births are named**: every write of the grain share issue that
 creates its cell -- the ticket with its initialized page included -- is named by the
@@ -176,8 +202,8 @@ def receiveLoaded (config : NativeHost.Config) (pins : FactoryPins)
     | return .rejected "noncanonical grain share issue ingress"
   let some grain := outer.decodeGrain
     | return .rejected "noncanonical grain-backed birth ingress"
-  let .ok tariff := config.grainBirthTariffValue
-    | return .rejected "grain-backed tariff unavailable"
+  let some tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment durable
+    | return .rejected "grain-backed tariff unavailable: the image's platform record pins none"
   match replay durable config.deployment.domain outer grain tariff with
   | some (.ok historical) => return .historical historical
   | some (.error reason) => return .rejected reason

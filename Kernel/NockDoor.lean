@@ -1,5 +1,5 @@
 /-
-# Kernel.NockDoor — a NockApp kernel door, refereed (NOCK §2.7)
+# Kernel.NockDoor — a NockApp kernel door, refereed (docs/NOCK.md §2.7)
 
 A program whose ABI names a `door` is a NockApp kernel, run exactly as
 NockApp runs it (nockchain `cbd9298f`, `crates/nockapp/src/kernel/form.rs`):
@@ -45,7 +45,26 @@ of `[effects state']`; `steps` = the oracle's count of the whole run, boot
 included. A claim over another state or event number refuses `sampleStale`:
 concurrent pokes serialise.
 -/
-import Kernel.Door
+module
+
+public import Kernel.Door
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NockDoor
 open Minidregg.Theory
@@ -281,9 +300,6 @@ theorem door_load_deterministic {program : Program} {view : View} {state state' 
   obtain ⟨stored, hl, rfl⟩ := ustateOf_loaded u
   exact Kernel.Door.door_load_deterministic (E := Evaluator.nock) (d := nockDoor) loaded
     ⟨trap, stored, cued, hl, step'⟩
-
--- Concrete counter fixtures and kernel-decided poles are checked in
--- `Assurance.NockDoorAudit`, required by both Deployed and Assurance.
 
 /-- info: 'Minidregg.Kernel.NockDoor.door_poke_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms door_poke_sound

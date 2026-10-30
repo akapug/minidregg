@@ -6,11 +6,30 @@ signature/capability/law at the same loaded image, then emit one distinct
 durable issue event. A bare resource birth or this generated draft alone is
 never a dispatch share.
 -/
-import Kernel.ApplicationDispatchAuthority
-import Kernel.ApplicationGrain
-import Kernel.NativeHostContext
-import Kernel.ResourceBirthController
-import Theory.AssertAxioms
+module
+
+public import Kernel.ApplicationDispatchAuthority
+public import Kernel.ApplicationGrain
+public import Kernel.NativeHostContext
+public import Kernel.ResourceBirthController
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueSource
 open Minidregg.Compiler
@@ -58,17 +77,7 @@ def specStream : StreamCodec Spec :=
 private def specFrame : List UInt8 :=
   "DREGG/APPLICATION/SHARE-ISSUE-SPEC/v2".toUTF8.toList
 
-private def rawSpecCodec : LawfulCodec Spec where
-  encode spec := specFrame ++ specStream.encode spec
-  decode bytes := if bytes.take specFrame.length = specFrame then
-    specStream.toLawful.decode (bytes.drop specFrame.length) else none
-  decode_encode := by
-    intro spec
-    have decoded := specStream.toLawful.decode_encode spec
-    change specStream.toLawful.decode (specStream.encode spec) = some spec at decoded
-    simp [decoded]
-
-def specCodec : LawfulCodec Spec := ResourceBirthCodec.strictCodec rawSpecCodec
+def specCodec : LawfulCodec Spec := (StreamCodec.framed specFrame specStream).toLawful
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec := specCodec.decode_encode spec
@@ -100,17 +109,7 @@ private def ingressStream : StreamCodec Ingress :=
 private def ingressFrame : List UInt8 :=
   "DREGG/APPLICATION/SHARE-ISSUE-INGRESS/v2".toUTF8.toList
 
-private def rawIngressCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec rawIngressCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 theorem ingress_decode_encode (ingress : Ingress) :
     ingressCodec.decode (ingressCodec.encode ingress) = some ingress :=
@@ -199,8 +198,12 @@ def Ready.births (ready : Ready domain spec operation) :
 theorem Ready.one_birth (ready : Ready domain spec operation) :
     ready.births.length = 1 := rfl
 
+/-- A root grant of the ticket, bound by the factory template under the platform record
+(`ResourceBirthPolicyController.Concrete.templateAt`): the record's owner budget and
+lifetime, the profile's issuer. -/
 private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState)
     (height : Nat) (identifier : CapabilityId) (subject : SubjectId)
     (target : Nat) (verbs : Finset (Verb kind)) : Capability kind where
   id := identifier
@@ -208,9 +211,9 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   parent := none
   issuer := profile.template.issuer
   holder := .subject subject
-  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget, none, ∅⟩
+  scope := ⟨.explicit {⟨target⟩}, verbs, record.ownerBudget, none, ∅⟩
   notBefore := height
-  notAfter := height + profile.template.lifetime
+  notAfter := height + record.lifetime
   issuerEpoch := authority.issuerEpoch profile.template.issuer
   policyId := ⟨target⟩
   policyEpoch := authority.policyEpoch ⟨target⟩
@@ -218,28 +221,30 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   channels := ∅
 
 private def ownerGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
-    (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.object, ⟨rootCapability .object profile authority height
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState) (height : Nat) (spec : Spec) : AuthorityGrant :=
+  ⟨.object, ⟨rootCapability .object profile record authority height
       spec.ticketOwnerCapability spec.issuer spec.ticket.resource
       (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
 
 private def controlGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
-    (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.program, ⟨rootCapability .program profile authority height
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState) (height : Nat) (spec : Spec) : AuthorityGrant :=
+  ⟨.program, ⟨rootCapability .program profile record authority height
       spec.ticketControlCapability spec.issuer spec.ticket.resource
       {.installPolicy, .revokeCapability}, []⟩⟩
 
 def Ready.grants {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (authority : AuthState) (height : Nat) : List AuthorityGrant :=
-  [ownerGrant profile authority height spec, controlGrant profile authority height spec]
+    (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
+    List AuthorityGrant :=
+  [ownerGrant profile record authority height spec,
+    controlGrant profile record authority height spec]
 
 theorem Ready.two_grants {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (authority : AuthState) (height : Nat) :
-    (ready.grants profile authority height).length = 2 := rfl
+    (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
+    (ready.grants profile record authority height).length = 2 := rfl
 
 /-- A share ticket is immutable as content. Even if a factory caller names
 its own subject as the born resource owner, a later ordinary content edit
@@ -302,11 +307,12 @@ def Ready.initialPolicies {F : Type} [Field F]
   [⟨record.policyId, PolicyRecordCodec.digest record, PolicyRecordCodec.encode record⟩]
 
 /-- The signed birth descriptor installs the ticket page with its source-derived
-first atom and the owner-locked policy, priced by the pinned tariff on that
-whole payload. -/
+first atom and the owner-locked policy, priced by the platform record's creation tariff on
+that whole payload, its grants bound by the record's owner budget and lifetime. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHost.Config) (authority : AuthState) (height : Nat)
+    (config : NativeHost.Config) (record : PlatformCellLayout.Platform)
+    (authority : AuthState) (height : Nat)
     (_domainBound : domain = config.deployment.domain)
     (_operationBound : operation =
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
@@ -319,13 +325,13 @@ def Ready.descriptor {F : Type} [Field F]
     { factory := ⟨config.deployment.factoryId⟩, creator := spec.issuer,
       transactionId := identity, nonce := spec.ticket.issueNonce,
       births := ready.births, auxiliaryCreates := [],
-      grants := ready.grants profile authority height,
+      grants := ready.grants profile record authority height,
       initialPolicies := ready.initialPolicies profile config,
       authorityNullifier := identity.value,
       funding := funding,
-      fee := ⟨payer, config.tariff.collector, config.tariff.asset, 0⟩ }
+      fee := ⟨payer, record.creation.collector, record.creation.asset, 0⟩ }
   { draft with fee := { draft.fee with amount :=
-      (draft.quotedFee config.tariff) } }
+      (draft.quotedFee record.creation) } }
 
 /-- Rebuild the one permissible birth descriptor from the selected issuer and
 exact ticket, retaining only the caller's payer/funding choices. The special
@@ -333,21 +339,21 @@ receiver compares this whole value with the decoded, natively admitted birth;
 the source builder alone is not issue authority. -/
 def Ready.expectedDescriptor {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHost.Config)
+    (config : NativeHost.Config) (record : PlatformCellLayout.Platform)
     (ready : Ready config.deployment.domain spec
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (authority : AuthState) (height payer : Nat)
     (funding : List InitialFunding := []) :
     Descriptor CanonicalCellRegistry.registry :=
-  ready.descriptor profile config authority height rfl rfl payer funding
+  ready.descriptor profile config record authority height rfl rfl payer funding
 
 /-- The delegation request commits to the complete source draft. Carried
 descriptors stay opaque bytes authenticated by their original profile's record.
 Hash collision resistance is external; digest equality is not byte equality. -/
 def sourceBytesFromDescriptorBytes (spec : Spec) (descriptorBytes : List UInt8) :
     List UInt8 :=
-  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v2".toUTF8.toList ++
+  "DREGG/APPLICATION/SHARE-ISSUE-SOURCE/v6".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode (specCodec.encode spec, descriptorBytes)
 
 def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) :
@@ -357,7 +363,7 @@ def sourceBytes (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.reg
 
 def issueMarker (spec : Spec) (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v2".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-MARKER/v6".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequestFromSourceBytes (domain semantics : Digest) (federation : FederationId)
@@ -372,10 +378,10 @@ def appRequestFromSourceBytes (domain semantics : Digest) (federation : Federati
   target := ⟨spec.ticket.scope.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v2".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-ARGS/v4".toUTF8.toList
     originalSourceBytes).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v2".toUTF8.toList
+    "DREGG/APPLICATION/SHARE-ISSUE-EFFECTS/v4".toUTF8.toList
     originalSourceBytes).digest
   nonce := spec.ticket.issueNonce
   height := height

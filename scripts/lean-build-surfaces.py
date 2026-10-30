@@ -1,8 +1,21 @@
 #!/usr/bin/env python3
-"""Generate explicit compile targets and a hash-pinned source inventory.
+"""Generate the explicit compile targets (SimplexQualification.lean, ResearchWip.lean) and the build
+surface report.
 
-This is a source/build graph report. It never promotes an owner's report to a
-compiler result, a semantic theorem, or native qualification.
+The report (which module is on the default surface, which is authored research, which are program
+roots) is a BUILD OUTPUT, written to build-logs/lean-build-surfaces.json and never tracked: it was a
+hash-pinned inventory (protocol/lean-build-surfaces.json) whose every red was "source drift" from an
+ordinary edit, and 65 re-pin commits since 10-01 existed only to feed it. What stays checked is what
+the generator EMITS into the tree: every emitted target file must be tracked by git and equal to what
+the generator writes now (a new untracked emitted file, or a stale one, is red).
+
+  generate   write the emitted targets into the tree, and the report
+  check      generate into a scratch dir; RED unless every emitted file is tracked and identical; the report
+  json       print the report (consumers: check-build-closure.sh)
+  research   lake build ResearchWip + the program roots (opt-in)
+
+This is a source/build graph report. It never promotes an owner's report to a compiler result, a
+semantic theorem, or native qualification.
 """
 import argparse
 import hashlib
@@ -10,6 +23,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -40,7 +54,7 @@ def source_modules(root):
     ).decode().split("\0")
     # During an authorized source-first publication, include staged and new
     # library source as well. Exclude build output and standalone scripts.
-    tops = {"Theory", "Pred", "Kernel", "Compiler", "Assurance", "Effects", "Selvage", "Host", "Verify"}
+    tops = {"Theory", "Pred", "Kernel", "Compiler", "Assurance", "Effects", "Selvage", "Host", "Verify", "Fixtures"}
     for top in tops:
         files.extend(str(p.relative_to(root)) for p in (root / top).glob("**/*.lean"))
     files.extend(name + ".lean" for name in GROUPS)
@@ -67,12 +81,17 @@ def closure(modules, roots):
     return seen
 
 
-def build(root):
+EMITTED = [group + ".lean" for group in GROUPS] + ["ResearchWip.lean"]
+
+
+def build(root, out=None):
+    """The report; the emitted target files are written under `out` (default: the tree)."""
+    out = root if out is None else out
     for group, roots in GROUPS.items():
         for module in roots:
             if not (root / (module.replace(".", "/") + ".lean")).exists():
                 raise ValueError("Missing qualification source: " + module)
-        (root / (group + ".lean")).write_text(
+        (out / (group + ".lean")).write_text(
             "/- Explicit compile target. Aggregate compilation and semantic/native\n"
             "qualification are separate. See docs/LEAN-QUALIFICATION.md. -/\n" +
             "".join("import " + module + "\n" for module in roots))
@@ -84,55 +103,75 @@ def build(root):
     unrooted = set(modules) - default - {"ResearchWip"}
     programs = sorted(m for m in unrooted if re.search(r"^def main(?:\s|\(|:)", modules[m].read_text(), re.M))
     research = sorted(unrooted - set(programs))
-    (root / "ResearchWip.lean").write_text(
+    (out / "ResearchWip.lean").write_text(
         "/- Opt-in authored research compilation. This target may fail; it is\n"
         "excluded from the default qualification gate. Executable roots are listed\n"
         "separately in protocol/lean-build-surfaces.json to avoid main collisions. -/\n" +
         "".join("import " + m + "\n" for m in research))
     modules = source_modules(root)
-    reports = json.loads((root / "docs/construction/source-intake-20261003.json").read_text())["files"]
-    by_path = {f["path"]: f for f in reports}
-    inventory = []
-    for name, path in sorted(modules.items()):
-        rel = str(path.relative_to(root)); sha = digest(path.read_bytes()); report = by_path.get(rel)
-        row = {"module": name, "path": rel, "sha256": sha,
-               "surface": "default" if name in default else "authored-research"}
-        if report and report["sha256"] == sha:
-            row["ownerReportedStatus"] = report.get("qualification", "unspecified")
-        else:
-            row["ownerReportedStatus"] = "No matching owner source report"
-        inventory.append(row)
-    return {"schema": "minidregg-lean-build-surfaces-v1",
-            "meaning": "Declared compile coverage and source hashes; no aggregate compiler PASS or native qualification is implied.",
+    inventory = [{"module": name, "path": str(path.relative_to(root)),
+                  "surface": "default" if name in default else "authored-research"}
+                 for name, path in sorted(modules.items())]
+    return {"schema": "minidregg-lean-build-surfaces-v2",
+            "meaning": "Declared compile coverage (a build output, not a pin); no aggregate compiler PASS or native qualification is implied.",
             "qualificationTargets": GROUPS,
             "optInTargets": ["ResearchWip"],
             "programRoots": programs,
             "modules": inventory}
 
 
+def tracked(root, rel):
+    return subprocess.run(["git", "ls-files", "--error-unmatch", "--", rel], cwd=root,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def emitted_problems(root, scratch, names):
+    """Every emitted file must be tracked and byte-equal to what the generator writes now."""
+    problems = []
+    for rel in names:
+        fresh = (scratch / rel).read_bytes()
+        if not tracked(root, rel):
+            problems.append(f"emitted target {rel} is not tracked by git (git add it)")
+        elif not (root / rel).is_file() or (root / rel).read_bytes() != fresh:
+            problems.append(f"emitted target {rel} is stale (run `python3 scripts/lean-build-surfaces.py generate`)")
+    return problems
+
+
+def report(root, data):
+    out = root / "build-logs"
+    out.mkdir(exist_ok=True)
+    (out / "lean-build-surfaces.json").write_text(json.dumps(data, indent=2) + "\n")
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["generate", "check", "research"])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("mode", choices=["generate", "check", "json", "research"])
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(); root = args.root.resolve()
-    path = root / "protocol/lean-build-surfaces.json"
     if args.mode == "generate":
-        data = build(root); path.write_text(json.dumps(data, indent=2) + "\n")
-        print(f"build-surfaces: {len(data['modules'])} source modules; explicit qualification and opt-in research targets generated")
-    else:
-        data = json.loads(path.read_text())
-        for row in data["modules"]:
-            source = root / row["path"]
-            if not source.is_file() or digest(source.read_bytes()) != row["sha256"]:
-                raise SystemExit("build-surfaces: source drift: " + row["path"])
-        declared = {row["module"] for row in data["modules"]}
-        missing = set(source_modules(root)) - declared
-        if missing:
-            raise SystemExit("build-surfaces: unclassified source: " + ", ".join(sorted(missing)))
+        data = build(root); report(root, data)
+        print(f"build-surfaces: {len(data['modules'])} source modules; emitted {', '.join(EMITTED)}; report build-logs/lean-build-surfaces.json")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        scratch = Path(d)
+        data = build(root, scratch)
+        if args.mode == "json":
+            print(json.dumps(data, indent=2)); return
         if args.mode == "research":
-            subprocess.run(["lake", "build", "ResearchWip"] + data["programRoots"], cwd=root, check=True)
-        else:
-            print(f"build-surfaces: source pins/classification PASS ({len(declared)} modules); compiler results are separate")
+            subprocess.run(["lake", "build", "ResearchWip"] + data["programRoots"], cwd=root, check=True); return
+        # self-test, every run: an emitted file git does not track is red by name
+        (scratch / "SelfTestUntracked.lean").write_text("-- plant\n")
+        plant = emitted_problems(root, scratch, ["SelfTestUntracked.lean"])
+        if not plant or "not tracked" not in plant[0]:
+            raise SystemExit("build-surfaces: instrument: an untracked emitted plant was not refused")
+        problems = emitted_problems(root, scratch, EMITTED)
+    report(root, data)
+    for p in problems:
+        print("build-surfaces: RED " + p)
+    if problems:
+        raise SystemExit(1)
+    print(f"build-surfaces: PASS: {len(EMITTED)} emitted targets tracked and current ({len(data['modules'])} modules classified; "
+          f"self-test: an untracked emitted file is refused); compiler results are separate")
 
 
 if __name__ == "__main__":

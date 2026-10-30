@@ -1,23 +1,29 @@
 //! Physical controller for one Mini agent-grain task. Semantic admission is
 //! exclusively a signed call to the native Lean host through `mini`.
 mod journal_io;
+mod deadline;
+#[cfg(test)]
+mod startup_budget_tests;
 mod controller_digest;
+#[path = "../../file_identity.rs"]
+mod file_identity;
 mod public_status;
 mod application_api_tools;
+mod oracle_tools;
 mod application_tools;
 mod concierge;
 mod hermes_room;
 mod room_task;
+mod sandbox_tools;
+mod history_compaction;
+mod resident_compute;
 mod room_resident;
 mod resident_context;
 mod quiescence;
-mod quiescence_transport;
-mod config_migration;
 mod resident_reconcile;
 mod hermes_outcome;
+mod prompt_outcome;
 mod hermes_session_verify;
-mod session_failure;
-mod resident_outcomes;
 mod resident_origin;
 mod resident_requests;
 mod resident_preflight;
@@ -28,24 +34,22 @@ mod birth_lifecycle_tests;
 mod control;
 mod cgroup_stop;
 mod systemd_manager;
-mod controller_write_scopes;
-// One source shared with `mini key` (resource-client includes it by path):
-// the write verbs are used there, the reserve-time lookups here.
-#[allow(dead_code)]
-mod credentials;
+// The provider table, grants and owners: the key broker's parsers (its sealed
+// store compiles only inside the broker).
+use mini_keys::credentials;
 mod custody_gate;
 mod dispatch_custody;
 #[cfg(test)]
 mod dispatch_runtime_tests;
 mod gitweb_worker;
+mod typed_applications;
 mod grain_source;
+mod grain_create;
 mod homelab;
 mod pending_prepare;
-mod legacy_custody_audit;
 mod mcp;
-#[cfg(test)]
-mod hermes_catalogue_probe;
 mod provider;
+mod provider_failure;
 mod provider_profile;
 mod provider_provision;
 mod provider_owner;
@@ -59,6 +63,8 @@ mod query_observation;
 mod publication_refusal_tests;
 mod resource_tools;
 mod shared_app_refs;
+mod foreground_session_recovery;
+mod birth_refusal;
 mod terminal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -81,6 +87,8 @@ use std::time::{Duration, Instant};
 
 type Result<T> = std::result::Result<T, String>;
 
+mod application_enrollment;
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Config {
@@ -89,6 +97,12 @@ struct Config {
     host_config: PathBuf,
     #[serde(default)]
     host_socket: Option<PathBuf>,
+    /// Operator budget for cold startup/recovery and idle attachment only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    startup_timeout_seconds: Option<u64>,
+    /// Opt in only with a qualified Mini/consent/proxy supporting full readiness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    consent_full_readiness: Option<bool>,
     control_socket: PathBuf,
     custody_key: PathBuf,
     state_dir: PathBuf,
@@ -109,6 +123,10 @@ struct Config {
     dispatch_task: Option<DispatchTask>,
     #[serde(default)]
     provider_task: Option<ProviderTask>,
+    /// Upstream Hermes's file, terminal and Python tools inside the worker:
+    /// the operator's ceiling and the class bounds (docs/HERMES-TOOLS-2026-10-27.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sandbox: Option<sandbox_tools::Sandbox>,
     /// A command must be selected by its configured name. Its arguments are
     /// fixed by the operator, so a remote connection cannot inject paths or
     /// gain a new executable through this interface.
@@ -152,6 +170,13 @@ struct ToolTask {
     /// Current execution generations come from each source-inspected plan.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_application_lifetime_routes: Vec<application_api_tools::LifetimeRoutePin>,
+    /// Protocol discovery profiles over existing lifetime API routes; never grants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    application_services: Vec<oracle_tools::ServiceProfile>,
+    /// Typed, package-pinned tools over existing lifetime routes (docs/APP-INTERFACE-2026-10-28.md).
+    /// An attachment names a route and a declaration; it is discovery and encoding, never a grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    typed_applications: Vec<typed_applications::TypedApplicationAttachment>,
     /// Only an explicitly certified Mini Host with the agent event21 route
     /// may enable the forward API tool. The SPK host still obtains and checks
     /// a fresh event21 permit for each request.
@@ -163,7 +188,7 @@ struct ToolTask {
     /// image. The family allowlists alone never enable op30/31 delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     current_birth_host_sha256: Option<String>,
-    /// The room this grain's Hermes was summoned into (PLACE §2.7): the room
+    /// The room this grain's Hermes was summoned into (docs/PLACE.md §2.7): the room
     /// tools (`resource_tools::room_tool_specs`) run the pinned client's shell
     /// under this workspace; each write pays the room's `hermes/turn` first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -197,9 +222,26 @@ struct DispatchTask {
     /// planning/assembly. The ordinary hostSocket remains public receipt IO.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     operator_socket: Option<PathBuf>,
+    /// Kernel credentials of the listening endpoint. A systemd-activated
+    /// controller-private socket may report its activator (often UID 0), not
+    /// the operator process accepting requests. Never inferred from path owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    operator_peer_uid: Option<u32>,
     /// Pinned enrolled identity for the controller's private purse signer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reserve_signer: Option<DispatchSignerPin>,
+}
+
+fn pin_operator_peer_command(command: &mut Command, mini: &Path, task: Option<&DispatchTask>) {
+    if command.get_program() != mini.as_os_str() { return; }
+    let selected = command.get_args().next().and_then(|arg| arg.to_str()).is_some_and(|name|
+        name.starts_with("agent-reserve-") || name.starts_with("agent-lifetime-reserve-")
+        || name.starts_with("agent-lifetime-paid-") || name == "agent-payer-sign");
+    if selected {
+        if let Some(uid) = task.and_then(|task| task.operator_peer_uid) {
+            command.arg("--operator-peer-uid").arg(uid.to_string());
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -212,20 +254,22 @@ struct DispatchSignerPin {
     key_epoch: String,
 }
 
-/// A one-target observed `NativeHost.prepareLoaded (.invoke ...)` has the
-/// target, observation, and authority signing incidences in this order. They
-/// all use the controller's pinned payer identity; the resident never gets
-/// that key. V2's separate signing profile is unaffected.
+/// Lifetime reserve and payer authoring each invoke one mutating purse target.
+/// Native Command.requiresObservation is false for that shape: the ordered
+/// incidences are target (4) and authority (1), with no observation (8).
+/// Both use the pinned payer identity; the resident never gets its key.
+/// The exact source plan is independently rederived by native consent before
+/// signing. V2's separate signing profile is unaffected.
 fn lifetime_purse_signers(
     slots: &[Value],
     signer: &DispatchSignerPin,
     key_path: &Path,
 ) -> Result<Vec<Value>> {
-    if !matches!(signer.role.as_str(), "4" | "8" | "1") || signer.index != "0" || slots.len() != 3 {
-        return Err("lifetime purse requires exact target/observe/authority slots".into());
+    if !matches!(signer.role.as_str(), "4" | "1") || signer.index != "0" || slots.len() != 2 {
+        return Err("lifetime purse requires exact target/authority slots".into());
     }
-    let mut approved = Vec::with_capacity(3);
-    for (slot, role) in slots.iter().zip(["4", "8", "1"]) {
+    let mut approved = Vec::with_capacity(2);
+    for (slot, role) in slots.iter().zip(["4", "1"]) {
         let signing = slot
             .get("signing")
             .ok_or("lifetime purse signing header absent")?;
@@ -249,6 +293,20 @@ fn lifetime_purse_signers(
             "keyPath":key_path}));
     }
     Ok(approved)
+}
+
+/// The source-approved signer incidences determine the returned signature
+/// cardinality. Do not carry a separate legacy three-slot transport profile.
+fn validate_lifetime_payer_reply(result: &Value, plan_sha256: &str, approved: &[Value]) -> Result<()> {
+    if result.get("type").and_then(Value::as_str) != Some("minidregg-agent-lifetime-payer-signatures-v1")
+        || result.get("planSha256").and_then(Value::as_str) != Some(plan_sha256)
+        || result.get("signatures").and_then(Value::as_array).is_none_or(|list|
+            list.len() != approved.len() || list.iter().any(|entry|
+                entry.as_str().is_none_or(|signature| signature.len() != 128
+                    || !signature.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))))) {
+        return Err("lifetime detached payer signatures differ from approved plan".into());
+    }
+    Ok(())
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -351,35 +409,34 @@ fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
     Ok(iterations)
 }
 
+/// The configured task's tariff from the Host profile's one service list
+/// (`providerMeterings`). A profile from a Host that still emits the retired
+/// scalar `providerMetering` refuses by name rather than being read as a pin.
 fn select_provider_metering<'a>(profile: &'a Value, task: &str) -> Result<&'a Value> {
-    if let Some(services) = profile.get("providerMeterings") {
-        if profile.get("providerMetering").is_some() {
-            return Err("Host profile mixes singular and multi-provider tariffs".into());
-        }
-        let services = services
-            .as_array()
-            .filter(|services| !services.is_empty() && services.len() <= 8)
-            .ok_or("Host provider metering list is not bounded")?;
-        let mut ids = std::collections::HashSet::new();
-        for service in services {
-            let id = service
-                .get("providerResourceId")
-                .and_then(Value::as_str)
-                .ok_or("Host provider metering resource ID absent")?;
-            decimal(id, "providerResourceId")?;
-            if id == "0" || !ids.insert(id) {
-                return Err("Host profile repeats or zeroes a provider metering ID".into());
-            }
-        }
-        services
-            .iter()
-            .find(|service| service.get("providerResourceId").and_then(Value::as_str) == Some(task))
-            .ok_or("pinned Host profile has no tariff for configured provider task".into())
-    } else {
-        profile
-            .get("providerMetering")
-            .ok_or("pinned Host profile has no provider metering tariff".into())
+    if profile.get("providerMetering").is_some() {
+        return Err("Host profile carries the retired scalar providerMetering; the Host must pin providerServices".into());
     }
+    let services = profile
+        .get("providerMeterings")
+        .ok_or("pinned Host profile has no provider metering tariff")?
+        .as_array()
+        .filter(|services| !services.is_empty() && services.len() <= 8)
+        .ok_or("Host provider metering list is not bounded")?;
+    let mut ids = std::collections::HashSet::new();
+    for service in services {
+        let id = service
+            .get("providerResourceId")
+            .and_then(Value::as_str)
+            .ok_or("Host provider metering resource ID absent")?;
+        decimal(id, "providerResourceId")?;
+        if id == "0" || !ids.insert(id) {
+            return Err("Host profile repeats or zeroes a provider metering ID".into());
+        }
+    }
+    services
+        .iter()
+        .find(|service| service.get("providerResourceId").and_then(Value::as_str) == Some(task))
+        .ok_or("pinned Host profile has no tariff for configured provider task".into())
 }
 
 fn provider_required_network(task: &ProviderTask) -> &'static str {
@@ -408,6 +465,34 @@ fn provider_command_route(command: &AllowedCommand, required_network: &str) -> b
             .args
             .get(7)
             .is_some_and(|arg| arg == "/agent/hermes-acp")
+}
+
+const FOREGROUND_API_WALL_SECONDS: u64 = 1800;
+
+/// Physical foreground API budget. A reverse caller may narrow the actual
+/// deadline, never extend it or borrow the identity of a Hermes worker.
+struct ForegroundApiBudget {
+    operation_id: u64,
+    started: Instant,
+    deadline: Instant,
+}
+
+impl ForegroundApiBudget {
+    fn new(operation_id: u64) -> Self {
+        let started = Instant::now();
+        Self { operation_id, started, deadline: started + Duration::from_secs(FOREGROUND_API_WALL_SECONDS) }
+    }
+    fn tighten(&mut self, requested: u64) -> Result<u64> {
+        if requested == 0 || requested > FOREGROUND_API_WALL_SECONDS {
+            return Err("lifetime foreground wall exceeds controller API policy".into());
+        }
+        let deadline = self.deadline.min(self.started + Duration::from_secs(requested));
+        if Instant::now() >= deadline {
+            return Err("lifetime foreground API budget expired".into());
+        }
+        self.deadline = deadline;
+        Ok(requested)
+    }
 }
 
 fn checked_lifetime_worker_wall(
@@ -534,6 +619,8 @@ struct Journal {
     birth_operation: Option<BirthOperation>,
     #[serde(default)]
     birth_pending: Option<BirthPending>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    birth_refusal: Option<birth_refusal::BirthRefusal>,
     #[serde(default)]
     born_resources: Vec<BornResourceRecord>,
     #[serde(default)]
@@ -564,6 +651,11 @@ struct Journal {
     prior_hermes_sessions: Vec<HermesSession>,
     #[serde(default)]
     prompt_witness: Option<Value>,
+    /// Bounded retry-with-backoff of one request's bytes across NEW reserves,
+    /// after a definite retryable reply (429, 5xx). Never covers a send whose
+    /// outcome is unknown: those attempts stay held until their settle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_retry_gate: Option<provider_failure::RetryGate>,
     unresolved_external: Vec<String>,
 }
 
@@ -668,12 +760,29 @@ fn managed_law_candidates(status: &str, desired: u64, own: Option<u64>) -> Resul
 
 /// Unresolved-effect notes whose only possible effects, for a network-none
 /// scoped worker with every Mini attempt resolved, are already accounted for.
-fn derivable_effect_note(note: &str) -> bool {
+fn derivable_effect_note(state_dir: &Path, note: &str) -> bool {
     (note.starts_with("worker operation ")
         && note.ends_with(" stopped after controller restart; external effects need acknowledgement"))
         || note == "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement"
         || note == "parent reserved operation may have external effects; explicit operator acknowledgement required"
-        || note.starts_with("Hermes prompt ")
+        || derivable_prompt_note(state_dir, note)
+}
+
+/// A failed Hermes prompt's note is derivable only through its typed outcome
+/// record (R11): the record must be `undecided` for exactly this note, retain
+/// no native attempt, and name no retry beyond the parent hold and the
+/// effects acknowledgement. A note prefix alone is never evidence.
+fn derivable_prompt_note(state_dir: &Path, note: &str) -> bool {
+    let Some(id) = note.strip_prefix("Hermes prompt ")
+        .and_then(|rest| rest.split_once(": "))
+        .and_then(|(id, _)| id.parse::<u64>().ok().filter(|n| n.to_string() == id))
+    else { return false };
+    let Ok(Some(record)) = prompt_outcome::read(state_dir, id) else { return false };
+    matches!(&record.outcome, prompt_outcome::Outcome::Undecided { retry, detail }
+        if detail == note
+            && retry.operation.is_none()
+            && retry.admin.last().map(String::as_str) == Some("reconcile effects")
+            && retry.admin.iter().all(|c| c == "reconcile parent audited" || c == "reconcile effects"))
 }
 
 /// Startup proof that no process of an earlier run of this controller's
@@ -890,11 +999,76 @@ fn bounded_foreground_result(mut result: Value) -> Result<(Value, Vec<u8>)> {
     Ok((result, bytes))
 }
 
+/// Birth and later renewal must encode the same ordered role list.
+fn ordered_worker_subjects(
+    tool: Option<&str>,
+    provider: Option<&str>,
+    dispatch: Option<&str>,
+) -> Vec<String> {
+    [tool, provider, dispatch]
+        .into_iter()
+        .flatten()
+        .map(str::to_owned)
+        .collect()
+}
+
 fn managed_worker_policy_source(owner: &str, workers: &[String], generation: &str) -> Value {
     if workers.len() == 1 {
         json!({"owner":owner,"workerSubject":workers[0],"workerGeneration":generation})
     } else {
         json!({"owner":owner,"workerSubjects":workers,"workerGeneration":generation})
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ToolSurface {
+    Resident,
+    OperatorForeground,
+}
+
+fn operator_foreground_tool(name: &str) -> bool {
+    matches!(name,
+            "mini_grain_status"
+                | "mini_workspace_list"
+                | "mini_workspace_describe"
+                | "mini_workspace_read"
+                | "mini_workspace_propose"
+                | "mini_workspace_submit"
+                | "mini_workspace_create"
+                | "mini_workspace_recover"
+                | "mini_workspace_attempts"
+                | "mini_workspace_import_reference"
+                | "mini_workspace_export_reference"
+                | "mini_read_resource"
+                | "mini_create_resource"
+                | "mini_create_application"
+                | "mini_create_application_session"
+                | "mini_publish"
+                | "mini_application_api"
+                | "mini_oracle_discover"
+                | "mini_oracle_call"
+    )
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentFullReadiness {
+    #[serde(rename = "type")]
+    kind: String,
+    ready: bool,
+}
+
+impl ConsentFullReadiness {
+    fn parse(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() > 1024 {
+            return Err("full-consent readiness reply exceeds 1024 bytes".into());
+        }
+        let receipt: Self = serde_json::from_slice(bytes)
+            .map_err(|e| format!("full-consent readiness reply: {e}"))?;
+        if receipt.kind != "mini-consent-full-readiness-v1" || !receipt.ready {
+            return Err("full-consent provider did not confirm readiness".into());
+        }
+        Ok(receipt)
     }
 }
 
@@ -1251,6 +1425,12 @@ struct ProviderAttempt {
     metered_charge: Option<String>,
     /// Table row and credential kind this attempt was permitted to use.
     route: ProviderRouteRecord,
+    /// The decided failure class, its settle state and the exact retry, set
+    /// the moment an attempt leaves the 200 path. It replaces every free-text
+    /// provider note: the attempt (and its hold) stays until a Host-admitted
+    /// settle clears it, and `retry` names the command that drives that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    decision: Option<provider_failure::Decision>,
 }
 
 /// One exact app dispatch attempt under the separate AgentGrain purse. The
@@ -1578,10 +1758,84 @@ struct ProviderSettlement {
     receipt: ReserveAnchor,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+fn provider_settlement_record_from(
+    config: &Config,
+    provider_attempt_id: u64,
+    pending: &Pending,
+    outcome_path: &Path,
+) -> Result<ProviderSettlement> {
+    let task = config.provider_task.as_ref().ok_or("providerTask absent")?;
+    if !matches!(
+        pending.operation.as_str(),
+        "provider settle" | "provider audit settle" | "provider recovery settle"
+    ) || pending.attempt
+        != config
+            .state_dir
+            .join(format!("attempt-{:016}", pending.operation_id))
+    {
+        return Err("provider settlement has no exact pending operation".into());
+    }
+    let source_path = config
+        .state_dir
+        .join(format!("source-{:016}.json", pending.operation_id));
+    let source_bytes = bounded_regular_file(&source_path, 131_072)?;
+    let source: Value = serde_json::from_slice(&source_bytes)
+        .map_err(|e| format!("provider settlement source: {e}"))?;
+    let charge = source
+        .pointer("/grain/operation/charge")
+        .and_then(Value::as_str)
+        .ok_or("provider settlement charge absent")?;
+    decimal(charge, "provider settlement charge")?;
+    if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
+        || source.pointer("/grain/subject").and_then(Value::as_str) != Some(task.subject.as_str())
+        || source
+            .pointer("/grain/operation/type")
+            .and_then(Value::as_str)
+            != Some("settle")
+        || !grain_source::retained_identity(
+            &source,
+            &config.task,
+            &task.task,
+            &task.subject,
+            pending.operation_id,
+        )
+    {
+        return Err("provider settlement source differs from pinned operation".into());
+    }
+    let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
+    let outcome: Value = serde_json::from_slice(&outcome_bytes)
+        .map_err(|e| format!("provider settlement outcome: {e}"))?;
+    if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
+        || !matches!(
+            outcome.get("confirmation").and_then(Value::as_str),
+            Some("installed" | "replayed")
+        )
+    {
+        return Err("provider settlement has no confirmed native outcome".into());
+    }
+    let call = pending.attempt.join("call.bin");
+    let outcome_binary = outcome_path.with_extension("bin");
+    Ok(ProviderSettlement {
+        provider_attempt_id,
+        operation_id: pending.operation_id,
+        operation: pending.operation.clone(),
+        attempt: pending.attempt.clone(),
+        charge: charge.to_owned(),
+        source_sha256: sha256_bytes(&source_bytes)?,
+        call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+        outcome_path: outcome_path.to_owned(),
+        outcome_sha256: sha256_bytes(&bounded_regular_file(&outcome_binary, 4_194_304)?)?,
+        receipt: ReserveAnchor::from_confirmed(&outcome)?,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum MeteredAuditPath {
     ProvenNoSend,
     CompleteResponse,
+    /// Crossed the send boundary with no complete reply: settled only by the
+    /// Host's outcome-class quote (v4 metering frame), never by inference.
+    ClassSettle(provider_failure::FailureClass),
 }
 
 fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<MeteredAuditPath> {
@@ -1591,6 +1845,11 @@ fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<Meter
         Ok(MeteredAuditPath::ProvenNoSend)
     } else if send_started && outcome.is_some_and(|kind| kind.starts_with("received:")) {
         Ok(MeteredAuditPath::CompleteResponse)
+    } else if send_started && outcome.is_none_or(|kind| kind.starts_with("uncertain:")) {
+        provider_failure::classify(send_started, outcome, None)
+            .filter(|class| class.after_send() && !class.has_complete_response())
+            .map(MeteredAuditPath::ClassSettle)
+            .ok_or_else(|| "metered provider audit could not classify the retained outcome".into())
     } else {
         Err("metered provider audit has no complete retained response or proven no-send".into())
     }
@@ -1694,10 +1953,50 @@ fn provider_metering_metadata(
     reserve: &str,
 ) -> Result<Value> {
     provider_route_code(&pin.route)?;
-    Ok(json!({"version":"3","providerResourceId":pin.provider_resource_id,
-        "route":pin.route,"status":status.to_string(),"contentType":content_type,
-        "reserve":reserve}))
+    Ok(json!({"version":"4","providerResourceId":pin.provider_resource_id,
+        "route":pin.route,"leg":"complete","status":status.to_string(),
+        "contentType":content_type,"reserve":reserve}))
 }
+
+/// The Host's leg (`Kernel/ProviderMetering.lean` `Leg`) for an after-send
+/// class without a complete reply.
+fn provider_class_leg(class: &str) -> Result<&'static str> {
+    match class {
+        "timeout-after-send" => Ok("timeout"),
+        "malformed" => Ok("truncated"),
+        "crash-after-send" => Ok("lost"),
+        _ => Err("provider class settle names an unknown outcome class".into()),
+    }
+}
+
+/// A settle request for a call that crossed the send boundary with no
+/// complete retained reply (`Host/ProviderUsage.lean` `quotePayload` v4): the
+/// leg names what happened, `status` is "0" and `contentType` empty; the
+/// response bytes are whatever partial body was retained (possibly empty).
+fn provider_class_metadata(pin: &ProviderMeteringPin, reserve: &str, class: &str) -> Result<Value> {
+    provider_route_code(&pin.route)?;
+    let leg = provider_class_leg(class)?;
+    Ok(json!({"version":"4","providerResourceId":pin.provider_resource_id,
+        "route":pin.route,"leg":leg,"status":"0","contentType":"","reserve":reserve}))
+}
+
+/// The Host's report statuses and claims (`Host/ProviderUsage.lean` `reportJson`).
+const QUOTED_PER_OPERATION: (&str, &str) = (
+    "quoted-per-operation",
+    "per-operation fee under operator tariff; the provider bill is the key owner's",
+);
+const QUOTED_REPORTED_USAGE: (&str, &str) = (
+    "quoted-reported-usage",
+    "provider-reported usage under operator tariff; not invoice-verified",
+);
+const QUOTED_REFUSED_REPLY: (&str, &str) = (
+    "quoted-refused-reply",
+    "complete non-200 reply: the route's declared per-operation fee; the provider bills nothing for a refused call",
+);
+const QUOTED_UNDECIDED_AT_HOLD: (&str, &str) = (
+    "quoted-undecided-at-hold",
+    "no usage record could be read for this leg: the whole hold, the maximum the provider may have billed",
+);
 
 fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32) -> Result<u128> {
     let per_op = pin
@@ -1733,19 +2032,35 @@ fn provider_quote_charge(
     reserve: &str,
     request_bytes: usize,
     response_bytes: usize,
+    outcome_class: Option<&str>,
 ) -> Result<String> {
     let user = pin.route == "user";
-    let (status, claim) = if user {
-        (
-            "quoted-per-operation",
-            "per-operation fee under operator tariff; the provider bill is the key owner's",
-        )
-    } else {
-        (
-            "quoted-reported-usage",
-            "provider-reported usage under operator tariff; not invoice-verified",
-        )
+    // `outcome_class`: None for a complete 200, "complete-non-200" for a
+    // complete refused reply, else the after-send class (no complete reply).
+    let (leg, http_status) = match outcome_class {
+        None => ("complete", None),
+        Some("complete-non-200") => ("complete", None),
+        Some(class) => (provider_class_leg(class)?, Some("0")),
     };
+    let reported_status = report.get("status").and_then(Value::as_str);
+    // The user route is quoted its per-operation fee whatever the leg; a
+    // metered route by the leg and reply; a complete 200 whose usage cannot
+    // be read is quoted undecided at the hold.
+    let (status, claim) = if user {
+        QUOTED_PER_OPERATION
+    } else {
+        match outcome_class {
+            None if reported_status == Some(QUOTED_UNDECIDED_AT_HOLD.0) => QUOTED_UNDECIDED_AT_HOLD,
+            None => QUOTED_REPORTED_USAGE,
+            Some("complete-non-200") => QUOTED_REFUSED_REPLY,
+            Some(_) => QUOTED_UNDECIDED_AT_HOLD,
+        }
+    };
+    if report.get("leg").and_then(Value::as_str) != Some(leg)
+        || http_status.is_some_and(|code| report.get("httpStatus").and_then(Value::as_str) != Some(code))
+    {
+        return Err("provider quote names another leg or HTTP status than the retained attempt".into());
+    }
     if report.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v2")
         || report.get("status").and_then(Value::as_str) != Some(status)
         || report.get("route").and_then(Value::as_str) != Some(pin.route.as_str())
@@ -1796,6 +2111,21 @@ fn provider_quote_charge(
             return Err(format!("provider quote {name} exceeds decimal bound"));
         }
         decimal(value, name)?;
+    }
+    let no_usage = ["promptTokens", "completionTokens", "totalTokens"]
+        .iter()
+        .all(|name| report.get(*name).is_none());
+    if !user && status == QUOTED_REFUSED_REPLY.0 {
+        if charge != pin.per_op || !no_usage {
+            return Err("refused-reply quote is not exactly the route fee without usage".into());
+        }
+        return Ok(charge.to_owned());
+    }
+    if !user && status == QUOTED_UNDECIDED_AT_HOLD.0 {
+        if charge != reserve || !no_usage {
+            return Err("undecided-leg quote is not exactly the hold without usage".into());
+        }
+        return Ok(charge.to_owned());
     }
     if user {
         // The friend's own key paid the provider: the fee alone, no counts.
@@ -2250,6 +2580,7 @@ impl Journal {
             birth_next_ordinal: BTreeMap::new(),
             birth_operation: None,
             birth_pending: None,
+            birth_refusal: None,
             born_resources: Vec::new(),
             workspace_proposals: Vec::new(),
             workspace_attempt: None,
@@ -2262,6 +2593,7 @@ impl Journal {
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
             prompt_witness: None,
+            provider_retry_gate: None,
             unresolved_external: Vec::new(),
         }
     }
@@ -2305,8 +2637,33 @@ fn bounded_policy_bytes(path: &Path) -> Result<Vec<u8>> {
     fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The digest of a pinned executable: hashed once per file identity (dev, ino, size, mode, owner,
+/// mtime, ctime), so a per-call pin check costs an open and an fstat, not a read of the image.
+fn sha256_pinned_file(path: &Path) -> Result<String> {
+    file_identity::cached_file_sha256(path).map_err(|e| format!("file digest: {e}"))
+}
+
+/// `sha256_bytes(&bounded_regular_file(path, maximum)?)` without reading an unchanged file again:
+/// the same symlink/type/length refusal, then the digest kept per file identity.
+fn sha256_bounded_regular_file(path: &Path, maximum: usize) -> Result<String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("bounded {}: {e}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > maximum as u64 {
+        return Err(format!("bounded {} has the wrong type or length", path.display()));
+    }
+    file_identity::cached_regular_file_sha256(path, maximum as u64)
+        .map_err(|e| format!("bounded {}: {e}", path.display()))
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     controller_digest::file(path).map_err(|e| format!("file digest: {e}"))
+}
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 fn sha256_bytes(bytes: &[u8]) -> Result<String> {
@@ -2370,6 +2727,28 @@ fn bounded_regular_file(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 /// retained its exact op-255 reply before any call existed. The marker binds
 /// the attempt-local request, config, and manifest; Lean decodes the Outcome.
 /// Missing or inconsistent custody evidence is uncertainty, not a refusal.
+/// The author of the request a resident prompt serves, read from the
+/// assignment the controller was handed (digest-checked against the
+/// resident's preparation before the session starts).
+fn resident_prompt_member(prompt: &str) -> Option<String> {
+    let assignment: Value = serde_json::from_str(prompt.strip_prefix(room_resident::ASSIGNMENT_PREFIX)?).ok()?;
+    let author = assignment.get("selectedRequest")?.get("author")?.as_str()?;
+    (!author.is_empty() && author.len() <= 20 && author.bytes().all(|b| b.is_ascii_digit())).then(|| author.to_owned())
+}
+
+#[cfg(test)]
+mod prompt_member_tests {
+    use super::*;
+    #[test]
+    fn the_pool_member_is_the_selected_request_author() {
+        let p = |a: Value| format!("{}{}", room_resident::ASSIGNMENT_PREFIX, a);
+        assert_eq!(resident_prompt_member(&p(json!({"selectedRequest":{"author":"21","cell":"7"}}))).as_deref(), Some("21"));
+        assert_eq!(resident_prompt_member(&p(json!({"recentMemberEntries":[]}))), None);
+        assert_eq!(resident_prompt_member(&p(json!({"selectedRequest":{"author":"2x"}}))), None);
+        assert_eq!(resident_prompt_member("Assignment: {\"selectedRequest\":{\"author\":\"21\"}}"), None);
+    }
+}
+
 fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Option<Value>> {
     let frame_path = attempt.join("pre-submit-refusal.frame");
     let marker_path = attempt.join("pre-submit-refusal.json");
@@ -2460,11 +2839,13 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
         }
     }
     let frame = read_bounded(&frame_path, 12_102_761)?;
+    // A prepare refusal is decided before any append, so the Host answers it under NO_RECORD
+    // (c5e268ebd); HOST_OUTCOME (255) carries only undecided answers and is never a refusal here.
     if frame.len() < 2
-        || frame[0] != 255
+        || frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD
         || sha256_file(&frame_path)? != digest_field("frameSha256")?
     {
-        return Err("prepare refusal frame differs from retained op-255 reply".into());
+        return Err("prepare refusal frame differs from the retained NO_RECORD reply".into());
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2478,16 +2859,14 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     let body = inspect_dir.join("outcome.bin");
     let result = inspect_dir.join("outcome.json");
     write_new(&body, &frame[1..])?;
-    let status = Command::new(&config.host)
+    let status = deadline::output(Command::new(&config.host)
         .arg(&config.host_config)
         .arg("inspect")
         .arg("outcome")
         .arg(&body)
-        .arg(&result)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|e| format!("native prepare refusal inspection: {e}"))?;
+        .arg(&result), deadline::NATIVE_CALL)
+        .map_err(|e| deadline::describe("native prepare refusal inspection", e))?
+        .status;
     if !status.success() {
         return Err("native Host did not decode prepare refusal Outcome".into());
     }
@@ -2721,6 +3100,13 @@ fn validate(c: &Config) -> Result<()> {
     validate_with_workspace(c, None)
 }
 fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> Result<()> {
+    deadline::startup_limit(c.startup_timeout_seconds)?;
+    if let Some(sandbox) = &c.sandbox {
+        sandbox.validate()?;
+        if c.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
+            return Err("sandbox tools are granted per room: sandbox requires toolTask.room".into());
+        }
+    }
     for (name, p) in [
         ("mini", &c.mini),
         ("host", &c.host),
@@ -2823,6 +3209,9 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .is_some_and(|p| p.custody_key == d.custody_key)
         {
             return Err("dispatchTask requires a distinct absolute custody key path".into());
+        }
+        if d.operator_peer_uid.is_some() && d.operator_socket.is_none() {
+            return Err("dispatchTask.operatorPeerUid requires operatorSocket".into());
         }
         if let Some(operator_socket) = &d.operator_socket {
             if !operator_socket.is_absolute()
@@ -3021,7 +3410,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .agent_api_host_sha256
                 .as_deref()
                 .ok_or("application API routes require a source-qualified event21 Mini Host pin")?;
-            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+            if c.host_socket.is_none() || sha256_pinned_file(&c.host)? != expected {
                 return Err(
                     "application API Mini Host or persistent socket differs from pin".into(),
                 );
@@ -3049,12 +3438,16 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
                 .lifetime_api_host_sha256
                 .as_deref()
                 .ok_or("lifetime API routes require an event26 Mini Host pin")?;
-            if c.host_socket.is_none() || sha256_file(&c.host)? != expected {
+            if c.host_socket.is_none() || sha256_pinned_file(&c.host)? != expected {
                 return Err("lifetime API Mini Host or persistent socket differs from pin".into());
             }
         } else if t.lifetime_api_host_sha256.is_some() {
             return Err("lifetime API Host pin has no operator route".into());
         }
+        oracle_tools::validate_profiles(&t.application_services,
+            &t.allowed_application_lifetime_routes.iter().map(|route| route.name.clone()).collect::<Vec<_>>())?;
+        typed_applications::validate(&t.typed_applications,
+            &t.allowed_application_lifetime_routes.iter().map(|route| route.name.clone()).collect::<Vec<_>>())?;
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -3104,6 +3497,9 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             &t.allowed_publications,
             (&peer_targets, &peer_capabilities),
         )?;
+        for family in &t.allowed_session_families {
+            application_tools::session_participant(family, &t.subject, &c.subject)?;
+        }
         for family in &t.allowed_birth_families {
             let charge = resource_tools::planned_birth_charge(family)?;
             if charge.parse::<u64>().ok() > t.reserve.parse::<u64>().ok() {
@@ -3132,7 +3528,7 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
             let expected = t.current_birth_host_sha256.as_deref().ok_or(
                 "current application birth requires an operator-pinned qualified Host image",
             )?;
-            if c.host_socket.is_none() || expected != sha256_file(&c.host)? {
+            if c.host_socket.is_none() || expected != sha256_pinned_file(&c.host)? {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -3323,13 +3719,36 @@ struct Runtime {
     signal_lock: Arc<Mutex<()>>,
     cancelled: Arc<AtomicBool>,
     custody_gate: Arc<custody_gate::CustodyGate>,
+    /// Set when the last `command_output` child exited with a status and
+    /// every holder of its output pipes closed them: the sender is reaped.
+    custody_exit_reaped: AtomicBool,
     application_api_send_gate: Arc<application_api_tools::ForwardSendGate>,
     completion_phase: Arc<AtomicU8>,
     current_unit: Arc<Mutex<Option<(String, PathBuf)>>>,
     provider_control: Arc<Mutex<Option<provider::GatewayControl>>>,
     provider_lease: Option<provider::LeaseId>,
     prompt_active: bool,
+    /// The room member the current resident prompt serves (its selected
+    /// request's author); the key broker charges that member's share of a
+    /// pool row's spend ceiling. None for maintenance and operator prompts.
+    prompt_member: Option<String>,
+    /// Provider requests the gateway refused during the current prompt (the
+    /// named code, e.g. `provider-refused:member-day-ceiling`): nothing was
+    /// reserved or sent for them.
+    prompt_provider_refusals: Vec<String>,
+    /// The sandbox toolsets granted to the running prompt's worker.
+    prompt_sandbox: Vec<&'static str>,
+    /// Whether the running resident prompt's room grants the oracle.
+    prompt_oracle: bool,
+    /// The room's `hermes/tools` apps bit for this prompt (typed application tools).
+    prompt_apps: bool,
+    /// The prompt allocated by the current `hermes_session`, and the decision
+    /// reached at its boundary; written as one typed record when it ends.
+    prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
     foreground_operation: Option<u64>,
+    foreground_api_budget: Option<ForegroundApiBudget>,
+    /// Process-local total budget; never persisted as authority or reused by work.
+    startup_deadline: Option<Instant>,
     output: Option<control::OutputHandle>,
     /// First controller operation ID allocated by this process. Earlier
     /// attempts were started by a previous process.
@@ -3435,10 +3854,9 @@ impl Runtime {
         launch_gate(&self.config.state_dir, program, unit, action)
     }
     fn prove_launcher_gate(program: &Path) -> Result<()> {
-        let output = Command::new(program)
-            .arg("--launch-gate-protocol")
-            .output()
-            .map_err(|e| format!("grain launcher protocol: {e}"))?;
+        let output = deadline::output(Command::new(program)
+            .arg("--launch-gate-protocol"), deadline::MANAGER_QUERY)
+            .map_err(|e| deadline::describe("grain launcher protocol", e))?;
         if !output.status.success() || output.stdout != b"mini-grain-launch-gate-v1\n" {
             return Err("configured grain launcher lacks launch-gate v1 protocol".into());
         }
@@ -3854,142 +4272,7 @@ impl Runtime {
             }
             return Ok((id, anchor.clone()));
         }
-        if !hold.reserve_confirmed
-            || hold.reserve_refused
-            || hold.reserve
-                != self
-                    .config
-                    .dispatch_task
-                    .as_ref()
-                    .ok_or("dispatchTask absent")?
-                    .reserve
-        {
-            return Err("dispatch audit lacks exact confirmed reserve hold".into());
-        }
-        let path = hold
-            .reserve_attempt
-            .as_ref()
-            .ok_or("dispatch reserve attempt path absent")?;
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("dispatch reserve attempt name invalid")?;
-        let encoded = name
-            .strip_prefix("attempt-")
-            .ok_or("dispatch reserve attempt name differs")?;
-        let id = encoded
-            .parse::<u64>()
-            .map_err(|_| "dispatch reserve operation ID malformed")?;
-        if encoded.len() != 16
-            || *path != self.config.state_dir.join(format!("attempt-{id:016}"))
-            || attempt
-                .reserve_operation_id
-                .is_some_and(|saved| saved != id)
-        {
-            return Err(
-                "dispatch reserve attempt path/operation differs from retained origin".into(),
-            );
-        }
-        let source_path = self.config.state_dir.join(format!("source-{id:016}.json"));
-        if sha256_file(&source_path)?
-            != hold
-                .reserve_source_sha256
-                .as_deref()
-                .ok_or("dispatch reserve source digest absent")?
-        {
-            return Err("dispatch reserve signed source bytes changed".into());
-        }
-        let source: Value = serde_json::from_slice(&bounded_regular_file(&source_path, 131_072)?)
-            .map_err(|e| format!("dispatch reserve source: {e}"))?;
-        let task = self
-            .config
-            .dispatch_task
-            .as_ref()
-            .ok_or("dispatchTask absent")?;
-        let payload = format!(
-            "DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{}",
-            attempt.source_request_digest
-        );
-        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
-            || source.pointer("/grain/subject").and_then(Value::as_str)
-                != Some(task.subject.as_str())
-            || source
-                .pointer("/grain/operation/type")
-                .and_then(Value::as_str)
-                != Some("reserve")
-            || source
-                .pointer("/grain/operation/amount")
-                .and_then(Value::as_str)
-                != Some(hold.reserve.as_str())
-            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, id)
-            || source
-                .pointer("/grain/context/payload")
-                .and_then(Value::as_str)
-                != Some(payload.as_str())
-            || source
-                .pointer("/grain/before/generation")
-                .and_then(Value::as_str)
-                != Some(hold.before_generation.as_str())
-            || source
-                .pointer("/grain/expectedTargetRoot")
-                .and_then(Value::as_str)
-                != Some(hold.before_target_root.as_str())
-        {
-            return Err("dispatch reserve source differs from exact held request".into());
-        }
-        let call_hash = hold
-            .reserve_call_sha256
-            .as_deref()
-            .ok_or("dispatch reserve call digest absent")?;
-        let outcome_path = hold
-            .reserve_outcome_path
-            .as_ref()
-            .ok_or("dispatch reserve outcome path absent")?;
-        let outcome_hash = hold
-            .reserve_outcome_sha256
-            .as_deref()
-            .ok_or("dispatch reserve outcome digest absent")?;
-        if sha256_file(&path.join("call.bin"))? != call_hash
-            || sha256_file(outcome_path)? != outcome_hash
-            || outcome_path.parent() != Some(path.as_path())
-        {
-            return Err("dispatch reserve retained native call/outcome changed".into());
-        }
-        let receipt_path = outcome_path.with_extension("json");
-        let original: Value =
-            serde_json::from_slice(&bounded_regular_file(&receipt_path, 131_072)?)
-                .map_err(|e| format!("dispatch reserve receipt: {e}"))?;
-        let anchor = hold
-            .reserve_anchor
-            .as_ref()
-            .ok_or("dispatch reserve anchor absent")?;
-        if ReserveAnchor::from_confirmed(&original)? != *anchor {
-            return Err("dispatch reserve receipt differs from retained anchor".into());
-        }
-        let retry_result = next_retry_json(path)?;
-        let mut args = vec![
-            "retry",
-            "--attempt",
-            path.to_str().ok_or("dispatch reserve attempt path UTF-8")?,
-            "--mode",
-            "lookup",
-        ];
-        if let Some(socket) = &self.config.host_socket {
-            args.extend(["--socket", socket.to_str().ok_or("Host socket path UTF-8")?]);
-        }
-        self.command_output(&self.config.mini, &args)?;
-        let current: Value = serde_json::from_slice(&bounded_regular_file(&retry_result, 131_072)?)
-            .map_err(|e| format!("dispatch reserve lookup: {e}"))?;
-        if current.get("type").and_then(Value::as_str) != Some("confirmed")
-            || !matches!(
-                current.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed")
-            )
-            || ReserveAnchor::from_confirmed(&current)? != *anchor
-        {
-            return Err("dispatch reserve is absent from current native image".into());
-        }
-        Ok((id, anchor.clone()))
+        Err("dispatch reserve has neither v2 nor lifetime custody (dispatch v1 is retired)".into())
     }
     /// Retain one exact source-authored HTTP request before its separately
     /// paid AgentGrain reserve. The source digest is checked against the full
@@ -4149,12 +4432,14 @@ impl Runtime {
                     "sessionObserveCapability":route.dispatch_selectors.session_observe,
                     "manifestObserveCapability":route.dispatch_selectors.manifest_observe,
                     "enrollmentObserveCapability":route.dispatch_selectors.enrollment_observe,
-                    "http":application_api_tools::routed_reserve_http(
-                        &retained, &route.signed_api_path)?,
+                    "http":application_api_tools::routed_reserve_http_for(
+                        &retained, &route.hosted_route()?)?,
                 },
+                // Native application command is authored as the session participant;
+                // the payer's delegated parent witness belongs to ordinary task IO.
                 "parentTask":self.config.task,
-                "parentCapability":dispatch.parent_capability,
-                "parentObserve":dispatch.parent_observe_capability,
+                "parentCapability":self.config.capability,
+                "parentObserve":self.config.query_capability,
                 "purseTask":dispatch.task,
                 "purseCapability":dispatch.capability,
                 "purseObserve":dispatch.query_capability,
@@ -4177,6 +4462,30 @@ impl Runtime {
     /// exact op80 plan and current signed parent/purse are checked before the
     /// protected signer is opened. The client durably marks one public op2;
     /// any lost reply can only take the receipt-only op3 path.
+    fn checked_lifetime_dispatch_wall(&mut self, requested: u64) -> Result<u64> {
+        if let Some(operation_id) = self.foreground_operation {
+            let attempt = self.journal.foreground_attempt.as_ref()
+                .ok_or("lifetime foreground operation has no durable attempt")?;
+            let budget = self.foreground_api_budget.as_mut()
+                .ok_or("lifetime foreground API budget absent")?;
+            if self.config.foreground_tool.is_none() || self.prompt_active
+                || self.child.is_some() || self.journal.child.is_some()
+                || attempt.operation_id != operation_id || budget.operation_id != operation_id
+                || attempt.phase != ForegroundPhase::Executing
+                || !(attempt.name == "mini_application_api" || oracle_tools::is_tool(&attempt.name)) {
+                return Err("lifetime reserve differs from active foreground API invocation".into());
+            }
+            return budget.tighten(requested);
+        }
+        if self.foreground_api_budget.is_some() {
+            return Err("lifetime foreground budget has no active invocation".into());
+        }
+        let selected = self.config.commands.iter().find(|command| command.name == "hermes-acp")
+            .ok_or("selected Hermes worker command absent")?;
+        checked_lifetime_worker_wall(selected, requested, self.prompt_active, self.child.is_some(),
+            self.journal.child.as_ref().map(|child| child.program.as_path()), false)
+    }
+
     fn dispatch_reserve_v3(
         &mut self,
         route_name: &str,
@@ -4185,29 +4494,13 @@ impl Runtime {
         worker_wall_seconds: u64,
         fixed_request: &Value,
     ) -> Result<Value> {
-        let selected = self
-            .config
-            .commands
-            .iter()
-            .find(|command| command.name == "hermes-acp")
-            .ok_or("selected Hermes worker command absent")?;
-        let effective_wall = checked_lifetime_worker_wall(
-            selected,
-            worker_wall_seconds,
-            self.prompt_active,
-            self.child.is_some(),
-            self.journal
-                .child
-                .as_ref()
-                .map(|child| child.program.as_path()),
-            self.foreground_operation.is_some(),
-        )?;
         let (route, retained_forward) = self.verified_reverse_lifetime_fixed_request(
             route_name,
             forward_operation_id,
             binding_sha256,
             fixed_request,
         )?;
+        let effective_wall = self.checked_lifetime_dispatch_wall(worker_wall_seconds)?;
         if self.journal.dispatch_pending.is_some()
             || self.journal.dispatch_hold.is_some()
             || self.journal.dispatch_attempt.is_some()
@@ -4232,26 +4525,8 @@ impl Runtime {
             .reserve_signer
             .as_ref()
             .ok_or("reserve signer absent")?;
-        let parent = self.query()?;
-        let parent_generation = parent
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("parent generation absent")?
-            .to_owned();
-        let parent_root = parent
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("parent physical root absent")?
-            .to_owned();
-        if !matches!(
-            parent.pointer("/grain/status").and_then(Value::as_str),
-            Some("3" | "4")
-        ) || self.journal.prompt_witness.is_none()
-        {
-            return Err("lifetime parent prompt is not reserved".into());
-        }
         let authority = self.dispatch()?;
-        let mut purse = self.query_as(&authority)?;
+        let purse = self.query_as(&authority)?;
         let status = purse
             .pointer("/grain/status")
             .and_then(Value::as_str)
@@ -4265,27 +4540,10 @@ impl Runtime {
                 "agent lifetime dispatch attach",
                 vec![],
             )?;
-            purse = self.query_as(&authority)?;
         } else if status != "1" {
             return Err("dispatch purse is not available for lifetime reserve".into());
         }
-        if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
-            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-        {
-            return Err("lifetime purse is not running and unreserved".into());
-        }
-        let purse_generation = purse
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("purse generation absent")?
-            .to_owned();
-        let purse_root = purse
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("purse physical root absent")?
-            .to_owned();
         let reserve_operation_id = self.next_id()?;
-        let attempt_id = self.next_id()?;
         let mut source = fixed_request.clone();
         source["fixed"]["reserveOperationId"] = json!(reserve_operation_id.to_string());
         let source_path = self.config.state_dir.join(format!(
@@ -4296,44 +4554,84 @@ impl Runtime {
             &serde_json::to_vec(&source)
                 .map_err(|error| format!("lifetime source JSON: {error}"))?,
         )?;
-        let directory = self
-            .config
-            .state_dir
-            .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
         fn path(value: &Path) -> Result<&str> {
             value
                 .to_str()
                 .ok_or_else(|| format!("{} is not UTF-8", value.display()))
         }
-        self.check_not_cancelled()?;
-        let plan_stdout = self.supervised_json_command({
-            let mut command = Command::new(&self.config.mini);
-            command.args([
-                "agent-lifetime-reserve-plan",
-                "--host",
-                path(&self.config.host)?,
-                "--config",
-                path(&self.config.host_config)?,
-                "--operator-socket",
-                path(operator_socket)?,
-                "--public-socket",
-                path(&public_socket)?,
-                "--request",
-                path(&source_path)?,
-                "--dir",
-                path(&directory)?,
-            ]);
-            command
-        })?;
+        let (parent, purse, plan, (attempt_id, directory, request)) =
+            application_api_tools::lifetime_reserve_snapshot(|| {
+                self.check_not_cancelled()?;
+                // Attach may have advanced the Store. Both signed observations
+                // and the native unsigned plan must name one exact image.
+                let parent = self.query()?;
+                if !matches!(
+                    parent.pointer("/grain/status").and_then(Value::as_str),
+                    Some("3" | "4")
+                ) || self.journal.prompt_witness.is_none()
+                {
+                    return Err("lifetime parent prompt is not reserved".into());
+                }
+                let purse = self.query_as(&authority)?;
+                if purse.pointer("/grain/status").and_then(Value::as_str) != Some("1")
+                    || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+                {
+                    return Err("lifetime purse is not running and unreserved".into());
+                }
+                let attempt_id = self.next_id()?;
+                let directory = self
+                    .config
+                    .state_dir
+                    .join(format!("agent-lifetime-reserve-{attempt_id:016}"));
+                self.check_not_cancelled()?;
+                let plan_stdout = self.supervised_json_command({
+                    let mut command = Command::new(&self.config.mini);
+                    command.args([
+                        "agent-lifetime-reserve-plan",
+                        "--host",
+                        path(&self.config.host)?,
+                        "--config",
+                        path(&self.config.host_config)?,
+                        "--operator-socket",
+                        path(operator_socket)?,
+                        "--public-socket",
+                        path(&public_socket)?,
+                        "--request",
+                        path(&source_path)?,
+                        "--dir",
+                        path(&directory)?,
+                    ]);
+                    command
+                })?;
+                let read_json = |name: &str| -> Result<Value> {
+                    serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
+                        .map_err(|error| format!("retained lifetime {name}: {error}"))
+                };
+                let request = read_json("request-inspected.json")?;
+                let plan = read_json("plan-inspected.json")?;
+                if plan_stdout != plan {
+                    return Err(
+                        "lifetime plan stdout differs from retained source inspection".into(),
+                    );
+                }
+                Ok((parent, purse, plan, (attempt_id, directory, request)))
+            })?;
+        let get = |object: &Value, field: &str| -> Result<String> {
+            object
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| format!("lifetime source {field} absent"))
+        };
+        let parent_generation = get(&parent["grain"], "generation")?;
+        let purse_generation = get(&purse["grain"], "generation")?;
+        // Ordinary task transitions use the logical root; lifetime bindings
+        // below use the source author's lifecycle root for the same snapshot.
+        let parent_root = get(&parent, "targetRoot")?;
         let read_json = |name: &str| -> Result<Value> {
             serde_json::from_slice(&bounded_regular_file(&directory.join(name), 2_097_152)?)
                 .map_err(|error| format!("retained lifetime {name}: {error}"))
         };
-        let request = read_json("request-inspected.json")?;
-        let plan = read_json("plan-inspected.json")?;
-        if plan_stdout != plan {
-            return Err("lifetime plan stdout differs from retained source inspection".into());
-        }
         let fixed_selectors = json!({
             "issueIndex":route.dispatch_selectors.issue_index,
             "ticketResource":route.ticket_resource,
@@ -4343,8 +4641,8 @@ impl Runtime {
             "manifestObserve":route.dispatch_selectors.manifest_observe,
             "enrollmentObserve":route.dispatch_selectors.enrollment_observe,
             "parentTask":self.config.task,
-            "parentCapability":task.parent_capability,
-            "parentObserve":task.parent_observe_capability,
+            "parentCapability":self.config.capability,
+            "parentObserve":self.config.query_capability,
             "purseTask":task.task,
             "purseCapability":task.capability,
             "purseObserve":task.query_capability,
@@ -4361,17 +4659,12 @@ impl Runtime {
         let bindings = plan
             .get("bindings")
             .ok_or("lifetime reserve bindings absent")?;
-        let get = |object: &Value, field: &str| -> Result<String> {
-            object
-                .get(field)
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-                .ok_or_else(|| format!("lifetime source {field} absent"))
-        };
         let app_generation = get(context, "appGeneration")?;
         let session_generation = get(context, "sessionGeneration")?;
         let app_physical_root = get(bindings, "appPhysicalRoot")?;
         let session_physical_root = get(bindings, "sessionPhysicalRoot")?;
+        let parent_physical_root = get(bindings, "parentPhysicalRoot")?;
+        let purse_physical_root = get(bindings, "pursePhysicalRoot")?;
         application_api_tools::verify_lifetime_reserve_inspection(
             application_api_tools::LifetimeReserveInspection {
                 route: &route,
@@ -4380,10 +4673,8 @@ impl Runtime {
                 reserve_operation_id: &reserve_operation_id.to_string(),
                 signed_parent_generation: &parent_generation,
                 signed_purse_generation: &purse_generation,
-                signed_app_physical_root: &app_physical_root,
-                signed_session_physical_root: &session_physical_root,
-                signed_parent_physical_root: &parent_root,
-                signed_purse_physical_root: &purse_root,
+                signed_parent: &parent,
+                signed_purse: &purse,
                 request: &request,
                 plan: &plan,
             },
@@ -4416,8 +4707,8 @@ impl Runtime {
             purse_generation: purse_generation.clone(),
             app_physical_root: app_physical_root.clone(),
             session_physical_root: session_physical_root.clone(),
-            parent_physical_root: parent_root.clone(),
-            purse_physical_root: purse_root.clone(),
+            parent_physical_root: parent_physical_root.clone(),
+            purse_physical_root: purse_physical_root.clone(),
         };
         let fingerprint = application_api_tools::lifetime_operation_fingerprint(
             binding_sha256,
@@ -4495,8 +4786,8 @@ impl Runtime {
                 purse_generation,
                 app_physical_root,
                 session_physical_root,
-                parent_physical_root: parent_root,
-                pre_reserve_purse_physical_root: purse_root,
+                parent_physical_root,
+                pre_reserve_purse_physical_root: purse_physical_root,
                 reserve_index: None,
                 reserve_receipt: None,
                 post_reserve_purse_physical_root: None,
@@ -4554,8 +4845,7 @@ impl Runtime {
             || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
             || receipt.get("acceptedCount").and_then(Value::as_str)
                 != Some(anchor.accepted_count.as_str())
-            || receipt.get("worldRoot").and_then(Value::as_str)
-                != Some(anchor.world_root.as_str())
+            || receipt.get("worldRoot").and_then(Value::as_str) != Some(anchor.world_root.as_str())
             || receipt.get("reserveIndex").and_then(Value::as_str)
                 != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
         {
@@ -4622,12 +4912,9 @@ impl Runtime {
             .as_mut()
             .ok_or("lifetime attempt disappeared")?;
         saved.dispatch_generation = Some(generation);
-        saved.dispatch_post_root = Some(post_root.clone());
-        saved
-            .lifetime
-            .as_mut()
-            .ok_or("lifetime custody absent")?
-            .post_reserve_purse_physical_root = Some(post_root);
+        saved.dispatch_post_root = Some(post_root);
+        // The signed resource view exposes a logical root. The lifecycle root
+        // is obtained only from the snapshot-bound native paid plan later.
         self.save()?;
         let reserve_plan_hex =
             checked_lifetime_reserve_plan_hex(&plan, &directory.join("plan.bin"))?;
@@ -4645,6 +4932,7 @@ impl Runtime {
             "reserveIndex":receipt.get("reserveIndex"),
             "reserveReceipt":anchor}))
     }
+
 
     /// Source-owned v2 reserve for exactly the active forward API call. The
     /// private op58/59 phases expose and seal a plan; only the marked public
@@ -4790,7 +5078,7 @@ impl Runtime {
         }
         application_api_tools::verify_routed_reserve_http(
             &retained_forward,
-            &route.signed_api_path,
+            &application_api_tools::HostedRoute::Api { signed_prefix: route.signed_api_path.clone() },
             &request_view,
         )?;
         let context = plan_view
@@ -5304,8 +5592,8 @@ impl Runtime {
             return Err("lifetime payer attempt is already used or unresolved".into());
         }
         let reserve_dir = lifetime.reserve_dir.clone();
-        let post_purse_root = lifetime
-            .post_reserve_purse_physical_root
+        let post_purse_root = attempt
+            .dispatch_post_root
             .as_ref()
             .ok_or("lifetime signed post-reserve purse root absent")?
             .clone();
@@ -5374,7 +5662,7 @@ impl Runtime {
             4096,
         )?)
         .map_err(|error| format!("lifetime original reserve receipt JSON: {error}"))?;
-        application_api_tools::verify_lifetime_paid_inspection(
+        let post_purse_physical_root = application_api_tools::verify_lifetime_paid_inspection(
             application_api_tools::LifetimePaidInspection {
                 reserve: &reserve,
                 paid: &paid,
@@ -5388,7 +5676,10 @@ impl Runtime {
                     "acceptedCount":reserve_receipt.get("acceptedCount"),
                     "worldRoot":reserve_receipt.get("worldRoot"),
                 }),
-                signed_post_purse_physical_root: &post_purse_root,
+                signed_post_purse_world_root: state
+                    .get("worldRoot")
+                    .and_then(Value::as_str)
+                    .ok_or("signed held purse world root absent")?,
             },
         )?;
         let slots = paid
@@ -5423,6 +5714,7 @@ impl Runtime {
             .as_mut()
             .and_then(|saved| saved.lifetime.as_mut())
             .ok_or("lifetime attempt disappeared before signing")?;
+        lifetime.post_reserve_purse_physical_root = Some(post_purse_physical_root.clone());
         lifetime.paid_dir = Some(directory.clone());
         lifetime.paid_plan_sha256 = Some(sha256_file(&directory.join("plan.bin"))?);
         self.save()?;
@@ -5438,35 +5730,16 @@ impl Runtime {
             ]);
             command
         })?;
-        if result.get("type").and_then(Value::as_str)
-            != Some("minidregg-agent-lifetime-payer-signatures-v1")
-            || result.get("planSha256").and_then(Value::as_str)
-                != Some(sha256_file(&directory.join("plan.bin"))?.as_str())
-            || result
-                .get("signatures")
-                .and_then(Value::as_array)
-                .is_none_or(|list| {
-                    list.len() != 3
-                        || list.iter().any(|entry| {
-                            entry.as_str().is_none_or(|signature| {
-                                signature.len() != 128
-                                    || !signature.bytes().all(|byte| {
-                                        byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
-                                    })
-                            })
-                        })
-                })
-        {
-            return Err("lifetime detached payer signatures differ from approved plan".into());
-        }
+        validate_lifetime_payer_reply(&result, &sha256_file(&directory.join("plan.bin"))?, &payer_signers)?;
         Ok(json!({"type":"payer-signatures-v3",
             "attemptId":attempt_id,
             "bindingSha256":confirmed.get("bindingSha256"),
             "operationFingerprint":operation_fingerprint,
-            "signedPostReservePursePhysicalRoot":post_purse_root,
+            "signedPostReservePursePhysicalRoot":post_purse_physical_root,
             "planSha256":result.get("planSha256"),
             "signatures":result.get("signatures")}))
     }
+
 
     /// The resident supplies an op48 paid plan, but only the controller's
     /// retained reserve, protected signer pin, and a fresh source inspection
@@ -5740,217 +6013,6 @@ impl Runtime {
             "planSha256":plan_sha,"signatures":values}))
     }
 
-    fn dispatch_reserve(
-        &mut self,
-        canonical_request: &[u8],
-        source_request_digest: &str,
-        http_operation_id: &str,
-    ) -> Result<Value> {
-        decimal(source_request_digest, "source request digest")?;
-        decimal(http_operation_id, "HTTP operation ID")?;
-        if source_request_digest.len() > 78
-            || http_operation_id.parse::<u64>().is_err()
-            || canonical_request.is_empty()
-            || canonical_request.len() > 10 * 1024 * 1024
-        {
-            return Err("dispatch request coordinates exceed bounds".into());
-        }
-        if self.cancelled.load(Ordering::SeqCst)
-            || !self.prompt_active
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || (self.journal.child.is_none() && self.foreground_operation.is_none())
-            || self.journal.dispatch_pending.is_some()
-            || self.journal.dispatch_hold.is_some()
-            || self.journal.dispatch_attempt.is_some()
-        {
-            return Err("dispatch task or parent prompt is unavailable".into());
-        }
-        let task = self
-            .config
-            .dispatch_task
-            .clone()
-            .ok_or("dispatchTask absent")?;
-        let parent = self.query()?;
-        let parent_state = parent.get("grain").ok_or("parent grain absent")?;
-        let parent_generation = parent_state
-            .get("generation")
-            .and_then(Value::as_str)
-            .ok_or("parent generation absent")?;
-        let parent_root = parent
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("parent root absent")?;
-        if !matches!(
-            parent_state.get("status").and_then(Value::as_str),
-            Some("3" | "4")
-        ) || self.journal.prompt_witness.is_none()
-        {
-            return Err("parent prompt is not reserved".into());
-        }
-        let attempt_id = self.next_id()?;
-        let request_path = self
-            .config
-            .state_dir
-            .join(format!("dispatch-{attempt_id:016}.canonical-request"));
-        write_new(&request_path, canonical_request)?;
-        self.journal.dispatch_attempt = Some(DispatchAttempt {
-            id: attempt_id,
-            http_operation_id: http_operation_id.into(),
-            parent_generation: parent_generation.into(),
-            parent_root: parent_root.into(),
-            request_path: request_path.clone(),
-            request_bytes: canonical_request.len(),
-            request_sha256: sha256_file(&request_path)?,
-            source_request_digest: source_request_digest.into(),
-            reserve_operation_id: None,
-            reserve_v2_dir: None,
-            reserve_v2_request_sha256: None,
-            reserve_v2_plan_sha256: None,
-            reserve_v2_source_sha256: None,
-            lifetime: None,
-            dispatch_generation: None,
-            dispatch_post_root: None,
-            no_send_release_started: false,
-            audited_charge: None,
-            settlement: None,
-            send_started: false,
-            committed_dispatch_transaction: None,
-            committed_dispatch_event: None,
-            committed_permit_sha256: None,
-            response_sha256: None,
-        });
-        self.save()?;
-        let authority = self.dispatch()?;
-        let status = self
-            .query_as(&authority)?
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            .ok_or("dispatch grain status absent")?
-            .to_owned();
-        if status == "0" {
-            self.check_not_cancelled()?;
-            self.transition_as(
-                &authority,
-                json!({"type":"attach","soft":false}),
-                "dispatch attach",
-                "agent app dispatch attach",
-                vec![],
-            )?;
-        } else if status != "1" {
-            return Err(format!(
-                "dispatch task status {status} requires reconciliation"
-            ));
-        }
-        self.check_not_cancelled()?;
-        self.mark_hold_as(
-            AuthoritySlot::Dispatch,
-            &authority,
-            &task.reserve,
-            &task.charge,
-        )?;
-        let payload =
-            format!("DREGG/APPLICATION/AGENT-DISPATCH-RESERVE/v1/{source_request_digest}");
-        self.transition_as(
-            &authority,
-            json!({"type":"reserve","amount":task.reserve}),
-            "dispatch reserve",
-            &payload,
-            vec![],
-        )?;
-        let dispatch_state = self.query_as(&authority)?;
-        if dispatch_state
-            .pointer("/grain/status")
-            .and_then(Value::as_str)
-            != Some("3")
-            || dispatch_state
-                .pointer("/grain/reserved")
-                .and_then(Value::as_str)
-                != Some(task.reserve.as_str())
-        {
-            return Err("confirmed dispatch reserve lacks exact signed reserved state".into());
-        }
-        let dispatch_generation = dispatch_state
-            .pointer("/grain/generation")
-            .and_then(Value::as_str)
-            .ok_or("dispatch generation absent after reserve")?
-            .to_owned();
-        let dispatch_post_root = dispatch_state
-            .get("targetRoot")
-            .and_then(Value::as_str)
-            .ok_or("dispatch root absent after reserve")?
-            .to_owned();
-        let hold = self
-            .journal
-            .dispatch_hold
-            .as_ref()
-            .filter(|hold| hold.reserve_confirmed)
-            .ok_or("dispatch reserve has no exact confirmed native hold")?;
-        let anchor = hold
-            .reserve_anchor
-            .as_ref()
-            .ok_or("dispatch reserve has no exact confirmed native anchor")?
-            .clone();
-        let reserve_path = hold
-            .reserve_attempt
-            .as_ref()
-            .ok_or("dispatch reserve attempt path absent")?;
-        let reserve_name = reserve_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("dispatch reserve attempt name invalid")?;
-        let encoded = reserve_name
-            .strip_prefix("attempt-")
-            .ok_or("dispatch reserve attempt name differs")?;
-        let reserve_operation_id = encoded
-            .parse::<u64>()
-            .map_err(|_| "dispatch reserve operation ID malformed")?;
-        if encoded.len() != 16
-            || *reserve_path
-                != self
-                    .config
-                    .state_dir
-                    .join(format!("attempt-{reserve_operation_id:016}"))
-        {
-            return Err("dispatch reserve attempt path differs from retained source".into());
-        }
-        let reserve_index = anchor
-            .accepted_count
-            .parse::<u64>()
-            .ok()
-            .and_then(|count| count.checked_sub(1))
-            .ok_or("dispatch reserve receipt has no selected history index")?;
-        let attempt = self
-            .journal
-            .dispatch_attempt
-            .as_mut()
-            .ok_or("dispatch attempt disappeared")?;
-        attempt.reserve_operation_id = Some(reserve_operation_id);
-        attempt.dispatch_generation = Some(dispatch_generation.clone());
-        attempt.dispatch_post_root = Some(dispatch_post_root.clone());
-        self.save()?;
-        Ok(json!({
-            "type":"dispatch-reserved-v1",
-            "attemptId":attempt_id.to_string(),
-            "httpOperationId":http_operation_id,
-            "requestSha256":sha256_file(&request_path)?,
-            "sourceRequestDigest":source_request_digest,
-            "reserveOperationId":reserve_operation_id.to_string(),
-            "reserveIndex":reserve_index.to_string(),
-            "dispatchTask":task.task,
-            "dispatchSubject":task.subject,
-            "parentTask":self.config.task,
-            "parentGeneration":parent_generation,
-            "parentRoot":parent_root,
-            "dispatchGeneration":dispatch_generation,
-            "dispatchPostRoot":dispatch_post_root,
-            "reserve":task.reserve,
-            "charge":task.charge,
-            "reserveReceipt":anchor,
-        }))
-    }
-    /// Persist the one-shot external boundary before the physical host writes
-    /// to fd3. The host must already have inspected the exact committed Mini
-    /// permit; this marker does not inspect or mint that permit.
     fn dispatch_mark_send(
         &mut self,
         attempt_id: u64,
@@ -6003,15 +6065,18 @@ impl Runtime {
         if sha256_file(&attempt.request_path)? != request_sha256 {
             return Err("retained dispatch request bytes changed".into());
         }
-        if attempt.reserve_v2_dir.is_some() {
-            self.verified_dispatch_reserve_hold(
-                &attempt,
-                self.journal
-                    .dispatch_hold
-                    .as_ref()
-                    .ok_or("v2 reserve hold absent")?,
-            )?;
+        // Dispatch v1 (a reserve the SPK host's word could settle) is retired:
+        // a send is marked only on a v2 reserve whose custody re-verifies.
+        if attempt.reserve_v2_dir.is_none() {
+            return Err("dispatch attempt has no v2 reserve custody".into());
         }
+        self.verified_dispatch_reserve_hold(
+            &attempt,
+            self.journal
+                .dispatch_hold
+                .as_ref()
+                .ok_or("v2 reserve hold absent")?,
+        )?;
         if self.cancelled.load(Ordering::SeqCst)
             || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
             || (!self.prompt_active && self.foreground_operation.is_none())
@@ -6580,61 +6645,6 @@ impl Runtime {
     /// A definite pre-send refusal releases this one purse at zero. Once the
     /// send marker exists, only a definite response or audited reconciliation
     /// may settle it; an old HTTP operation cannot obtain a second attempt.
-    fn dispatch_abort_no_send(&mut self, attempt_id: u64) -> Result<Value> {
-        if self.cancelled.load(Ordering::SeqCst)
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-        {
-            return Err("agent hard EOF requires audited dispatch reconciliation".into());
-        }
-        let attempt = self
-            .journal
-            .dispatch_attempt
-            .as_ref()
-            .ok_or("no dispatch attempt")?;
-        if attempt.id != attempt_id
-            || attempt.send_started
-            || self.journal.dispatch_pending.is_some()
-        {
-            return Err("dispatch may have crossed an external boundary".into());
-        }
-        if let Some(hold) = self.journal.dispatch_hold.clone() {
-            let authority = self.dispatch()?;
-            if hold.reserve_confirmed && hold.reserve_anchor.is_some() {
-                self.journal
-                    .dispatch_attempt
-                    .as_mut()
-                    .ok_or("dispatch attempt disappeared before release")?
-                    .no_send_release_started = true;
-                self.save()?;
-                self.transition_as(
-                    &authority,
-                    json!({"type":"settle","charge":"0"}),
-                    "dispatch release",
-                    "definite refusal before app send",
-                    vec![],
-                )?;
-            } else if hold.reserve_refused || hold.reserve_attempt.is_none() {
-                let current = self.query_as(&authority)?;
-                if current.pointer("/grain/status").and_then(Value::as_str) != Some("1")
-                    || current.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
-                    || current.get("targetRoot").and_then(Value::as_str)
-                        != Some(hold.before_target_root.as_str())
-                {
-                    return Err("unsubmitted dispatch reserve differs from held origin".into());
-                }
-                self.journal.dispatch_hold = None;
-                self.save()?;
-            } else {
-                return Err("dispatch reserve may have committed; exact lookup required".into());
-            }
-        } else if attempt.reserve_operation_id.is_some() {
-            return Err("dispatch reserve marker disappeared without settlement".into());
-        }
-        self.journal.dispatch_attempt = None;
-        self.save()?;
-        Ok(json!({"type":"dispatch-aborted-before-send-v1",
-            "attemptId":attempt_id.to_string(),"charge":"0"}))
-    }
     fn dispatch_rpc(&mut self, command: dispatch_custody::Command) -> Result<Value> {
         use dispatch_custody::Command as C;
         let attempt_id = |value: &str| -> Result<u64> {
@@ -6644,14 +6654,6 @@ impl Runtime {
                 .map_err(|_| "dispatch attempt ID exceeds u64".into())
         };
         match command {
-            C::Reserve {
-                http_operation_id,
-                source_request_digest,
-                canonical_request_hex,
-            } => {
-                let request = dispatch_custody::decode_hex(&canonical_request_hex)?;
-                self.dispatch_reserve(&request, &source_request_digest, &http_operation_id)
-            }
             C::ReserveV2 {
                 route_name,
                 forward_operation_id,
@@ -6749,33 +6751,6 @@ impl Runtime {
                 attempt_id: id,
                 response_sha256,
             } => self.dispatch_settle_definite(attempt_id(&id)?, &response_sha256),
-            C::AbortNoSend { attempt_id: id } => self.dispatch_abort_no_send(attempt_id(&id)?),
-            C::Inspect { attempt_id: id } => {
-                let id = attempt_id(&id)?;
-                let attempt = self
-                    .journal
-                    .dispatch_attempt
-                    .as_ref()
-                    .ok_or("no dispatch attempt")?;
-                if attempt.id != id {
-                    return Err("dispatch attempt ID differs".into());
-                }
-                let hold = self.journal.dispatch_hold.as_ref();
-                Ok(json!({"type":"dispatch-attempt-v1",
-                    "attemptId":id.to_string(),
-                    "httpOperationId":attempt.http_operation_id,
-                    "sourceRequestDigest":attempt.source_request_digest,
-                    "requestSha256":attempt.request_sha256,
-                    "parentGeneration":attempt.parent_generation,
-                    "reserveOperationId":attempt.reserve_operation_id.map(|n| n.to_string()),
-                    "reserveConfirmed":hold.is_some_and(|h| h.reserve_confirmed),
-                    "reserveReceipt":hold.and_then(|h| h.reserve_anchor.as_ref()),
-                    "sendStarted":attempt.send_started,
-                    "dispatchTransaction":attempt.committed_dispatch_transaction,
-                    "dispatchEvent":attempt.committed_dispatch_event,
-                    "permitSha256":attempt.committed_permit_sha256,
-                    "responseSha256":attempt.response_sha256}))
-            }
         }
     }
     fn answer_dispatch(&mut self, request: dispatch_custody::Request) {
@@ -6791,7 +6766,10 @@ impl Runtime {
         }
         let response = match self.dispatch_rpc(request.command) {
             Ok(value) => value,
-            Err(detail) => json!({"type":"refused","detail":detail}),
+            Err(detail) => {
+                eprintln!("grain-runtime: dispatch RPC refused: {detail}");
+                json!({"type":"refused","detail":detail})
+            },
         };
         request.phase.store(2, Ordering::SeqCst);
         let _ = request.reply.send(response);
@@ -6811,11 +6789,6 @@ impl Runtime {
         })
     }
     fn open(config: Config, config_path: PathBuf) -> Result<Self> {
-        Self::open_mode(config, config_path, None)
-    }
-    // The migration entrypoint never calls serve or any worker/provider action.
-    // Its only relaxed seam is cross-file transport validation before publication.
-    fn open_mode(config: Config, config_path: PathBuf, migration: Option<&Path>) -> Result<Self> {
         if !config_path.is_absolute() {
             return Err("controller config path must be absolute".into());
         }
@@ -6843,14 +6816,8 @@ impl Runtime {
         }
         let locked_state_dir = config.state_dir.clone();
         systemd_manager::initialize(&config, &config_path)?;
-        session_failure::ensure_publication_known(&config.state_dir)?;
-        let startup = config_migration::recover_startup(&config, &config_path)?;
-        let config: Config = if startup.is_some() {
-            serde_json::from_slice(&bounded_regular_file(&config_path, 262_144)?)
-                .map_err(|e| format!("controller config after migration recovery: {e}"))?
-        } else { config };
         if config.state_dir != locked_state_dir { return Err("stateDir changed while taking controller lock".into()); }
-        if migration.is_none() { validate(&config)?; }
+        validate(&config)?;
         let binding = json!({"config":config,"configPath":config_path});
         let path = config.state_dir.join("journal.json");
         let journal = if path.exists() {
@@ -6866,17 +6833,13 @@ impl Runtime {
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
             j.validate_foreground(&config.state_dir)?;
-            if let Some(request) = migration {
-                config_migration::check_stopped_open(&config, &config_path, &j, request)?;
-            } else { j.validate_workspace(&config)?; }
+            j.validate_workspace(&config)?;
             j
         } else {
-            if migration.is_some() { return Err("configuration migration requires an existing journal".into()); }
             let j = Journal::fresh(binding);
             atomic_json(&path, &j)?;
             j
         };
-        config_migration::activate_startup(&config.state_dir, startup)?;
         let process_first_operation_id = journal.next_operation_id;
         let mut rt = Self {
             config,
@@ -6890,13 +6853,22 @@ impl Runtime {
             signal_lock: Arc::new(Mutex::new(())),
             cancelled: Arc::new(AtomicBool::new(false)),
             custody_gate: Arc::new(custody_gate::CustodyGate::new()),
+            custody_exit_reaped: AtomicBool::new(false),
             application_api_send_gate: Arc::new(application_api_tools::ForwardSendGate::new()),
             completion_phase: Arc::new(AtomicU8::new(PHASE_IDLE)),
             current_unit: Arc::new(Mutex::new(None)),
             provider_control: Arc::new(Mutex::new(None)),
             provider_lease: None,
             prompt_active: false,
+            prompt_member: None,
+            prompt_provider_refusals: Vec::new(),
+            prompt_sandbox: Vec::new(),
+            prompt_oracle: false,
+            prompt_apps: false,
+            prompt_decision: None,
             foreground_operation: None,
+            foreground_api_budget: None,
+            startup_deadline: None,
             output: None,
             process_first_operation_id,
             startup_recovery_active: false,
@@ -6904,10 +6876,10 @@ impl Runtime {
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
-        if migration.is_none() && (rt.journal.child.is_some()
+        if rt.journal.child.is_some()
             || rt.journal.foreground_attempt.is_some()
             || rt.journal.connection == Connection::Hard
-            || rt.journal.hard_reconnect_pending)
+            || rt.journal.hard_reconnect_pending
         {
             rt.journal.connection = Connection::Fenced;
             rt.save()?;
@@ -6915,8 +6887,6 @@ impl Runtime {
         Ok(rt)
     }
     fn save(&self) -> Result<()> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
-        session_failure::ensure_publication_known(&self.config.state_dir)?;
         atomic_json(&self.config.state_dir.join("journal.json"), &self.journal)
     }
     fn confirmed_publication_receipt(
@@ -7031,15 +7001,8 @@ impl Runtime {
             reported: false,
         }))
     }
-    fn confirmed_birth_record(
-        &self,
-        pending: &Pending,
-        origin: &BirthPending,
-        outcome_path: &Path,
-    ) -> Result<Option<BornResourceRecord>> {
-        if pending.operation != "tool birth" {
-            return Ok(None);
-        }
+    fn verify_birth_origin(&self, pending: &Pending, origin: &BirthPending) -> Result<()> {
+        if pending.operation != "tool birth" { return Err("not a native birth attempt".into()); }
         origin.validate_members()?;
         let tool = self.config.tool_task.as_ref().ok_or("tool task absent")?;
         if pending.operation_id != origin.operation_id
@@ -7134,6 +7097,7 @@ impl Runtime {
                     family,
                     tool,
                     &self.config.task,
+                    &self.config.subject,
                     app_target,
                     application_tools::BirthIndex {
                         nonce: pending.operation_id,
@@ -7183,6 +7147,13 @@ impl Runtime {
                 );
             }
         }
+        Ok(())
+    }
+    fn confirmed_birth_record(
+        &self, pending: &Pending, origin: &BirthPending, outcome_path: &Path,
+    ) -> Result<Option<BornResourceRecord>> {
+        if pending.operation != "tool birth" { return Ok(None); }
+        self.verify_birth_origin(pending, origin)?;
         let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
         let outcome: Value = serde_json::from_slice(&outcome_bytes)
             .map_err(|e| format!("resource birth outcome: {e}"))?;
@@ -7206,9 +7177,9 @@ impl Runtime {
         Ok(Some(BornResourceRecord {
             pending: origin.clone(),
             attempt: pending.attempt.clone(),
-            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
+            call_sha256: sha256_bounded_regular_file(&call, 4_194_304)?,
             outcome_path: outcome_path.to_owned(),
-            outcome_sha256: sha256_bytes(&bounded_regular_file(&binary, 4_194_304)?)?,
+            outcome_sha256: sha256_bounded_regular_file(&binary, 4_194_304)?,
             transaction_id: field("transactionId")?,
             event_id: field("eventId")?,
             accepted_count: field("acceptedCount")?,
@@ -7240,6 +7211,12 @@ impl Runtime {
         Ok(())
     }
     fn verified_born_named(&self, name: &str) -> Result<Option<resource_tools::BornResource>> {
+        Ok(self.verified_born_read(name)?.map(|(born, _)| born))
+    }
+    fn verified_born_read(
+        &self,
+        name: &str,
+    ) -> Result<Option<(resource_tools::BornResource, resource_tools::ResourceReadSigner)>> {
         let Some(record) = self.journal.born_resources.iter().find(|record| {
             record
                 .pending
@@ -7250,12 +7227,22 @@ impl Runtime {
             return Ok(None);
         };
         self.verify_born_record(record)?;
+        let signer = if record.pending.route == Some(ApplicationBirthRoute::Session) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            let family = tool.allowed_session_families.iter()
+                .find(|family| family.name == record.pending.family)
+                .ok_or("retained session family is no longer configured")?;
+            application_tools::session_read_signer(family, &tool.subject, &self.config.subject)?
+        } else {
+            resource_tools::ResourceReadSigner::Tool
+        };
         Ok(record
             .pending
             .members()
             .iter()
             .find(|born| born.name == name)
-            .cloned())
+            .cloned()
+            .map(|born| (born, signer)))
     }
     fn verified_born_target(
         &self,
@@ -7280,79 +7267,11 @@ impl Runtime {
             .cloned())
     }
     fn provider_settlement_record(
-        &self,
-        pending: &Pending,
-        outcome_path: &Path,
+        &self, pending: &Pending, outcome_path: &Path,
     ) -> Result<ProviderSettlement> {
-        let task = self
-            .config
-            .provider_task
-            .as_ref()
-            .ok_or("providerTask absent")?;
-        let provider_attempt = self
-            .journal
-            .provider_attempt
-            .as_ref()
-            .ok_or("provider settlement has no retained request")?;
-        if !matches!(
-            pending.operation.as_str(),
-            "provider settle" | "provider audit settle" | "provider recovery settle"
-        ) || pending.attempt
-            != self
-                .config
-                .state_dir
-                .join(format!("attempt-{:016}", pending.operation_id))
-        {
-            return Err("provider settlement has no exact pending operation".into());
-        }
-        let source_path = self
-            .config
-            .state_dir
-            .join(format!("source-{:016}.json", pending.operation_id));
-        let source_bytes = bounded_regular_file(&source_path, 131_072)?;
-        let source: Value = serde_json::from_slice(&source_bytes)
-            .map_err(|e| format!("provider settlement source: {e}"))?;
-        let charge = source
-            .pointer("/grain/operation/charge")
-            .and_then(Value::as_str)
-            .ok_or("provider settlement charge absent")?;
-        decimal(charge, "provider settlement charge")?;
-        if source.pointer("/grain/task").and_then(Value::as_str) != Some(task.task.as_str())
-            || source.pointer("/grain/subject").and_then(Value::as_str)
-                != Some(task.subject.as_str())
-            || source
-                .pointer("/grain/operation/type")
-                .and_then(Value::as_str)
-                != Some("settle")
-            || !grain_source::retained_identity(&source, &self.config.task, &task.task, &task.subject, pending.operation_id)
-        {
-            return Err("provider settlement source differs from pinned operation".into());
-        }
-        let outcome_bytes = bounded_regular_file(outcome_path, 131_072)?;
-        let outcome: Value = serde_json::from_slice(&outcome_bytes)
-            .map_err(|e| format!("provider settlement outcome: {e}"))?;
-        if outcome.get("type").and_then(Value::as_str) != Some("confirmed")
-            || !matches!(
-                outcome.get("confirmation").and_then(Value::as_str),
-                Some("installed" | "replayed")
-            )
-        {
-            return Err("provider settlement has no confirmed native outcome".into());
-        }
-        let call = pending.attempt.join("call.bin");
-        let outcome_binary = outcome_path.with_extension("bin");
-        Ok(ProviderSettlement {
-            provider_attempt_id: provider_attempt.id,
-            operation_id: pending.operation_id,
-            operation: pending.operation.clone(),
-            attempt: pending.attempt.clone(),
-            charge: charge.to_owned(),
-            source_sha256: sha256_bytes(&source_bytes)?,
-            call_sha256: sha256_bytes(&bounded_regular_file(&call, 4_194_304)?)?,
-            outcome_path: outcome_path.to_owned(),
-            outcome_sha256: sha256_bytes(&bounded_regular_file(&outcome_binary, 4_194_304)?)?,
-            receipt: ReserveAnchor::from_confirmed(&outcome)?,
-        })
+        let id = self.journal.provider_attempt.as_ref()
+            .ok_or("provider settlement has no retained request")?.id;
+        provider_settlement_record_from(&self.config, id, pending, outcome_path)
     }
     fn verified_provider_settlement(
         &self,
@@ -7567,12 +7486,67 @@ impl Runtime {
         self.save()?;
         Ok(id)
     }
+    fn with_startup_budget<T>(
+        &mut self,
+        outer: Option<Instant>,
+        work: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || self.foreground_api_budget.is_some()
+        {
+            return Err("cold-start budget cannot be entered by active work".into());
+        }
+        let previous = self.startup_deadline;
+        let mut end = previous.unwrap_or(
+            Instant::now() + deadline::startup_limit(self.config.startup_timeout_seconds)?,
+        );
+        if let Some(outer) = outer {
+            end = end.min(outer);
+        }
+        self.startup_deadline = Some(end);
+        let result = self.native_work_limit().and_then(|_| work(self));
+        self.startup_deadline = previous;
+        result
+    }
+    fn native_work_limit(&self) -> Result<Duration> {
+        if let Some(budget) = &self.foreground_api_budget {
+            let remaining = budget.deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("foreground API budget expired before native helper spawn".into());
+            }
+            return Ok(remaining.min(deadline::NATIVE_CALL));
+        }
+        // A stale maintenance marker must never extend a live worker's helper.
+        if self.child.is_none() && !self.prompt_active && self.foreground_operation.is_none() {
+            if let Some(end) = self.startup_deadline {
+                let remaining = end.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("cold-start budget expired before native helper spawn".into());
+                }
+                return Ok(remaining);
+            }
+        }
+        Ok(deadline::NATIVE_CALL)
+    }
     fn command_output(&self, program: &Path, args: &[&str]) -> Result<()> {
-        let output = Command::new(program)
-            .args(args)
-            .output()
-            .map_err(|e| format!("{}: {e}", program.display()))?;
+        self.command_capture(program, args).map(|_| ())
+    }
+    fn command_capture(&self, program: &Path, args: &[&str]) -> Result<std::process::Output> {
+        self.custody_exit_reaped.store(false, Ordering::SeqCst);
+        let output = deadline::output(Command::new(program).args(args), self.native_work_limit()?).map_err(|e| {
+            // At the deadline deadline::wait killed the child's whole process
+            // group and reaped the leader: the sender is stopped too.
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                self.custody_exit_reaped.store(true, Ordering::SeqCst);
+            }
+            deadline::describe(&program.display().to_string(), e)
+        })?;
         if !output.status.success() {
+            // deadline::output returned a status and both pipes at EOF: the
+            // child is reaped and no descendant still holds its output.
+            self.custody_exit_reaped.store(true, Ordering::SeqCst);
             return Err(format!(
                 "{} exited {}: {}",
                 program.display(),
@@ -7580,7 +7554,7 @@ impl Runtime {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        Ok(())
+        Ok(output)
     }
     fn work_output(
         &self,
@@ -7589,6 +7563,7 @@ impl Runtime {
     ) -> std::result::Result<(), custody_gate::CustodyError> {
         let mut command = Command::new(program);
         command.args(args);
+        pin_operator_peer_command(&mut command, &self.config.mini, self.config.dispatch_task.as_ref());
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -7597,7 +7572,7 @@ impl Runtime {
         }
         let output = self
             .custody_gate
-            .run_capture(&self.cancelled, &mut command)?;
+            .run_capture_until(&self.cancelled, &mut command, self.native_work_limit().map_err(|_| custody_gate::CustodyError::BeforeSpawn)?)?;
         if !output.status.success() {
             return Err(custody_gate::CustodyError::Uncertain(io::Error::other(
                 format!(
@@ -7616,10 +7591,19 @@ impl Runtime {
         read: &resource_tools::AllowedResourceRead,
         nonce: u64,
     ) -> Result<Value> {
-        resource_tools::read_resource_with(&self.config, tool, read, nonce, |command| {
+        self.supervised_resource_read_as(tool, read, nonce, resource_tools::ResourceReadSigner::Tool)
+    }
+    fn supervised_resource_read_as(
+        &self,
+        tool: &ToolTask,
+        read: &resource_tools::AllowedResourceRead,
+        nonce: u64,
+        signer: resource_tools::ResourceReadSigner,
+    ) -> Result<Value> {
+        resource_tools::read_resource_with(&self.config, tool, read, nonce, signer, |command| {
             let output = self
                 .custody_gate
-                .run_capture(&self.cancelled, command)
+                .run_capture_until(&self.cancelled, command, self.native_work_limit()?)
                 .map_err(|error| format!("supervised native resource read: {error}"))?;
             if !output.status.success() {
                 return Err(format!(
@@ -7632,6 +7616,7 @@ impl Runtime {
         })
     }
     fn supervised_json_command(&self, mut command: Command) -> Result<Value> {
+        pin_operator_peer_command(&mut command, &self.config.mini, self.config.dispatch_task.as_ref());
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -7640,7 +7625,7 @@ impl Runtime {
         }
         let output = self
             .custody_gate
-            .run_capture(&self.cancelled, &mut command)
+            .run_capture_until(&self.cancelled, &mut command, self.native_work_limit()?)
             .map_err(|error| format!("supervised native lookup: {error}"))?;
         if !output.status.success() {
             return Err(format!(
@@ -7740,37 +7725,38 @@ impl Runtime {
         self.query_as(&a)
     }
     fn query_as(&mut self, authority: &Authority) -> Result<Value> {
-        self.query_as_via(authority, None)
-    }
-    // Only the query-only topology receiver can construct this transport token.
-    // The shared bounded read path preserves this exact admitted socket on retries.
-    fn query_as_via(&mut self, authority: &Authority,
-        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
-        self.query_observation_via(authority, transport)
+        self.query_observation_as(authority)
     }
     fn query_policy(&mut self) -> Result<Value> {
         self.query_policy_observation()
     }
     fn managed_worker_subjects(&self) -> Result<Vec<String>> {
-        let mut workers = Vec::new();
-        if let Some(tool) = &self.config.tool_task {
-            workers.push(tool.subject.clone());
-        }
-        if let Some(dispatch) = &self.config.dispatch_task {
-            if workers.iter().any(|subject| subject == &dispatch.subject) {
-                return Err("dispatch and tool witness subjects must be distinct".into());
+        let workers = ordered_worker_subjects(
+            self.config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.provider_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.dispatch_task.as_ref().map(|v| v.subject.as_str()),
+        );
+        for (i, subject) in workers.iter().enumerate() {
+            if workers[..i].contains(subject) {
+                return Err("tool, provider and dispatch witness subjects must be distinct".into());
             }
-            workers.push(dispatch.subject.clone());
-        }
-        if let Some(provider) = &self.config.provider_task {
-            if workers.iter().any(|subject| subject == &provider.subject) {
-                return Err(
-                    "provider witness subject must be distinct from tool and dispatch".into(),
-                );
-            }
-            workers.push(provider.subject.clone());
         }
         Ok(workers)
+    }
+    /// The sole historical variant is the old runtime's tool/dispatch/provider
+    /// ordering. Compare complete native-authored bytes, never unordered roles.
+    fn managed_worker_policy_orders(&self) -> Result<Vec<Vec<String>>> {
+        let canonical = self.managed_worker_subjects()?;
+        let legacy = ordered_worker_subjects(
+            self.config.tool_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.dispatch_task.as_ref().map(|v| v.subject.as_str()),
+            self.config.provider_task.as_ref().map(|v| v.subject.as_str()),
+        );
+        let mut orders = vec![canonical];
+        if legacy != orders[0] {
+            orders.push(legacy);
+        }
+        Ok(orders)
     }
     fn renew_worker_policy(&mut self, attaching_from_paused: bool) -> Result<()> {
         let workers = self.managed_worker_subjects()?;
@@ -7898,6 +7884,10 @@ impl Runtime {
         status: &str,
         desired_generation: &str,
     ) -> Result<()> {
+        let orders = self.managed_worker_policy_orders()?;
+        if workers != orders[0].as_slice() {
+            return Err("managed worker roles differ from controller configuration".into());
+        }
         let predicate = view
             .get("predicate")
             .ok_or("signed policy has no predicate")?;
@@ -7922,17 +7912,20 @@ impl Runtime {
         self.author_grain_policy_bytes("predicate", &observed_source, &observed_bytes)?;
         let observed = bounded_policy_bytes(&observed_bytes)?;
         for candidate in candidates {
-            let source =
-                managed_worker_policy_source(&self.config.subject, workers, &candidate.to_string());
-            let path = dir.join(format!("managed-{candidate}.json"));
-            write_new(
-                &path,
-                &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
-            )?;
-            let output = dir.join(format!("managed-{candidate}.bin"));
-            self.author_grain_policy_bytes("grain-policy", &path, &output)?;
-            if bounded_policy_bytes(&output)? == observed {
-                return Ok(());
+            for (index, order) in orders.iter().enumerate() {
+                let source =
+                    managed_worker_policy_source(&self.config.subject, order, &candidate.to_string());
+                let suffix = if index == 0 { "" } else { "-legacy-runtime" };
+                let path = dir.join(format!("managed-{candidate}{suffix}.json"));
+                write_new(
+                    &path,
+                    &serde_json::to_vec(&source).map_err(|e| e.to_string())?,
+                )?;
+                let output = dir.join(format!("managed-{candidate}{suffix}.bin"));
+                self.author_grain_policy_bytes("grain-policy", &path, &output)?;
+                if bounded_policy_bytes(&output)? == observed {
+                    return Ok(());
+                }
             }
         }
         Err("signed policy is not a supported exact managed worker law; explicit owner audit and policy upgrade required".into())
@@ -8492,6 +8485,47 @@ impl Runtime {
         };
         let _ = request.reply.send(response);
     }
+    /// A product tool constructs ordinary HTTP only. Dispatch below still
+    /// checks the current route, signed authority, native permit and settlement.
+    /// A restricted room resident reaches applications only through the Oracle tools, and only
+    /// in a room that grants the oracle; refused by name before any dispatch.
+    fn restricted_application_call(&self, name: &str) -> Result<()> {
+        if typed_applications::is_raw_tool(name) {
+            let configured = self.config.tool_task.as_ref().is_some_and(|tool| !tool.typed_applications.is_empty());
+            if !configured {
+                return Err("refused: typed-apps-not-configured: no typed application is attached to this resident".into());
+            }
+            if self.room_tools_restricted() && !self.prompt_apps {
+                return Err("refused: typed-apps-not-granted: this room's founder has not granted apps (hermes/tools bit 16)".into());
+            }
+            return Ok(());
+        }
+        if !self.room_tools_restricted() { return Ok(()); }
+        if !oracle_tools::is_tool(name) {
+            return Err("this resident accepts only room tools".into());
+        }
+        if self.resident_oracle_applications().is_empty() {
+            return Err("refused: oracle-not-configured: no Oracle lifetime route serves this resident".into());
+        }
+        if !self.prompt_oracle {
+            return Err("refused: oracle-not-granted: this room's founder has not granted the oracle (hermes/tools bit 8)".into());
+        }
+        Ok(())
+    }
+    fn application_tool_arguments(&self, name: &str, arguments: &Value) -> Result<Value> {
+        if oracle_tools::is_tool(name) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            oracle_tools::http_arguments(name, arguments, &tool.application_services)
+        } else if typed_applications::is_raw_tool(name) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            typed_applications::raw_arguments(&tool.typed_applications, arguments)
+        } else if matches!(name, "mini_application_api" | "__mini_gitweb_http_raw") {
+            Ok(arguments.clone())
+        } else {
+            Err("unknown application tool".into())
+        }
+    }
+
     fn begin_application_api(
         &mut self,
         arguments: &Value,
@@ -8542,7 +8576,7 @@ impl Runtime {
             .agent_api_host_sha256
             .as_deref()
             .ok_or("application API event21 Host pin is absent; agent delivery is unavailable")?;
-        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected_host {
             return Err("application API event21 Host image or socket differs from pin".into());
         }
         let routes = &tool.allowed_application_api_routes;
@@ -8656,7 +8690,7 @@ impl Runtime {
             .lifetime_api_host_sha256
             .as_deref()
             .ok_or("lifetime application Host pin absent")?;
-        if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected_host {
+        if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected_host {
             return Err("lifetime application Host image or socket differs from pin".into());
         }
         let registered = tool
@@ -9201,7 +9235,12 @@ impl Runtime {
                         )
                     }
                     (Ok(_), _) => eprintln!("provider request: replayed from this prompt's cache"),
-                    (Err(error), _) => eprintln!("provider request refused: {error}"),
+                    (Err(error), _) => {
+                        eprintln!("provider request refused: {error}");
+                        if self.prompt_provider_refusals.len() < 16 {
+                            self.prompt_provider_refusals.push(error.clone());
+                        }
+                    }
                 }
                 let _ = reply.send(result);
             }
@@ -9238,11 +9277,10 @@ impl Runtime {
                                 })
                         })
                 {
-                    let note = format!("metered provider request {attempt_id} retained a response without a valid Lean quote; held allowance needs reconciliation");
-                    if !self.journal.unresolved_external.contains(&note) {
-                        self.journal.unresolved_external.push(note);
-                        let _ = self.save();
-                    }
+                    // No free-text note: the attempt carries its decided class
+                    // and the exact retry (`reconcile provider audited`), and
+                    // the hold stays until a Host-admitted settle clears it.
+                    self.provider_await_host(attempt_id);
                 }
                 let not_sent = recorded.as_ref().ok().copied().flatten() == Some("0");
                 let acknowledged = reply.send(recorded.map(|_| ())).is_ok();
@@ -9378,6 +9416,9 @@ impl Runtime {
         if let Some(replay) = Self::provider_replay(&self.journal.provider_replays, &request)? {
             return Ok(replay);
         }
+        if let Some(gate) = &self.journal.provider_retry_gate {
+            gate.admits(&sha256_bytes(&request.exact_body)?, unix_ms())?;
+        }
         self.provider_prompt_budget(&task)?;
         provider_history::require_native_support(&profile)?;
         if self.journal.provider_replays.len() >= 16 {
@@ -9509,6 +9550,7 @@ impl Runtime {
             meter_report_sha256: None,
             metered_charge: None,
             route: route_record,
+            decision: None,
         });
         self.save()?;
         let authority = self.provider()?;
@@ -9586,8 +9628,12 @@ impl Runtime {
                 if max_tokens.is_none_or(|tokens| tokens > u64::from(task.max_output_tokens)) {
                     return Err(credentials::refused("per-call-cap"));
                 }
-                let t = authorize(json!({"op":"provider-authorize","kind":"pool","provider":row.name,
-                    "runner":task.subject,"maxTokens":max_tokens,"bodySha256":body_sha256}))?;
+                let mut request = json!({"op":"provider-authorize","kind":"pool","provider":row.name,
+                    "runner":task.subject,"maxTokens":max_tokens,"bodySha256":body_sha256});
+                if let Some(member) = &self.prompt_member {
+                    request["member"] = json!(member);
+                }
+                let t = authorize(request)?;
                 (t["ticket"].as_str().map(str::to_owned), "pool".to_owned())
             }
             credentials::CredentialSource::User => {
@@ -9628,14 +9674,13 @@ impl Runtime {
     /// admission remains authoritative; this check rejects incompatible bundles
     /// before a fresh request can reserve funds or reach a provider.
     fn provider_native_profile(&self) -> Result<Value> {
-        let output = Command::new(&self.config.mini)
+        let output = deadline::output(Command::new(&self.config.mini)
             .arg("profile")
             .arg("--host")
             .arg(&self.config.host)
             .arg("--config")
-            .arg(&self.config.host_config)
-            .output()
-            .map_err(|e| format!("provider metering profile: {e}"))?;
+            .arg(&self.config.host_config), deadline::NATIVE_CALL)
+            .map_err(|e| deadline::describe("provider metering profile", e))?;
         if !output.status.success() || output.stdout.len() > 16_384 {
             return Err("pinned Host provider metering profile unavailable".into());
         }
@@ -9934,8 +9979,8 @@ impl Runtime {
                         headers_valid,
                     )
                 }
-                provider::ProviderOutcome::NotSent { reason } => (
-                    format!("not-sent:{reason}"),
+                provider::ProviderOutcome::NotSent { kind, reason } => (
+                    format!("not-sent:{}:{reason}", kind.tag()),
                     Vec::new(),
                     None,
                     Some("0"),
@@ -9945,9 +9990,10 @@ impl Runtime {
                 ),
                 provider::ProviderOutcome::Uncertain {
                     partial_body,
+                    kind,
                     reason,
                 } => (
-                    format!("uncertain:{reason}"),
+                    format!("uncertain:{}:{reason}", kind.tag()),
                     partial_body,
                     None,
                     None,
@@ -9988,21 +10034,181 @@ impl Runtime {
             attempt.response_headers_bytes = Some(len);
             attempt.response_headers_sha256 = Some(digest);
         }
-        if charge.is_none() {
-            self.journal.unresolved_external.push(format!(
-                "provider request {attempt_id} may have reached upstream; exact response uncertain"
-            ));
+        if !headers_valid {
+            attempt.outcome = Some("uncertain:malformed:raw-header-metadata-mismatch".into());
+        }
+        let decision = provider_failure::classify(
+            attempt.send_started,
+            attempt.outcome.as_deref(),
+            attempt.response_status.filter(|_| headers_valid),
+        )
+        .map(|class| provider_failure::decide(class, &attempt.route.credential));
+        let request_sha256 = attempt.request_sha256.clone();
+        attempt.decision = decision.clone();
+        match &decision {
+            Some(d) if d.resend == provider_failure::Resend::NewReserveBackoff => {
+                let gate = provider_failure::RetryGate::after_failure(
+                    self.journal.provider_retry_gate.as_ref(),
+                    &request_sha256,
+                    unix_ms(),
+                    attempt_id,
+                );
+                self.journal.provider_retry_gate = Some(gate);
+            }
+            None if charge == Some("configured") => {
+                // A 200 reply ends this request's retry budget.
+                if self.journal.provider_retry_gate.as_ref().is_some_and(|g| g.request_sha256 == request_sha256) {
+                    self.journal.provider_retry_gate = None;
+                }
+            }
+            _ => {}
+        }
+        if let Some(d) = &decision {
+            eprintln!(
+                "provider attempt {attempt_id}: decided {} -> {:?}{}",
+                d.class.wire_name(),
+                d.state,
+                d.retry.as_deref().map(|r| format!("; retry: {r}")).unwrap_or_default()
+            );
         }
         if !headers_valid {
-            attempt.outcome = Some("uncertain:raw-header-metadata-mismatch".into());
-            self.journal.unresolved_external.push(format!(
-                "provider request {attempt_id} returned raw headers inconsistent with reported metadata"
-            ));
             self.save()?;
             return Err("provider response metadata differs from retained raw headers".into());
         }
         self.save()?;
         Ok(charge)
+    }
+    /// The Host did not admit a settle for this attempt's reply: record the
+    /// decided class in the awaiting-host state with the exact retry. The
+    /// hold and attempt stay; nothing else releases them.
+    fn provider_await_host(&mut self, attempt_id: u64) {
+        let Some(attempt) = self.journal.provider_attempt.as_mut() else { return };
+        if attempt.id != attempt_id {
+            return;
+        }
+        let mut decision = attempt.decision.clone().unwrap_or_else(|| {
+            provider_failure::decide(
+                provider_failure::FailureClass::Malformed {
+                    reason: "complete reply without a Host-admitted quote".into(),
+                },
+                &attempt.route.credential,
+            )
+        });
+        decision.state = provider_failure::DecidedState::SettleAwaitingHost;
+        decision.retry = Some(provider_failure::AUDITED_RETRY.to_owned());
+        attempt.decision = Some(decision);
+        let _ = self.save();
+    }
+    /// Read-only Host quote for a metered call that crossed the send boundary
+    /// with no complete reply. A crash before any outcome first retains an
+    /// empty response file as the exact evidence the frame carries.
+    fn provider_meter_class_inner(
+        &mut self,
+        attempt_id: u64,
+        class: &provider_failure::FailureClass,
+    ) -> Result<()> {
+        let task = self.config.provider_task.clone().ok_or("providerTask absent")?;
+        let mut attempt = self.journal.provider_attempt.clone().ok_or("provider attempt absent")?;
+        if attempt.id != attempt_id || !attempt.send_started || attempt.meter_report_path.is_some() {
+            return Err("provider class settle lacks the exact held attempt".into());
+        }
+        if attempt.outcome.is_none() {
+            if *class != provider_failure::FailureClass::CrashAfterSend {
+                return Err("only a crash leaves an after-send attempt without an outcome".into());
+            }
+            let path = self
+                .config
+                .state_dir
+                .join(format!("provider-{attempt_id:016}.controller-outcome"));
+            write_new(&path, b"")?;
+            attempt.outcome_sha256 = Some(sha256_file(&path)?);
+            attempt.outcome_path = Some(path);
+            attempt.outcome_bytes = Some(0);
+            attempt.outcome =
+                Some("uncertain:crash-after-send:no outcome journaled before restart".into());
+            self.journal.provider_attempt = Some(attempt.clone());
+            self.save()?;
+        }
+        let pin = attempt.metering_pin.clone().ok_or("provider tariff pin absent")?;
+        let hold = self.journal.provider_hold.clone().ok_or("provider signed hold absent")?;
+        if !hold.reserve_confirmed
+            || hold.reserve != provider_hold_amount(&task, &pin)
+            || pin.provider_resource_id != task.task
+            || pin.model != task.model
+        {
+            return Err("provider class settle differs from the signed hold".into());
+        }
+        let provider_authority = self.provider()?;
+        let signed_provider = self.query_as(&provider_authority)?;
+        if !provider_audit_coordinates(&signed_provider, &hold) {
+            return Err("signed provider state differs from the held reserve".into());
+        }
+        let request = retained_exact(
+            &attempt.request_path,
+            attempt.request_bytes,
+            &attempt.request_sha256,
+            task.max_request_bytes,
+        )?;
+        let response_path = attempt.outcome_path.clone().ok_or("provider partial response absent")?;
+        let response = retained_exact(
+            &response_path,
+            attempt.outcome_bytes.ok_or("provider response byte count absent")?,
+            attempt.outcome_sha256.as_deref().ok_or("provider response digest absent")?,
+            task.max_response_bytes,
+        )?;
+        let socket = self.config.host_socket.clone().ok_or("metering requires pinned Host socket")?;
+        let id = self.next_id()?;
+        let metadata_path = self
+            .config
+            .state_dir
+            .join(format!("provider-meter-{id:016}.metadata.json"));
+        let metadata = provider_class_metadata(&pin, &hold.reserve, class.wire_name())?;
+        write_new(&metadata_path, metadata.to_string().as_bytes())?;
+        let directory = self.config.state_dir.join(format!("provider-meter-{id:016}"));
+        let cfg = &self.config;
+        self.command_output(
+            &cfg.mini,
+            &[
+                "meter",
+                "--host",
+                cfg.host.to_str().ok_or("host path UTF-8")?,
+                "--config",
+                cfg.host_config.to_str().ok_or("config path UTF-8")?,
+                "--socket",
+                socket.to_str().ok_or("Host socket path UTF-8")?,
+                "--metadata",
+                metadata_path.to_str().ok_or("meter metadata path UTF-8")?,
+                "--request",
+                attempt.request_path.to_str().ok_or("request path UTF-8")?,
+                "--response",
+                response_path.to_str().ok_or("response path UTF-8")?,
+                "--dir",
+                directory.to_str().ok_or("meter attempt path UTF-8")?,
+            ],
+        )
+        .map_err(|e| format!("provider class quote retained at {}: {e}", directory.display()))?;
+        let report_path = directory.join("meter.json");
+        let report_bytes = bounded_regular_file(&report_path, 16_384)?;
+        let report: Value = serde_json::from_slice(&report_bytes)
+            .map_err(|e| format!("provider class quote JSON: {e}"))?;
+        let charge = provider_quote_charge(
+            &report,
+            &pin,
+            &hold.reserve,
+            request.len(),
+            response.len(),
+            Some(class.wire_name()),
+        )?;
+        let mut current = self.journal.provider_attempt.clone().ok_or("provider attempt disappeared")?;
+        if current.id != attempt_id || current.meter_report_path.is_some() {
+            return Err("provider attempt changed during read-only class quote".into());
+        }
+        current.meter_report_path = Some(report_path);
+        current.meter_report_sha256 = Some(sha256_bytes(&report_bytes)?);
+        current.metered_charge = Some(charge);
+        self.validated_metered_charge(&current)?;
+        self.journal.provider_attempt = Some(current);
+        self.save()
     }
     fn provider_meter_quote(&mut self, attempt_id: u64) -> Result<()> {
         self.provider_meter_quote_inner(attempt_id, true)
@@ -10150,8 +10356,14 @@ impl Runtime {
         let report_bytes = bounded_regular_file(&report_path, 16_384)?;
         let report: Value = serde_json::from_slice(&report_bytes)
             .map_err(|e| format!("provider Lean quote JSON: {e}"))?;
-        let charge =
-            provider_quote_charge(&report, pin, &hold.reserve, request.len(), response.len())?;
+        let charge = provider_quote_charge(
+            &report,
+            pin,
+            &hold.reserve,
+            request.len(),
+            response.len(),
+            (status != 200).then_some("complete-non-200"),
+        )?;
         if require_live_lease {
             self.provider_lease_current(&lease)?;
         }
@@ -10222,27 +10434,41 @@ impl Runtime {
                 .ok_or("metered response digest absent")?,
             task.max_response_bytes,
         )?;
-        let headers = retained_exact(
-            attempt
-                .response_headers_path
-                .as_deref()
-                .ok_or("metered raw headers absent")?,
-            attempt
-                .response_headers_bytes
-                .ok_or("metered raw headers length absent")?,
-            attempt
-                .response_headers_sha256
-                .as_deref()
-                .ok_or("metered raw headers digest absent")?,
-            131_072,
-        )?;
-        let (status, content_type) = provider::response_headers(&headers)
-            .map_err(|e| format!("metered raw headers invalid: {e}"))?;
-        if Some(status) != attempt.response_status
-            || Some(content_type.as_str()) != attempt.response_content_type.as_deref()
-        {
-            return Err("metered status or Content-Type differs from raw headers".into());
-        }
+        let (metadata, outcome_class) = if attempt.response_headers_path.is_some() {
+            let headers = retained_exact(
+                attempt
+                    .response_headers_path
+                    .as_deref()
+                    .ok_or("metered raw headers absent")?,
+                attempt
+                    .response_headers_bytes
+                    .ok_or("metered raw headers length absent")?,
+                attempt
+                    .response_headers_sha256
+                    .as_deref()
+                    .ok_or("metered raw headers digest absent")?,
+                131_072,
+            )?;
+            let (status, content_type) = provider::response_headers(&headers)
+                .map_err(|e| format!("metered raw headers invalid: {e}"))?;
+            if Some(status) != attempt.response_status
+                || Some(content_type.as_str()) != attempt.response_content_type.as_deref()
+            {
+                return Err("metered status or Content-Type differs from raw headers".into());
+            }
+            let class = (status != 200).then_some("complete-non-200");
+            (provider_metering_metadata(pin, status, &content_type, reserve)?, class)
+        } else {
+            let class = provider_failure::classify(
+                attempt.send_started,
+                attempt.outcome.as_deref(),
+                None,
+            )
+            .filter(|class| class.after_send() && !class.has_complete_response())
+            .ok_or("metered attempt has neither raw headers nor an after-send class")?;
+            let name = class.wire_name();
+            (provider_class_metadata(pin, reserve, name)?, Some(name))
+        };
         let report_path = attempt
             .meter_report_path
             .as_ref()
@@ -10282,7 +10508,6 @@ impl Runtime {
                 "metered Host frame or copied inputs differ from the retained attempt".into(),
             );
         }
-        let metadata = provider_metering_metadata(pin, status, &content_type, reserve)?;
         if bounded_regular_file(&directory.join("metadata.json"), 4096)?
             != metadata.to_string().as_bytes()
             || bounded_regular_file(&directory.join("config.json"), 131_072)?
@@ -10292,7 +10517,14 @@ impl Runtime {
         }
         let report: Value = serde_json::from_slice(&report_bytes)
             .map_err(|e| format!("metered report JSON: {e}"))?;
-        let charge = provider_quote_charge(&report, pin, reserve, request.len(), response.len())?;
+        let charge = provider_quote_charge(
+            &report,
+            pin,
+            reserve,
+            request.len(),
+            response.len(),
+            outcome_class,
+        )?;
         if attempt.metered_charge.as_deref() != Some(charge.as_str()) {
             return Err("metered charge differs from source-authored retained report".into());
         }
@@ -10412,6 +10644,7 @@ impl Runtime {
         Ok(Some(charge))
     }
     fn provider_settle(&mut self, charge: &str) -> Result<()> {
+        const PROVIDER_SETTLE_FRESH_PREPARES: u32 = 3;
         let authority = self.provider()?;
         let configured = self
             .config
@@ -10465,13 +10698,37 @@ impl Runtime {
         if self.journal.provider_pending.is_some() {
             return Err("provider transition needs exact retry".into());
         }
-        self.transition_as(
-            &authority,
-            json!({"type":"settle","charge":charge,"route":pin.route}),
-            "provider settle",
-            "gateway source-quoted provider settlement",
-            vec![],
-        )?;
+        // A continuity rejection before signing (the Store moved between
+        // the prepare and the Host's continuity check, e.g. another writer on
+        // a shared Store) sent nothing: retire that exact attempt on its
+        // verified marker and prepare afresh, at most PROVIDER_SETTLE_FRESH_PREPARES
+        // times. Anything else keeps its pending attempt for exact retry.
+        let mut fresh = 0;
+        loop {
+            match self.transition_as(
+                &authority,
+                json!({"type":"settle","charge":charge,"route":pin.route}),
+                "provider settle",
+                "gateway source-quoted provider settlement",
+                vec![],
+            ) {
+                Ok(()) => break,
+                Err(error)
+                    if fresh < PROVIDER_SETTLE_FRESH_PREPARES
+                        && self.retire_reaped_settle_rejection(&error)? =>
+                {
+                    fresh += 1;
+                    eprintln!("provider settle: continuity rejected before signing ({error}); fresh prepare {fresh}");
+                    thread::sleep(Duration::from_millis(250 << fresh));
+                    let signed = self.query_as(&authority)?;
+                    if !provider_reserve_coordinates(&signed, &hold) {
+                        return Err("metered provider signed hold changed before settlement".into());
+                    }
+                    provider_signed_route(&signed, &pin)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let after = self.query_as(&authority)?;
         match after.pointer("/grain/status").and_then(Value::as_str) {
             Some("1") => self.transition_as(
@@ -10567,10 +10824,18 @@ impl Runtime {
         // proves no Mini birth submit could have started may return the
         // consumed tail ordinal. The ordinal and marker change in one journal
         // rename below; an interrupted save leaves the old marker intact.
-        persist_retired_no_birth_operation(
+        let mut terminal_refusal = self.journal.birth_refusal.clone();
+        if let Some(refusal) = terminal_refusal.as_mut() {
+            refusal.retain_terminal(self.journal.birth_operation.as_ref().unwrap(), terminal)?;
+            refusal.bind_terminal_files(&self.config.state_dir, self.journal.next_operation_id.checked_sub(1).ok_or("terminal query ID absent")?)?;
+        }
+        let previous = std::mem::replace(&mut self.journal.birth_refusal, terminal_refusal);
+        let result = persist_retired_no_birth_operation(
             &self.config.state_dir.join("journal.json"),
             &mut self.journal,
-        )
+        );
+        if result.is_err() { self.journal.birth_refusal = previous; }
+        result
     }
 
     fn create_resource(
@@ -10650,14 +10915,15 @@ impl Runtime {
                 .current_birth_host_sha256
                 .as_deref()
                 .ok_or("current application birth is not enabled by operator Host pin")?;
-            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+            if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
                 );
             }
         }
-        if self.journal.birth_operation.is_some()
+        if self.journal.birth_refusal.is_some()
+            || self.journal.birth_operation.is_some()
             || self.journal.birth_pending.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.tool_hold.is_some()
@@ -10823,6 +11089,7 @@ impl Runtime {
                     family,
                     &tool,
                     &self.config.task,
+                    &self.config.subject,
                     app_target,
                     application_tools::BirthIndex { nonce: id, ordinal },
                     &tool_view,
@@ -10987,6 +11254,9 @@ impl Runtime {
                     .ok()
                     .flatten();
                 if explicit || prepared.is_some() {
+                    if let Some(refusal) = prepared {
+                        self.retain_birth_refusal(&origin, refusal)?;
+                    }
                     // Keep birth_operation through the signed zero settlement.
                     self.journal.birth_pending = None;
                     self.journal.tool_pending = None;
@@ -12219,12 +12489,63 @@ impl Runtime {
         )
     }
 
-    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
-        if self.room_tools_restricted()
-            && !resource_tools::is_room_tool(name)
-            && name != "mini_room_attempts"
+    fn require_tool_surface(&self, surface: ToolSurface, name: &str) -> Result<()> {
+        match surface {
+            ToolSurface::Resident => {
+                if self.room_tools_restricted()
+                    && !resource_tools::is_room_tool(name)
+                    && name != "mini_room_attempts"
+                {
+                    return Err("this resident accepts only room tools".into());
+                }
+            }
+            ToolSurface::OperatorForeground => {
+                if self.config.foreground_tool.is_none() {
+                    return Err("foregroundTool is not configured".into());
+                }
+                if !operator_foreground_tool(name) {
+                    return Err("foreground tool is not delegated".into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn require_foreground_execution(&self, name: &str, arguments: &Value) -> Result<()> {
+        let attempt = self.journal.foreground_attempt.as_ref()
+            .ok_or("operator tool lacks a durable foreground request")?;
+        if self.foreground_operation != Some(attempt.operation_id)
+            || attempt.phase != ForegroundPhase::Executing
+            || attempt.reported || attempt.name != name
+            || attempt.result_path.is_some() || attempt.result_sha256.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || self.prompt_active
         {
-            return Err("this resident accepts only room tools".into());
+            return Err("operator tool is not the exclusive executing foreground request".into());
+        }
+        self.journal.validate_foreground(&self.config.state_dir)?;
+        let request: ForegroundRequest = serde_json::from_slice(
+            &bounded_regular_file(&attempt.request_path, 262_144)?)
+            .map_err(|e| format!("operator retained request: {e}"))?;
+        if request.request_id != attempt.request_id || request.name != name
+            || request.arguments != *arguments
+        {
+            return Err("operator execution differs from its retained foreground request".into());
+        }
+        Ok(())
+    }
+
+    fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
+        self.tool_call_from(ToolSurface::Resident, name, arguments)
+    }
+
+    fn tool_call_from(&mut self, surface: ToolSurface, name: &str, arguments: &Value) -> Result<Value> {
+        self.require_tool_surface(surface, name)?;
+        match surface {
+            ToolSurface::OperatorForeground => self.require_foreground_execution(name, arguments)?,
+            ToolSurface::Resident if self.foreground_operation.is_some() => {
+                return Err("resident request cannot borrow an operator foreground invocation".into());
+            }
+            ToolSurface::Resident => {}
         }
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
@@ -12289,9 +12610,11 @@ impl Runtime {
                     .ok_or("toolTask is not configured")?
                     .clone();
                 let mut reads = configured.allowed_reads.clone();
+                let mut signer = resource_tools::ResourceReadSigner::Tool;
                 if let Some(name) = arguments.get("name").and_then(Value::as_str) {
-                    if let Some(born) = self.verified_born_named(name)? {
+                    if let Some((born, owner)) = self.verified_born_read(name)? {
                         reads.push(resource_tools::born_read(&born));
+                        signer = owner;
                     }
                 }
                 // A factory-minted owner capability carries both observe and
@@ -12300,7 +12623,7 @@ impl Runtime {
                 // exact composite receipt is revalidated above.
                 let read = resource_tools::select_read(&reads, arguments)?.clone();
                 let nonce = self.next_id()?;
-                self.supervised_resource_read(&configured, &read, nonce)
+                self.supervised_resource_read_as(&configured, &read, nonce, signer)
             }
             "mini_create_resource" => {
                 if self.tool_catalog()?.resource_workspace_create {
@@ -12519,6 +12842,7 @@ impl Runtime {
     /// This is only a syntax/operator-profile preflight; the normal tool path
     /// still verifies every native grant and current source state.
     fn preflight_foreground_arguments(&self, request: &ForegroundRequest) -> Result<()> {
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let arguments = &request.arguments;
         let tool = self
             .config
@@ -12717,7 +13041,7 @@ impl Runtime {
                         .journal
                         .born_resources
                         .iter()
-                        .any(|born| born.pending.born.name == name)
+                        .any(|born| born.pending.members().iter().any(|member| member.name == name))
                 {
                     return Err("resource read name is not configured or recorded".into());
                 }
@@ -12779,7 +13103,7 @@ impl Runtime {
                     .current_birth_host_sha256
                     .as_deref()
                     .ok_or("current application birth is not enabled by operator Host pin")?;
-                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
                     return Err(
                         "current application birth Host image or socket differs from operator pin"
                             .into(),
@@ -12839,7 +13163,9 @@ impl Runtime {
                     }
                 }
             }
-            "mini_application_api" => {
+            "mini_application_api" | "mini_oracle_discover" | "mini_oracle_call" => {
+                let mapped = self.application_tool_arguments(&request.name, arguments)?;
+                let arguments = &mapped;
                 let mut allowed = tool
                     .allowed_application_api_routes
                     .iter()
@@ -12864,7 +13190,7 @@ impl Runtime {
                         "application API event21 Host pin is absent; agent delivery is unavailable",
                     )?
                 };
-                if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != pin {
+                if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != pin {
                     return Err(
                         "application API event21 Host image or socket differs from pin".into(),
                     );
@@ -12896,6 +13222,80 @@ impl Runtime {
             _ => return Err("foreground tool is not delegated".into()),
         }
         Ok(())
+    }
+
+    /// The same idle-state gate is used for readiness and tool admission.
+    fn idle_task_ready(&self) -> bool {
+        !(self.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
+            || self.cancelled.load(Ordering::SeqCst)
+            || self.journal.child.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.pending.is_some()
+            || self.journal.parent_hold.is_some()
+            || self.journal.tool_pending.is_some()
+            || self.journal.tool_hold.is_some()
+            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
+            || self.journal.workspace_birth.is_some()
+            || self.journal.birth_operation.is_some()
+            || self.journal.birth_pending.is_some()
+            || self.journal.provider_pending.is_some()
+            || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some()
+            || self.journal.dispatch_pending.is_some()
+            || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+            || self.journal.settlement_due.is_some()
+            || !self.journal.unresolved_external.is_empty())
+    }
+
+    fn prepare_full_consent(&self) -> Result<Option<ConsentFullReadiness>> {
+        if self.config.consent_full_readiness != Some(true) {
+            return Ok(None);
+        }
+        let output = self.command_capture(&self.config.mini, &[
+            "consent-full-ready",
+            "--host", self.config.host.to_str().ok_or("host path UTF-8")?,
+            "--config", self.config.host_config.to_str().ok_or("config path UTF-8")?,
+        ])?;
+        ConsentFullReadiness::parse(&output.stdout).map(Some)
+    }
+
+    /// Explicit operator readiness, before any tool request is submitted.
+    /// This may perform ordinary native recovery/soft attachment; success
+    /// requires both a clean controller and a fresh signed idle task view.
+    fn prepare_idle(&mut self, outer: Instant) -> Result<Value> {
+        if self.child.is_some()
+            || self.journal.child.is_some()
+            || self.prompt_active
+            || self.foreground_operation.is_some()
+            || self.journal.foreground_attempt.is_some()
+            || self.journal.application_api_attempt.is_some()
+        {
+            return Err("idle preparation cannot recover an active or retained worker/tool; use exact recovery".into());
+        }
+        self.with_startup_budget(Some(outer), |rt| {
+            if !rt.idle_task_ready() { rt.attach(true)?; }
+            if !rt.idle_task_ready() { return Err("controller is not reconciled and idle".into()); }
+            let consent = rt.prepare_full_consent()?;
+            let signed = rt.query()?;
+            let expected_status = match rt.journal.connection {
+                Connection::Hard => "1",
+                Connection::Soft => "2",
+                _ => return Err("controller readiness is not attached".into()),
+            };
+            if signed.pointer("/grain/status").and_then(Value::as_str) != Some(expected_status)
+                || signed.pointer("/grain/reserved").and_then(Value::as_str) != Some("0") {
+                return Err("controller readiness lacks a signed idle task".into());
+            }
+            Ok(json!({"type":"mini-grain-idle-readiness-v1", "ready":true,
+                "task":rt.config.task, "connection":rt.journal.connection,
+                "startupTimeoutSeconds":deadline::startup_limit(rt.config.startup_timeout_seconds)?.as_secs(),
+                "signedTask":signed, "fullConsent":consent}))
+        })
     }
 
     /// Run one model-free tool call under the same signed parent/tool custody.
@@ -12944,28 +13344,7 @@ impl Runtime {
         {
             return Err("foreground tool name is invalid".into());
         }
-        if !matches!(
-            request.name.as_str(),
-            "mini_grain_status"
-                | "mini_workspace_list"
-                | "mini_workspace_describe"
-                | "mini_workspace_read"
-                | "mini_workspace_propose"
-                | "mini_workspace_submit"
-                | "mini_workspace_create"
-                | "mini_workspace_recover"
-                | "mini_workspace_attempts"
-                | "mini_workspace_import_reference"
-                | "mini_workspace_export_reference"
-                | "mini_read_resource"
-                | "mini_create_resource"
-                | "mini_create_application"
-                | "mini_create_application_session"
-                | "mini_publish"
-                | "mini_application_api"
-        ) {
-            return Err("foreground tool is not delegated".into());
-        }
+        self.require_tool_surface(ToolSurface::OperatorForeground, &request.name)?;
         let profile = self
             .config
             .foreground_tool
@@ -12976,27 +13355,8 @@ impl Runtime {
             .output
             .as_ref()
             .is_some_and(|output| output.is_active_framed_attachment(attachment_id))
-            || !matches!(self.journal.connection, Connection::Hard | Connection::Soft)
-            || self.cancelled.load(Ordering::SeqCst)
-            || self.journal.child.is_some()
-            || self.journal.foreground_attempt.is_some()
-            || self.journal.pending.is_some()
-            || self.journal.parent_hold.is_some()
-            || self.journal.tool_pending.is_some()
-            || self.journal.tool_hold.is_some()
-            || (self.journal.workspace_attempt.is_some() || self.journal.room_attempt.is_some())
-            || self.journal.workspace_birth.is_some()
-            || self.journal.birth_operation.is_some()
-            || self.journal.birth_pending.is_some()
-            || self.journal.provider_pending.is_some()
-            || self.journal.provider_hold.is_some()
-            || self.journal.provider_attempt.is_some()
-            || self.journal.dispatch_pending.is_some()
-            || self.journal.dispatch_hold.is_some()
-            || self.journal.dispatch_attempt.is_some()
-            || self.journal.application_api_attempt.is_some()
-            || self.journal.settlement_due.is_some()
-            || !self.journal.unresolved_external.is_empty()
+
+            || !self.idle_task_ready()
         {
             return Err("foreground tool requires an attached, reconciled idle task".into());
         }
@@ -13047,16 +13407,23 @@ impl Runtime {
             self.completion_phase.store(PHASE_RUNNING, Ordering::SeqCst);
             self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Executing;
             self.save()?;
-            let result = if request.name == "mini_application_api" {
-                self.foreground_application_api(&request.arguments, input)?
+            let result = if request.name == "mini_application_api" || oracle_tools::is_tool(&request.name) {
+                let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
+                self.foreground_application_api(&arguments, input)?
             } else {
-                self.tool_call(&request.name, &request.arguments)
+                self.tool_call_from(ToolSurface::OperatorForeground, &request.name, &request.arguments)
                     .map(|value| json!({"isError":false,"text":value.to_string()}))?
             };
             self.check_not_cancelled()?;
             Ok(result)
         })();
         self.foreground_operation = None;
+        let definite_refusal = if outcome.is_err() { self.completed_birth_refusal_result() } else { Ok(None) };
+        let (outcome, completion_charge) = match definite_refusal {
+            Ok(Some(result)) => (Ok(result), "0"),
+            Ok(None) => (outcome, profile.charge.as_str()),
+            Err(error) => (Err(error), profile.charge.as_str()),
+        };
         let result = match outcome {
             Ok(value) => value,
             Err(error) => {
@@ -13105,29 +13472,7 @@ impl Runtime {
                 ));
             }
         };
-        let result_path = self
-            .config
-            .state_dir
-            .join(format!("foreground-{operation_id:016}.result.json"));
-        let (result, result_bytes) = bounded_foreground_result(result)?;
-        write_new(&result_path, &result_bytes)?;
-        let attempt = self.journal.foreground_attempt.as_mut().unwrap();
-        attempt.result_sha256 = Some(sha256_bytes(&result_bytes)?);
-        attempt.result_path = Some(result_path);
-        self.save()?;
-        if !self.claim_completion(&profile.charge)? {
-            self.disconnect()?;
-            return Err("hard disconnect before foreground settlement".into());
-        }
-        self.transition(
-            json!({"type":"settle","charge":profile.charge}),
-            "settle",
-            "foreground tool complete",
-        )?;
-        self.journal.prompt_witness = None;
-        self.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Definite;
-        self.save()?;
-        self.completion_phase.store(PHASE_IDLE, Ordering::SeqCst);
+        let result = self.complete_attached_foreground_result(result, completion_charge)?;
         self.finish_reconnected_mode()?;
         let _queued = self.output.as_ref().is_some_and(|output| {
             output.try_tool_event_for(
@@ -13286,6 +13631,90 @@ impl Runtime {
         response.map(|_| ())
     }
 
+    /// Exclusive journal custody plus the prior-run watermark stops an old
+    /// controller from authoring another reserve. The v3 path saves the forward
+    /// fingerprint and dispatch attempt BEFORE opening the protected reserve
+    /// signer. No such marker means any surviving helper was only planning.
+    /// This archives a proved no-dispatch, never an HTTP response or a resend.
+    fn recover_foreground_api_unreserved(&mut self, request_id: &str) -> Result<Value> {
+        if !valid_foreground_request_id(request_id) || self.prompt_active
+            || self.foreground_operation.is_some() || self.foreground_api_budget.is_some()
+            || self.child.is_some() || self.journal.child.is_some() || !self.custody_gate.is_idle()
+            || self.journal.dispatch_pending.is_some() || self.journal.dispatch_hold.is_some()
+            || self.journal.dispatch_attempt.is_some() || self.journal.pending.is_some()
+            || self.journal.tool_pending.is_some() || self.journal.tool_hold.is_some()
+            || self.journal.provider_pending.is_some() || self.journal.provider_hold.is_some()
+            || self.journal.provider_attempt.is_some() || self.journal.birth_pending.is_some()
+            || self.journal.birth_operation.is_some() || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some() || self.journal.room_attempt.is_some()
+            || self.journal.settlement_due.is_some() {
+            return Err("unreserved API recovery requires a stopped invocation and no other pending effect".into());
+        }
+        let foreground = self.journal.foreground_attempt.as_ref()
+            .ok_or("unreserved API recovery has no foreground request")?.clone();
+        let forward = self.journal.application_api_attempt.as_ref()
+            .ok_or("unreserved API recovery has no retained API request")?.clone();
+        if foreground.request_id != request_id
+            || !matches!(foreground.phase, ForegroundPhase::Executing | ForegroundPhase::Uncertain)
+            || foreground.operation_id >= forward.operation_id
+            || forward.operation_id >= self.process_first_operation_id
+            || foreground.result_path.is_some() || foreground.result_sha256.is_some()
+            || !matches!(forward.phase, ApplicationApiPhase::DispatchStarted | ApplicationApiPhase::Uncertain)
+            || forward.operation_fingerprint.is_some() || forward.lifetime_committed_receipt.is_some()
+            || forward.lifetime_settled_response_sha256.is_some() || forward.lifetime_settlement.is_some()
+            || forward.reply_path.is_some() || forward.reply_sha256.is_some() {
+            return Err("unreserved API recovery differs from a prior unsealed invocation".into());
+        }
+        let tombstone = read_foreground_tombstone(&self.config.state_dir, request_id)?
+            .ok_or("unreserved API recovery foreground tombstone absent")?;
+        let raw = bounded_regular_file(&foreground.request_path, 262_144)?;
+        let request: ForegroundRequest = serde_json::from_slice(&raw)
+            .map_err(|e| format!("retained foreground request: {e}"))?;
+        if sha256_bytes(&raw)? != foreground.request_sha256
+            || tombstone.request_sha256 != foreground.request_sha256
+            || tombstone.operation_id != foreground.operation_id || request.request_id != request_id
+            || request.name != foreground.name {
+            return Err("unreserved API recovery foreground bytes changed".into());
+        }
+        let route = self.config.tool_task.as_ref().and_then(|tool|
+            tool.allowed_application_lifetime_routes.iter().find(|route| route.name == forward.route_name))
+            .ok_or("unreserved API recovery requires a pinned lifetime route")?;
+        let binding = forward.binding_sha256.as_deref().ok_or("unreserved API binding absent")?;
+        let arguments = self.application_tool_arguments(&request.name, &request.arguments)?;
+        let input = application_api_tools::parse_input(&arguments, &[route.name.clone()])?;
+        let expected = application_api_tools::lifetime_dispatch_request(forward.operation_id, binding, &input)?;
+        let forward_raw = bounded_regular_file(&forward.request_path, 262_144)?;
+        if sha256_bytes(&forward_raw)? != forward.request_sha256
+            || serde_json::from_slice::<Value>(&forward_raw).map_err(|e| e.to_string())? != expected {
+            return Err("unreserved API recovery forward HTTP differs from foreground request".into());
+        }
+        let authority = self.dispatch()?;
+        let query_start = self.journal.next_operation_id;
+        let purse = self.query_as(&authority)?;
+        if !matches!(purse.pointer("/grain/status").and_then(Value::as_str), Some("0" | "1" | "2" | "6"))
+            || purse.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || purse.pointer("/grain/task").and_then(Value::as_str) != Some(authority.task.as_str()) {
+            return Err("unreserved API recovery requires signed idle dispatch purse".into());
+        }
+        let decision_id = self.next_id()?;
+        let proof = json!({"decisionId":decision_id.to_string(),"action":"recover-unreserved-foreground-api",
+            "requestId":request_id,"foregroundOperationId":foreground.operation_id.to_string(),
+            "apiOperationId":forward.operation_id.to_string(),"requestSha256":foreground.request_sha256,
+            "forwardRequestSha256":forward.request_sha256,"bindingSha256":binding,
+            "processFirstOperationId":self.process_first_operation_id.to_string(),
+            "basis":"exclusive journal; prior invocation; durable marker absent before reserve signer; signed idle purse",
+            "queryStartOperationId":query_start.to_string(),"signedPurse":purse,"noDispatch":true});
+        let mut finished = self.journal.application_api_attempt.take().unwrap();
+        finished.phase = ApplicationApiPhase::NoDispatch; finished.reported = true;
+        if self.journal.application_api_history.len() >= 16 { self.journal.application_api_history.remove(0); }
+        self.journal.application_api_history.push(finished);
+        self.journal.reconciliation_log.push(proof.clone());
+        self.save()?;
+        Ok(json!({"type":"mini-foreground-api-unreserved-recovery-v1","proof":proof,
+            "parentHoldRemains":self.journal.parent_hold.is_some(),"foregroundRemains":true,
+            "next":"reconcile remaining parent allowance and effects, then reconcile foreground audited"}))
+    }
+
     fn reconcile_foreground_audited(&mut self) -> Result<()> {
         let attempt = self
             .journal
@@ -13366,89 +13795,95 @@ impl Runtime {
         arguments: &Value,
         input: &Receiver<Input>,
     ) -> Result<Value> {
-        let (reply, received) = mpsc::channel();
-        let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
-        let deadline = Instant::now() + Duration::from_secs(1800);
-        loop {
-            self.poll_application_api(&mut active)?;
-            if let Ok(value) = received.try_recv() {
-                if value.get("isError").and_then(Value::as_bool) == Some(true)
-                    && self.journal.application_api_attempt.is_some()
-                {
-                    return Err(
-                        "application API outcome remains retained for read-only inspection".into(),
-                    );
-                }
-                return Ok(value);
-            }
-            if self.cancelled.load(Ordering::SeqCst) || Instant::now() >= deadline {
-                return Err(
-                    "foreground API call cancelled or timed out; inspect exact attempt".into(),
-                );
-            }
-            match input.try_recv() {
-                Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
-                Ok(Input::Admin(request)) => {
-                    let _ = request.reply.send("foreground API call is running".into());
-                }
-                Ok(Input::Disconnect) => {
-                    self.stdin_gone = true;
-                    if self.hard_connection.load(Ordering::SeqCst) {
-                        return Err("hard disconnect during foreground API call".into());
-                    }
-                }
-                Ok(Input::Line(line)) if line == "disconnect" => {
-                    self.stdin_gone = true;
-                    if self.hard_connection.load(Ordering::SeqCst) {
-                        return Err("hard disconnect during foreground API call".into());
-                    }
-                }
-                Ok(Input::SoftDetach) => self.stdin_gone = true,
-                Ok(Input::Line(line))
-                    if line == "attach soft" && self.journal.connection == Connection::Soft =>
-                {
-                    self.emit("reconnected to soft foreground tool\n");
-                }
-                Ok(Input::Line(line))
-                    if line == "attach hard" && self.journal.connection == Connection::Soft =>
-                {
-                    self.note_hard_reconnect()?;
-                }
-                Ok(Input::ForegroundTool {
-                    attachment_id,
-                    frame,
-                }) => {
-                    if let Some(output) = &self.output {
-                        let _ = output.try_tool_event_for(
-                            attachment_id,
-                            json!({"v":1,
-                            "type":"tool-complete","isError":true,
-                            "requestId":foreground_request_id(&frame),
-                            "result":"foreground tool already in progress"}),
+        let operation_id = self.foreground_operation.ok_or("foreground API invocation absent")?;
+        self.foreground_api_budget = Some(ForegroundApiBudget::new(operation_id));
+        let result = (|| {
+            let (reply, received) = mpsc::channel();
+            let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
+            loop {
+                self.poll_application_api(&mut active)?;
+                if let Ok(value) = received.try_recv() {
+                    if value.get("isError").and_then(Value::as_bool) == Some(true)
+                        && self.journal.application_api_attempt.is_some()
+                    {
+                        return Err(
+                            "application API outcome remains retained for read-only inspection".into(),
                         );
                     }
+                    return Ok(value);
                 }
-                Ok(Input::ForegroundResult {
-                    attachment_id,
-                    request_id,
-                }) => {
-                    let _ = self.answer_foreground_result(attachment_id, &request_id);
+                if self.cancelled.load(Ordering::SeqCst) || self.native_work_limit().is_err() {
+                    return Err(
+                        "foreground API call cancelled or timed out; inspect exact attempt".into(),
+                    );
                 }
-                Ok(Input::ForegroundAck {
-                    attachment_id,
-                    request_id,
-                }) => {
-                    let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                match input.try_recv() {
+                    Ok(Input::Dispatch(request)) => self.answer_dispatch(request),
+                    Ok(Input::Admin(request)) => {
+                        let _ = request.reply.send("foreground API call is running".into());
+                    }
+                    Ok(Input::Disconnect) => {
+                        self.stdin_gone = true;
+                        if self.hard_connection.load(Ordering::SeqCst) {
+                            return Err("hard disconnect during foreground API call".into());
+                        }
+                    }
+                    Ok(Input::Line(line)) if line == "disconnect" => {
+                        self.stdin_gone = true;
+                        if self.hard_connection.load(Ordering::SeqCst) {
+                            return Err("hard disconnect during foreground API call".into());
+                        }
+                    }
+                    Ok(Input::SoftDetach) => self.stdin_gone = true,
+                    Ok(Input::Line(line))
+                        if line == "attach soft" && self.journal.connection == Connection::Soft =>
+                    {
+                        self.emit("reconnected to soft foreground tool\n");
+                    }
+                    Ok(Input::Line(line))
+                        if line == "attach hard" && self.journal.connection == Connection::Soft =>
+                    {
+                        self.note_hard_reconnect()?;
+                    }
+                    Ok(Input::ForegroundTool {
+                        attachment_id,
+                        frame,
+                    }) => {
+                        if let Some(output) = &self.output {
+                            let _ = output.try_tool_event_for(
+                                attachment_id,
+                                json!({"v":1,
+                                "type":"tool-complete","isError":true,
+                                "requestId":foreground_request_id(&frame),
+                                "result":"foreground tool already in progress"}),
+                            );
+                        }
+                    }
+                    Ok(Input::ForegroundResult {
+                        attachment_id,
+                        request_id,
+                    }) => {
+                        let _ = self.answer_foreground_result(attachment_id, &request_id);
+                    }
+                    Ok(Input::ForegroundAck {
+                        attachment_id,
+                        request_id,
+                    }) => {
+                        let _ = self.answer_foreground_ack(attachment_id, &request_id);
+                    }
+                    Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err("foreground connector channel closed".into());
+                    }
                 }
-                Ok(_) | Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    return Err("foreground connector channel closed".into());
-                }
+                thread::sleep(Duration::from_millis(20));
             }
-            thread::sleep(Duration::from_millis(20));
-        }
+        })();
+        self.foreground_api_budget = None;
+        result
     }
     fn check_not_cancelled(&self) -> Result<()> {
+        self.native_work_limit()?;
         if self.cancelled.load(Ordering::SeqCst) {
             Err("hard connection closed; tool task requires reconciliation".into())
         } else {
@@ -13522,6 +13957,9 @@ impl Runtime {
         Ok(())
     }
     fn attach(&mut self, soft: bool) -> Result<()> {
+        self.with_startup_budget(None, |rt| rt.attach_inner(soft))
+    }
+    fn attach_inner(&mut self, soft: bool) -> Result<()> {
         // A tripped breaker or lost reply leaves the task fenced. The owner's
         // reattach first runs the same provable recovery the controller runs
         // at startup; whatever it cannot prove keeps the task fenced.
@@ -13585,6 +14023,16 @@ impl Runtime {
         let unit = self.journal.child.as_ref().and_then(|c| c.unit.clone());
         let child = self.child.as_ref().ok_or("no live owned child")?;
         let pgid = child.id() as i32;
+        // A metered worker's gate records its CPU only when the worker exits
+        // by itself; this stop ends the unit, and the gate with it. Record the
+        // unit cgroup's CPU first, before any signal ends the unit, so the
+        // resident pays what the sandbox used rather than the pessimistic
+        // wall-time charge.
+        if let Some(unit) = &unit {
+            if let Err(error) = record_unit_cpu(&self.config.state_dir, unit) {
+                eprintln!("grain-runtime: worker {unit} CPU not recorded before stop ({error}); the pessimistic charge applies");
+            }
+        }
         // The leader remains unreaped until group cleanup, so its PID cannot
         // be recycled while signals address the process group.
         if group_has_live_member(pgid)? {
@@ -14201,6 +14649,26 @@ impl Runtime {
     }
     /// Prepare bounded tool-discovery names from exact retained Mini births.
     /// The catalog never substitutes for admission on a later tool call.
+    /// The Oracle applications a restricted room resident is offered: the operator's
+    /// `applicationServices` behind a pinned lifetime API (docs/oracle-agent-tools.md).
+    fn resident_oracle_applications(&self) -> Vec<String> {
+        self.config.tool_task.as_ref()
+            .filter(|tool| tool.lifetime_api_host_sha256.is_some())
+            .map(|tool| oracle_tools::applications(&tool.application_services))
+            .unwrap_or_default()
+    }
+    /// The upstream catalogue names a restricted resident's session must report beyond the
+    /// room catalogue: the granted sandbox toolsets and the offered Oracle tools.
+    fn resident_extra_tool_names(&self) -> Vec<String> {
+        let mut names = sandbox_tools::names(&self.prompt_sandbox);
+        if !self.resident_oracle_applications().is_empty() {
+            names.extend(["mcp__mini_grain__mini_oracle_discover".to_owned(), "mcp__mini_grain__mini_oracle_call".to_owned()]);
+        }
+        if let Some(tool) = self.config.tool_task.as_ref() {
+            names.extend(typed_applications::tool_names(&tool.typed_applications));
+        }
+        names
+    }
     fn room_tools_restricted(&self) -> bool {
         self.config.tool_task.as_ref().and_then(|tool| tool.room.as_ref())
             .is_some_and(|room| room.restrict_tools)
@@ -14208,7 +14676,15 @@ impl Runtime {
 
     fn tool_catalog(&self) -> Result<mcp::ToolCatalog> {
         if self.room_tools_restricted() {
-            return Ok(mcp::ToolCatalog { room_tools: true, ..Default::default() });
+            // The room catalogue, plus the operator's Oracle tools when a lifetime route serves
+            // them: offered to every prompt, called only where the room grants the oracle.
+            let oracle = self.resident_oracle_applications();
+            let typed = match self.config.tool_task.as_ref() {
+                Some(tool) => typed_applications::catalog(&tool.typed_applications, &tool.allowed_application_lifetime_routes)?,
+                None => Vec::new(),
+            };
+            return Ok(mcp::ToolCatalog { room_tools: true, api_applications: oracle.clone(),
+                oracle_applications: oracle, typed_applications: typed, ..Default::default() });
         }
         let Some(tool) = self.config.tool_task.as_ref() else {
             return Ok(mcp::ToolCatalog::default());
@@ -14220,7 +14696,7 @@ impl Runtime {
                 .current_birth_host_sha256
                 .as_deref()
                 .ok_or("current application birth Host pin absent")?;
-            if self.config.host_socket.is_none() || sha256_file(&self.config.host)? != expected {
+            if self.config.host_socket.is_none() || sha256_pinned_file(&self.config.host)? != expected {
                 return Err(
                     "current application birth Host image or socket differs from operator pin"
                         .into(),
@@ -14296,6 +14772,10 @@ impl Runtime {
             } else {
                 Vec::new()
             },
+            oracle_applications: if tool.lifetime_api_host_sha256.is_some() {
+                oracle_tools::applications(&tool.application_services)
+            } else { Vec::new() },
+            typed_applications: typed_applications::catalog(&tool.typed_applications, &tool.allowed_application_lifetime_routes)?,
             resource_workspace: tool.resource_workspace.is_some(),
             room_tools: tool.room.is_some(),
             resource_workspace_create: if let Some(root) = &tool.resource_workspace {
@@ -14336,20 +14816,116 @@ impl Runtime {
             }
             self.enter_resident_prompt(id,sha)?;
         }
+        self.prompt_decision = None;
         let outcome=self.hermes_session_inner(invocation,input);
         if !invocation.is_prompt() { return outcome; }
         let retirement=self.retire_refused_provider_request();
-        match (outcome,retirement) {
+        let result = match (outcome,retirement) {
             (result,Ok(())) => result,
             (Ok(()),Err(error)) => Err(format!("provider refusal remains retained: {error}")),
             (Err(original),Err(error)) => Err(format!("{original}; provider refusal remains retained: {error}")),
+        };
+        // The record is written whatever the result; a write failure is
+        // reported with the prompt's own outcome and never replaces it.
+        let recorded = self.record_prompt_outcome(invocation);
+        if recorded.is_ok() {
+            self.reconcile_after_prompt_record();
+            self.compact_history();
         }
+        match (result, recorded) {
+            (result, Ok(())) => result,
+            (Ok(()), Err(error)) => Err(format!("prompt outcome record not written: {error}")),
+            (Err(original), Err(error)) => Err(format!("{original}; prompt outcome record not written: {error}")),
+        }
+    }
+
+    /// A failed prompt pushes its note and trips the breaker, whose automatic
+    /// reconcile runs before the prompt's outcome record exists (R11 derives
+    /// the note only from that record), so the note would wait for an
+    /// operator. Once the record is durable, derive what it proves, for a
+    /// detached task with no child; a refusal is logged like the
+    /// post-disconnect one.
+    fn reconcile_after_prompt_record(&mut self) {
+        if self.journal.unresolved_external.is_empty()
+            || self.child.is_some()
+            || self.journal.child.is_some()
+            || self.journal.connection != Connection::Detached
+        {
+            return;
+        }
+        if let Err(error) = self.automatic_reconcile() {
+            let decision = self.journal.next_operation_id;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":decision.to_string(),"action":"post-record-reconcile",
+                "automatic":true,"result":error}));
+            let _ = self.save();
+        }
+    }
+
+    /// A room resident's decided history leaves its per-operation files for
+    /// one line each in `history.jsonl` once nothing is retained
+    /// (history_compaction.rs). Never fails the prompt: a refusal is reported
+    /// and the files stay for the next pass.
+    fn compact_history(&mut self) {
+        let Some(room) = self.config.tool_task.as_ref().and_then(|t| t.room.as_ref()) else { return };
+        let (workspace, home) = (room.workspace.clone(), room.home.clone());
+        match history_compaction::compact(&self.journal, &self.config.state_dir, &[workspace.as_path()], &[home.as_path()]) {
+            Ok(Some(summary)) if summary.entries > 0 => eprintln!(
+                "grain-runtime: compacted {} decided operations, {} workspace attempts and {} superseded reads ({} entries) into {}",
+                summary.operations, summary.workspace_attempts, summary.transient, summary.entries, history_compaction::HISTORY),
+            Ok(_) => {}
+            Err(error) => eprintln!("grain-runtime: history compaction refused: {error}"),
+        }
+    }
+
+    fn decide_prompt(&mut self, id: u64, decision: prompt_outcome::Outcome) {
+        if let Some((current, slot)) = self.prompt_decision.as_mut() {
+            if *current == id { *slot = Some(decision); }
+        }
+    }
+
+    /// Exactly one typed record per allocated prompt (gr §4.3). A decision
+    /// the prompt reached stands only if the journal retains nothing for it;
+    /// otherwise the prompt is undecided and the record names the exact
+    /// admin retry. With no decision and nothing retained, the controller
+    /// refused after allocation and nothing can still commit.
+    fn record_prompt_outcome(&mut self, invocation: hermes_session_verify::Invocation<'_>) -> Result<()> {
+        let Some((id, decision)) = self.prompt_decision.take() else { return Ok(()) };
+        let retained = prompt_outcome::retry_for(&self.journal);
+        let outcome = match (decision, retained) {
+            (_, Some(retry)) => prompt_outcome::Outcome::Undecided {
+                retry,
+                detail: self.journal.unresolved_external.iter()
+                    .find(|note| note.starts_with(&format!("Hermes prompt {id}: ")))
+                    .cloned().unwrap_or_else(|| "custody retained at the prompt boundary".into()),
+            },
+            (Some(decision), None) => decision,
+            (None, None) => prompt_outcome::Outcome::Refused {
+                stage: prompt_outcome::RefusalStage::Controller,
+                reason: "the controller ended the prompt before a decision and retains no custody for it".into(),
+            },
+        };
+        let origin = invocation.resident_identity();
+        let session_id = self.journal.resident_prompt_origin.as_ref()
+            .filter(|o| o.prompt_operation_id == id).and_then(|o| o.session_id.clone())
+            .or_else(|| self.journal.hermes_session.as_ref().map(|s| s.id.clone()));
+        prompt_outcome::write(&self.config.state_dir, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(),
+            prompt_operation_id: id,
+            resident_prompt_id: origin.map(|(rid, _)| rid.to_owned()),
+            prompt_sha256: origin.map(|(_, sha)| sha.to_owned()),
+            session_id,
+            outcome,
+        })
     }
     fn hermes_session_inner(&mut self, invocation: hermes_session_verify::Invocation<'_>, input: &Receiver<Input>) -> Result<()> {
         let prompt = invocation.prompt().unwrap_or("");
         if invocation.is_prompt() && (self.journal.resident_delivery.is_some() || self.journal.resident_completion.is_some()) {
             return Err("resident final delivery remains pending; drain it without another model turn".into());
         }
+        // The previous prompt is delivered and completed: its history may
+        // compact now (after its own record, its completion was still due).
+        if invocation.is_prompt() { self.compact_history(); }
         if let Some((resident_id,digest))=invocation.resident_identity() {
             resident_origin::validate(resident_id,digest,prompt)?;
             if self.config.state_dir.join(format!("resident-origin-id-{resident_id}.json"))
@@ -14575,6 +15151,9 @@ impl Runtime {
         }
         let id = self.next_id()?;
         if invocation.is_prompt() {
+            self.prompt_member = invocation.resident_identity().and(invocation.prompt()).and_then(resident_prompt_member);
+            self.prompt_provider_refusals.clear();
+            self.prompt_decision = Some((id, None));
             self.journal.resident_prompt_origin=invocation.resident_identity().map(|(resident_id,digest)|
                 resident_origin::ResidentPromptOrigin{resident_prompt_id:resident_id.into(),
                     prompt_sha256:digest.into(),prompt_operation_id:id,session_id:None});
@@ -14591,6 +15170,17 @@ impl Runtime {
             self.save()?;
         }
         let unit = self.worker_unit(id, &spec);
+        // Sandbox tools need the scoped launcher's bounds and only a
+        // resident's prompt carries the room's grant.
+        self.prompt_sandbox = match (&self.config.sandbox, &unit, invocation.resident_identity()) {
+            (Some(sandbox), Some(_), Some(_)) => sandbox.grant(invocation.prompt()),
+            _ => Vec::new(),
+        };
+        // The oracle is granted per room (hermes/tools bit 8), read like the sandbox grant.
+        self.prompt_oracle = invocation.resident_identity().is_some()
+            && sandbox_tools::oracle_granted(invocation.prompt());
+        self.prompt_apps = invocation.resident_identity().is_some()
+            && sandbox_tools::apps_granted(invocation.prompt());
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
             systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
@@ -14613,9 +15203,14 @@ impl Runtime {
         } else {
             broker_path.clone()
         };
+        if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
+            sandbox_tools::require_workspace_volume(&workspace, sandbox.workspace_mib)?;
+        }
         let mut command = Command::new(&spec.program);
         command
             .args(&spec.args)
+            .args(sandbox_tools::worker_arguments(&self.prompt_sandbox,
+                self.config.sandbox.as_ref().map_or(0, |s| s.tool_call_seconds)))
             .current_dir(&self.config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -14624,6 +15219,9 @@ impl Runtime {
             command.env("HERMES_HOME", &hermes_home);
         }
         self.worker_env(&mut command, &spec, &unit, Some(&broker_path))?;
+        if let (Some(sandbox), false) = (&self.config.sandbox, self.prompt_sandbox.is_empty()) {
+            sandbox.environment(&mut command);
+        }
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -14759,7 +15357,7 @@ impl Runtime {
             acp_send(&mut child_stdin, 2, method, params)?;
             let response =
                 self.acp_response(2, &rx, input, &mut child_stdin, &display_tx, &broker, None)?;
-            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response)?; }
+            if self.room_tools_restricted() { room_task::require_acp_catalogue(&response, &self.resident_extra_tool_names())?; }
             if let Some(previous) = &existing_session {
                 if !response.is_object() {
                     return Err("Hermes did not reload the retained session".into());
@@ -14895,8 +15493,17 @@ impl Runtime {
         let provider_drained = provider_drained.and(refused_completion);
         let outcome = match (outcome, provider_drained) {
             (Ok(value), Ok(())) if invocation.is_prompt() => hermes_outcome::validate_completion(
-                value, &self.journal, id, self.config.provider_task.is_some()),
+                hermes_outcome::refused_model_turn(value, &self.journal, id, &self.prompt_provider_refusals),
+                &self.journal, id, self.config.provider_task.is_some()),
             (Ok(value), Ok(())) => Ok(value),
+            // The worker ended with an error after the gateway refused every
+            // model call by name: decided (nothing sent), not uncertain.
+            (Err(error), Ok(())) if invocation.is_prompt() && self.config.provider_task.is_some()
+                && hermes_outcome::all_model_calls_refused(&self.journal, id, &self.prompt_provider_refusals) => {
+                hermes_outcome::validate_completion(
+                    hermes_outcome::refusal_failure(&self.prompt_provider_refusals, Some(&error)),
+                    &self.journal, id, true)
+            }
             (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
             (Err(acp), Err(provider)) => {
                 Err(format!("ACP outcome: {acp}; provider drain: {provider}"))
@@ -14933,6 +15540,10 @@ impl Runtime {
                 "settle",
                 &format!("hermes-acp setup failed exit:{exit}"),
             )?;
+            self.decide_prompt(id, prompt_outcome::Outcome::Refused {
+                stage: prompt_outcome::RefusalStage::Setup,
+                reason: format!("Hermes setup failed before prompt: {error}"),
+            });
             self.journal.settlement_due = None;
             self.journal.prompt_witness = None;
             self.save()?;
@@ -14970,6 +15581,28 @@ impl Runtime {
             "settle",
             &format!("hermes-acp exit:{exit}"),
         )?;
+        if invocation.is_prompt() {
+            if let Ok(value) = &outcome {
+                let decision = match hermes_outcome::failure(value) {
+                    Some(failure) => prompt_outcome::Outcome::Refused {
+                        stage: prompt_outcome::RefusalStage::TurnFailure,
+                        reason: failure.pointer("/data/reason").and_then(Value::as_str)
+                            .map(str::to_owned).unwrap_or_else(|| failure.to_string()),
+                    },
+                    None => {
+                        let replay = self.journal.provider_replays.iter()
+                            .rfind(|r| r.prompt_operation_id == id && r.status == 200);
+                        prompt_outcome::Outcome::Admitted {
+                            stop_reason: value["stopReason"].as_str().unwrap_or("").to_owned(),
+                            settled_charge: invocation.charge(&spec.charge).to_owned(),
+                            provider_response_sha256: replay.map(|r| r.response_sha256.clone()),
+                            provider_metered_charge: replay.and_then(|r| r.metered_charge.clone()),
+                        }
+                    }
+                };
+                self.decide_prompt(id, decision);
+            }
+        }
         self.journal.settlement_due = None;
         self.journal.prompt_witness = None;
         self.save()?;
@@ -15070,20 +15703,32 @@ impl Runtime {
                         if matches!(
                             request.name.as_str(),
                             "mini_application_api" | "__mini_gitweb_http_raw"
+                                | "mini_oracle_discover" | "mini_oracle_call"
+                                | typed_applications::RAW_TOOL
                         ) =>
                     {
                         if application_api_call.is_some() {
-                            let _ = request.reply.send(json!({"isError":true,
-                                "text":"application API call already in progress"}));
+                            let busy = if typed_applications::is_raw_tool(&request.name) {
+                                "refused: typed-dispatch-busy: application API call already in progress"
+                            } else { "application API call already in progress" };
+                            let _ = request.reply.send(json!({"isError":true,"text":busy}));
+                        } else if let Err(refusal) = self.restricted_application_call(&request.name) {
+                            let _ = request.reply.send(json!({"isError":true,"text":refusal}));
                         } else {
-                            match self.begin_application_api(
-                                &request.arguments,
-                                request.reply.clone(),
-                                Some(request.prompt_epoch),
-                                request.name == "__mini_gitweb_http_raw",
-                            ) {
+                            match self.application_tool_arguments(&request.name, &request.arguments)
+                                .and_then(|arguments| self.begin_application_api(
+                                    &arguments,
+                                    request.reply.clone(),
+                                    Some(request.prompt_epoch),
+                                    request.name == "__mini_gitweb_http_raw" || typed_applications::is_raw_tool(&request.name),
+                                )) {
                                 Ok(active) => application_api_call = Some(active),
                                 Err(error) => {
+                                    // Nothing was sent: a typed worker reads this spelling as a clean refusal.
+                                    let error = if typed_applications::is_raw_tool(&request.name) && !error.starts_with("refused: ") {
+                                        eprintln!("typed application dispatch did not begin: {error}");
+                                        format!("refused: typed-dispatch-not-begun: {error}")
+                                    } else { error };
                                     let _ =
                                         request.reply.send(json!({"isError":true,"text":error}));
                                 }
@@ -15240,8 +15885,13 @@ impl Runtime {
                 }
             }
             if msg.get("method").and_then(Value::as_str) == Some("session/request_permission") {
-                let reply = json!({"jsonrpc":"2.0","id":msg.get("id"),
-                    "result":{"outcome":{"outcome":"cancelled"}}});
+                let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                let outcome = sandbox_tools::permission_outcome(&self.prompt_sandbox, &params);
+                eprintln!("grain-runtime: ACP permission {} ({}): {}",
+                    params.pointer("/toolCall/toolCallId").and_then(Value::as_str).unwrap_or("?"),
+                    params.pointer("/toolCall/kind").and_then(Value::as_str).unwrap_or("?"),
+                    outcome.pointer("/outcome/outcome").and_then(Value::as_str).unwrap_or("?"));
+                let reply = json!({"jsonrpc":"2.0","id":msg.get("id"),"result":outcome});
                 writeln!(writer, "{reply}")
                     .and_then(|_| writer.flush())
                     .map_err(|e| e.to_string())?;
@@ -15730,11 +16380,16 @@ impl Runtime {
             .get("reserveIndex")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        lifetime.post_reserve_purse_physical_root = saved.dispatch_post_root.clone();
+        // Recovery retains the signed logical root in dispatch_post_root.
+        // Never label it as a lifecycle root; an existing native paid-plan
+        // physical root (if any) remains unchanged.
         self.save()
     }
 
     fn recover(&mut self) -> Result<()> {
+        if self.preserves_foreground_session() {
+            return Err("retained session requires exact foreground recovery; reservation preserved".into());
+        }
         if let Some(record) = self.journal.child.clone() {
             let unit = record.unit.as_deref().ok_or(
                 "prior controller died with unscoped child; operator process audit required",
@@ -15957,12 +16612,17 @@ impl Runtime {
         }
         self.retry_pending_slot(AuthoritySlot::Provider)?;
         if let Some(attempt) = &self.journal.provider_attempt {
-            if attempt.send_started && attempt.outcome.is_none() {
-                let note = format!("provider request {} crossed durable send boundary before controller restart; upstream result uncertain", attempt.id);
-                if !self.journal.unresolved_external.contains(&note) {
-                    self.journal.unresolved_external.push(note);
-                    self.save()?;
+            if attempt.send_started && attempt.outcome.is_none() && attempt.decision.is_none() {
+                let id = attempt.id;
+                let decision = provider_failure::decide(
+                    provider_failure::FailureClass::CrashAfterSend,
+                    &attempt.route.credential,
+                );
+                eprintln!("provider attempt {id}: decided crash-after-send; retry: {}", provider_failure::AUDITED_RETRY);
+                if let Some(attempt) = self.journal.provider_attempt.as_mut() {
+                    attempt.decision = Some(decision);
                 }
+                self.save()?;
             }
         }
         if self.journal.birth_pending.is_some() && self.journal.birth_operation.is_none() {
@@ -16253,9 +16913,6 @@ impl Runtime {
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
-        if tool && legacy_custody_audit::zero_phase_active(self) {
-            return Err("legacy B44 audit requires its exact zero-charge settlement".into());
-        }
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -16498,15 +17155,29 @@ impl Runtime {
         } else {
             match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
                 MeteredAuditPath::ProvenNoSend => "0".to_owned(),
-                MeteredAuditPath::CompleteResponse => {
+                path @ (MeteredAuditPath::CompleteResponse | MeteredAuditPath::ClassSettle(_)) => {
                     if attempt.meter_report_path.is_none()
                         && attempt.meter_report_sha256.is_none()
                         && attempt.metered_charge.is_none()
                     {
                         // Audited recovery may run after the prompt lease ended. This
-                        // read-only native quote uses the exact retained response and
-                        // signed hold; it never authorizes another upstream send.
-                        self.provider_meter_quote_inner(attempt.id, false)?;
+                        // read-only native quote uses the exact retained response (or
+                        // the declared outcome class) and the signed hold; it never
+                        // authorizes another upstream send.
+                        let quoted = match &path {
+                            MeteredAuditPath::ClassSettle(class) => {
+                                self.provider_meter_class_inner(attempt.id, class)
+                            }
+                            _ => self.provider_meter_quote_inner(attempt.id, false),
+                        };
+                        if let Err(error) = quoted {
+                            self.provider_await_host(attempt.id);
+                            return Err(format!(
+                                "provider attempt {} settle awaits a Host that quotes it: {error}; hold kept; retry: {}",
+                                attempt.id,
+                                provider_failure::AUDITED_RETRY
+                            ));
+                        }
                         attempt = self
                             .journal
                             .provider_attempt
@@ -16521,6 +17192,7 @@ impl Runtime {
             let outcome = match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
                 MeteredAuditPath::ProvenNoSend => minidregg_inference_scheduler::core::Outcome::NotSent,
                 MeteredAuditPath::CompleteResponse => minidregg_inference_scheduler::core::Outcome::Ended,
+                MeteredAuditPath::ClassSettle(_) => minidregg_inference_scheduler::core::Outcome::Uncertain,
             };
             placement.finish(outcome)?;
         }
@@ -16540,6 +17212,7 @@ impl Runtime {
             "sendBoundaryDurable":attempt.send_started,
             "outcome":attempt.outcome,
             "auditedCharge":audited_charge,
+            "decision":attempt.decision,
             "meterReportPath":attempt.meter_report_path,
             "meterReportSha256":attempt.meter_report_sha256,
             "meteringPin":attempt.metering_pin,
@@ -16816,7 +17489,7 @@ impl Runtime {
             return;
         }
         self.startup_recovery_active = true;
-        let result = self.recover().and_then(|()| self.automatic_reconcile());
+        let result = self.with_startup_budget(None, |rt| rt.recover().and_then(|()| rt.automatic_reconcile()));
         self.startup_recovery_active = false;
         let decision = self.journal.next_operation_id;
         self.journal.reconciliation_log.push(json!({
@@ -16826,6 +17499,7 @@ impl Runtime {
             "result":match &result { Ok(()) => "recovered".to_owned(), Err(e) => e.clone() },
             "connection":self.journal.connection,
             "unresolvedExternal":self.journal.unresolved_external,
+            "providerDecision":self.journal.provider_attempt.as_ref().and_then(|a| a.decision.as_ref()),
         }));
         if let Err(error) = self.save() {
             eprintln!("grain-runtime: startup recovery journal: {error}");
@@ -16839,6 +17513,9 @@ impl Runtime {
     /// is machine-provable, then derive the external-effect acknowledgement
     /// when every channel the worker had is accounted for.
     fn automatic_reconcile(&mut self) -> Result<()> {
+        if self.preserves_foreground_session() {
+            return Err("retained session requires exact foreground recovery; reservation preserved".into());
+        }
         if self.journal.parent_hold.is_some()
             && self.child.is_none()
             && self.journal.child.is_none()
@@ -16850,7 +17527,7 @@ impl Runtime {
             return Ok(());
         }
         let notes = self.journal.unresolved_external.clone();
-        if !notes.iter().all(|note| derivable_effect_note(note)) {
+        if !notes.iter().all(|note| derivable_effect_note(&self.config.state_dir, note)) {
             return Err("an external-effect note needs operator acknowledgement".into());
         }
         let network_none = self.config.commands.iter().all(|command| {
@@ -17212,7 +17889,7 @@ fn signal_group(pgid: i32, signal: i32) -> Result<()> {
 
 fn prove_controller_unit(task: &str) -> Result<()> {
     let unit = format!("mini-grain-controller@{task}.service");
-    let output = systemd_manager::controller_command(task)?
+    let output = deadline::output(systemd_manager::controller_command(task)?
         .args([
             "show",
             "-p",
@@ -17220,9 +17897,8 @@ fn prove_controller_unit(task: &str) -> Result<()> {
             "-p",
             "ActiveState",
             &unit,
-        ])
-        .output()
-        .map_err(|e| format!("controller service proof: {e}"))?;
+        ]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("controller service proof", e))?;
     if !output.status.success() {
         return Err("controller service is unavailable".into());
     }
@@ -17240,17 +17916,47 @@ fn prove_controller_unit(task: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write `STATE/UNIT.cpu` (`mini-grain-cpu-v1 USEC`, the launch gate's
+/// format) from systemd's CPU accounting of the live unit, unless the gate
+/// already wrote it. Rounded up to the next microsecond.
+fn record_unit_cpu(state_dir: &Path, unit: &str) -> Result<()> {
+    let path = state_dir.join(format!("{unit}.cpu"));
+    if path.try_exists().map_err(|e| e.to_string())? { return Ok(()); }
+    // The unit cgroup's cpu.stat usage_usec, as the gate reads it (it counts
+    // every descendant, exited ones too); systemd's CPUUsageNSec is unset
+    // when the user manager keeps no CPU accounting.
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "ControlGroup", "--value", &format!("{unit}.service")]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("worker cgroup", e))?;
+    let group = String::from_utf8(output.stdout).map_err(|e| e.to_string())?.trim().to_owned();
+    let relative = Path::new(&group).strip_prefix("/").map_err(|_| format!("worker cgroup unavailable: {group:?}"))?;
+    if relative.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+        || relative.file_name().and_then(|n| n.to_str()) != Some(&format!("{unit}.service")) {
+        return Err(format!("worker cgroup does not name its unit: {group:?}"));
+    }
+    let stat = fs::read_to_string(Path::new("/sys/fs/cgroup").join(relative).join("cpu.stat"))
+        .map_err(|e| format!("worker cpu.stat: {e}"))?;
+    let usec = stat.lines().find_map(|l| l.strip_prefix("usage_usec ")).and_then(|n| n.trim().parse::<u64>().ok())
+        .ok_or("worker cpu.stat has no usage_usec")?;
+    let nsec = usec.saturating_mul(1000);
+    let temporary = path.with_extension("cpu.tmp");
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)
+        .map_err(|e| format!("cpu record: {e}"))?;
+    file.write_all(format!("mini-grain-cpu-v1 {}\n", nsec.div_ceil(1000)).as_bytes())
+        .and_then(|_| file.sync_all()).map_err(|e| format!("cpu record: {e}"))?;
+    fs::rename(&temporary, &path).map_err(|e| format!("cpu record: {e}"))
+}
+
 fn kill_unit(unit: &str) -> Result<()> {
     let name = format!("{unit}.service");
-    let output = systemd_manager::worker_command(unit)?
+    let output = deadline::output(systemd_manager::worker_command(unit)?
         .args([
             "kill",
             "--signal=SIGKILL",
             "--kill-whom=all",
             &name,
-        ])
-        .output()
-        .map_err(|e| format!("systemd worker kill: {e}"))?;
+        ]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("systemd worker kill", e))?;
     if output.status.success() {
         return Ok(());
     }
@@ -17270,8 +17976,8 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
     let mut command = Command::new(&helper);
     command.arg(action).arg(state_dir).arg(unit);
     systemd_manager::gate_environment(unit, action, &mut command)?;
-    let output = command.output()
-        .map_err(|e| format!("launch gate {}: {e}", helper.display()))?;
+    let output = deadline::output(&mut command, deadline::LAUNCH_GATE)
+        .map_err(|e| deadline::describe(&format!("launch gate {}", helper.display()), e))?;
     if !output.status.success() {
         return Err(format!(
             "launch gate {action} refused for {unit}: {}",
@@ -17283,10 +17989,9 @@ fn launch_gate(state_dir: &Path, program: &Path, unit: &str, action: &str) -> Re
 
 fn unit_inactive(unit: &str) -> Result<bool> {
     let name = format!("{unit}.service");
-    let output = systemd_manager::worker_command(unit)?
-        .args(["show", "-p", "ActiveState", "--value", &name])
-        .output()
-        .map_err(|e| format!("systemd unit observation: {e}"))?;
+    let output = deadline::output(systemd_manager::worker_command(unit)?
+        .args(["show", "-p", "ActiveState", "--value", &name]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("systemd unit observation", e))?;
     if !output.status.success() {
         return Err("systemd unit observation failed".into());
     }
@@ -17301,9 +18006,9 @@ fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Re
     let name = format!("{unit}.service");
     let observe = || -> Result<String> {
         prove_controller_unit(task)?;
-        let output = systemd_manager::worker_command(unit)?
-            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name])
-            .output().map_err(|e| format!("worker cgroup observation: {e}"))?;
+        let output = deadline::output(systemd_manager::worker_command(unit)?
+            .args(["show", "--property=ControlGroup,MainPID,ActiveState", &name]), deadline::MANAGER_QUERY)
+            .map_err(|e| deadline::describe("worker cgroup observation", e))?;
         if !output.status.success() || output.stdout.len() > 16384 {
             return Err("worker cgroup observation failed".into());
         }
@@ -17347,10 +18052,9 @@ fn prove_worker_unit_stopped(task: &str, record: &ChildRecord, unit: &str) -> Re
 /// unreaped until this count reaches zero, keeping its PGID unavailable for
 /// reuse while the controller signals it.
 fn group_has_live_member(pgid: i32) -> Result<bool> {
-    let output = Command::new("/bin/ps")
-        .args(["-axo", "pgid=,stat="])
-        .output()
-        .map_err(|e| format!("process table unavailable: {e}"))?;
+    let output = deadline::output(Command::new("/bin/ps")
+        .args(["-axo", "pgid=,stat="]), deadline::MANAGER_QUERY)
+        .map_err(|e| deadline::describe("process table unavailable", e))?;
     if !output.status.success() {
         return Err("process table inspection failed".into());
     }
@@ -17593,14 +18297,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
     });
     loop {
         let next = input.recv().map_err(|e| e.to_string())?;
-        if let Err(error) = config_migration::ensure_process_current(&rt.config.state_dir)
-            .and_then(|()|session_failure::ensure_publication_known(&rt.config.state_dir)) {
-            if let Input::Admin(request) = next {
-                request.phase.store(2, Ordering::SeqCst);
-                let _ = request.reply.send(format!("error: {error}"));
-            } else { rt.emit(format!("error: {error}\n")); }
-            continue;
-        }
         let result = match next {
             Input::Line(line) if line == "attach hard" => rt.attach(false),
             Input::Line(line) if line == "attach soft" => rt.attach(true),
@@ -17663,12 +18359,11 @@ fn serve(mut rt: Runtime) -> Result<()> {
                         .send("admin action expired before dispatch".into());
                     continue;
                 }
-                if let Some(path) = request.command.strip_prefix("config migrate ") {
-                    let result = rt.migrate_config(Path::new(path), false);
+                if request.command == "prepare idle" {
+                    let result = rt.prepare_idle(request.deadline);
                     request.phase.store(2, Ordering::SeqCst);
                     let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
+                        Ok(value) => value.to_string(), Err(error) => format!("error: {error}"),
                     });
                     continue;
                 }
@@ -17716,33 +18411,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     let _ = request.reply.send(match result { Ok(value) => value.to_string(), Err(error) => format!("error: {error}") });
                     continue;
                 }
-                if let Some(path) = request.command.strip_prefix("resident supersede-completion ") {
-                    let result = rt.supersede_unsupported_completion(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("session reconcile-failure ") {
-                    let result = rt.reconcile_session_failure(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(value) => value.to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
-                if let Some(path) = request.command.strip_prefix("quiescence transport ") {
-                    let result = rt.inspect_quiescence_transport(Path::new(path));
-                    request.phase.store(2, Ordering::SeqCst);
-                    let _ = request.reply.send(match result {
-                        Ok(status) => json!({"type":"mini-grain-quiescence-v1","status":status}).to_string(),
-                        Err(error) => format!("error: {error}"),
-                    });
-                    continue;
-                }
                 if request.command == "quiescence status" || request.command.starts_with("quiescence inspect ") {
                     let result = if request.command == "quiescence status" {
                         rt.quiescence_status()
@@ -17787,6 +18455,24 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     });
                     continue;
                 }
+                if let Some(id)=request.command.strip_prefix("reconcile prompt audited ") {
+                    let result=rt.reconcile_prompt_audited(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
+                if let Some(id)=request.command.strip_prefix("recover foreground api-unreserved ") {
+                    let result=rt.recover_foreground_api_unreserved(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
+                if let Some(id)=request.command.strip_prefix("recover foreground session ") {
+                    let result=rt.recover_foreground_session(id);
+                    request.phase.store(2, Ordering::SeqCst);
+                    let _=request.reply.send(match result {Ok(value)=>value.to_string(),Err(error)=>format!("error: {error}")});
+                    continue;
+                }
                 let outcome = match request.command.as_str() {
                     "reconcile parent" => rt.reconcile_hold(false, false),
                     "reconcile tool" => rt.reconcile_hold(true, false),
@@ -17798,8 +18484,6 @@ fn serve(mut rt: Runtime) -> Result<()> {
                     "reconcile provider abort" => rt.abort_refused_provider_request(),
                     "reconcile parent abort" => rt.abort_unsubmitted_hold(false),
                     "reconcile tool abort" => rt.abort_unsubmitted_hold(true),
-                    "reconcile tool legacy b44" => legacy_custody_audit::audit_b44(&mut rt),
-                    "reconcile tool legacy zero" => legacy_custody_audit::settle_b44_zero(&mut rt),
                     "reconcile effects" => rt.acknowledge_effects(),
                     "reconcile worker audited" => rt.reconcile_worker_audited(),
                     "reconcile foreground audited" => rt.reconcile_foreground_audited(),
@@ -17920,26 +18604,30 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() >= 2 && args[1] == "application-enroll" {
+        if args.len() != 5 || args[2] != "stopped" {
+            eprintln!("usage: grain-runtime application-enroll stopped CONFIG REQUEST");
+            return ExitCode::from(2);
+        }
+        return match application_enrollment::run(Path::new(&args[3]), Path::new(&args[4])) {
+            Ok(receipt) => { println!("{receipt}"); ExitCode::SUCCESS },
+            Err(error) => { eprintln!("application enrollment failed; inspect retained state before retry: {error}"); ExitCode::FAILURE },
+        };
+    }
     if args.len() == 2 && args[1] == "--controller-manager-protocol" {
         println!("{}", systemd_manager::PROTOCOL);
         return ExitCode::SUCCESS;
+    }
+    if args.len() >= 2 && args[1] == "create" {
+        return match grain_create::client(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("grain-runtime create: {error}"); ExitCode::FAILURE }
+        };
     }
     if args.len() >= 2 && args[1] == "controller-launch" {
         return match systemd_manager::launch_client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime controller-launch: {error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "controller-write-scopes" {
-        return match controller_write_scopes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
-        };
-    }
-    if args.len() >= 2 && args[1] == "config-migrate" {
-        return match config_migration::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime config-migrate: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "resident-completion" {
@@ -17952,24 +18640,6 @@ fn main() -> ExitCode {
         return match resident_delivery::client(&args[2..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => { eprintln!("grain-runtime resident-delivery: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "resident-outcome" {
-        return match resident_outcomes::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime resident-outcome: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "session-failure" {
-        return match session_failure::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime session-failure: {error}"); ExitCode::from(1) }
-        };
-    }
-    if args.len() >= 2 && args[1] == "quiescence-transport" {
-        return match quiescence_transport::client(&args[2..]) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => { eprintln!("grain-runtime quiescence-transport: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() >= 2 && args[1] == "quiescence" {
@@ -18005,6 +18675,12 @@ fn main() -> ExitCode {
                 eprintln!("provider table refused: {error}");
                 ExitCode::from(1)
             }
+        };
+    }
+    if args.len() == 5 && args[1] == "hermes-room" && args[2] == "resident-init" {
+        return match room_resident::initialize(Path::new(&args[3]), Path::new(&args[4])) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => { eprintln!("room resident initialization: {error}"); ExitCode::from(1) }
         };
     }
     if args.len() == 4 && args[1] == "hermes-room" && args[2] == "resident" {
@@ -18199,11 +18875,38 @@ fn main() -> ExitCode {
             }
         };
         return match control::admin_call(&PathBuf::from(&args[2]), command) {
+            Ok(response) if command == "prepare idle" => {
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-grain-idle-readiness-v1" && value["ready"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
             Ok(response) if command == "hermes verify-session" => {
                 let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
                     value["type"] == "mini-hermes-session-readiness-v1" && value["ready"] == true);
                 if ready { println!("{response}"); ExitCode::SUCCESS }
                 else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
+            Ok(response) if command.starts_with("reconcile prompt audited ") => {
+                let id = command.strip_prefix("reconcile prompt audited ").unwrap();
+                if prompt_outcome::successful_admin_reply(id, &response) {
+                    println!("{response}"); ExitCode::SUCCESS
+                } else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
+            Ok(response) if command.starts_with("recover foreground api-unreserved ") => {
+                let request_id = command.strip_prefix("recover foreground api-unreserved ").unwrap();
+                let ready = serde_json::from_str::<Value>(&response).ok().is_some_and(|value|
+                    value["type"] == "mini-foreground-api-unreserved-recovery-v1"
+                    && value["proof"]["requestId"] == request_id
+                    && value["proof"]["noDispatch"] == true);
+                if ready { println!("{response}"); ExitCode::SUCCESS }
+                else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
+            }
+            Ok(response) if command.starts_with("recover foreground session ") => {
+                let request_id = command.strip_prefix("recover foreground session ").unwrap();
+                if foreground_session_recovery::successful_reply(request_id, &response) {
+                    println!("{response}"); ExitCode::SUCCESS
+                } else { eprintln!("grain-runtime admin: {response}"); ExitCode::from(1) }
             }
             Ok(response) if response == "ok" => {
                 println!("{response}");
@@ -18220,7 +18923,7 @@ fn main() -> ExitCode {
         };
     }
     if args.len() != 3 || args[1] != "serve" {
-        eprintln!("usage: grain-runtime provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited' | mcp-stdio /absolute/socket");
+        eprintln!("usage: grain-runtime create /absolute/spec.json | provider-table check FILE | serve /absolute/config.json | connect /absolute/socket [hard|soft] | terminal /absolute/socket [hard|soft] | tool-id | tool /absolute/socket hard|soft REQUEST_ID_32_HEX NAME /absolute/arguments.json | tool-result /absolute/socket REQUEST_ID_32_HEX | tool-ack /absolute/socket REQUEST_ID_32_HEX | admin /absolute/stateDir/admin.sock 'reconcile parent|tool|effects|worker audited|foreground audited|recover foreground api-unreserved REQUEST_ID|recover foreground session REQUEST_ID' | mcp-stdio /absolute/socket");
         return ExitCode::from(2);
     }
     let path = PathBuf::from(&args[2]);
@@ -18237,6 +18940,9 @@ fn main() -> ExitCode {
         ExitCode::SUCCESS
     }
 }
+
+#[cfg(test)]
+mod foreground_api_tests;
 
 #[cfg(test)]
 mod tests {
@@ -18385,7 +19091,7 @@ mod tests {
     }
 
     #[test]
-    fn lifetime_purse_signs_all_source_target_observe_authority_slots() {
+    fn lifetime_purse_signs_exact_single_target_source_slots() {
         let signer = DispatchSignerPin {
             role: "1".into(),
             index: "0".into(),
@@ -18398,29 +19104,48 @@ mod tests {
             "signing":{"decoded":true,"keyId":"7007","keyEpoch":"1",
                 "algorithm":"1"}})
         };
-        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let slots = vec![slot("4"), slot("1")];
         let approved =
             lifetime_purse_signers(&slots, &signer, Path::new("/private/payer.key")).unwrap();
-        assert_eq!(approved.len(), 3);
+        assert_eq!(approved.len(), 2);
+        let reply = json!({"type":"minidregg-agent-lifetime-payer-signatures-v1", "planSha256":"plan",
+            "signatures":["a".repeat(128),"b".repeat(128)]});
+        validate_lifetime_payer_reply(&reply, "plan", &approved).unwrap();
+        for signatures in [json!(["a".repeat(128)]), json!(["a".repeat(128),"b".repeat(128),"c".repeat(128)]),
+            json!(["a".repeat(128),"G".repeat(128)])] {
+            let mut bad=reply.clone(); bad["signatures"]=signatures;
+            assert!(validate_lifetime_payer_reply(&bad,"plan",&approved).is_err());
+        }
+        assert!(validate_lifetime_payer_reply(&reply,"foreign-plan",&approved).is_err());
         assert_eq!(
             approved
                 .iter()
                 .map(|v| v["role"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["4", "8", "1"]
+            vec!["4", "1"]
         );
         let mut reordered = slots.clone();
-        reordered.swap(1, 2);
+        reordered.swap(0, 1);
         assert!(
             lifetime_purse_signers(&reordered, &signer, Path::new("/private/payer.key")).is_err()
         );
+        let extra_observation = vec![slot("4"), slot("8"), slot("1")];
+        assert!(lifetime_purse_signers(&extra_observation, &signer, Path::new("/private/payer.key")).is_err());
+        for field in ["keyEpoch", "algorithm", "decoded"] {
+            let mut changed = slots.clone();
+            changed[1]["signing"][field] = if field == "decoded" { json!(false) } else { json!("9") };
+            assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err(), "{field}");
+        }
+        let mut changed = slots.clone();
+        changed[1]["index"] = json!("1");
+        assert!(lifetime_purse_signers(&changed, &signer, Path::new("/private/payer.key")).is_err());
         let mut wrong_key = slots.clone();
         wrong_key[1]["signing"]["keyId"] = json!("8008");
         assert!(
             lifetime_purse_signers(&wrong_key, &signer, Path::new("/private/payer.key")).is_err()
         );
         assert!(
-            lifetime_purse_signers(&slots[..2], &signer, Path::new("/private/payer.key")).is_err()
+            lifetime_purse_signers(&slots[..1], &signer, Path::new("/private/payer.key")).is_err()
         );
     }
 
@@ -19027,7 +19752,7 @@ mod tests {
         )
         .unwrap();
         let frame = attempt.join("pre-submit-refusal.frame");
-        fs::write(&frame, b"\xffcanonical outcome bytes").unwrap();
+        fs::write(&frame, [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"canonical outcome bytes"].concat()).unwrap();
         let marker = attempt.join("pre-submit-refusal.json");
         fs::write(
             &marker,
@@ -19112,6 +19837,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             host: root.join("host"),
             host_config: root.join("host-config.json"),
             host_socket: None,
+            startup_timeout_seconds: None,
+            consent_full_readiness: None,
             control_socket: state.join("control.sock"),
             custody_key: root.join("parent.key"),
             state_dir: state.clone(),
@@ -19121,6 +19848,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             capability: "71".into(),
             query_capability: "74".into(),
             policy_control_capability: Some("72".into()),
+            sandbox: None,
             foreground_tool: None,
             dispatch_task: None,
             tool_task: Some(ToolTask {
@@ -19148,6 +19876,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
                 registered_shared_applications: vec![],
                 allowed_application_api_routes: vec![],
                 allowed_application_lifetime_routes: vec![],
+                application_services: vec![],
+                typed_applications: vec![],
                 agent_api_host_sha256: None,
                 lifetime_api_host_sha256: None,
                 current_birth_host_sha256: None,
@@ -19411,7 +20141,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             max_output_tokens: Some(3),
         };
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2", "status":"quoted-reported-usage",
+            "type":"minidregg-provider-metering-v2", "leg":"complete", "httpStatus":"200", "status":"quoted-reported-usage",
             "providerResourceId":"7004", "route":"pool", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "promptTokens":"2",
@@ -19420,34 +20150,34 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "claim":"provider-reported usage under operator tariff; not invoice-verified"
         });
         assert_eq!(
-            provider_quote_charge(&report, &pin, "10", 20, 30).unwrap(),
+            provider_quote_charge(&report, &pin, "10", 20, 30, None).unwrap(),
             "7"
         );
         report["charge"] = json!("11");
         report["operation"]["charge"] = json!("11");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["charge"] = json!("7");
         report["operation"]["charge"] = json!("6");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["operation"]["charge"] = json!("7");
         report["tariffDigest"] = json!("124");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["tariffDigest"] = json!("123");
         report["responseBytes"] = json!("31");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["responseBytes"] = json!("30");
         report["promptTokens"] = json!("3");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["promptTokens"] = json!("2");
         report["completionTokens"] = json!("4");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["completionTokens"] = json!("3");
         // A quote for another route, or settling under another route, refuses.
         report["route"] = json!("user");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
         report["route"] = json!("pool");
         report["operation"]["route"] = json!("user");
-        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30, None).is_err());
     }
 
     #[test]
@@ -19466,20 +20196,20 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         };
         assert_eq!(provider_max_charge_bound(&pin, 1000, 1000).unwrap(), 4);
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2", "status":"quoted-per-operation",
+            "type":"minidregg-provider-metering-v2", "leg":"complete", "httpStatus":"200", "status":"quoted-per-operation",
             "providerResourceId":"7004", "route":"user", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "perOp":"4", "reserve":"4", "charge":"4",
             "operation":{"type":"settle","charge":"4","route":"user"},
             "claim":"per-operation fee under operator tariff; the provider bill is the key owner's"
         });
-        assert_eq!(provider_quote_charge(&report, &pin, "4", 20, 30).unwrap(), "4");
+        assert_eq!(provider_quote_charge(&report, &pin, "4", 20, 30, None).unwrap(), "4");
         report["promptTokens"] = json!("2");
-        assert!(provider_quote_charge(&report, &pin, "4", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "4", 20, 30, None).is_err());
         report.as_object_mut().unwrap().remove("promptTokens");
         report["charge"] = json!("3");
         report["operation"]["charge"] = json!("3");
-        assert!(provider_quote_charge(&report, &pin, "4", 20, 30).is_err());
+        assert!(provider_quote_charge(&report, &pin, "4", 20, 30, None).is_err());
         let signed = json!({"grain":{"route":"2"}});
         assert!(provider_signed_route(&signed, &pin)
             .unwrap_err()
@@ -19521,9 +20251,64 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             metered_audit_path(true, Some("received:200:application/json")).unwrap(),
             MeteredAuditPath::CompleteResponse
         );
-        assert!(metered_audit_path(true, None).is_err());
-        assert!(metered_audit_path(true, Some("uncertain:lost-reply")).is_err());
+        // An after-send unknown is never a zero charge and never a dead end:
+        // it is settled only by the Host's outcome-class quote.
+        use provider_failure::FailureClass;
+        assert_eq!(
+            metered_audit_path(true, None).unwrap(),
+            MeteredAuditPath::ClassSettle(FailureClass::CrashAfterSend)
+        );
+        assert_eq!(
+            metered_audit_path(true, Some("uncertain:lost-reply")).unwrap(),
+            MeteredAuditPath::ClassSettle(FailureClass::TimeoutAfterSend)
+        );
+        assert_eq!(
+            metered_audit_path(true, Some("uncertain:malformed:truncated provider reply")).unwrap(),
+            MeteredAuditPath::ClassSettle(FailureClass::Malformed { reason: "truncated provider reply".into() })
+        );
         assert!(metered_audit_path(false, Some("received:200:application/json")).is_err());
+        assert!(metered_audit_path(false, Some("uncertain:lost-reply")).is_err());
+    }
+
+    #[test]
+    fn provider_leg_quotes_follow_the_host_report() {
+        let pin = ProviderMeteringPin {
+            provider_resource_id: "7".into(), model: "m".into(), tariff_version: "1".into(),
+            tariff_digest: "9".into(), route: "pool".into(), per_op: "3".into(),
+            input_micro_per_million: "0".into(), output_micro_per_million: "0".into(),
+            max_input_tokens: Some(10), max_output_tokens: Some(10),
+        };
+        // The shape `Host/ProviderUsage.lean` `reportJson` answers.
+        let report = |(status, claim): (&str, &str), leg: &str, http: &str, charge: &str| json!({
+            "type":"minidregg-provider-metering-v2","status":status,"basis":"b","leg":leg,
+            "httpStatus":http,"providerResourceId":"7","route":"pool","model":"m",
+            "tariffVersion":"1","tariffDigest":"9","requestDigest":"1","responseDigest":"2",
+            "requestBytes":"20","responseBytes":"0","perOp":"3","reserve":"10","charge":charge,
+            "operation":{"type":"settle","charge":charge,"route":"pool"},"claim":claim});
+        // An undecided leg settles at the whole hold, with its leg named.
+        for (class, leg) in [("timeout-after-send", "timeout"), ("malformed", "truncated"), ("crash-after-send", "lost")] {
+            assert_eq!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, leg, "0", "10"), &pin, "10", 20, 0,
+                Some(class)).unwrap(), "10");
+            assert!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, leg, "0", "3"), &pin, "10", 20, 0,
+                Some(class)).is_err());
+            let meta = provider_class_metadata(&pin, "10", class).unwrap();
+            assert_eq!((meta["version"].as_str(), meta["leg"].as_str(), meta["status"].as_str()), (Some("4"), Some(leg), Some("0")));
+        }
+        assert!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, "lost", "0", "10"), &pin, "10", 20, 0,
+            Some("malformed")).is_err());
+        // A complete refused reply settles at the route fee.
+        assert_eq!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "429", "3"), &pin, "10", 20, 0,
+            Some("complete-non-200")).unwrap(), "3");
+        assert!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "429", "10"), &pin, "10", 20, 0,
+            Some("complete-non-200")).is_err());
+        // A complete 200 whose usage the Host could not read: the hold.
+        assert_eq!(provider_quote_charge(&report(QUOTED_UNDECIDED_AT_HOLD, "complete", "200", "10"), &pin, "10", 20, 0,
+            None).unwrap(), "10");
+        // A refused-reply report is never accepted for a 200.
+        assert!(provider_quote_charge(&report(QUOTED_REFUSED_REPLY, "complete", "200", "3"), &pin, "10", 20, 0, None).is_err());
+        let meta = provider_metering_metadata(&pin, 409, "application/json", "10").unwrap();
+        assert_eq!((meta["version"].as_str(), meta["leg"].as_str(), meta["status"].as_str()), (Some("4"), Some("complete"), Some("409")));
+        assert!(provider_class_metadata(&pin, "10", "complete-non-200").is_err());
     }
 
     #[test]
@@ -19576,10 +20361,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         mixed["providerMetering"] = json!({"providerResourceId":"7950"});
         assert!(select_provider_metering(&mixed, "7950").is_err());
         let legacy = json!({"providerMetering":{"providerResourceId":"7004"}});
-        assert_eq!(
-            select_provider_metering(&legacy, "7004").unwrap()["providerResourceId"],
-            "7004"
-        );
+        assert!(select_provider_metering(&legacy, "7004")
+            .unwrap_err()
+            .contains("retired scalar providerMetering"));
     }
 
     #[test]
@@ -19607,7 +20391,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         let metadata = provider_metering_metadata(&pool, 200, "application/json", "50").unwrap();
         assert_eq!(
             metadata,
-            json!({"version":"3","providerResourceId":"7004","route":"pool","status":"200",
+            json!({"version":"4","providerResourceId":"7004","route":"pool","leg":"complete","status":"200",
                 "contentType":"application/json","reserve":"50"})
         );
         // The HERMES-KEYS task shape (fixed charge, opt-in metering) refuses.
@@ -19811,14 +20595,37 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
 
     #[test]
     fn derived_effect_acknowledgement_covers_only_accounted_channels() {
+        let state = std::env::temp_dir().join(format!("derivable-notes-{}", std::process::id()));
+        fs::create_dir_all(&state).unwrap();
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        let state = state.as_path();
         for note in [
             "worker operation 12 stopped after controller restart; external effects need acknowledgement",
             "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
             "parent reserved operation may have external effects; explicit operator acknowledgement required",
-            "Hermes prompt 9: ACP stream closed",
         ] {
-            assert!(derivable_effect_note(note), "{note}");
+            assert!(derivable_effect_note(state, note), "{note}");
         }
+        // R11: a Hermes prompt note is derivable only through its typed record.
+        let note = "Hermes prompt 9: ACP stream closed";
+        assert!(!derivable_effect_note(state, note), "a prefix without a record is not evidence");
+        let record = |id: u64, admin: &[&str], operation: Option<u64>, detail: &str| prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: id, resident_prompt_id: None,
+            prompt_sha256: None, session_id: None,
+            outcome: prompt_outcome::Outcome::Undecided {
+                retry: prompt_outcome::Retry { admin: admin.iter().map(|c| c.to_string()).collect(), operation },
+                detail: detail.into() } };
+        prompt_outcome::write(state, &record(9, &["reconcile parent audited", "reconcile effects"], None, note)).unwrap();
+        assert!(derivable_effect_note(state, note));
+        assert!(!derivable_effect_note(state, "Hermes prompt 9: a different failure"));
+        prompt_outcome::write(state, &record(10, &["reconcile provider audited", "reconcile effects"], None,
+            "Hermes prompt 10: x")).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 10: x"), "provider custody is never waved through");
+        prompt_outcome::write(state, &record(11, &["recover", "reconcile effects"], Some(4), "Hermes prompt 11: x")).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 11: x"), "a retained Mini attempt is never waved through");
+        prompt_outcome::write(state, &prompt_outcome::Record { outcome: prompt_outcome::Outcome::Refused {
+            stage: prompt_outcome::RefusalStage::TurnFailure, reason: "r".into() }, ..record(12, &["reconcile effects"], None, "") }).unwrap();
+        assert!(!derivable_effect_note(state, "Hermes prompt 12: x"));
         for note in [
             "tool reserved operation may have external effects; explicit operator acknowledgement required",
             "delegated tool reservation fenced with uncertain external effects",
@@ -19827,8 +20634,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "parent confirmed reservation was externally settled; explicit effects acknowledgement required",
             "worker operation 12 stopped after controller restart; external effects need acknowledgement; and more",
         ] {
-            assert!(!derivable_effect_note(note), "{note}");
+            assert!(!derivable_effect_note(state, note), "{note}");
         }
+        fs::remove_dir_all(state).unwrap();
     }
 
     pub(super) fn restart_resolution_fixture(tag: &str) -> (PathBuf, Runtime) {
@@ -20073,5 +20881,69 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         assert_eq!(result["basis"], "no-call-after-submitter-stop");
         assert_eq!(result["toolCharge"], "0");
         fs::remove_dir_all(&root).unwrap();
+    }
+    /// A pool 429 is a decided, retryable provider reply. It is carried by the
+    /// attempt's `decision`, never by a free-text unresolved-effect note.
+    #[test]
+    fn pool_429_through_handle_provider_leaves_no_note() {
+        let (root, mut runtime) = restart_resolution_fixture("pool-429");
+        let dir = runtime.config.state_dir.clone();
+        let request_path = dir.join("provider-0000000000000009.controller-request");
+        write_new(&request_path, b"{}").unwrap();
+        runtime.journal.provider_attempt = Some(ProviderAttempt {
+            fence: None,
+            placement: None,
+            id: 9,
+            prompt_operation_id: 42,
+            parent_generation: "3".into(),
+            model: "local".into(),
+            request_path: request_path.clone(),
+            request_bytes: 2,
+            request_sha256: sha256_file(&request_path).unwrap(),
+            send_started: true,
+            outcome_path: None,
+            outcome_bytes: None,
+            outcome_sha256: None,
+            outcome: None,
+            response_status: None,
+            response_content_type: None,
+            response_headers_path: None,
+            response_headers_bytes: None,
+            response_headers_sha256: None,
+            metering_pin: None,
+            meter_report_path: None,
+            meter_report_sha256: None,
+            metered_charge: None,
+            route: ProviderRouteRecord {
+                provider: "pool-row".into(),
+                endpoint: "https://pool.invalid/v1/chat/completions".into(),
+                credential: "pool".into(),
+            },
+            decision: None,
+        });
+        runtime.journal.unresolved_external.clear();
+        let (reply, _recv) = std::sync::mpsc::channel();
+        runtime.handle_provider(provider::ProviderCommand::Outcome {
+            attempt_id: 9,
+            outcome: provider::ProviderOutcome::Received {
+                status: 429,
+                content_type: "application/json".into(),
+                exact_headers: b"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n\r\n".to_vec(),
+                exact_body: br#"{"error":"rate limited"}"#.to_vec(),
+            },
+            reply,
+        });
+        assert!(
+            runtime.journal.unresolved_external.is_empty(),
+            "a decided pool 429 must not leave a note: {:?}",
+            runtime.journal.unresolved_external
+        );
+        let attempt = runtime.journal.provider_attempt.as_ref().unwrap();
+        let decision = attempt.decision.as_ref().expect("429 is decided on the attempt");
+        assert_eq!(
+            decision.class,
+            provider_failure::FailureClass::CompleteNon200 { status: 429 }
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

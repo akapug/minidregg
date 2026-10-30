@@ -23,11 +23,6 @@ const MAX_RESPONSE: usize = 1024 * 1024;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Command {
-    Reserve {
-        http_operation_id: String,
-        source_request_digest: String,
-        canonical_request_hex: String,
-    },
     ReserveV2 {
         route_name: String,
         forward_operation_id: String,
@@ -89,12 +84,6 @@ pub enum Command {
     SettleDefinite {
         attempt_id: String,
         response_sha256: String,
-    },
-    AbortNoSend {
-        attempt_id: String,
-    },
-    Inspect {
-        attempt_id: String,
     },
 }
 
@@ -458,7 +447,7 @@ mod tests {
             .unwrap()
             .contains(&format!("user:{peer}:rw-")));
         let mut stream = UnixStream::connect(&socket).unwrap();
-        let request = br#"{"type":"inspect","attempt_id":"1"}"#;
+        let request = br#"{"type":"inspect-v2","route_name":"r","forward_operation_id":"1"}"#;
         stream
             .write_all(&(request.len() as u32).to_be_bytes())
             .unwrap();

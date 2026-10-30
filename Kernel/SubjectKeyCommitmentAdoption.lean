@@ -1,8 +1,29 @@
 /- Explicit current-key authorization to establish its first next-key commitment.
 The current and next key sign different frames over the complete command.
 Neither a sponsor nor a carry operator can invent this authority. -/
-import Kernel.Receivers.SubjectKeyRotation
-import Theory.KeyCommitmentAdoption
+module
+
+public import Kernel.Receivers.SubjectKeyRotation
+public import Theory.KeyCommitmentAdoption
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SubjectKeyCommitmentAdoption
 open Minidregg.Compiler
@@ -76,8 +97,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   match commandExact : commandCodec.decode ingress.commandBytes with
   | none => none
   | some command => some ⟨ingress, command,
-      ResourceBirthCodec.strictCodec_canonical
-        (ParticipantKeyEnrollment.framedRaw commandFrame commandStream) commandExact⟩
+      ParticipantKeyEnrollment.framed_canonical commandExact⟩
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 := ingressCodec.encode ingress.ingress
 
@@ -246,6 +266,24 @@ def admitDecodedNative (deployment : Deployment) (semantics : Digest) (durable :
       | .ok accepted => return .ok ⟨prepared, accepted, physical⟩
     else return .error .physicalPreparation
 
+/-- **An accepted adoption is prepared on `durable` for `ingress.command`.** The authority
+write expects `durable`'s exact root and obeys `deployment`'s physical post law, every read
+guard is at `durable`'s exact root, and the operation marker of `ingress.command` under
+`semantics` is unspent in the loaded authority. The signature leg is NOT stated: it rests on
+`Accepted`, whose verdicts are identity carriers (census defect 01a13c42-4d9b). -/
+theorem AcceptedAdoption.prepared_on {ingress : DecodedIngress}
+    (accepted : AcceptedAdoption deployment semantics durable ingress) :
+    (∀ write ∈ writes accepted.prepared,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      (∀ write ∈ writes accepted.prepared,
+        ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+      (∀ guard ∈ readGuards accepted.prepared,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+      accepted.prepared.authority.snapshot.spent
+        (marker accepted.prepared.authority.snapshot.domain semantics ingress.command) = false :=
+  ⟨accepted.physical.2.1, accepted.physical.2.2.1, accepted.physical.2.2.2,
+    accepted.prepared.unspent⟩
+
 variable {ingress : DecodedIngress}
 
 def charge (accepted : AcceptedAdoption deployment semantics durable ingress) :
@@ -253,7 +291,9 @@ def charge (accepted : AcceptedAdoption deployment semantics durable ingress) :
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain semantics ingress)
   | .witnessBytes => ingress.ingress.currentSignature.length + ingress.ingress.nextPossessionSignature.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -264,7 +304,7 @@ def intent (accepted : AcceptedAdoption deployment semantics durable ingress) :
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain semantics ingress
   -- Both signatures authorize only the first commitment; the current key stays current.
   subject := some ingress.command.subject

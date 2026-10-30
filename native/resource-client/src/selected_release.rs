@@ -78,82 +78,6 @@ fn retained(directory: &Path) -> Result<Attempt> {
     })
 }
 
-fn latest_lookup_absent_with<F>(
-    directory: &Path,
-    attempt: &Attempt,
-    inspect_outcome: F,
-) -> Result<bool>
-where
-    F: FnOnce(&Path, &Path) -> Result<Value>,
-{
-    let mut latest = None;
-    for index in 0..10_000 {
-        let path = directory.join(format!("request-{index:04}.json"));
-        if path.exists() {
-            latest = Some(index);
-        }
-    }
-    let Some(index) = latest else {
-        return Ok(false);
-    };
-    let marker: Value = serde_json::from_slice(&crate::fsio::read_bounded(
-        &directory.join(format!("request-{index:04}.json")),
-        4096,
-    )?)
-    .map_err(|error| format!("invalid retained request marker: {error}"))?;
-    if marker.get("operation").and_then(Value::as_u64) != Some(21) {
-        return Ok(false);
-    }
-    if marker.get("ingressSha256").and_then(Value::as_str)
-        != Some(digest(&attempt.ingress).as_str())
-        || marker.get("socket").and_then(Value::as_str) != Some(utf8_path(&attempt.socket)?)
-    {
-        return Err("retained lookup marker differs from exact ingress or selected socket".into());
-    }
-    let frame = crate::fsio::read_bounded(
-        &directory.join(format!("request-{index:04}.frame")),
-        HOST_MAX_FRAME,
-    )?;
-    if frame.first() != Some(&21) {
-        return Ok(false);
-    }
-    let binary = crate::fsio::read_bounded(
-        &directory.join(format!("request-{index:04}.bin")),
-        HOST_MAX_FRAME - 1,
-    )?;
-    if frame[1..] != binary {
-        return Err("retained lookup outcome differs from exact reply frame".into());
-    }
-    let binary_path = directory.join(format!("request-{index:04}.bin"));
-    let mut inspection_path = None;
-    for replay_index in 0..10_000 {
-        let candidate = directory.join(format!(
-            "request-{index:04}.reinspect-{replay_index:04}.json"
-        ));
-        if !candidate.exists() {
-            inspection_path = Some(candidate);
-            break;
-        }
-    }
-    let inspection_path =
-        inspection_path.ok_or("selected-release lookup exhausted reinspection names")?;
-    // The cached JSON is only presentation. The pinned Lean Host must decode
-    // the exact retained binary again at the moment a resubmit is authorized.
-    let value = inspect_outcome(&binary_path, &inspection_path)?;
-    Ok(value.get("type").and_then(Value::as_str) == Some("absent"))
-}
-
-fn latest_lookup_absent(directory: &Path, attempt: &Attempt) -> Result<bool> {
-    latest_lookup_absent_with(directory, attempt, |binary, presentation| {
-        inspect(
-            &attempt.host,
-            &attempt.config,
-            "outcome",
-            binary,
-            presentation,
-        )
-    })
-}
 
 fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Result<Value> {
     let (marker_path, frame_path, outcome_path) = new_path(directory)?;
@@ -178,7 +102,7 @@ fn invoke(directory: &Path, attempt: &Attempt, operation: u8, stem: &str) -> Res
     })?;
     create_private(&frame_path, &reply)?;
     sync_directory_ancestors(directory)?;
-    if reply.first() == Some(&255) {
+    if reply.first().is_some_and(|b| crate::is_outcome_frame(*b)) {
         return Err(format!(
             "Host refused selected release; exact refusal retained in {}",
             frame_path.display()
@@ -239,7 +163,7 @@ pub(super) fn submit(
     create_private(&directory.join("attempt.json"), &manifest_bytes)?;
     sync_directory_ancestors(&directory)?;
     let attempt = retained(&directory)?;
-    invoke(&directory, &attempt, 20, "submit").map(|_| ())
+    invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_SUBMIT, "submit").map(|_| ())
 }
 
 pub(super) fn lookup(directory: &Path, override_socket: Option<&Path>) -> Result<()> {
@@ -248,7 +172,7 @@ pub(super) fn lookup(directory: &Path, override_socket: Option<&Path>) -> Result
     if let Some(socket) = override_socket {
         attempt.socket = absolute(socket)?;
     }
-    invoke(&directory, &attempt, 21, "lookup").map(|_| ())
+    invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_LOOKUP, "lookup").map(|_| ())
 }
 
 /// Whole-action recovery consumes the existing source-authorized absent gate.
@@ -260,26 +184,14 @@ pub(super) fn recover(directory: &Path, override_socket: Option<&Path>) -> Resul
     if let Some(socket) = override_socket {
         attempt.socket = absolute(socket)?;
     }
-    let lookup = invoke(&directory, &attempt, 21, "lookup")?;
+    let lookup = invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_LOOKUP, "lookup")?;
     // invoke retains the exact reply frame and derives this outcome by the
     // pinned Host's native decoder. Reuse that checked value immediately;
     // cached presentation alone never authorizes a submit.
     if lookup["type"] == "absent" {
-        invoke(&directory, &attempt, 20, "submit")?;
+        invoke(&directory, &attempt, mini_sdk::host_operations::SELECTED_RELEASE_SUBMIT, "submit")?;
     }
     Ok(())
-}
-
-pub(super) fn retry_submit(directory: &Path, override_socket: Option<&Path>) -> Result<()> {
-    let directory = absolute(directory)?;
-    let mut attempt = retained(&directory)?;
-    if let Some(socket) = override_socket {
-        attempt.socket = absolute(socket)?;
-    }
-    if !latest_lookup_absent(&directory, &attempt)? {
-        return Err("exact selected-release resubmit requires a retained absent lookup".into());
-    }
-    invoke(&directory, &attempt, 20, "submit").map(|_| ())
 }
 
 #[cfg(test)]
@@ -301,43 +213,8 @@ mod tests {
     }
 
     #[test]
-    fn bounded_ingress_and_absent_gate() {
+    fn bounded_ingress_reads_refuse_empty_and_oversized() {
         let directory = scratch();
-        let attempt = Attempt {
-            host: directory.join("host"),
-            config: directory.join("config"),
-            socket: directory.join("socket"),
-            host_sha: String::new(),
-            ingress: b"exact".to_vec(),
-        };
-        let inspect_absent = |_: &Path, _: &Path| Ok(json!({"type":"absent"}));
-        assert!(!latest_lookup_absent_with(&directory, &attempt, inspect_absent).unwrap());
-        fs::write(directory.join("request-0000.json"), b"{\"operation\":20}").unwrap();
-        assert!(!latest_lookup_absent_with(&directory, &attempt, inspect_absent).unwrap());
-        fs::write(
-            directory.join("request-0001.json"),
-            serde_json::to_vec(&json!({
-            "operation":21,"ingressSha256":digest(&attempt.ingress),
-            "socket":attempt.socket.to_str().unwrap()}))
-            .unwrap(),
-        )
-        .unwrap();
-        fs::write(directory.join("request-0001.frame"), b"\x15outcome").unwrap();
-        fs::write(directory.join("request-0001.bin"), b"outcome").unwrap();
-        fs::write(
-            directory.join("request-0001.outcome.json"),
-            b"{\"type\":\"absent\"}",
-        )
-        .unwrap();
-        assert!(latest_lookup_absent_with(&directory, &attempt, inspect_absent).unwrap());
-        // A forged cached projection cannot authorize a retry when a fresh
-        // source decode of the retained binary says confirmed.
-        assert!(!latest_lookup_absent_with(&directory, &attempt, |_, _| Ok(
-            json!({"type":"confirmed"})
-        ))
-        .unwrap());
-        fs::write(directory.join("request-0002.json"), b"{\"operation\":20}").unwrap();
-        assert!(!latest_lookup_absent_with(&directory, &attempt, inspect_absent).unwrap());
         fs::write(directory.join("ingress.bin"), b"").unwrap();
         assert!(crate::fsio::read_bounded(&directory.join("ingress.bin"), 3).is_err());
         fs::write(directory.join("ingress.bin"), b"abcd").unwrap();
@@ -378,10 +255,6 @@ mod tests {
                 b"host-authored-exact-ingress"
             );
             assert!(attempt.join("request-0000.json").exists());
-            assert!(!latest_lookup_absent(&attempt, &retained(&attempt).unwrap()).unwrap());
-            assert!(retry_submit(&attempt, None)
-                .unwrap_err()
-                .contains("absent lookup"));
             // The exchange recovery consumer may look up unknown effects,
             // but losing that lookup reply must never trigger another submit.
             fs::remove_file(&socket).unwrap();

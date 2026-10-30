@@ -1,8 +1,12 @@
 /- Shape selector for a same-walk, already native-admitted event20 record and
 its exact receipt. The caller, not this pure selector, must mint that history
 pair through native replay or verified exact readback. -/
-import Kernel.FnConsumerNamespaceRegistration
-import Kernel.DurableReceiver
+module
+
+public import Kernel.FnConsumerNamespaceRegistration
+public import Kernel.DurableReceiver
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerNamespaceHistory
 
@@ -17,7 +21,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 structure Original where
-  private mk ::
+  mk ::
   ingress : Ingress
   receipt : Receipt
   transactionExact : transactionId ingress.spec = receipt.transactionId

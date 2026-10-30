@@ -8,26 +8,50 @@ it) with log-chain value `c` is vouched for, and writes the system cell's
   `installPolicy`), admitted in capability mode under the factory's current law
   with the operation slot `authority/operation/certify` — the authority shape of
   the clock tick and PAY's book receiver, so the factory law decides WHICH
-  certifiers may certify (today the operator; after SURPASS N1 a witness
-  quorum's certificate);
+  certifiers may certify (today the operator; a witness
+  quorum's certificate is not built);
 * the command pins the current factory, authority and system roots;
-* the command names exactly the current head and its chain value
-  (`headMismatch`, `chainMismatch`), and the head is past the certified height
-  (`notAdvancing`) — `certified_advances`;
+* the command names a prefix of the log that the durable chain log holds
+  (`heightUnavailable`) at that prefix's chain value (`chainMismatch`), past the
+  certified height (`notAdvancing`) — `Kernel.ChainHistory.certifiable`, the one
+  rule the tail gate also calls; `certified_advances`, `certified_true`. A
+  certifier names the head it observed; records landing before its submission
+  no longer refuse it;
 * its single-use marker (sponsor, nonce) is unspent.
 
 The kernel's tail rule (`Kernel.TailBound.gate`) judges the same write again at
 the durable boundary: whatever produced it, a write to the system cell must be
-exactly `certifyNext` of the current head and chain.  A certify record is the
+exactly `certifyNext` of a held prefix and its chain.  A certify record is the
 one record the tail bound exempts, so certification can always follow a full
 tail.
 
 The patch is one guarded write of the system value from the exact loaded value;
 the record writes only the system cell (`intent_writes_system_cell`).
 -/
-import Compiler.DurableReceiverIO
-import Kernel.CapabilityRevocationController
-import Kernel.SystemCellDomain
+module
+
+public import Compiler.DurableReceiverIO
+public import Kernel.CapabilityRevocationController
+public import Kernel.SystemCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CertifyReceiver
 
@@ -70,58 +94,56 @@ def Plan.patch (plan : Plan) : Patch SystemCell.layout := certifyPatch plan.curr
 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable
-  | systemUnavailable | staleAuthority | staleSystem | headMismatch | chainMismatch | notAdvancing
+  | systemUnavailable | staleAuthority | staleSystem | heightUnavailable | chainMismatch | notAdvancing
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving DecidableEq, Repr
 
-/-- The whole rule of certification, on the loaded system value, the current
-head `head` (records accepted) and its chain value `chain`. -/
-def decideCertify (current : System) (head : Nat) (chain : Digest) (height : Nat) (digest : Digest) :
-    Except Reject Plan :=
-  if height = head then
-    if digest = chain then
-      if current.certifiedHeight < head then .ok ⟨current, certifyNext current head chain⟩
-      else .error .notAdvancing
-    else .error .chainMismatch
-  else .error .headMismatch
+/-- The whole rule of certification, on the loaded system value and the log's chain
+history: `Kernel.ChainHistory.certifiable`, its refusals named as the receiver's. -/
+def decideCertify {H : Type} [ChainHistory H] (current : System) (history : H) (height : Nat)
+    (digest : Digest) : Except Reject Plan :=
+  match ChainHistory.certifiable current.certifiedHeight history height digest with
+  | .ok () => .ok ⟨current, certifyNext current height digest⟩
+  | .error .notAdvancing => .error .notAdvancing
+  | .error .heightUnavailable => .error .heightUnavailable
+  | .error .chainMismatch => .error .chainMismatch
 
-theorem decideCertify_ok {current : System} {head height : Nat} {chain digest : Digest} {plan : Plan}
-    (decided : decideCertify current head chain height digest = .ok plan) :
-    plan = ⟨current, certifyNext current head chain⟩ ∧ height = head ∧ digest = chain ∧
-      current.certifiedHeight < head := by
+theorem decideCertify_ok {H : Type} [ChainHistory H] {current : System} {history : H}
+    {height : Nat} {digest : Digest} {plan : Plan}
+    (decided : decideCertify current history height digest = .ok plan) :
+    plan = ⟨current, certifyNext current height digest⟩ ∧ current.certifiedHeight < height ∧
+      ChainHistory.chainAt history height = some digest := by
   unfold decideCertify at decided
-  by_cases sameHead : height = head
-  · by_cases sameChain : digest = chain
-    · by_cases advancing : current.certifiedHeight < head
-      · simp only [sameHead, sameChain, advancing, if_true] at decided
-        cases decided
-        exact ⟨rfl, sameHead, sameChain, advancing⟩
-      · simp [sameHead, sameChain, advancing] at decided
-    · simp [sameHead, sameChain] at decided
-  · simp [sameHead] at decided
+  split at decided
+  · rename_i certified
+    cases decided
+    exact ⟨rfl, (ChainHistory.certifiable_ok_iff _ _ _ _).mp certified⟩
+  all_goals cases decided
 
 /-- Refuting pole: a certify at or below the certified height is refused. -/
-theorem certify_not_advancing_refused (current : System) (chain : Digest) (head : Nat)
-    (behind : head ≤ current.certifiedHeight) :
-    decideCertify current head chain head chain = .error .notAdvancing := by
+theorem certify_not_advancing_refused {H : Type} [ChainHistory H] (current : System) (history : H)
+    (height : Nat) (digest : Digest) (behind : height ≤ current.certifiedHeight) :
+    decideCertify current history height digest = .error .notAdvancing := by
   unfold decideCertify
-  simp [Nat.not_lt.mpr behind]
+  rw [ChainHistory.at_or_below_certified_refused _ _ _ _ behind]
 
-/-- Refuting pole: a certify naming a height other than the head is refused. -/
-theorem certify_other_head_refused (current : System) (chain digest : Digest) (head height : Nat)
-    (other : height ≠ head) :
-    decideCertify current head chain height digest = .error .headMismatch := by
+/-- Refuting pole: a certify of a height the history does not hold (past the head) is refused. -/
+theorem certify_unheld_refused {H : Type} [ChainHistory H] (current : System) (history : H)
+    (height : Nat) (digest : Digest) (advancing : current.certifiedHeight < height)
+    (unheld : ChainHistory.chainAt history height = none) :
+    decideCertify current history height digest = .error .heightUnavailable := by
   unfold decideCertify
-  simp [other]
+  rw [ChainHistory.unheld_refused _ _ _ _ advancing unheld]
 
-/-- Refuting pole: a certify naming another chain value is refused. -/
-theorem certify_other_chain_refused (current : System) (chain digest : Digest) (head : Nat)
-    (other : digest ≠ chain) :
-    decideCertify current head chain head digest = .error .chainMismatch := by
+/-- Refuting pole: a certify naming another chain value than the held one is refused. -/
+theorem certify_other_chain_refused {H : Type} [ChainHistory H] (current : System) (history : H)
+    (height : Nat) (digest chain : Digest) (advancing : current.certifiedHeight < height)
+    (held : ChainHistory.chainAt history height = some chain) (other : digest ≠ chain) :
+    decideCertify current history height digest = .error .chainMismatch := by
   unfold decideCertify
-  simp [other]
+  rw [ChainHistory.other_chain_refused _ _ _ _ _ advancing held other]
 
 /-- The certify patch installs exactly the next value. -/
 theorem certify_installs (store : SystemStore) (plan : Plan) :
@@ -157,24 +179,16 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, control, nonce, factoryRoot, authorityRoot, systemRoot, height, digest⟩)
     (by intro c; cases c; rfl)
 
-def framedRaw {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
-    { encode value := frame ++ stream.encode value
-      decode bytes := if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-      decode_encode := by
-        intro value
-        have exact := stream.toLawful.decode_encode value
-        change stream.toLawful.decode (stream.encode value) = some value at exact
-        simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_canonical {A : Type} (frame : List UInt8) (stream : StreamCodec A)
     {bytes : List UInt8} {value : A}
     (decoded : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 def commandFrame : List UInt8 := "DREGG/CERTIFY/v1".toUTF8.toList
 
@@ -196,10 +210,10 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/CERTIFY/SIGNED/v1".toUTF8.toList ingressStream
+  framed "DREGG/CERTIFY/SIGNED/v2".toUTF8.toList ingressStream
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : Command
   canonical : commandCodec.encode command = ingress.commandBytes
@@ -249,7 +263,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) (plan : Plan) : Declaration :=
   ⟨plan, command.expectedSystemRoot, marker domain semantics command⟩
@@ -332,8 +346,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     deployment.factoryId command.expectedFactoryRoot
   system : SystemCellDomain.Loaded deployment durable.snapshot
   plan : Plan
-  decided : decideCertify system.system durable.height durable.chain command.height command.digest =
-    .ok plan
+  decided : decideCertify system.system durable command.height command.digest = .ok plan
   candidate : Candidate (family deployment authority.snapshot system.cell profile.semantics ambient command)
     system.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
@@ -352,8 +365,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
     if rootExact : command.expectedSystemRoot = system.cell.root then
-      match decided : decideCertify system.system durable.height durable.chain command.height
-          command.digest with
+      match decided : decideCertify system.system durable command.height command.digest with
       | .error reason => throw reason
       | .ok plan =>
         let d := declaration snapshot.domain profile.semantics command plan
@@ -385,19 +397,30 @@ def Prepared.systemPost (prepared : Prepared deployment profile ambient durable 
   prepared.candidate.validated.apply
 
 /-- **`certified_advances`.**  A prepared certify installs exactly the
-certification of the current head at its chain value, and that head is past the
-certified height the snapshot holds. -/
+certification of the prefix it names at the chain value it names, that prefix is
+past the certified height the snapshot holds, and the durable chain log holds it
+at that value. -/
 theorem certified_advances (prepared : Prepared deployment profile ambient durable command) :
     systemOf prepared.systemPost.logical =
-        some (certifyNext prepared.system.system durable.height durable.chain) ∧
-      prepared.system.system.certifiedHeight < durable.height ∧
-      command.height = durable.height ∧ command.digest = durable.chain := by
-  obtain ⟨planExact, sameHead, sameChain, advancing⟩ := decideCertify_ok prepared.decided
-  refine ⟨?_, advancing, sameHead, sameChain⟩
+        some (certifyNext prepared.system.system command.height command.digest) ∧
+      prepared.system.system.certifiedHeight < command.height ∧
+      ChainHistory.chainAt durable command.height = some command.digest := by
+  obtain ⟨planExact, advancing, held⟩ := decideCertify_ok prepared.decided
+  refine ⟨?_, advancing, held⟩
   have installs := certify_installs prepared.system.cell.logical prepared.plan
   simp only [Prepared.systemPost, ValidatedPatch.apply_logical]
   show SystemCell.systemOf (Patch.run prepared.system.cell.logical prepared.plan.patch) = _
   rw [installs, planExact]
+
+/-- **`certified_true`.**  What a prepared certify vouches for is true of the log: its
+height is at or below the head, and its digest is the chain after exactly that many
+accepted records (`Loaded.faithful`). -/
+theorem certified_true (prepared : Prepared deployment profile ambient durable command) :
+    command.height ≤ durable.height ∧
+      command.digest = DurableCheckpointCodec.chainAfter durable.logStart (durable.image.accepted.take command.height) := by
+  have held := (certified_advances prepared).2.2
+  exact ⟨ChainHistory.chainAt_le_head durable command.height command.digest held,
+    (DurableReceiverIO.Loaded.faithful durable).sound command.height command.digest held⟩
 
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : SystemStore) : Minidregg.Pred.State :=
@@ -502,6 +525,24 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.sponsorEnvelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  ⟨accepted.envelopeExact, ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
+    (request deployment prepared.authority.snapshot prepared.system.cell profile.semantics ambient
+      command prepared.plan)
+    accepted.semantic.authorization⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -542,7 +583,7 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.CERTIFY.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash "DREGG.CERTIFY.EVENT/v2".toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=
@@ -600,6 +641,18 @@ structure AcceptedCertify [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : CertifyReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedCertify.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedCertify deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+    systemOf accepted.prepared.systemPost.logical =
+      some (certifyNext accepted.prepared.system.system ingress.command.height ingress.command.digest) ∧
+    ingress.command.height ≤ durable.height ∧
+    ingress.command.digest =
+      DurableCheckpointCodec.chainAfter durable.logStart (durable.image.accepted.take ingress.command.height) ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, (certified_advances accepted.prepared).1,
+    (certified_true accepted.prepared).1, (certified_true accepted.prepared).2,
+    accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -621,7 +674,9 @@ def charge (accepted : AcceptedCertify deployment profile ambient durable ingres
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.sponsorEnvelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -633,7 +688,7 @@ def intent (accepted : AcceptedCertify deployment profile ambient durable ingres
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
@@ -726,21 +781,8 @@ def viewStream : StreamCodec SystemCellDomain.View :=
 def viewCodec : LawfulCodec SystemCellDomain.View :=
   framed "DREGG/CERTIFY/VIEW/v1".toUTF8.toList viewStream
 
-/-- info: 'Minidregg.Kernel.CertifyReceiver.certified_advances' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certified_advances
-/-- info: 'Minidregg.Kernel.CertifyReceiver.certify_not_advancing_refused' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_not_advancing_refused
-/-- info: 'Minidregg.Kernel.CertifyReceiver.certify_other_head_refused' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_other_head_refused
-/-- info: 'Minidregg.Kernel.CertifyReceiver.certify_other_chain_refused' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_other_chain_refused
-/-- info: 'Minidregg.Kernel.CertifyReceiver.certify_installs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_installs
-/-- info: 'Minidregg.Kernel.CertifyReceiver.certify_requires_capability' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms certify_requires_capability
-/-- info: 'Minidregg.Kernel.CertifyReceiver.command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms command_roundtrip
-/-- info: 'Minidregg.Kernel.CertifyReceiver.decideCertify_ok' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms decideCertify_ok
+#assert_axioms certified_advances certified_true certify_not_advancing_refused
+  certify_unheld_refused certify_other_chain_refused certify_installs certify_requires_capability
+  command_roundtrip decideCertify_ok AcceptedCertify.sound
 
 end Minidregg.Kernel.CertifyReceiver

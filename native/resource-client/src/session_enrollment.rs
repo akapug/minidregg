@@ -17,14 +17,14 @@ const INGRESS_TYPE: &str = "application-session-enrollment-ingress-v1";
 const REQUEST_ROUTE: &str = "application-session-enrollment-request";
 const PLAN_ROUTE: &str = "application-session-enrollment-plan";
 const INGRESS_ROUTE: &str = "application-session-enrollment-ingress";
-const PLAN_OP: u8 = 82;
-const ASSEMBLE_OP: u8 = 83;
-const SUBMIT_OP: u8 = 84;
-const LOOKUP_OP: u8 = 85;
+const PLAN_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_PLAN;
+const ASSEMBLE_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_ASSEMBLE;
+const SUBMIT_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_SUBMIT;
+const LOOKUP_OP: u8 = mini_sdk::host_operations::APPLICATION_SESSION_ENROLLMENT_LOOKUP;
 
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "enrollment Host refused op{operation}; frame retained"
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
@@ -32,6 +32,37 @@ fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
             "enrollment op{operation} returned an invalid frame"
         )),
     }
+}
+
+fn author_reply_with_outcome<'a>(frame: &'a [u8], operation: u8,
+    decode: impl FnOnce(&[u8]) -> Result<Value>) -> Result<&'a [u8]> {
+    let is_outcome = matches!(frame.first(), Some(&mini_sdk::host_operations::RESPONSE_NO_RECORD) | Some(&mini_sdk::host_operations::RESPONSE_HOST_OUTCOME))
+        || (frame.first() == Some(&operation)
+            && frame.get(1..).is_some_and(|body| body.starts_with(b"DREGG/NATIVE-HOST/OUTCOME/v8")));
+    if is_outcome {
+        let body = frame.get(1..).filter(|body| !body.is_empty())
+            .ok_or_else(|| format!("enrollment op{operation} returned an invalid frame"))?;
+        let view = decode(body).map_err(|error| format!(
+            "enrollment op{operation} outcome could not decode: {error}; frame retained"))?;
+        let status = match frame[0] {
+            mini_sdk::host_operations::RESPONSE_NO_RECORD => "no record",
+            mini_sdk::host_operations::RESPONSE_HOST_OUTCOME => "undecided",
+            _ => "same-opcode outcome, no authoring plan",
+        };
+        return Err(format!("enrollment Host outcome op{operation} ({status}): {}; frame retained, not retried", view));
+    }
+    reply(frame, operation)
+}
+
+fn author_reply<'a>(host: &Path, config: &Path, directory: &Path,
+    frame: &'a [u8], operation: u8) -> Result<&'a [u8]> {
+    author_reply_with_outcome(frame, operation, |body| {
+        let input = directory.join(format!("op{operation}-outcome.bin"));
+        create_private(&input, body)?;
+        sync_directory_ancestors(directory)?;
+        source_inspect(host, config, "outcome", &input,
+            &directory.join(format!("op{operation}-outcome.json")))
+    })
 }
 
 fn inspected(directory: &Path, name: &str) -> Result<Value> {
@@ -158,7 +189,7 @@ pub(super) fn plan(
     let frame = session_invoke(&host, &socket, &config, PLAN_OP, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan_bytes = reply(&frame, PLAN_OP)?;
+    let plan_bytes = author_reply(&host, &config, &directory, &frame, PLAN_OP)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let plan_view = source_inspect(
@@ -292,7 +323,7 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     create_private(&directory.join("assembly.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
-    let ingress = reply(&frame, ASSEMBLE_OP)?;
+    let ingress = author_reply(&pinned.host, &pinned.config, &directory, &frame, ASSEMBLE_OP)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     sync_retained_call(&directory, &directory.join("ingress.bin"))?;
     let inspection = source_inspect(
@@ -486,43 +517,39 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
     print_json(&result)
 }
 
-/// Re-decode canonical source Plan bytes; old cached JSON may predate additive
-/// source inspection fields. This is presentation, not a native verdict.
-pub(super) fn inspect_plan_exact(directory: &Path) -> Result<Value> {
-    let pinned = pin(directory)?;
-    let output = fresh_inspection_path(directory, "reenroll-plan")?;
-    let fresh = source_inspect(&pinned.host, &pinned.config, PLAN_ROUTE,
-        &directory.join("plan.bin"), &output)?;
-    same_pin(directory, &pinned)?;
-    exact_plan(&fresh, &inspected(directory, "request-inspected.json")?, &pinned.request, &pinned.plan)?;
-    Ok(fresh)
-}
-fn fresh_inspection_path(directory: &Path, stem: &str) -> Result<PathBuf> {
-    (0..10_000).map(|i| directory.join(format!("{stem}-{i:04}.json")))
-        .find(|p| !p.exists()).ok_or_else(|| "enrollment inspection names exhausted".into())
-}
-/// Exact historical native lookup followed by fresh source decoding. Host and
-/// config must be the caller's pinned execution image; never use an old image
-/// against a Store after a compatible upgrade.
-pub(super) fn authenticated_anchor(directory: &Path, host: &Path, config: &Path, socket: &Path, inspector: &Path) -> Result<Value> {
-    let (pinned, ingress) = sealed(directory)?;
-    if pinned.host != host || pinned.socket != socket || bounded(&pinned.config, 65_536)? != bounded(config, 65_536)? {
-        return Err("enrollment anchor execution pins differ".into());
-    }
-    lookup(directory)?;
-    let output = fresh_inspection_path(directory, "reenroll-ingress")?;
-    let fresh = source_inspect(inspector, &pinned.config, INGRESS_ROUTE,
-        &directory.join("ingress.bin"), &output)?;
-    same_seal(directory, &pinned, &ingress)?;
-    exact_ingress(&fresh, &inspected(directory, "plan-inspected.json")?, &pinned.request, &ingress)?;
-    Ok(fresh)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
     use std::os::unix::fs::DirBuilderExt;
+
+    #[test]
+    fn enrollment_authoring_outcomes_keep_no_record_and_uncertain_distinct() {
+        for (marker, kind, tail) in [(253, "contention", vec![1,1,1,0,0]),
+            (255, "uncertain", vec![1,1,1,1,1,255])] {
+            let mut frame = vec![marker];
+            frame.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v8");
+            frame.extend(tail);
+            let error = author_reply_with_outcome(&frame, PLAN_OP, |body| {
+                assert_eq!(body, &frame[1..]);
+                Ok(json!({"type":kind,"detail":"retained diagnostic"}))
+            }).unwrap_err();
+            assert!(error.contains(kind), "{error}");
+            assert!(error.contains(if marker == 253 {"no record"} else {"undecided"}), "{error}");
+        }
+    }
+
+    #[test]
+    fn enrollment_authoring_outcome_decode_failure_never_yields_plan() {
+        let mut malformed = vec![253];
+        malformed.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v8");
+        malformed.push(9);
+        let error = author_reply_with_outcome(&malformed, PLAN_OP, |_| Err("noncanonical outcome".into())).unwrap_err();
+        assert!(error.contains("noncanonical outcome"), "{error}");
+        for frame in [vec![], vec![PLAN_OP], vec![42,1]] {
+            assert!(author_reply_with_outcome(&frame, PLAN_OP, |_| panic!("invalid frame decoded")).is_err());
+        }
+    }
 
     #[test]
     fn plan_and_ingress_must_echo_exact_source_request_and_receipt() {

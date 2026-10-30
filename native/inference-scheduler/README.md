@@ -140,15 +140,17 @@ is not an implicit operator reload.
 
 ## Operation and supervision
 
-The candidate build ships `bin/mini-inference-scheduler` and records its hash in
-`provenance.json` and `SHA256SUMS`. The deployment unit is
-[`deploy/hermes/mini-inference.service`](../../deploy/hermes/mini-inference.service).
-Dregg infrastructure vendors that same unit and installs its private
-`/var/lib/mini/inference` directory through the existing installer. The optional
-component enables only when the candidate binary and valid inventory exist.
-Install an operator-authored inventory as root-owned mode 0644 at
-`/etc/mini/inference.json`, then use the existing `mini-components --apply`.
-It contains endpoint/identity metadata, never credentials or prompts.
+The candidate package ships `bin/mini-inference-scheduler` (role `inferenceScheduler` in `ROLES`,
+`deploy/candidate/package.py`). **Nothing in this repository runs it.** There is no
+`mini-inference.service` here (`deploy/hermes/` holds no unit for it), the demo's
+controller, written by `deploy/hermes/demo/install-hermes`, pins a `pool` provider row and no
+`providerTask.homelab`, and the only deployment reference is the
+installer patch's unit list (`deploy/door/infra/dregg-infra.patch`), which names a
+`mini-inference.service` that lives in the dregg-infra repository, not here. Whether a
+box has that unit enabled, and its inventory at `/etc/mini/inference.json`, is not
+recorded in this repository. The inventory is root-owned and carries
+endpoint/identity metadata, never credentials or prompts. The operator commands below
+are the binary's own (`src/main.rs`):
 
 ```sh
 B=/var/lib/mini/candidate/current/bin/mini-inference-scheduler
@@ -190,15 +192,14 @@ service. It refuses queued and placed work (cancel or drain those). A late
 report from the old holder is then a no-op. Snapshots carrying
 `operator-resolved` do not load in older binaries.
 
-The unit drains on intentional stop/restart, waits up to 50 seconds, then stops.
-Restart retains that flag until explicit resume. `mini-components --apply` and
-`--check` surface `DRAINED; explicit resume required` and return nonzero instead
-of calling this ready. A crash restarts automatically; dispatched work becomes
-uncertain and keeps its slots, while previously unsent placements receive fresh
-leases. A snapshot written by this version adds drain state; older binaries
-which reject unknown fields cannot read it. Keep the compatible binary and
-snapshot together when planning rollback. Inventory changes still require a
-separate retained-state migration; drain alone does not rewrite its identity pin.
+The drain flag is part of the durable state, so it survives a restart until an
+explicit `resume`. A crash leaves dispatched work uncertain, keeping its slots, while
+previously unsent placements receive fresh leases. A snapshot written by this version
+adds drain state; older binaries which reject unknown fields cannot read it. Keep the
+compatible binary and snapshot together when planning rollback. Inventory changes
+still require a separate retained-state migration; drain alone does not rewrite its
+identity pin. A supervisor that drains on stop is the unit's job, and no such unit is
+in this repository.
 
 ## Checks and remaining deployment work
 
@@ -208,7 +209,9 @@ cargo test -j2 --manifest-path native/grain-runtime/Cargo.toml provider::homelab
 cargo test -j2 --manifest-path native/grain-runtime/Cargo.toml provider::tests::
 ```
 
-Core/socket checks cover shared aliases, same-member controllers, fair service,
+`native/inference-scheduler/native-journey.py` and `native-two-member.py` are Linux
+journey drivers (real Mini admission with a scripted provider, per their own
+docstrings); no recorded run of either is cited here. Core/socket checks cover shared aliases, same-member controllers, fair service,
 eligibility, independent hosts, exact identities, cancellation, daemon death,
 stale lease refusal and uncertain occupancy. Receiving tests connect two actual
 gateway instances to the real private broker and local fake HTTP providers;
@@ -255,8 +258,8 @@ budget, not an infinite-disk promise. Reopen scans bounded receipt metadata;
 normal startup uses saved outcome summaries, rebuilding them after an interrupted
 archive/snapshot cut. A configured per-receipt bound is also fail closed: unusually
 large stale-lease history requires preservation and reconciliation, never eviction.
-The direct core API enforces the same64 KiB request bound as the socket, and each
-request retains at most1024 exact unsent restart guards. Reaching that guard
+The direct core API enforces the same 64 KiB request bound as the socket, and each
+request retains at most 1024 exact unsent restart guards. Reaching that guard
 bound terminalizes only that definitely-unsent placement as `NotSent`, preserving
 every old guard and the current exact lease. Other principals continue receiving;
 the retired request needs a fresh explicit prompt rather than automatic retry.

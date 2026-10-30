@@ -5,6 +5,7 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 publish = false
 description = "Physical Linux custody and sandbox launch for Sandstorm SPK grains"
+build = "build.rs"
 
 [[bin]]
 name = "spk-host"
@@ -30,6 +31,7 @@ rustls = { version = "=0.23.45", default-features = false, features = ["std", "a
 rustls-pemfile = "=2.2.0"
 sandstorm-package = { git = "https://github.com/emberian/dregg.git", rev = "5819115352bdfa43c5cbd329727d4f8d8a1b5be9" }
 minidregg-spk-rpc = { path = "../spk-rpc" }
+minidregg-spk-package-stream = { path = "../spk-package-stream" }
 minidregg-signed-api-path = { path = "../signed-api-path" }
 tokio = { version = "=1.48.0", features = ["net", "rt", "time", "io-util", "process", "sync"] }
 

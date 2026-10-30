@@ -31,8 +31,28 @@ The one induction lives here, once (`fold_unique`, §4).
 
 Imports Mathlib only (Compiler may import Mathlib + Theory + Compiler).
 -/
-import Mathlib.Data.PFunctor.Univariate.Basic
-import Mathlib.Data.Countable.Defs
+module
+
+public import Mathlib.Data.PFunctor.Univariate.Basic
+public import Mathlib.Data.Countable.Defs
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 
@@ -491,5 +511,24 @@ obligation names, exercised end-to-end on one concrete instance. -/
 theorem conflated_pair_separated :
     opaqueRun ℕ (guardT fun _ => true) ≠ opaqueRun ℕ (guardT fun _ => false) :=
   opaqueRun_separates_guards fun h => Bool.noConfusion (congrFun h 0)
+
+/-! ## Poles of `IsFoldHom`
+
+Over the one-leaf signature, the fold of the constant-`0` algebra is a hom; the
+constant-`1` map is not. -/
+
+/-- One leaf shape, no recursive slots. -/
+def unitLeaf : Signature := ⟨Unit, fun _ => Empty⟩
+
+theorem isFoldHom_unitLeaf_fold :
+    IsFoldHom (S := unitLeaf) (fun _ _ => (0 : Nat)) (fold fun _ _ => 0) :=
+  fold_isFoldHom _
+
+theorem isFoldHom_unitLeaf_const_refused :
+    ¬ IsFoldHom (S := unitLeaf) (fun _ _ => (0 : Nat)) (fun _ => 1) := by
+  intro h
+  exact Nat.one_ne_zero (h () Empty.elim)
+
+#assert_axioms isFoldHom_unitLeaf_fold isFoldHom_unitLeaf_const_refused
 
 end Minidregg.Compiler

@@ -26,14 +26,7 @@ AUTHORIZED transition. Both halves are theorems here:
   `Kernel/PrivateTurn`'s `privateTurn_public_indistinguishable`: there the VIEW is blind to the
   witness, here the RELEASE is). Concrete instance on `Fin 2 → Bool` — coordinate 0 designated,
   coordinate 1 private — every fact `decide` (`TwoBit`).
-* **§3 the tree.** (i) `Kernel/PrivateEscrowSettlement`'s `EvidenceBinding.Acceptable` is the
-  kernel-level gate shape: acceptance pins a NAMED relation — a nonzero proof-suite identity, or
-  a declared MPC with nonzero protocol and federation (`acceptable_pins_named_relation`); the
-  kernel's own routing refusal is `note_or_bfv_zero_suite_not_acceptable` (zero-pinned evidence
-  is not acceptable, whatever it claims). And the kernel's `Settlement` is a `BindingGate` by
-  TYPE: its `claimBound` field forces `releasedBase = fill.base` (`settlement_is_binding_gate`,
-  `settlement_release_public_only` — the generic lemma applied to the real kernel type). (ii)
-  `Compiler/CommittedTerminalFiatShamir`'s Stage-0 receipt (`FsReceipt`, 4,131 wires, 13 rounds)
+* **§3 the tree.** `Compiler/CommittedTerminalFiatShamir`'s Stage-0 receipt (`FsReceipt`, 4,131 wires, 13 rounds)
   inhabits the evidence type. What it binds is exactly `descriptorHolds evmAddDescriptor (traceOf
   word)` with the root the word itself (`stage0_relation_is_descriptor`, `Iff.rfl`); the
   descriptor FORCES the released `Z` from the public `(X, Y)` (`stage0_released_output_forced`,
@@ -60,12 +53,11 @@ sum of the operands the statement names, or the receipt is refused (up to the pr
   `R s s' o` says nothing about `s` being CURRENT, and a gate that is a function of the evidence
   alone accepts a replay exactly as it accepted the original. The tree's continuity objects are
   `Kernel/DurableDataIntent`'s `StableNullifier`, `Kernel/DurableCommitProtocol`'s
-  `Intent.nullifiersFreshCheck` (inside `preflight`), `Kernel/PrivateEscrowSettlement`'s
-  `Settlement.installed_rekey_nullifier_not_fresh` and `Claim.computationNullifier`, and
+  `Intent.nullifiersFreshCheck` (inside `preflight`), and
   `Kernel/State`'s `UKey.nullifier` plane. None is re-proved here.
 -/
-import Kernel.PrivateEscrowSettlement
 import Compiler.CommittedTerminalFiatShamir
+import Theory.AxiomPin
 
 namespace Minidregg.Assurance.ReleaseGateRouting
 
@@ -290,53 +282,7 @@ end Binding
 
 /-! ## §3. The tree -/
 
-/-! ### (i) The kernel gate shape — `Kernel/PrivateEscrowSettlement` -/
-
-section Kernel
-
-open Minidregg.Kernel.PrivateEscrowSettlement
-open Minidregg.Kernel.CanonicalEscrowMarket (Fill)
-open Minidregg.Theory.TypedAuthorization (Digest Portal AuthState)
-
-/-- **The kernel's gate is binding-shaped**: `EvidenceBinding.Acceptable` pins a NAMED relation —
-a nonzero proof-suite identity for a semantic proof, or a declared MPC with nonzero protocol
-and federation and zero proof pins. The zero-pinned NoteSpend/BFV statements are refused
-(`note_or_bfv_zero_suite_not_acceptable`): the kernel's own routing refusal. -/
-theorem acceptable_pins_named_relation (b : EvidenceBinding) (h : b.Acceptable) :
-    b.pins.proofSuiteId ≠ ⟨0⟩ ∨
-      (b.mode = .sharedMpc ∧ b.pins = .zero ∧ b.protocolId ≠ ⟨0⟩ ∧ b.federationId ≠ ⟨0⟩) := by
-  rcases h with hs | hm
-  · exact Or.inl (b.semanticAssigned hs).1
-  · exact Or.inr (b.mpcShape hm)
-
-variable {Source : Claim → EvidenceBinding → Type}
-  {M : Minidregg.Theory.CellState.Materializer
-    Minidregg.Theory.CanonicalResourceKernel.layout Digest}
-  {portal : Portal} {authState : AuthState}
-
-/-- **The kernel's `Settlement` is a `BindingGate` by TYPE**: every settlement is accepted (the
-gate is `claimBound`, a proof field — ill-typed until discharged), and its released base is
-FORCED equal to the authorized public fill's base. The generic definition instantiated at the
-real kernel type, not a mirror. Premise-inhabitation of the evidence type is the tree's
-`Assurance/PrivateEscrowSettlementJoin`'s `Witness.settlement_nonempty` (not imported here). -/
-theorem settlement_is_binding_gate :
-    BindingGate (E := Settlement Source M portal authState)
-      (fun (fill : Fill M portal authState) _ o => o = fill.base)
-      (fun st => st.fill) (fun st => st.sealed.claim.releasedBase) (fun _ => true) :=
-  fun st _ => ⟨st.fill, st.claimBound.releaseExact⟩
-
-/-- **The kernel's released base is public-only**: two settlements over fills of the same base
-release the same base — whatever their sealed private computations. `binding_release_public_only`
-at the kernel. -/
-theorem settlement_release_public_only (st₁ st₂ : Settlement Source M portal authState)
-    (h : st₁.fill.base = st₂.fill.base) :
-    st₁.sealed.claim.releasedBase = st₂.sealed.claim.releasedBase :=
-  binding_release_public_only (π := fun fill : Fill M portal authState => fill.base) (h := id)
-    settlement_is_binding_gate (fun _ _ _ ho => ho) st₁ st₂ rfl rfl h
-
-end Kernel
-
-/-! ### (ii) The Stage-0 receipt — `Compiler/CommittedTerminalFiatShamir` -/
+/-! ### The Stage-0 receipt — `Compiler/CommittedTerminalFiatShamir` -/
 
 section Stage0
 
@@ -519,10 +465,6 @@ end Stage0
 #guard_msgs (whitespace := lax) in #print axioms TwoBit.routed_refused
 /-- info: 'Minidregg.Assurance.ReleaseGateRouting.TwoBit.private_bit_not_released' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms TwoBit.private_bit_not_released
-/-- info: 'Minidregg.Assurance.ReleaseGateRouting.acceptable_pins_named_relation' does not depend on any axioms -/
-#guard_msgs (whitespace := lax) in #print axioms acceptable_pins_named_relation
-/-- info: 'Minidregg.Assurance.ReleaseGateRouting.settlement_release_public_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms settlement_release_public_only
 /-- info: 'Minidregg.Assurance.ReleaseGateRouting.stage0_relation_is_descriptor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stage0_relation_is_descriptor
 /-- info: 'Minidregg.Assurance.ReleaseGateRouting.stage0_released_output_forced' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -539,5 +481,33 @@ end Stage0
 #guard_msgs (whitespace := lax) in #print axioms stage0_deployed_gate_accepts_honest
 /-- info: 'Minidregg.Assurance.ReleaseGateRouting.stage0Receipt_is_bound_evidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms stage0Receipt_is_bound_evidence
+
+/-! ## Poles of `BindingGate` and `PublicOnly`
+
+An accept-all gate binds the full relation and is refused for the empty one; a
+relation releasing a constant reads only the public half, one releasing the
+private state does not. -/
+
+theorem bindingGate_full :
+    BindingGate (fun (_ _ : Unit) (_ : Unit) => True) id id (fun _ => true) :=
+  fun _ _ => ⟨(), trivial⟩
+
+theorem bindingGate_acceptAll_refused :
+    ¬ BindingGate (fun (_ _ : Unit) (_ : Unit) => False) id id (fun _ => true) := by
+  intro h
+  obtain ⟨_, h⟩ := h () rfl
+  exact h
+
+theorem publicOnly_constant :
+    PublicOnly (fun (_ _ : Bool) (o : Bool) => o = true) (fun _ => ()) (fun _ => true) :=
+  fun _ _ _ h => h
+
+theorem publicOnly_private_refused :
+    ¬ PublicOnly (fun (s _ : Bool) (o : Bool) => o = s) (fun _ => ()) (fun _ => true) := by
+  intro h
+  exact absurd (h false false false rfl) (by decide)
+
+#assert_axioms bindingGate_full bindingGate_acceptAll_refused publicOnly_constant
+  publicOnly_private_refused
 
 end Minidregg.Assurance.ReleaseGateRouting

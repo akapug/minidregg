@@ -1,0 +1,86 @@
+# The fn consumer worker: admits one selected release that fn stored, at the
+# recipient Mini, on the fn-r route (the only route fn's NNTP POST produces).
+#
+# One instance per exchange NAME, the private contract /etc/mini/fn/NAME.json
+# (type minidregg-selected-exchange-v1, native/resource-client/SELECTED-EXCHANGE.md)
+# and its state /var/lib/mini-fn/NAME, made by `--phase prepare` and
+# `--phase publish` run as this unit's uid. Each run is
+#   mini selected-exchange --phase receive-transport
+# which polls the LOCAL fn node over its Unix control socket through the
+# pinned Host (`selected-release-fn-legacy-poll`: fn's ACL2 decoder extracts
+# the stored article; the Host binds the owner-authored suffix and derives
+# the recipient ingress), then submits that Lean-authored ingress to the
+# recipient's socket (op 20). A later run after an attempt does only the
+# exact op 21 lookup, so a lost reply never authors a second event13, and a
+# finished exchange is a read-only no-op. The admitted record is
+# recipient-attempt/request-NNNN.outcome.json (confirmed, installed or
+# replayed). fn acceptance or retrieval is never Mini admission.
+#
+# The fn-r route never ACKs at fn, so one fn consumer scope yields one
+# article: each exchange carries its own scope in its contract.
+#
+# Network: none. Mini's fn wire reaches only the co-located fn node (the
+# control socket here; POST at 127.0.0.1 in `publish`). The NNTP leg between
+# machines is fn-to-fn peering on 119/563, which fn's own unit owns.
+# The journey row `exchange` (selected-exchange-journey.sh) runs this
+# ExecStart line verbatim for its exact-retry step.
+#
+# Setup (operator, once per box): useradd --system --home /var/lib/mini-fn
+# mini-fn; give it group access to the fn control socket (group `fn`) and the
+# recipient's public socket (group `mini`). Then per exchange:
+#   install -m 600 -o mini-fn contract.json /etc/mini/fn/NAME.json
+#   sudo -u mini-fn mini selected-exchange --phase prepare ... --state-dir /var/lib/mini-fn/NAME
+#   sudo -u mini-fn mini selected-exchange --phase publish ...
+#   systemctl enable --now mini-fn-receive@NAME.timer
+[Unit]
+Description=Mini fn consumer (fn-r route) for exchange %i
+After=mini-store.service
+ConditionPathExists=/etc/mini/fn/%i.json
+ConditionPathExists=/var/lib/mini-fn/%i/prepared.json
+
+[Service]
+Type=oneshot
+User=mini-fn
+Group=mini-fn
+SupplementaryGroups=fn mini
+Slice=mini.slice
+Nice=10
+UMask=0077
+Environment=MINI=/usr/local/bin/mini
+Environment=MINI_FN_CONTRACT=/etc/mini/fn/%i.json
+Environment=MINI_FN_STATE=/var/lib/mini-fn/%i
+# fn's helper is SBCL; the default 32000 MiB dynamic-space reservation is
+# not needed for one poll and one decode.
+Environment="SBCL_USER_ARGS=--dynamic-space-size 2048"
+ExecStart=/bin/sh -c 'exec "$MINI" selected-exchange --phase receive-transport --contract "$MINI_FN_CONTRACT" --state-dir "$MINI_FN_STATE"'
+StateDirectory=mini-fn
+StateDirectoryMode=0700
+TimeoutStartSec=600
+# Confinement: its own uid, no network namespace peers, Unix sockets only.
+# Path-bound Unix sockets still connect across PrivateNetwork.
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mini-fn
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+LimitCORE=0
+TasksMax=64
+MemoryMax=4G

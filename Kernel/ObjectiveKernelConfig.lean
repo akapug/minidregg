@@ -9,8 +9,12 @@ pins: `maximum`, `tariff`, `sourceBytes`). An operator who disabled Core4
 (`objective-core4`) disables both with it. Fees are in the deployment's
 creation-tariff asset, paid to its collector.
 -/
-import Kernel.ObjectiveActivity
-import Kernel.ObjectiveBendNativeAdmission
+module
+
+public import Kernel.ObjectiveActivity
+public import Kernel.ObjectiveBendNativeAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveKernelConfig
 
@@ -29,6 +33,9 @@ structure Ambient where
   /-- The deployment's creation-tariff asset (the credit fees are paid in) and collector. -/
   asset : Nat
   collector : Nat
+  /-- The package replays the Host holds (`ObjectiveActivity.LoadMemo`): a memo, so it changes no
+  decision (`ObjectiveActivity.LoadMemo.replay_eq`), only how often a pin's front end runs. -/
+  held : ObjectiveActivity.LoadMemo := {}
 
 /-- The longest patience an await may declare. -/
 def maxPatience : Nat := 64
@@ -57,6 +64,6 @@ def configOf {F : Type} [Field F] (deployment : Deployment) (profile : Canonical
          maxPatience := maxPatience
          typeFuel := policy.maximum.typeFuel, maxArtifactBytes := policy.sourceBytes
          tariff := policy.tariff
-         abandonGrace := maxPatience, storageRate := storageRate }
+         abandonGrace := maxPatience, storageRate := storageRate, held := ambient.held }
 
 end Minidregg.Kernel.ObjectiveKernelConfig

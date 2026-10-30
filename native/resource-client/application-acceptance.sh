@@ -1,6 +1,7 @@
 #!/bin/sh
 # Native two-participant application birth gate. No hosted model or app process runs.
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 SOURCE_MATCHED_MINIDREGG_HOST NEW_PRIVATE_EVIDENCE_DIRECTORY" >&2
@@ -13,6 +14,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+NO_RECORD=$(response_marker "$REPO" NO_RECORD)
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -25,7 +28,7 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
 umask 077
-shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
+sha256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   >"$EVIDENCE/input-sha256.txt"
 
 decimal() {
@@ -64,11 +67,15 @@ deny_query() (
     echo "unauthorized read succeeded: $label" >&2
     exit 1
   fi
-  reason_hex=$(printf '%s' 'observation refused' | od -An -tx1 -v | tr -d ' \n')
+  # Refused by name at the observation, before any record: the key holds no grant on that
+  # target (`no-grant`, phase observation), a NO_RECORD (253) frame the client keeps.
   if ! { [ -s "$EVIDENCE/$label/signed-observation.bin" ] &&
       [ ! -e "$EVIDENCE/$label/view.json" ] &&
-      grep -Fq 'host refused query' "$EVIDENCE/$label.stderr" &&
-      grep -Fq "$reason_hex" "$EVIDENCE/$label.stderr"; }; then
+      jq -e '.type == "minidregg-query-refusal-v1" and .stage == "query"' \
+        "$EVIDENCE/$label/query-refusal.json" >/dev/null &&
+      [ "$(head -c 1 "$EVIDENCE/$label/query-refusal.frame" | od -An -tu1 | tr -d ' ')" = "$NO_RECORD" ] &&
+      grep -Fq 'host refused query: refused: no-grant: ' "$EVIDENCE/$label.stderr" &&
+      grep -Fq '(phase observation)' "$EVIDENCE/$label.stderr"; }; then
     echo "missing exact native observation refusal: $label" >&2
     exit 1
   fi
@@ -115,50 +122,18 @@ SECOND_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/second.pub" | tr -d ' \n')
 [ "$OWNER_PUBLIC" != "$FIRST_PUBLIC" ] && [ "$OWNER_PUBLIC" != "$SECOND_PUBLIC" ] &&
   [ "$FIRST_PUBLIC" != "$SECOND_PUBLIC" ]
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8527,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-
-cat >"$EVIDENCE/genesis.json" <<EOF
-{"domain":"8527","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-  {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-    "publicKey":"$OWNER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"1000",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-    "publicKey":"$FIRST_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-   "factoryObserveCapabilityId":"55","initialBalance":"1000",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"9009","keyEpoch":"2","algorithm":"1","subject":"9",
-    "publicKey":"$SECOND_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"9","spendCapabilityId":"43","controlCapabilityId":"53",
-   "factoryObserveCapabilityId":"56","initialBalance":"1000",
-   "accountPredicate":{"type":"all","predicates":[]}}
- ],
- "factoryControllerSubject":"7","factoryControllerCapability":"57","clockTickers":[],
- "tailBound":"256",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+# The genesis through the one template (scenario-genesis.sh): only what this world differs by.
+jq -n --arg first "$FIRST_PUBLIC" --arg second "$SECOND_PUBLIC" '[
+  {subject: 8, keyId: 8008, publicKey: $first, accountId: 8, spendCapabilityId: 42,
+   controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 1000},
+  {subject: 9, keyId: 9009, publicKey: $second, accountId: 9, spendCapabilityId: 43,
+   controlCapabilityId: 53, factoryObserveCapabilityId: 56, initialBalance: 1000}]' >"$EVIDENCE/enrollments.json"
+# subject 9's control capability is 53, so the factory controller's moves to 57
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$HERE/scenario-genesis.sh" "$EVIDENCE" "$OWNER_PUBLIC" \
+  'del(.grainPlatform) | .domain = 8527 | .factoryControllerCapability = 57 | .sponsor.initialBalance = 1000' \
+  "$EVIDENCE/enrollments.json"
+SEMANTICS=$(decimal "$EVIDENCE/profile.json" semantics)
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" \
   >"$EVIDENCE/bootstrap.stdout"
@@ -266,17 +241,17 @@ query app-second 9 6100 302 "$EVIDENCE/second.key" 16009 resource
 FIRST_ROOT=$(jq -er '.cell.root' "$EVIDENCE/app-first/view.json")
 SECOND_ROOT=$(jq -er '.cell.root' "$EVIDENCE/app-second/view.json")
 [ "$FIRST_ROOT" = "$SECOND_ROOT" ]
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/before-denied-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/before-denied-image.bin"
 deny_query second-cannot-read-first 9 6208 201 "$EVIDENCE/second.key" 17009
 deny_query first-cannot-read-second 8 6209 211 "$EVIDENCE/first.key" 17008
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/after-denied-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/after-denied-image.bin"
 cmp "$EVIDENCE/before-denied-image.bin" "$EVIDENCE/after-denied-image.bin"
 
 # Restart the pinned Host session, recover the original exact signed call by
 # lookup, and show that no second birth or debit was installed.
 query factory-before-reopen 7 10 54 "$EVIDENCE/owner.key" 18001 resource
 BEFORE_BOUNDARY=$(decimal "$EVIDENCE/factory-before-reopen/challenge.json" worldRoot)
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/before-reopen-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/before-reopen-image.bin"
 stop_session
 start_session session-reopen
 "$MINI" retry --attempt "$EVIDENCE/session-first-attempt" --mode lookup \
@@ -294,7 +269,7 @@ query app-first-reopen 8 6100 301 "$EVIDENCE/first.key" 18008 resource
 query app-second-reopen 9 6100 302 "$EVIDENCE/second.key" 18009 resource
 [ "$(jq -er '.cell.root' "$EVIDENCE/app-first-reopen/view.json")" = "$FIRST_ROOT" ]
 [ "$(jq -er '.cell.root' "$EVIDENCE/app-second-reopen/view.json")" = "$FIRST_ROOT" ]
-"$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/after-reopen-image.bin"
+durable_image "$EVIDENCE/store" "$EVIDENCE/after-reopen-image.bin"
 cmp "$EVIDENCE/before-reopen-image.bin" "$EVIDENCE/after-reopen-image.bin"
 
 jq -n --arg app "6100" --arg first "6208" --arg second "6209" \

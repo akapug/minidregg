@@ -4,15 +4,34 @@ controller bytes, not a second executor or an authority assertion. Each
 operation's existing strict receiving codec still decodes its inner payload.
 No raw DataIntent, supplied height, profile, or post-state is a call variant.
 -/
-import Compiler.NativeProtocolFrames
-import Compiler.NativeHostProfile
-import Kernel.DeclaredResourceController
-import Kernel.PolicyInstallReceiver
-import Kernel.ResourceBirthReceiver
-import Kernel.CapabilityDelegationReceiver
-import Kernel.CapabilityRevocationReceiver
-import Kernel.WorldRoot
-import Compiler.RefusalReason
+module
+
+public import Compiler.NativeProtocolFrames
+public import Compiler.NativeHostProfile
+public import Kernel.DeclaredResourceController
+public import Kernel.PolicyInstallReceiver
+public import Kernel.ResourceBirthReceiver
+public import Kernel.CapabilityDelegationReceiver
+public import Kernel.CapabilityRevocationReceiver
+public import Kernel.WorldRoot
+public import Compiler.RefusalReason
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -24,7 +43,7 @@ open Minidregg.Kernel
 
 set_option autoImplicit false
 
-/-! ## The world root (DATAMODEL §3.2/§3.4, step C1)
+/-! ## The world root (docs/DATAMODEL.md §3.2/§3.4, step C1)
 
 Receipts, signing plans and observation challenges bind `(worldRoot, height)`.
 The world root is `Kernel.WorldRoot`'s authenticated map over the world's
@@ -65,31 +84,24 @@ def worldEntries (domain semantics : Digest) (image : DurableReceiver.Image) :
   (.system, .system (height image) (logRoot domain semantics image)) ::
     image.cellIds.map fun cellId => (.cell cellId.value, .cell (image.currentBytes cellId))
 
-/-- **The world root** of an image, evaluated sparsely. -/
+/-- The image's slot roots: the system slot, then every cell it names. -/
+def worldSlotRoots (domain semantics : Digest) (image : DurableReceiver.Image) : List (WorldRoot.Key × Digest) :=
+  (worldEntries domain semantics image).map fun e => (e.1, leafRoot e.2)
+
+/-- **The world root** of an image: the compressed trie over its slot roots. -/
 def worldRoot (domain semantics : Digest) (image : DurableReceiver.Image) : Digest :=
-  WorldRoot.deployedRoot ((worldEntries domain semantics image).map fun e => (e.1, leafRoot e.2))
+  WorldRoot.deployedRoot (worldSlotRoots domain semantics image)
 
-/-- The world root is A3's two-level `worldRoot` over (slot ↦ leaf root) at the
-deployed scheme. -/
-theorem worldRoot_eq_entryRoot (domain semantics : Digest) (image : DurableReceiver.Image) :
-    worldRoot domain semantics image =
-      WorldRoot.entryRoot WorldRoot.deployed leafRoot (worldEntries domain semantics image) :=
-  (WorldRoot.entryRoot_deployed leafRoot _).symm
-
-/-- **Openings (§3.4).**  When no two of the image's slots share an index path,
-a named cell's current root opens at the world root. -/
+/-- **Openings (§3.4).**  When no two of the image's slots share an index path
+(else the deployed hash collides, `WorldRoot.deployed_paths`), a named cell's
+current root opens at the world root, by the opening read off the kept trie. -/
 theorem cell_opens (domain semantics : Digest) (image : DurableReceiver.Image)
     (cellId : DurableDataIntent.CellId) (named : cellId ∈ image.cellIds)
-    (hix : ∀ e ∈ worldEntries domain semantics image,
-      WorldRoot.deployed.ix e.1 = WorldRoot.deployed.ix (.cell cellId.value) → e.1 = .cell cellId.value) :
-    WorldRoot.deployed.verify (worldRoot domain semantics image) (.cell cellId.value)
-      (some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)))
-      (WorldRoot.deployed.opening (Theory.AuthMap.worldSlots leafRoot
-        (WorldRoot.slotsOf WorldRoot.deployed.ix (worldEntries domain semantics image))) (.cell cellId.value)) =
-      true := by
-  have opens := Theory.AuthMap.world_opening WorldRoot.deployed leafRoot
-    (WorldRoot.slotsOf WorldRoot.deployed.ix (worldEntries domain semantics image)) (.cell cellId.value)
-  rw [WorldRoot.lookup_slotsOf _ _ _ hix] at opens
+    (inj : Theory.AuthTrie.Cache.PathsInjective WorldRoot.deployedIx (worldSlotRoots domain semantics image)) :
+    Theory.AuthTrie.verify WorldRoot.worldDig WorldRoot.deployedIx (worldRoot domain semantics image)
+      (.cell cellId.value) (some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)))
+      ((Theory.AuthTrie.Cache.build (dig := WorldRoot.worldDig) WorldRoot.deployedIx_length
+        (worldSlotRoots domain semantics image)).opening (.cell cellId.value)) = true := by
   have hall : ∀ e ∈ (worldEntries domain semantics image).filter
       (fun e => decide (e.1 = WorldRoot.Key.cell cellId.value)),
       e = (.cell cellId.value, .cell (image.currentBytes cellId)) := by
@@ -118,27 +130,42 @@ theorem cell_opens (domain semantics : Digest) (image : DurableReceiver.Image)
         some (.cell cellId.value, .cell (image.currentBytes cellId)) := by
     rw [List.getLast?_eq_getLast hne]
     exact congrArg some (hall _ (List.getLast_mem hne))
-  rw [hone] at opens
-  simpa [leafRoot, worldRoot_eq_entryRoot, WorldRoot.entryRoot] using opens
+  have hv : Theory.AuthTrie.lastVal (worldSlotRoots domain semantics image) (.cell cellId.value) =
+      some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)) := by
+    rw [worldSlotRoots, Theory.AuthTrie.lastVal_map]
+    unfold Theory.AuthTrie.lastVal
+    rw [hone]
+    rfl
+  have built := Theory.AuthTrie.Cache.build_holds (dig := WorldRoot.worldDig) WorldRoot.deployedIx_length
+    (worldSlotRoots domain semantics image)
+  have opened := Theory.AuthTrie.Cache.opening_complete WorldRoot.deployedIx_length built inj (.cell cellId.value)
+  rw [Theory.AuthTrie.Cache.digest_eq built, hv] at opened
+  exact opened
 
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-    { encode value := frame ++ stream.encode value
-      decode bytes := if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-      decode_encode := by
-        intro value
-        have exact := stream.toLawful.decode_encode value
-        change stream.toLawful.decode (stream.encode value) = some value at exact
-        simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of
+`StreamCodec.framed`.  It is canonical by construction (`framed_canonical`), so
+it decodes without re-encoding what it read. -/
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
+
+theorem framed_decode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
+    (bytes : List UInt8) :
+    (framed frame stream).decode bytes =
+      if bytes.take frame.length = frame then stream.toLawful.decode (bytes.drop frame.length)
+      else none := by
+  by_cases prefixed : bytes.take frame.length = frame <;>
+    simp [framed, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap,
+      StreamCodec.product, StreamCodec.literal, prefixed]
+  cases stream.decodePrefix (bytes.drop frame.length) <;> simp
+
+theorem framed_encode {α : Type} (frame : List UInt8) (stream : StreamCodec α) (value : α) :
+    (framed frame stream).encode value = frame ++ stream.encode value := rfl
 
 theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec α)
     {bytes : List UInt8} {value : α}
     (decoded : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 def signedInvocationStream : StreamCodec DeclaredResourceController.SignedCommand :=
   StreamCodec.xmap (StreamCodec.product bytesStream
@@ -242,6 +269,9 @@ def rosterInstallStream : StreamCodec RosterInstallWire :=
 def draftStream : StreamCodec Draft :=
   StreamCodec.xmap (StreamCodec.sum ordinaryDraftStream rosterInstallStream)
     Draft.toWire Draft.ofWire (by intro value; cases value <;> rfl)
+    (by
+      intro wire
+      rcases wire with (⟨_, _⟩ | _ | ⟨_, _, _⟩ | _ | _ | _) | ⟨_, _, _, _⟩ <;> rfl)
 
 def draftCodec : LawfulCodec Draft := framed draftFrame draftStream
 
@@ -299,8 +329,10 @@ def receiptStream : StreamCodec Receipt :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro value; cases value; rfl)
 
+/-- `.inr true` names no confirmation and is refused (it used to decode as
+`.replayed`, a second spelling of it). -/
 def confirmationStream : StreamCodec DurableReceiverIO.Confirmation :=
-  StreamCodec.xmap (StreamCodec.sum StreamCodec.bool StreamCodec.bool)
+  StreamCodec.retract (StreamCodec.sum StreamCodec.bool StreamCodec.bool)
     (fun value => match value with
       | .installed => .inl false
       | .recoveredAfterUncertainResponse => .inl true
@@ -360,6 +392,9 @@ def outcomeStream : StreamCodec Outcome :=
               (StreamCodec.product bytesStream (StreamCodec.option LawLeaf.stream))))
           (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream)))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
+    (by
+      intro wire
+      rcases wire with ⟨_, _⟩ | ⟨_, _, _⟩ | ⟨_, _, _, _⟩ | (_ | _) | _ | _ <;> rfl)
 
 def outcomeCodec : LawfulCodec Outcome :=
   framed outcomeFrame outcomeStream
@@ -371,9 +406,7 @@ theorem v1_outcome_refused (payload : List UInt8) :
     outcomeCodec.decode (retiredOutcomeFrame ++ payload) = none := by
   have lengthExact : outcomeFrame.length = retiredOutcomeFrame.length := by decide +kernel
   have different : retiredOutcomeFrame ≠ outcomeFrame := by decide +kernel
-  have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrame ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [outcomeCodec, framed_decode, lengthExact, different]
 
 def retiredOutcomeFrameV2 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v2".toUTF8.toList
 
@@ -383,9 +416,7 @@ theorem v2_outcome_refused (payload : List UInt8) :
     outcomeCodec.decode (retiredOutcomeFrameV2 ++ payload) = none := by
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV2.length := by decide +kernel
   have different : retiredOutcomeFrameV2 ≠ outcomeFrame := by decide +kernel
-  have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrameV2 ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [outcomeCodec, framed_decode, lengthExact, different]
 
 def retiredOutcomeFrameV3 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v3".toUTF8.toList
 
@@ -396,9 +427,7 @@ theorem v3_outcome_refused (payload : List UInt8) :
     outcomeCodec.decode (retiredOutcomeFrameV3 ++ payload) = none := by
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV3.length := by decide +kernel
   have different : retiredOutcomeFrameV3 ≠ outcomeFrame := by decide +kernel
-  have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrameV3 ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [outcomeCodec, framed_decode, lengthExact, different]
 
 def retiredOutcomeFrameV4 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v4".toUTF8.toList
 
@@ -407,20 +436,36 @@ theorem v4_outcome_refused (payload : List UInt8) :
     outcomeCodec.decode (retiredOutcomeFrameV4 ++ payload) = none := by
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV4.length := by decide +kernel
   have different : retiredOutcomeFrameV4 ≠ outcomeFrame := by decide +kernel
-  have raw : (framedRaw outcomeFrame outcomeStream).decode
-      (retiredOutcomeFrameV4 ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [outcomeCodec, framed_decode, lengthExact, different]
+
+def retiredOutcomeFrameV5 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v5".toUTF8.toList
+
+/-- A version-5 outcome (its refusal reason without `overBound`, tag 15)
+refuses to decode: a v5 peer would read tag 15 as unknown, a v6 reader never
+reinterprets a v5 frame. -/
+theorem v5_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV5 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV5.length := by decide +kernel
+  have different : retiredOutcomeFrameV5 ≠ outcomeFrame := by decide +kernel
+  simp [outcomeCodec, framed_decode, lengthExact, different]
+
+def retiredOutcomeFrameV6 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v6".toUTF8.toList
+
+/-- A version-6 outcome (its refusal reason without `rateLimited`, tag 16)
+refuses to decode: a v6 peer would read tag 16 as unknown, a v7 reader never
+reinterprets a v6 frame. -/
+theorem v6_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV6 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV6.length := by decide +kernel
+  have different : retiredOutcomeFrameV6 ≠ outcomeFrame := by decide +kernel
+  simp [outcomeCodec, framed_decode, lengthExact, different]
 
 /-- A version-4 signing plan (its draft without `renounce`) refuses to decode. -/
 theorem v4_signingPlan_refused (payload : List UInt8) :
     signingPlanCodec.decode (retiredSigningPlanFrame ++ payload) = none := by
   have lengthExact : signingPlanFrame.length = retiredSigningPlanFrame.length := by decide +kernel
   have different : retiredSigningPlanFrame ≠ signingPlanFrame := by decide +kernel
-  have raw : (framedRaw signingPlanFrame signingPlanStream).decode
-      (retiredSigningPlanFrame ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [signingPlanCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [signingPlanCodec, framed_decode, lengthExact, different]
 
 def retiredDraftFrame : List UInt8 := "DREGG/NATIVE-HOST/DRAFT/v3".toUTF8.toList
 def retiredCallFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNED-CALL/v3".toUTF8.toList
@@ -431,10 +476,7 @@ theorem v3_draft_refused (payload : List UInt8) :
   have lengthExact : draftFrame.length = retiredDraftFrame.length := by
     decide +kernel
   have different : retiredDraftFrame ≠ draftFrame := by decide +kernel
-  have raw : (framedRaw draftFrame draftStream).decode
-      (retiredDraftFrame ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [draftCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [draftCodec, framed_decode, lengthExact, different]
 
 /-- A version-3 signed call (without `renounce`) refuses to decode. -/
 theorem v3_call_refused (payload : List UInt8) :
@@ -442,10 +484,7 @@ theorem v3_call_refused (payload : List UInt8) :
   have lengthExact : callFrame.length = retiredCallFrame.length := by
     decide +kernel
   have different : retiredCallFrame ≠ callFrame := by decide +kernel
-  have raw : (framedRaw callFrame callStream).decode
-      (retiredCallFrame ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [callCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [callCodec, framed_decode, lengthExact, different]
 
 @[simp] theorem call_roundtrip (value : SignedCall) :
     callCodec.decode (callCodec.encode value) = some value := callCodec.decode_encode value
@@ -469,7 +508,7 @@ theorem plan_canonical {bytes : List UInt8} {value : SigningPlan}
 theorem framed_other_frame_refused {α : Type} (frame : List UInt8) (stream : StreamCodec α)
     (bytes : List UInt8) (other : bytes.take frame.length ≠ frame) :
     (framed frame stream).decode bytes = none := by
-  simp [framed, ResourceBirthCodec.strictCodec, framedRaw, other]
+  simp [framed_decode, other]
 
 /-- A refusal frame names its reason and its law clause. -/
 theorem outcome_refusal_reason_decoded (reason : RefusalReason) (phase detail : List UInt8)
@@ -499,8 +538,6 @@ theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
 #guard_msgs (whitespace := lax) in #print axioms v3_draft_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.v3_call_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_call_refused
-/-- info: 'Minidregg.Compiler.NativeHostCodec.worldRoot_eq_entryRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms worldRoot_eq_entryRoot
 /-- info: 'Minidregg.Compiler.NativeHostCodec.cell_opens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cell_opens
 
@@ -510,9 +547,7 @@ theorem v4_draft_refused (payload : List UInt8) :
     draftCodec.decode (retiredDraftFrameV4 ++ payload) = none := by
   have lengthExact : draftFrame.length = retiredDraftFrameV4.length := by decide +kernel
   have different : retiredDraftFrameV4 ≠ draftFrame := by decide +kernel
-  have raw : (framedRaw draftFrame draftStream).decode (retiredDraftFrameV4 ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [draftCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [draftCodec, framed_decode, lengthExact, different]
 
 def retiredSigningPlanFrameV5 : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v5".toUTF8.toList
 
@@ -520,8 +555,6 @@ theorem v5_signingPlan_refused (payload : List UInt8) :
     signingPlanCodec.decode (retiredSigningPlanFrameV5 ++ payload) = none := by
   have lengthExact : signingPlanFrame.length = retiredSigningPlanFrameV5.length := by decide +kernel
   have different : retiredSigningPlanFrameV5 ≠ signingPlanFrame := by decide +kernel
-  have raw : (framedRaw signingPlanFrame signingPlanStream).decode (retiredSigningPlanFrameV5 ++ payload) = none := by
-    simp [framedRaw, lengthExact, different]
-  simp [signingPlanCodec, framed, ResourceBirthCodec.strictCodec, raw]
+  simp [signingPlanCodec, framed_decode, lengthExact, different]
 
 end Minidregg.Compiler.NativeHostCodec

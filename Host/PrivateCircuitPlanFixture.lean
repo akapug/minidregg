@@ -2,6 +2,7 @@
 No secret material, production state or release authority is embedded here. -/
 import Compiler.PrivateCircuitAllocation
 import Lean
+open Lean
 
 namespace Minidregg.Host.PrivateCircuitPlanFixture
 open Minidregg.Compiler.PrivateCircuitAllocation

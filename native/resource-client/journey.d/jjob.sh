@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-JOB (COMPUTE, the floor): one friend posts a Nock job in a room, another
+# J-JOB (docs/COMPUTE.md §2): one friend posts a Nock job in a room, another
 # friend's node runs it, the answer comes back, and a WRONG answer costs the
 # provider its bond -- adjudicated by one `ran` turn: the kernel re-executes the
 # job's program on its own sample and compares the outputs exactly.
@@ -10,7 +10,7 @@
 # it starts. Run it from a SHORT root (the socket path must fit SUN_LEN).
 # Also needs: NOCK_RUN (the untrusted nockvm runner) and JOB_PROGRAMS, a
 # directory holding collatz.jam and liar.jam (minimal jam bytes of
-# deploy/shell/templates/job/programs/*.hoon, compiled by the pinned hoonc).
+# native/resource-client/templates/job/programs/*.hoon, compiled by the pinned hoonc).
 # Exit 0 = PASS. The last stdout line is rows.tsv; the verdict is the last stderr line.
 #
 # Who: A = the sponsor (subject 7, account 7) is the caller and the operator;
@@ -40,9 +40,14 @@ mkdir -p "$DIR"
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 set +e
 python3 - "$DIR" "$HERE" <<'PY'
-import json, os, re, socket, struct, subprocess, sys, time
+import hashlib, json, os, re, socket, struct, subprocess, sys, time
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 DIR, HERE = sys.argv[1], sys.argv[2]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
+HOST_PIN = hashlib.sha256(open(HOST, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
 NOCK_RUN, PROGS = os.environ["NOCK_RUN"], os.environ["JOB_PROGRAMS"]
 W = os.path.join(DIR, "w")
 ROWS = []
@@ -113,7 +118,7 @@ cfg = open(CONFIG, "rb").read()
 def frame(b): return struct.pack("<I", len(b)) + b
 def op(code, payload):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
-    s.sendall(frame(bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload))
+    s.sendall(frame(bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([code]) + payload))
     def exact(n):
         out = b""
         while len(out) < n:
@@ -156,7 +161,7 @@ def propose_submit(ws, pid, request):
     if r1.returncode: return r1, None
     r2 = run(MINI, "workspace", "--action", "submit", "--dir", ws, "--intent",
              os.path.join(ws, "proposals", pid, "intent.json"), "--attempt", os.path.join(ws, "attempts", pid))
-    try: outcome = json.load(open(os.path.join(ws, "attempts", pid, "outcome.json")))
+    try: outcome = attempt_answer(os.path.join(ws, "attempts", pid, "outcome.json"))
     except Exception: outcome = None
     return r2, outcome
 invite = {"type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": "lab", "recipient": "21",
@@ -246,7 +251,7 @@ def restart():
 
 def raw_op(code, payload):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
-    body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload
+    body = bytes([2]) + struct.pack("<I", len(cfg)) + cfg + HOST_PIN + bytes([code]) + payload
     s.sendall(struct.pack("<I", len(body)) + body)
     def exact(n):
         out = b""

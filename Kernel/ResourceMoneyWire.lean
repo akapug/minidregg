@@ -1,6 +1,25 @@
 /- Typed declarations only. Account/capability/signature identity is always the
 containing native target; no Book post or raw balance write crosses this wire. -/
-import Kernel.ResourceMoneyOperationDomain
+module
+
+public import Kernel.ResourceMoneyOperationDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceMoneyWire
 
@@ -108,11 +127,13 @@ def assets (batch : ApplicationBatch) (entry : Entry) : List AssetId :=
     (batch.operations[position]?).map fun operation => operation.posting.asset
 
 /-- Reuse the production verb distinctions; ordinary payment authority does
-not issue an asset or destroy it. These are required from the SAME admitted
+not issue an asset, extend credit in it (a floor is set from the issuer well,
+under the same `mintAsset` verb as a mint), or destroy it. These are required from the SAME admitted
 account capability in addition to whole-command/current-law admission. -/
 def operationVerb : Operation → Verb .account
   | .mint _ _ _ => .mintAsset
   | .burn _ _ _ => .burnAsset
+  | .setFloor _ _ _ => .mintAsset
   | _ => .transfer
 
 def verbs (batch : ApplicationBatch) (entry : Entry) : List (Verb .account) :=

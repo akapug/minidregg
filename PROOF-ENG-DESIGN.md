@@ -1,14 +1,22 @@
 # Objective Bend Core4: proof-engineering target structure
 
-Lane PROOF-ENG, 2026-10-04. Scope: `Theory/ObjectiveBend*` (definition modules in the
-default build; proof modules in the `ObjectiveProofs` target). Evidence tags: READ = read
-at source, MEASURED = counted in this clone, DESIGN = this note's decision.
+Scope: `Theory/ObjectiveBend*` (definition modules in the default build; proof modules in the
+`ObjectiveProofs` target). Evidence tags: READ = read at source, MEASURED = counted, DESIGN =
+this note's decision.
+
+**Built from §1(a):** the shared step split `Theory/ObjectiveBendStepCases.lean` (used by
+`ObjectiveBendDemandPreservation`, `ObjectiveBendDemandAdequacy` and `ObjectiveBendLedgerPoles`)
+and the per-constructor Preservation modules `Theory/ObjectiveBendDemandPreservation/Base.lean`
+and `Cases/{Activities,Arithmetic,Functions,Pairs,Records,Sums}.lean`. §0 describes the
+structure these replace.
 
 ## 0. What makes a new constructor expensive (READ/MEASURED)
 
-* **Positional recursors.** `Theory/ObjectiveBendDemandPreservation.lean` runs
+* **Positional recursors.** Before the split, `Theory/ObjectiveBendDemandPreservation.lean` ran
   `refine PartialTyping.rec (motive_1 := …) (motive_2 := …) (motive_3 := …) ?_ … ?_ source`
-  fourteen times, each with 29 positional `?_` and 29 positional bullets. Most are
+  fourteen times, each with 29 positional `?_` and 29 positional bullets. On this tree the
+  recursor is applied 16 times, spread over `Base.lean`, the `Cases/` modules and
+  `ObjectiveBendDemandTyping.lean`. Most are
   inversion lemmas where one or two constructors matter and the rest are
   `intros; trivial`. A new typing rule means inserting a bullet at the right
   *position* in all fourteen, including the ~twelve where it is irrelevant.
@@ -110,6 +118,8 @@ declaration, not the 402 someone remembered.
 
 ## 1(d). Statement-stability gate
 
+> **History (2026-10-27).** The manifest ratchet described here (`scripts/gates/objective-manifest/`, the decisions ledger, `objective-manifest.py`) was deleted: 33 bookkeeping commits in October, 610 files and a 9,011-line ledger protected nothing the axiom pins and the build do not. `docs/COORDINATION-2026-10-27.md` §2 has the verdict. The axiom pins (§1(c)) stay.
+
 (Superseded 2026-10-07 by the contract manifests. The first version pinned pretty-printed
 statements and regenerated the whole snapshot with `--update`; it left a theorem's row
 byte-identical when a definition its statement mentions was redefined.)
@@ -121,11 +131,13 @@ closure a row in `scripts/gates/objective-manifest/<Module>.tsv`: its elaborated
 transitively; cut at constants outside the repository, axioms and opaques, hashed by type), and
 its exact axiom set. The gate is a RATCHET (`scripts/objective-manifest.py`): additions pass; a
 removed row, a restated statement, a redefined closure or a changed axiom set fails unless a
-reviewed line of `scripts/gates/objective-contract-changes.txt` admits exactly that change. The
+reviewed line of `scripts/gates/objective-contract-decisions.txt` admits exactly that change. The
 elaborated term, not the source text, is compared: a reformatting is not a change, a changed
 premise is, and so is `def Safe := True` under an unchanged `theorem t : Safe x`.
 
 ## 1(e). Vacuity gates (HypothesisLedger)
+
+> **History (2026-10-27).** The ledger is no longer a per-landing gate row; `scripts/check-hypothesis-ledger.sh` runs on demand before a research move (`docs/COORDINATION-2026-10-27.md` §2).
 
 **Why not literally "REFUTED when any instance refutes" (DESIGN, MEASURED).** On the
 10-04 ledger (persvati `ledger-c2.out`), 25 GREEN assumption-tier families — e.g.

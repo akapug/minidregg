@@ -8,16 +8,17 @@ KIND is `intent` (an intent JSON, authored by the Host's pure codec) or `binary`
 intent.bin). Each is signed with KEY (a 32-byte ed25519 seed, as `mini keygen` writes it) and sent
 to the Host as an op 4 observation challenge over the socket: the first thing any read or write
 needs. One TSV line per input on stdout: `LABEL<TAB>refused<TAB>OP REASON<TAB>TEXT` when the Host
-answers with a refusal frame (255), else `LABEL<TAB>NOT-REFUSED<TAB>reply op N`. Exit 0 always;
+answers with a proven refusal (NO_RECORD, 253: decided before any append), else `LABEL<TAB>NOT-REFUSED<TAB>reply op N`. Exit 0 always;
 the journey counts."""
-import os, socket, struct, subprocess, sys
+import hashlib, os, socket, struct, subprocess, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 mini, host_bin, config, sock_path, keyfile, outdir = sys.argv[1:7]
 seed = open(keyfile, "rb").read()
 key = Ed25519PrivateKey.from_private_bytes(seed)
 config_bytes = open(config, "rb").read()
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v5"
+HOST_PIN = hashlib.sha256(open(host_bin, "rb").read()).digest()  # envelope v2: the Host image pin (v1 is refused)
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 
 def frame_of(s):
     def exact(n):
@@ -31,7 +32,7 @@ def frame_of(s):
 
 def ask_host(request):
     s = socket.socket(socket.AF_UNIX); s.settimeout(300); s.connect(sock_path)
-    body = bytes([1]) + struct.pack("<I", len(config_bytes)) + config_bytes + request
+    body = bytes([2]) + struct.pack("<I", len(config_bytes)) + config_bytes + HOST_PIN + request
     s.sendall(struct.pack("<I", len(body)) + body)
     try: return frame_of(s)
     finally: s.close()
@@ -50,7 +51,7 @@ for spec in sys.argv[7:]:
         intent = open(path, "rb").read()
     reply = ask_host(bytes([4]) + struct.pack("<I", len(intent)) + intent + key.sign(intent))
     open(os.path.join(outdir, label + ".reply"), "wb").write(reply)
-    if reply[0] == 255 and reply[1:].startswith(TAG):
+    if reply[0] == 253 and reply[1:].startswith(TAG):  # 255 is undecided, never a refusal (L1)
         text = "".join(chr(b) if 32 <= b < 127 else " " for b in reply[1 + len(TAG):])
         text = " ".join(text.split())
         print(f"{label}\trefused\t{text}")

@@ -5,8 +5,27 @@ may be excepted. No final-value equality or same-shaped replacement supplies
 this evidence. All other suffix entries retain NativeReserveContinuity's
 conservative ordinary-other rule, including authority-family exclusions.
 -/
-import Kernel.NativeReserveContinuity
-import Kernel.ProviderRoute
+module
+
+public import Kernel.NativeReserveContinuity
+public import Kernel.ProviderRoute
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeProviderHistory
 
@@ -40,7 +59,7 @@ structure PriorInPrefix {config : Config} (session : NativeHostSession.Walked co
     (reserveCount : Nat) (point : PriorChecked) where
   bounds : priorBounds reserveCount session.target.image.accepted.length point = true
   receipt : NativeHostCodec.Receipt
-  receiptAt : session.verified.receipts[point.acceptedCount - 1]? = some receipt
+  receiptAt : session.verified.receiptAt (point.acceptedCount - 1) = some receipt
   exactPoint : priorReceiptMatches point receipt = true
 
 theorem PriorInPrefix.exact_root {config : Config}
@@ -54,7 +73,7 @@ def checkPrior {config : Config} (session : NativeHostSession.Walked config)
     (reserveCount : Nat) (point : PriorChecked) :
     Except String (PriorInPrefix session reserveCount point) := do
   if bounds : priorBounds reserveCount session.target.height point = true then
-    match receiptAt : session.verified.receipts[point.acceptedCount - 1]? with
+    match receiptAt : session.verified.receiptAt (point.acceptedCount - 1) with
     | none => .error "prior checked prefix receipt is absent from verified history"
     | some receipt =>
         if exactPoint : priorReceiptMatches point receipt = true then
@@ -66,7 +85,7 @@ def checkPrior {config : Config} (session : NativeHostSession.Walked config)
 structure ExactWrite {config : Config} (session : NativeHostSession.Walked config)
     (receipt : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId) where
   positive : 0 < receipt.acceptedCount
-  receiptExact : session.verified.receipts[receipt.acceptedCount - 1]? = some receipt
+  receiptExact : session.verified.receiptAt (receipt.acceptedCount - 1) = some receipt
   ingress : List UInt8
   parsed : reserveIngress? config call = some ingress
   callExact : (session.target.image.accepted[receipt.acceptedCount - 1]?).map
@@ -78,7 +97,7 @@ def exactWrite {config : Config} (session : NativeHostSession.Walked config)
     (receipt : NativeHostCodec.Receipt) (call : List UInt8) (provider : CellId) :
     Except String (ExactWrite session receipt call provider) := do
   if positive : 0 < receipt.acceptedCount then
-    if receiptExact : session.verified.receipts[receipt.acceptedCount - 1]? = some receipt then
+    if receiptExact : session.verified.receiptAt (receipt.acceptedCount - 1) = some receipt then
       match parsed : reserveIngress? config call with
       | none => .error "history call is not a canonical signed invocation"
       | some ingress =>

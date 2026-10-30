@@ -5,7 +5,26 @@ This module deliberately exposes no CAS receiver or physical delivery permit:
 accepted historical share issue. An upper verifier must supply that provenance
 and bind it to the complete issue ingress before committing this candidate.
 -/
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.ApplicationDispatchAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchPending
 
@@ -73,26 +92,33 @@ theorem readGuards_readonly
   · subst guard; exact checked.enrollmentRead.readonly
   · subst guard; exact checked.ticketRead.readonly
 
-/-- The pending source tariff includes four additional native observations,
-the complete wrapper ingress, and its stable one-use operation key. It charges
-no external HTTP effect, which has not happened. -/
-def charge (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec originalSourceBytes) :
-    Charge :=
-  let ordinary := checked.invocation.dataIntent checked.shape
+/-- The pending source tariff over an already-derived ordinary intent. The ordinary intent is a
+parameter, never a `let` under the lane binder: a charge is a function of the lane, the compiler
+eta-expands a charge-returning definition, and a `let` in its body would then re-derive the whole
+ordinary intent (writes, read guards, the runtime semantics digest) on every one of the ten lane
+queries, and on every later consumer of `exactCharge`. -/
+def chargeOf (ordinary : DataIntent rootBytes) : Charge :=
   fun dimension => match dimension with
     | .incidences => ordinary.exactCharge .incidences + 4
     | .turnBytes => ingress.canonicalBytes.length
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => ordinary.exactCharge .proofWork + 4
     | .memoryTouches => ordinary.exactCharge .memoryTouches + 4
-    | .storageBytes => ordinary.exactCharge .storageBytes +
-        ingress.canonicalBytes.length +
-        (ApplicationDispatchAdmissionIngress.nullifier ingress).canonicalBytes.length
+    | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (ApplicationDispatchAdmissionIngress.event ingress)
     | other => ordinary.exactCharge other
+
+/-- The pending source tariff includes four additional native observations,
+the complete wrapper ingress, and its stable one-use operation key. It charges
+no external HTTP effect, which has not happened. -/
+def charge (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec originalSourceBytes) :
+    Charge :=
+  chargeOf (ingress := ingress) (ground := ground) (checked.invocation.dataIntent checked.shape)
 
 /-- A special pending event, not the ordinary DRC mutation receipt. This is a
 candidate data intent; only a receiver joined with verifier-authenticated
-share-issue provenance may submit it. -/
+share-issue provenance may submit it. The charge is held as ten first-order
+values (`Charge.materialize`), computed once from the one ordinary intent built
+here; `candidateIntent_exactCharge` states it is `charge checked` lane by lane. -/
 def candidateIntent
     (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec originalSourceBytes) :
     DataIntent rootBytes := by
@@ -109,11 +135,17 @@ def candidateIntent
       readGuards := ordinary.readGuards ++ readGuards checked
       nullifiers := ordinary.nullifiers ++
         [ApplicationDispatchAdmissionIngress.nullifier ingress]
-      exactCharge := charge checked
+      exactCharge := (Charge.materialize (chargeOf (ingress := ingress) (ground := ground) ordinary)).toCharge
       event := ApplicationDispatchAdmissionIngress.event ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
+
+/-- The held charge is the specified charge. -/
+theorem candidateIntent_exactCharge
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec originalSourceBytes) :
+    (candidateIntent checked).exactCharge = charge checked :=
+  Charge.materialize_eq _
 
 theorem candidateIntent_retains_full_ingress
     (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec originalSourceBytes) :

@@ -2,52 +2,17 @@
 //! authenticated received frames, source request events and recursive outboxes
 //! commit before visibility. Honest crash storage only, no rollback/release authority.
 use crate::{
-    asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat, Reader},
-    consensus_wire::Cursor,
+    codec::{bad, bytes, Generation, Nat},
+    consensus_wire::{get_phase, put_phase, Cursor},
     private_send_store,
     reconstruction::Field,
     sh2t_id::{Body, Message, Send, Sh2tId},
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
-pub(crate) fn count(c: &mut Cursor) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
-pub(crate) fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (t, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(t);
-    bytes(v, b);
-}
-pub(crate) fn phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let tag = c.byte()?;
-    let b = c.bytes()?;
-    match tag {
-        0 => Ok(PhaseMessage::Init(b)),
-        1 => Ok(PhaseMessage::Echo(b)),
-        2 => Ok(PhaseMessage::Ready(b)),
-        _ => Err(bad("Sh2t phase")),
-    }
-}
 pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     Nat::new(v.len() as u64).put(b);
     for x in v {
@@ -55,7 +20,7 @@ pub(crate) fn put_fields(v: &[Field], b: &mut Vec<u8>) {
     }
 }
 pub(crate) fn fields(c: &mut Cursor) -> Result<Vec<Field>> {
-    let n = count(c)?;
+    let n = c.count()?;
     if n > 128 {
         return Err(bad("Sh2t point vector capacity"));
     }
@@ -135,33 +100,33 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     }
     let context = c.fixed32()?;
     let body = match c.byte()? {
-        0 => Body::Commitment(phase(&mut c)?),
+        0 => Body::Commitment(get_phase(&mut c)?),
         1 => Body::Private {
             holder: c.u16()?,
             message: private_send_store::decode_message(&c.bytes()?)?,
         },
-        2 => Body::Termination(phase(&mut c)?),
+        2 => Body::Termination(get_phase(&mut c)?),
         3 => Body::Complaint {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         4 => Body::OpenRequest {
             holder: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         5 => Body::ReconRequest {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         6 => Body::AgreementAccusation {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         7 => Body::Point {
-            group: count(&mut c)?,
+            group: c.count()?,
             receiver: c.u16()?,
             values: fields(&mut c)?,
             masks: fields(&mut c)?,
@@ -176,40 +141,14 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let len = count(&mut c)?;
-    if len > crate::codec::MAX / 40 {
-        return Err(bad("Sh2t outbox capacity"));
-    }
-    let mut ps = vec![];
-    for _ in 0..len {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("Sh2t outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox(&ps) != b {
-        return Err(bad("Sh2t outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "Sh2t", decode_message, encode_message)
 }
-/// The journaled dealer event: tag 0, the dealing seed, and every zero-sharing polynomial.
-pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
-    let mut e = vec![0];
+/// Tag 5: commit the dealing seed and inputs durably, publishing nothing.
+pub(crate) fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+    let mut e = vec![5];
     e.extend(seed);
     Nat::new(polys.len() as u64).put(&mut e);
     for p in polys {
@@ -219,17 +158,21 @@ pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
     }
     e
 }
+/// Tag 6: emit the deal from the committed seed and inputs.
+pub(crate) const EMIT_EVENT: [u8; 1] = [6];
 #[derive(Clone)]
 pub struct Sh2tMachine {
     pub state: Sh2tId,
+    /// Seed and inputs committed by a tag 5 event, awaiting their tag 6 emission.
+    pub pending: Option<([u8; 32], Vec<Vec<Field>>)>,
 }
 impl Machine for Sh2tMachine {
     fn apply(&mut self, e: &[u8]) -> Result<Vec<u8>> {
         let mut c = Cursor::new(e)?;
         let out = match c.byte()? {
-            0 => {
+            5 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.count() {
                     return Err(bad("Sh2t event polynomial count"));
                 }
@@ -243,6 +186,20 @@ impl Machine for Sh2tMachine {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 c.finish()?;
+                if self.pending.is_some() {
+                    return Err(bad("Sh2t dealer already committed"));
+                }
+                // Dry run on a clone: a commit that could never emit is refused.
+                self.state.clone().dealer(&polys, seed)?;
+                self.pending = Some((seed, polys));
+                vec![]
+            }
+            6 => {
+                c.finish()?;
+                let (seed, polys) = self
+                    .pending
+                    .take()
+                    .ok_or_else(|| bad("Sh2t emit without committed dealer"))?;
                 self.state.dealer(&polys, seed)?
             }
             1 => {
@@ -257,7 +214,7 @@ impl Machine for Sh2tMachine {
                 self.state.receive(sender, m)?
             }
             3 => {
-                let group = count(&mut c)?;
+                let group = c.count()?;
                 let receiver = c.u16()?;
                 c.finish()?;
                 self.state.request_private_reconstruction(group, receiver)?
@@ -286,21 +243,35 @@ impl Store {
         per_group: usize,
     ) -> Result<Self> {
         let state = Sh2tId::new(me, dealer, n, f, g, per_group)?;
-        let mut identity = b"DREGG.SH2T.ID.PARTY.WAL.V1".to_vec();
+        let mut identity = b"DREGG.SH2T.ID.PARTY.WAL.V2".to_vec();
         g.put(&mut identity);
         identity.extend(state.context);
         identity.extend(me.to_le_bytes());
         Ok(Self {
-            journal: Journal::open(path, &identity, Sh2tMachine { state })?,
+            journal: Journal::open(
+                path,
+                &identity,
+                Sh2tMachine {
+                    state,
+                    pending: None,
+                },
+            )?,
         })
     }
     pub fn state(&self) -> &Sh2tId {
         &self.journal.state().state
     }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
+    }
     fn apply(&mut self, e: &[u8]) -> Result<Vec<Send>> {
         let out = self.journal.append(e)?;
         parse_outbox(&out, self.state().n)
     }
+    /// The deal is two journalled steps: commit the seed and inputs (nothing
+    /// published), then emit. A tear of the emit record, or its loss to
+    /// damage after publication, re-derives the same deal from the committed
+    /// seed; a tear of the commit record means nothing was ever published.
     pub fn dealer(&mut self, polys: &[Vec<Field>]) -> Result<Vec<Send>> {
         if let Some(old) = self.state().dealer_inputs() {
             if old != polys {
@@ -314,10 +285,16 @@ impl Store {
         {
             return Err(bad("Sh2t dealer inputs"));
         }
-        let mut seed = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut seed)?;
-        let e = dealer_event(seed, polys);
-        self.apply(&e)
+        if let Some((_, old)) = &self.journal.state().pending {
+            if old != polys {
+                return Err(bad("Sh2t changed dealer retry"));
+            }
+        } else {
+            let mut seed = [0; 32];
+            crate::entropy::os_fill(&mut seed)?;
+            self.apply(&commit_event(seed, polys))?;
+        }
+        self.apply(&EMIT_EVENT)
     }
     pub fn receive(&mut self, sender: u16, m: &Message) -> Result<Vec<Send>> {
         let mut e = vec![2];
@@ -425,14 +402,48 @@ mod tests {
             .unwrap()
             .set_len(len - 1)
             .unwrap();
-        // The final record lost its last byte: it was never fsynced and never
-        // published, so recovery truncates it (transition_journal, fa84160e)
-        // and the dealer has dealt nothing yet.
+        // The final record (the emit) lost its last byte. Whether that is a crash
+        // tear or damage to a published record cannot be told apart, so the same
+        // deal must come back: re-derived from the committed seed, never re-drawn.
         let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.torn_tail().is_some(), "the dropped emit record is reported");
         assert!(s.replay_outboxes().unwrap().is_empty());
         assert!(s.state().dealer_inputs().is_none());
-        assert!(fs::metadata(&p).unwrap().len() < len - 1, "torn record truncated away");
-        assert!(!s.dealer(&polys()).unwrap().is_empty());
+        assert!(s.dealer(&changed_polys()).is_err(), "changed inputs refuse after the tear");
+        assert_eq!(s.dealer(&polys()).unwrap(), out, "same deal, not a re-deal");
+        assert_eq!(s.dealer(&polys()).unwrap(), out);
+        drop(s);
+        let s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.torn_tail().is_none());
+        assert_eq!(s.replay_outboxes().unwrap(), out);
+    }
+    fn changed_polys() -> Vec<Vec<Field>> {
+        let mut c = polys();
+        c[0][0] = Field(1);
+        c
+    }
+    #[test]
+    fn torn_commit_record_published_nothing_so_a_fresh_deal_is_safe() {
+        let p = root().join("wal");
+        let (after_open, after_commit);
+        {
+            let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+            after_open = fs::metadata(&p).unwrap().len();
+            s.dealer(&polys()).unwrap();
+            after_commit = fs::metadata(&p).unwrap().len();
+        }
+        assert!(after_commit > after_open);
+        // Cut inside the commit record: the emit record is gone with it.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_len(after_open + 5)
+            .unwrap();
+        let mut s = Store::open(&p, 0, 0, 4, 1, &generation(), 1).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(!s.dealer(&changed_polys()).unwrap().is_empty());
     }
     #[test]
     fn actual_recipient_reconstruction_survives_store_reopen_and_canonical_refusers() {
@@ -494,5 +505,43 @@ mod tests {
         assert!(fresh.request_accusation(0).is_err());
         assert!(fresh.request_private_reconstruction(0, 0).is_err());
         assert_eq!(fs::metadata(root.join("fresh")).unwrap().len(), len);
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Echo(vec![1])) } },
+            Send { to: 3, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

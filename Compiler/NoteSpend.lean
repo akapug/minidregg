@@ -73,7 +73,26 @@ resistance of the instantiated hash — a cryptographic assumption about
 `[AIR-poseidon-params]`, named, never a theorem here (the demo parameters are honestly NOT
 collision-resistant, and a keystone below exhibits a real collision rather than hiding it).
 -/
-import Compiler.AirMembership
+module
+
+public import Compiler.AirMembership
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

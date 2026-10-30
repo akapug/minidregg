@@ -1,7 +1,28 @@
 /- Exact persistence codecs for private custody. Canonical decoding protects
 identity, NOT rollback freshness; the physical store must preserve Extends. -/
-import Kernel.PrivateSuccessorCustody
-import Compiler.DurableReceiverCodec
+module
+
+public import Kernel.PrivateSuccessorCustody
+public import Compiler.DurableReceiverCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PrivateSuccessorCustodyCodec
 open Minidregg.Kernel.PrivateSuccessorCustody
@@ -34,7 +55,7 @@ def purposeOf : Nat → CorrelationPurpose
   | 1 => .agreementCoin | 2 => .holderOutputPad | 3 => .audienceReleasePad | _ => .triple
 
 def purposeStream : StreamCodec CorrelationPurpose :=
-  StreamCodec.xmap StreamCodec.nat purposeCode purposeOf (by intro purpose; cases purpose <;> rfl)
+  StreamCodec.retract StreamCodec.nat purposeCode purposeOf (by intro purpose; cases purpose <;> rfl)
 
 def correlationStream : StreamCodec CorrelationId :=
   StreamCodec.xmap (StreamCodec.product digestStream StreamCodec.nat)
@@ -42,7 +63,7 @@ def correlationStream : StreamCodec CorrelationId :=
     (by intro id; cases id; rfl)
 
 def consumptionStream : StreamCodec Consumption :=
-  StreamCodec.xmap StreamCodec.nat
+  StreamCodec.retract StreamCodec.nat
     (fun status => match status with | .reserved => 0 | .consumed => 1)
     (fun code => if code = 1 then .consumed else .reserved)
     (by intro status; cases status <;> rfl)
@@ -65,33 +86,24 @@ def journalStream : StreamCodec Journal :=
 /-- Source-owned version/domain framing, not an unbound digest. -/
 def journalFrame : List UInt8 := "DREGG.PRIVATE.CORRELATIONS".toUTF8.toList ++ [1]
 
+/-- The frame is CHECKED (same octets as before: the length-prefixed
+`journalFrame`); a foreign or other-version frame is refused. -/
 def framedJournalStream : StreamCodec Journal :=
-  StreamCodec.xmap (StreamCodec.product bytesStream journalStream)
-    (fun journal => (journalFrame, journal)) Prod.snd (by intro journal; rfl)
+  StreamCodec.framed (bytesStream.encode journalFrame) journalStream
 
 def encodeJournal (journal : Journal) : List UInt8 := framedJournalStream.encode journal
 
-def decodeJournal (bytes : List UInt8) : Option Journal :=
-  match framedJournalStream.toLawful.decode bytes with
-  | none => none
-  | some journal => if encodeJournal journal = bytes then some journal else none
+/-- `framedJournalStream` is canonical: the decoder accepts exactly the
+encodings (`decode_journal_canonical`). -/
+def decodeJournal (bytes : List UInt8) : Option Journal := framedJournalStream.toLawful.decode bytes
 
 @[simp] theorem decode_encode_journal (journal : Journal) :
-    decodeJournal (encodeJournal journal) = some journal := by
-  have roundtrip := framedJournalStream.decodePrefix_encode journal []
-  simp only [List.append_nil] at roundtrip
-  simp [decodeJournal, encodeJournal, StreamCodec.toLawful, roundtrip]
+    decodeJournal (encodeJournal journal) = some journal :=
+  framedJournalStream.toLawful.decode_encode journal
 
 theorem decode_journal_canonical {bytes : List UInt8} {journal : Journal}
-    (accepted : decodeJournal bytes = some journal) : encodeJournal journal = bytes := by
-  unfold decodeJournal at accepted
-  cases decoded : framedJournalStream.toLawful.decode bytes with
-  | none => simp [decoded] at accepted
-  | some result =>
-    simp only [decoded] at accepted
-    split at accepted
-    · cases accepted; assumption
-    · cases accepted
+    (accepted : decodeJournal bytes = some journal) : encodeJournal journal = bytes :=
+  framedJournalStream.toLawful_canonical bytes journal accepted
 
 /-- A trusted monotonic anchor must live outside the rollback domain of the
 snapshot being restored. Passing the snapshot's own spent list is circular. -/

@@ -1,5 +1,5 @@
 {
-  "protocol": "mini-spk-broker-config-v2",
+  "protocol": "mini-spk-broker-config-v3",
   "store": "0123456789abcdef",
   "grainsRoot": "/var/lib/mini-spk-worlds/0123456789abcdef",
   "spkRoot": "/var/lib/mini-spk-worlds/0123456789abcdef/spk",
@@ -8,6 +8,8 @@
   "unitPrefix": "mini",
   "spkHost": "/home/ember/.local/libexec/spk-host",
   "spkHostSha256": "<sha256 of the installed spk-host>",
+  "bwrap": "/usr/local/libexec/mini-grain-bwrap",
+  "bwrapSha256": "<sha256 of that bwrap; deploy/grain-host/resolve-bwrap picks the path>",
   "ingestHelper": "/home/ember/.local/libexec/spk-ingest",
   "volumeHelper": "/usr/local/libexec/mini-spk-volume-helper",
   "appUids": [165536, 165537, 165538, 165539],

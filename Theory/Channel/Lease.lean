@@ -1,7 +1,7 @@
 /-
 # Theory.Channel.Lease — the schedule, its leases, the relay's tick assembly and its fan-out
 
-CHANNELS.md §2.3–§2.4 and §4 (revision 2). A *slot* is a residue class `ρ < n` of a room's schedule; a
+docs/CHANNELS.md §2.3–§2.4 and §4 (revision 2). A *slot* is a residue class `ρ < n` of a room's schedule; a
 *lease* names its holder for a window of channel epochs. Each tick the relay **assembles** one vector
 in slot order: at position `ρ` the first received cell that the slot's live lease holder sent under
 the position's header, and otherwise a **fill cell** — the same size, the same header, its bytes the
@@ -20,7 +20,26 @@ Two places where this file's statements differ from §2.3's PROPOSED Lean, both 
 * `no_lease_no_cell` needs `c ≠ fillCell …`: the relay itself puts a cell at an unleased position (the
   fill), and it is in the vector. The hypothesis is load-bearing (`fill_at_unleased_slot_assembled`).
 -/
-import Theory.Channel.Cell
+module
+
+public import Theory.Channel.Cell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.Channel
 
@@ -88,7 +107,7 @@ parsed in the layout the tick selects (so a fill at tick 0 has the duty layout, 
 holder's VRF proof would be — which is why a missing duty cell still reaches readers, §2.4). -/
 def fillCell (P : Profile) (prf : FillPrf) (h : Header) : Cell P := Cell.ofRaw h (fit P.bodyLen (prf h))
 
-/-- **`fill_is_cell_shaped`** (CHANNELS.md §2.2, revision 2): a fill is exactly `C` bytes and carries
+/-- **`fill_is_cell_shaped`** (docs/CHANNELS.md §2.2, revision 2): a fill is exactly `C` bytes and carries
 the position's header. -/
 theorem fill_is_cell_shaped (P : Profile) (prf : FillPrf) (h : Header) :
     (fillCell P prf h).encode.length = P.C ∧ (fillCell P prf h).header = h :=
@@ -163,7 +182,7 @@ theorem assembleAt_holder {prf : FillPrf} {e t : Nat} {received : List (Submissi
     exact ⟨this.1, List.mem_of_find?_eq_some hf⟩
   · cases h
 
-/-- **`header_is_schedule`** (CHANNELS.md §2.2): every cell of the vector carries the header of its
+/-- **`header_is_schedule`** (docs/CHANNELS.md §2.2): every cell of the vector carries the header of its
 position. -/
 theorem header_is_schedule (prf : FillPrf) (e t : Nat) (received : List (Submission sched.profile))
     {c : Cell sched.profile} (inVector : c ∈ sched.assemble prf e t received) :
@@ -172,7 +191,7 @@ theorem header_is_schedule (prf : FillPrf) (e t : Nat) (received : List (Submiss
   obtain ⟨ρ, hρ, rfl⟩ := inVector
   exact ⟨ρ, (sched.mem_slots).1 hρ, sched.assembleAt_header _ _ _ _ _⟩
 
-/-- **`slot_rate_bounded`** (CHANNELS.md §2.3): in any assembled vector, the positions holding a cell
+/-- **`slot_rate_bounded`** (docs/CHANNELS.md §2.3): in any assembled vector, the positions holding a cell
 `s` sent number at most the slots `s` holds — whatever `s` submits, and however many times. -/
 theorem slot_rate_bounded (prf : FillPrf) (e t : Nat) (received : List (Submission sched.profile)) (s : SubjectId) :
     (sched.assembleTagged prf e t received).countP (fun x => x.2 == .holder s) ≤ sched.leasedSlots e s := by
@@ -196,7 +215,7 @@ theorem slot_positions_exact (prf : FillPrf) (e t : Nat) (received : List (Submi
   intro ρ hρ
   simp only [Function.comp, sched.assembleAt_header, sched.headerAt_slot ((sched.mem_slots).1 hρ)]
 
-/-- **`no_lease_no_cell`** (CHANNELS.md §2.3): a cell whose slot has no live lease is not in the vector
+/-- **`no_lease_no_cell`** (docs/CHANNELS.md §2.3): a cell whose slot has no live lease is not in the vector
 — unless it is byte-for-byte the relay's own fill for its header. -/
 theorem no_lease_no_cell (prf : FillPrf) (e t : Nat) (received : List (Submission sched.profile))
     (c : Cell sched.profile) (noLease : sched.leaseAt e c.header.slot.val = none)
@@ -255,7 +274,7 @@ mailbox. -/
 def fanout (sched : Schedule) (p : Presence) : List (Nat × Route) :=
   sched.slots.map fun ρ => (ρ, if p ρ then .live else .mailbox)
 
-/-- **`fanout_independent_of_presence`** (CHANNELS.md §2.4, revision 2). -/
+/-- **`fanout_independent_of_presence`** (docs/CHANNELS.md §2.4, revision 2). -/
 theorem fanout_independent_of_presence (sched : Schedule) (p : Presence) :
     (fanout sched p).map Prod.fst = sched.slots := by
   simp [fanout, Function.comp_def]

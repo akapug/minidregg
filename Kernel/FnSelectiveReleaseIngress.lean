@@ -6,8 +6,27 @@ admission must verify the capability, owner key and current law before this
 derived command may become a durable intent. The distinct event is essential:
 an ordinary DRC mutation of similar content is not a checked release.
 -/
-import Kernel.FnSelectiveReleaseSignature
-import Kernel.DeclaredResourceController
+module
+
+public import Kernel.FnSelectiveReleaseSignature
+public import Kernel.DeclaredResourceController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseIngress
 
@@ -39,16 +58,13 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream
 
 theorem ingressCodec_accepted_bytes {bytes : List UInt8} {ingress : Ingress}
     (accepted : ingressCodec.decode bytes = some ingress) :
     ingressCodec.encode ingress = bytes := by
   unfold ingressCodec at accepted ⊢
-  exact ResourceBirthCodec.strictCodec_canonical
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
-    accepted
+  exact NativeHostCodec.framed_canonical _ _ accepted
 
 /-- The release key excludes gateway witness choice and owner subject. It is
 the same recipient-domain/target/nonce namespace across all attempted

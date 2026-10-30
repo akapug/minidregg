@@ -21,8 +21,27 @@ in the same intent.
 An activity with no holdings is untouched: `join` returns `none` and the turn
 is exactly the activity kernel's.
 -/
-import Kernel.SeatStore
-import Kernel.ObjectiveAdmittedTurn
+module
+
+public import Kernel.SeatStore
+public import Kernel.ObjectiveAdmittedTurn
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ActivitySeatEnd
 
@@ -312,6 +331,13 @@ def AdmittedTurn.finalIntent {rootBytes : Bytes → Digest} {config : Config} {s
         (registered.guards ++ extra) [] sealing
   | .failed request _ =>
       intentOf rootBytes request.transaction posts extra [] sealing
+
+/-- An activity turn's intent credits no meter (M2: only the refill family carries credit). -/
+theorem AdmittedTurn.finalIntent_credit {rootBytes : Bytes → Digest} {config : Config}
+    {snapshot : Snapshot rootBytes} {height : Nat} (sealing : Seal) (posts : List Post)
+    (extra : List ReadGuard) (turn : AdmittedTurn config snapshot height) :
+    (AdmittedTurn.finalIntent sealing posts extra turn).credit = 0 := by
+  cases turn <;> rfl
 
 /-- A cell an intent GUARDS: a read guard on it at the snapshot's root, or the intent writes it. -/
 def Guarded {rootBytes : Bytes → Digest} (snapshot : Snapshot rootBytes) (intent : DataIntent rootBytes)

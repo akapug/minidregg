@@ -1,6 +1,6 @@
 # Existing-world SPK attachment and ordinary checkpoints
 
-Construction contract, October 2. These scripts do not create a second Store or
+Construction contract. These scripts do not create a second Store or
 replace existing apps. Qualification needs the joined manifest and actual service
 journeys; unit/helper checks are not browser or backup/restore evidence.
 
@@ -104,9 +104,9 @@ Static root-owned callback config `mini-spk-checkpoint-app-config-v1` contains
 `app`, `stateRoot`, `profilePath`, `spkHost`, `spkHostSha256`. The service registers:
 
 ```
-python3 /pinned/scripts/checkpoint-app.py capture CONFIG --checkpoint-id ID
-python3 /pinned/scripts/checkpoint-app.py quiesce CONFIG --checkpoint-id ID
-python3 /pinned/scripts/checkpoint-app.py resume CONFIG --checkpoint-id ID
+python3 /pinned/scripts/spk-platform/checkpoint-app.py capture CONFIG --checkpoint-id ID
+python3 /pinned/scripts/spk-platform/checkpoint-app.py quiesce CONFIG --checkpoint-id ID
+python3 /pinned/scripts/spk-platform/checkpoint-app.py resume CONFIG --checkpoint-id ID
 ```
 
 Plans reside under `stateRoot/checkpoints/ID`. Each successful callback returns
@@ -147,9 +147,10 @@ journal must never be rearmed. Retain uncertain dispatch evidence. Recovery must
 perform an authenticated source/physical STOP audit, retire only the exact stopped
 checkpoint fence, START a new generation, and let returning members re-enroll with
 their existing authority and retained role/ticket through an ordinary client flow.
-The existing `session-reenroll` compatible-upgrade admission is not that ordinary
-client flow. Its new same-source reconnect mode and audited stopped-fence retirement
-are explicit remaining implementation/receiving work; automatic disaster restore
+No client re-enrollment flow exists; a re-enroll must come from a Lean lifecycle
+command, not a session-close transition authored in Rust. The
+same-source reconnect mode and audited stopped-fence retirement are explicit
+remaining implementation/receiving work; automatic disaster restore
 has not been delivered by these callbacks.
 
 

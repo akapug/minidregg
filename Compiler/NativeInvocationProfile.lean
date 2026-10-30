@@ -4,9 +4,29 @@ Route bindings are source policy bytes, not an invocation-supplied allow list.
 This registration is necessary but not sufficient: each nonordinary route still
 requires its closed current native admission producer.
 -/
-import Theory.AssertAxioms
-import Compiler.NativeInvocationStatement
-import Compiler.ContentControlFrame
+module
+
+public import Theory.AssertAxioms
+public import Compiler.NativeInvocationStatement
+public import Compiler.ContentControlFrame
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.NativeInvocationProfile
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -28,16 +48,7 @@ def stream : StreamCodec Policy :=
 
 def frame : List UInt8 := "DREGG/NATIVE/REGISTERED-INVOCATION-PROFILE/v1".toUTF8.toList
 
-def rawCodec : LawfulCodec Policy where
-  encode p := frame ++ stream.encode p
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro p
-    have exact := stream.toLawful.decode_encode p
-    change stream.toLawful.decode (stream.encode p) = some p at exact
-    simp [exact]
-def codec : LawfulCodec Policy := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Policy := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 

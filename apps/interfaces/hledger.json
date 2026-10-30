@@ -1,0 +1,852 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "hledger",
+  "interfaceVersion": 1,
+  "appId": "894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80",
+  "packageId": "7c0c42cbc414380ded0f0f5c1e743e06",
+  "appVersion": "1.52.4",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "transactions.add": {
+      "description": "Append a balanced structured transaction to the journal; the app validates accounting semantics.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "transaction": {
+            "type": "object",
+            "properties": {
+              "tcomment": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "tpostings": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "pbalanceassertion": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "pstatus": {
+                      "enum": [
+                        "Unmarked",
+                        "Pending",
+                        "Cleared"
+                      ]
+                    },
+                    "pamount": {
+                      "type": "array",
+                      "maxItems": 16,
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "acost": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "acostbasis": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "acommodity": {
+                            "type": "string",
+                            "maxLength": 64
+                          },
+                          "aquantity": {
+                            "type": "object",
+                            "properties": {
+                              "floatingPoint": {
+                                "type": "number"
+                              },
+                              "decimalPlaces": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 18
+                              },
+                              "decimalMantissa": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "floatingPoint",
+                              "decimalPlaces",
+                              "decimalMantissa"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "astyle": {
+                            "type": "object",
+                            "properties": {
+                              "ascommodityside": {
+                                "enum": [
+                                  "L",
+                                  "R"
+                                ]
+                              },
+                              "asdigitgroups": {
+                                "type": [
+                                  "array",
+                                  "null"
+                                ]
+                              },
+                              "ascommodityspaced": {
+                                "type": "boolean"
+                              },
+                              "asprecision": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "asdecimalmark": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "asrounding": {
+                                "enum": [
+                                  "NoRounding",
+                                  "HardRounding",
+                                  "SoftRounding",
+                                  "AllRounding"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "ascommodityside",
+                              "asdigitgroups",
+                              "ascommodityspaced",
+                              "asprecision",
+                              "asdecimalmark",
+                              "asrounding"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "acost",
+                          "acostbasis",
+                          "acommodity",
+                          "aquantity",
+                          "astyle"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "ptransaction_": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "paccount": {
+                      "type": "string",
+                      "maxLength": 1024
+                    },
+                    "pdate": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "ptype": {
+                      "enum": [
+                        "RegularPosting",
+                        "VirtualPosting",
+                        "BalancedVirtualPosting"
+                      ]
+                    },
+                    "pcomment": {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    "pdate2": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "ptags": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                          "type": "string",
+                          "maxLength": 4096
+                        }
+                      }
+                    },
+                    "poriginal": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "pbalanceassertion",
+                    "pstatus",
+                    "pamount",
+                    "ptransaction_",
+                    "paccount",
+                    "pdate",
+                    "ptype",
+                    "pcomment",
+                    "pdate2",
+                    "ptags",
+                    "poriginal"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "ttags": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 4096
+                  }
+                }
+              },
+              "tsourcepos": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sourceName": {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    "sourceLine": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "sourceColumn": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "sourceName",
+                    "sourceLine",
+                    "sourceColumn"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "tdate": {
+                "type": "string",
+                "maxLength": 10
+              },
+              "tcode": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "tindex": {
+                "type": "integer"
+              },
+              "tprecedingcomment": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "tdate2": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tdescription": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "tstatus": {
+                "enum": [
+                  "Unmarked",
+                  "Pending",
+                  "Cleared"
+                ]
+              }
+            },
+            "required": [
+              "tcomment",
+              "tpostings",
+              "ttags",
+              "tsourcepos",
+              "tdate",
+              "tcode",
+              "tindex",
+              "tprecedingcomment",
+              "tdate2",
+              "tdescription",
+              "tstatus"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "transaction"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "add"
+        ],
+        "decode": "status",
+        "status": [
+          201
+        ],
+        "json": {
+          "arg": "transaction"
+        }
+      }
+    },
+    "transactions.list": {
+      "description": "Read structured journal transactions including postings and decimal quantities.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "tcomment": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "tpostings": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pbalanceassertion": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "pstatus": {
+                    "enum": [
+                      "Unmarked",
+                      "Pending",
+                      "Cleared"
+                    ]
+                  },
+                  "pamount": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "acost": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "acostbasis": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "acommodity": {
+                          "type": "string",
+                          "maxLength": 64
+                        },
+                        "aquantity": {
+                          "type": "object",
+                          "properties": {
+                            "floatingPoint": {
+                              "type": "number"
+                            },
+                            "decimalPlaces": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 18
+                            },
+                            "decimalMantissa": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "floatingPoint",
+                            "decimalPlaces",
+                            "decimalMantissa"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "astyle": {
+                          "type": "object",
+                          "properties": {
+                            "ascommodityside": {
+                              "enum": [
+                                "L",
+                                "R"
+                              ]
+                            },
+                            "asdigitgroups": {
+                              "type": [
+                                "array",
+                                "null"
+                              ]
+                            },
+                            "ascommodityspaced": {
+                              "type": "boolean"
+                            },
+                            "asprecision": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "asdecimalmark": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "asrounding": {
+                              "enum": [
+                                "NoRounding",
+                                "HardRounding",
+                                "SoftRounding",
+                                "AllRounding"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "ascommodityside",
+                            "asdigitgroups",
+                            "ascommodityspaced",
+                            "asprecision",
+                            "asdecimalmark",
+                            "asrounding"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "acost",
+                        "acostbasis",
+                        "acommodity",
+                        "aquantity",
+                        "astyle"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "ptransaction_": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "paccount": {
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  "pdate": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ptype": {
+                    "enum": [
+                      "RegularPosting",
+                      "VirtualPosting",
+                      "BalancedVirtualPosting"
+                    ]
+                  },
+                  "pcomment": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "pdate2": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ptags": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    }
+                  },
+                  "poriginal": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "pbalanceassertion",
+                  "pstatus",
+                  "pamount",
+                  "ptransaction_",
+                  "paccount",
+                  "pdate",
+                  "ptype",
+                  "pcomment",
+                  "pdate2",
+                  "ptags",
+                  "poriginal"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "ttags": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              }
+            },
+            "tsourcepos": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sourceName": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "sourceLine": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sourceColumn": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "sourceName",
+                  "sourceLine",
+                  "sourceColumn"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "tdate": {
+              "type": "string",
+              "maxLength": 10
+            },
+            "tcode": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "tindex": {
+              "type": "integer"
+            },
+            "tprecedingcomment": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "tdate2": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tdescription": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "tstatus": {
+              "enum": [
+                "Unmarked",
+                "Pending",
+                "Cleared"
+              ]
+            }
+          },
+          "required": [
+            "tcomment",
+            "tpostings",
+            "ttags",
+            "tsourcepos",
+            "tdate",
+            "tcode",
+            "tindex",
+            "tprecedingcomment",
+            "tdate2",
+            "tdescription",
+            "tstatus"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 10000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "transactions"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "headers": {
+          "accept": "application/json"
+        }
+      }
+    },
+    "accounts.names": {
+      "description": "List journal account names.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "maxItems": 10000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "accountnames"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "headers": {
+          "accept": "application/json"
+        }
+      }
+    },
+    "commodities.list": {
+      "description": "List commodities inferred from the journal.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "commodities"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "headers": {
+          "accept": "application/json"
+        }
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "add",
+      "op": "transactions.add",
+      "args": {
+        "transaction": {
+          "tcomment": "",
+          "tpostings": [
+            {
+              "pbalanceassertion": null,
+              "pstatus": "Unmarked",
+              "pamount": [
+                {
+                  "acost": null,
+                  "acostbasis": null,
+                  "acommodity": "$",
+                  "aquantity": {
+                    "floatingPoint": 3,
+                    "decimalPlaces": 2,
+                    "decimalMantissa": 300
+                  },
+                  "astyle": {
+                    "ascommodityside": "L",
+                    "asdigitgroups": null,
+                    "ascommodityspaced": false,
+                    "asprecision": 2,
+                    "asdecimalmark": ".",
+                    "asrounding": "NoRounding"
+                  }
+                }
+              ],
+              "ptransaction_": "1",
+              "paccount": "expenses:mini",
+              "pdate": null,
+              "ptype": "RegularPosting",
+              "pcomment": "",
+              "pdate2": null,
+              "ptags": [],
+              "poriginal": null
+            },
+            {
+              "pbalanceassertion": null,
+              "pstatus": "Unmarked",
+              "pamount": [
+                {
+                  "acost": null,
+                  "acostbasis": null,
+                  "acommodity": "$",
+                  "aquantity": {
+                    "floatingPoint": -3,
+                    "decimalPlaces": 2,
+                    "decimalMantissa": -300
+                  },
+                  "astyle": {
+                    "ascommodityside": "L",
+                    "asdigitgroups": null,
+                    "ascommodityspaced": false,
+                    "asprecision": 2,
+                    "asdecimalmark": ".",
+                    "asrounding": "NoRounding"
+                  }
+                }
+              ],
+              "ptransaction_": "1",
+              "paccount": "assets:cash",
+              "pdate": null,
+              "ptype": "RegularPosting",
+              "pcomment": "",
+              "pdate2": null,
+              "ptags": [],
+              "poriginal": null
+            }
+          ],
+          "ttags": [],
+          "tsourcepos": [
+            {
+              "sourceName": "",
+              "sourceLine": 1,
+              "sourceColumn": 1
+            },
+            {
+              "sourceName": "",
+              "sourceLine": 1,
+              "sourceColumn": 1
+            }
+          ],
+          "tdate": "2026-10-28",
+          "tcode": "",
+          "tindex": 1,
+          "tprecedingcomment": "",
+          "tdate2": null,
+          "tdescription": {
+            "context": "runId"
+          },
+          "tstatus": "Unmarked"
+        }
+      }
+    },
+    {
+      "id": "read",
+      "op": "transactions.list",
+      "args": {},
+      "assert": [
+        {
+          "contains": {
+            "tdescription": {
+              "context": "runId"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/hledgerorg/hledger/blob/1.52.4/hledger-web/Hledger/Web/Handler/AddR.hs",
+    "https://github.com/hledgerorg/hledger/blob/1.52.4/hledger-web/Hledger/Web/Handler/MiscR.hs",
+    "https://github.com/hledgerorg/hledger/blob/1.52.4/hledger-lib/Hledger/Data/Json.hs",
+    "apps/packages/hledger/sandstorm-pkgdef.capnp",
+    "scripts/spk-platform/featured-qualify.sh"
+  ],
+  "$defs": {}
+}

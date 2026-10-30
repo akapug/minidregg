@@ -48,11 +48,31 @@ or product range. Larger integer promises require a bounded-limb extension.
 `witnessed` remains distinct from first-party semantics; new source vocabulary must
 be lowered here rather than added through a second policy verifier.
 -/
-import Pred.Core
-import Pred.HashEq
-import Compiler.PredOrderGadget
-import Mathlib.Data.List.Dedup
-import Std.Data.HashSet
+module
+
+public import Pred.Core
+public import Pred.HashEq
+public import Compiler.PredOrderGadget
+public import Mathlib.Data.List.Dedup
+public import Std.Data.HashSet
+public import Std.Data.HashMap
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 
@@ -82,6 +102,123 @@ def CompilerProfile.Admissible (profile : CompilerProfile) (F : Type) [Field F] 
 
 /-- Actual source integer; absence is tracked separately, never inferred from this zero. -/
 def intOf (st : State) (s : Slot) : Int := (st.get s).getD 0
+
+/-- A state with a proved-exact lookup table. The source list remains the semantic state;
+compiled evaluators share this view instead of rescanning the list at every atom. -/
+structure IndexedState where
+  state : State
+  table : Std.HashMap Slot Int
+  exact : ∀ k, table[k]? = state.get k
+
+/-- Insert from the tail so the first binding in the source list wins. -/
+private def slotTable (slots : List (Slot × Int)) : Std.HashMap Slot Int :=
+  slots.foldr (fun p table => table.insert p.1 p.2) ∅
+
+private theorem slotTable_get : ∀ (slots : List (Slot × Int)) (k : Slot),
+    (slotTable slots)[k]? = (slots.find? (fun p => p.1 == k)).map (·.2)
+  | [], k => by simp [slotTable]
+  | (key, value) :: rest, k => by
+      have ih := slotTable_get rest k
+      simp only [slotTable, List.foldr_cons] at ih ⊢
+      rw [Std.HashMap.getElem?_insert, ih, List.find?_cons]
+      by_cases h : key = k
+      · subst h; simp
+      · have different : (key == k) = false := by simp [h]
+        simp [different]
+
+/-- Build the shared lookup view once. Its exactness field proves every hashed read is
+exactly the first-occurrence list read specified by `State.get`. -/
+def indexState (s : State) : IndexedState where
+  state := s
+  table := slotTable s.slots
+  exact k := by simpa only [State.get] using slotTable_get s.slots k
+
+/-- Indexed read; no source-list traversal. -/
+def IndexedState.get (s : IndexedState) (k : Slot) : Option Int :=
+  s.table[k]?
+
+@[simp] theorem IndexedState.get_exact (s : IndexedState) (k : Slot) :
+    s.get k = s.state.get k :=
+  s.exact k
+
+@[simp] theorem indexState_state (s : State) : (indexState s).state = s := rfl
+
+/-- Fail-closed indexed reads of several slots, in order. -/
+def IndexedState.getAll (s : IndexedState) : List Slot → Option (List Int)
+  | [] => some []
+  | v :: vs => match s.get v, s.getAll vs with
+    | some x, some xs => some (x :: xs)
+    | _, _ => none
+
+@[simp] theorem IndexedState.getAll_exact (s : IndexedState) (vs : List Slot) :
+    s.getAll vs = s.state.getAll vs := by
+  induction vs with
+  | nil => rfl
+  | cons v rest ih =>
+      simp only [IndexedState.getAll, State.getAll, s.get_exact, ih]
+      rfl
+
+/-- The `hashEq` opening through an indexed state. -/
+def IndexedState.hashEqOpening (s : IndexedState) (values : List Slot) (blinder commit : Slot) :
+    Option Minidregg.Pred.HashEqDigest.Opening :=
+  match s.get Minidregg.Pred.hashEqCellSlot, s.getAll values, s.get blinder with
+  | some cell, some xs, some r =>
+      let o : Minidregg.Pred.HashEqDigest.Opening := ⟨cell, values, blinder, commit, xs, r⟩
+      if o.Admissible then some o else none
+  | _, _, _ => none
+
+@[simp] theorem IndexedState.hashEqOpening_exact (s : IndexedState)
+    (values : List Slot) (blinder commit : Slot) :
+    s.hashEqOpening values blinder commit =
+      Minidregg.Pred.hashEqOpening s.state values blinder commit := by
+  simp only [IndexedState.hashEqOpening, Minidregg.Pred.hashEqOpening, s.get_exact, s.getAll_exact]
+  rfl
+
+/-- Integer read through a shared state index. -/
+def intOfIndexed (st : IndexedState) (s : Slot) : Int := (st.get s).getD 0
+
+@[simp] theorem intOfIndexed_eq (st : IndexedState) (s : Slot) :
+    intOfIndexed st s = intOf st.state s := by
+  simp only [intOfIndexed, intOf, st.get_exact]
+
+mutual
+/-- Range checking through indexes built once for the whole predicate traversal. -/
+def inputsInRangeIndexed (profile : CompilerProfile) : Pred → IndexedState → IndexedState → Bool
+  | .le s v, _, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width (new.get s).isSome (intOfIndexed new s) v)
+  | .monotone s, old, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width
+            ((old.get s).isSome && (new.get s).isSome) (intOfIndexed old s) (intOfIndexed new s))
+  | .leSlots a b, _, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width
+            ((new.get a).isSome && (new.get b).isSome) (intOfIndexed new a) (intOfIndexed new b))
+  | .leSlotsOff a b c, _, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width
+            ((new.get a).isSome && (new.get b).isSome) (intOfIndexed new a) (intOfIndexed new b + c))
+  | .not p, old, new => inputsInRangeIndexed profile p old new
+  | .allL ps, old, new => inputsInRangeIndexedL profile ps old new
+  | .anyL ps, old, new => inputsInRangeIndexedL profile ps old new
+  | _, _, _ => true
+
+def inputsInRangeIndexedL (profile : CompilerProfile) :
+    PredList → IndexedState → IndexedState → Bool
+  | .nil, _, _ => true
+  | .cons p ps, old, new =>
+      inputsInRangeIndexed profile p old new && inputsInRangeIndexedL profile ps old new
+end
+
 
 mutual
 /-- Every order atom is checked, including children of negation and disjunction. -/
@@ -120,6 +257,41 @@ def inputsInRangeL (profile : CompilerProfile) : PredList → State → State �
       inputsInRange profile p old new && inputsInRangeL profile ps old new
 end
 
+mutual
+theorem inputsInRangeIndexed_eq (profile : CompilerProfile) :
+    ∀ (p : Pred) (old new : State),
+      inputsInRangeIndexed profile p (indexState old) (indexState new) = inputsInRange profile p old new
+  | .le s v, old, new => by
+      cases h : profile.order <;> simp [inputsInRangeIndexed, inputsInRange, h]
+  | .monotone s, old, new => by
+      cases h : profile.order <;> simp [inputsInRangeIndexed, inputsInRange, h]
+  | .leSlots a b, old, new => by
+      cases h : profile.order <;> simp [inputsInRangeIndexed, inputsInRange, h]
+  | .leSlotsOff a b c, old, new => by
+      cases h : profile.order <;> simp [inputsInRangeIndexed, inputsInRange, h]
+  | .not p, old, new => inputsInRangeIndexed_eq profile p old new
+  | .allL ps, old, new => inputsInRangeIndexedL_eq profile ps old new
+  | .anyL ps, old, new => inputsInRangeIndexedL_eq profile ps old new
+  | .eq _ _, _, _ | .memberOf _ _, _, _ | .writeOnce _, _, _ | .eqSlots _ _, _, _
+  | .sumEq _ _, _, _ | .witnessed _, _, _ | .hashEq _ _ _, _, _ | .ran _, _, _ => rfl
+
+theorem inputsInRangeIndexedL_eq (profile : CompilerProfile) :
+    ∀ (ps : PredList) (old new : State),
+      inputsInRangeIndexedL profile ps (indexState old) (indexState new) = inputsInRangeL profile ps old new
+  | .nil, _, _ => rfl
+  | .cons p ps, old, new => by
+      simp only [inputsInRangeIndexedL, inputsInRangeL, inputsInRangeIndexed_eq,
+        inputsInRangeIndexedL_eq]
+end
+
+/-- Compiled range check: one index per side, shared by every atom. -/
+def inputsInRangeFast (profile : CompilerProfile) (p : Pred) (old new : State) : Bool :=
+  inputsInRangeIndexed profile p (indexState old) (indexState new)
+
+@[csimp] theorem inputsInRange_eq_fast : @inputsInRange = @inputsInRangeFast := by
+  funext profile p old new
+  exact (inputsInRangeIndexed_eq profile p old new).symm
+
 /-! ## §1. Wires — the step pinned on input wires, prover witnesses on path-addressed aux. -/
 
 /-- The wire alphabet of a lowered policy: per-slot VALUE and PRESENCE input wires (the
@@ -148,9 +320,27 @@ def valOf (st : State) (s : Slot) : F :=
   | some x => (x : F)
   | none   => 0
 
+/-- Value reading through a shared index. -/
+def valOfIndexed (st : IndexedState) (s : Slot) : F :=
+  match st.get s with
+  | some x => (x : F)
+  | none   => 0
+
+@[simp] theorem valOfIndexed_eq (st : IndexedState) (s : Slot) :
+    valOfIndexed (F := F) st s = valOf st.state s := by
+  simp only [valOfIndexed, valOf, st.get_exact]
+
 /-- The presence reading of a slot: `1` if present, `0` if absent. -/
 def presOf (st : State) (s : Slot) : F :=
   cond (st.get s).isSome 1 0
+
+/-- Presence reading through a shared index. -/
+def presOfIndexed (st : IndexedState) (s : Slot) : F :=
+  cond (st.get s).isSome 1 0
+
+@[simp] theorem presOfIndexed_eq (st : IndexedState) (s : Slot) :
+    presOfIndexed (F := F) st s = presOf st.state s := by
+  simp only [presOfIndexed, presOf, st.get_exact]
 
 /-- The digest reading of a `hashEq` opening on a state (`0` if there is none). -/
 def digestOf (st : State) (v : List Slot) (b c : Slot) : F :=
@@ -159,9 +349,28 @@ def digestOf (st : State) (v : List Slot) (b c : Slot) : F :=
       ((Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o : Int) : F)
   | none => 0
 
+/-- Digest reading through a shared index. -/
+def digestOfIndexed (st : IndexedState) (v : List Slot) (b c : Slot) : F :=
+  match st.hashEqOpening v b c with
+  | some o =>
+      ((Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o : Int) : F)
+  | none => 0
+
+@[simp] theorem digestOfIndexed_eq (st : IndexedState) (v : List Slot) (b c : Slot) :
+    digestOfIndexed (F := F) st v b c = digestOf st.state v b c := by
+  simp only [digestOfIndexed, digestOf, st.hashEqOpening_exact]
+
 /-- The opening reading: `1` if the state has an admissible `hashEq` opening, else `0`. -/
 def openedOf (st : State) (v : List Slot) (b c : Slot) : F :=
   cond (Minidregg.Pred.hashEqOpening st v b c).isSome 1 0
+
+/-- Opening reading through a shared index. -/
+def openedOfIndexed (st : IndexedState) (v : List Slot) (b c : Slot) : F :=
+  cond (st.hashEqOpening v b c).isSome 1 0
+
+@[simp] theorem openedOfIndexed_eq (st : IndexedState) (v : List Slot) (b c : Slot) :
+    openedOfIndexed (F := F) st v b c = openedOf st.state v b c := by
+  simp only [openedOfIndexed, openedOf, st.hashEqOpening_exact]
 
 /-- **The step assignment**: input wires pinned by the (old, new) step, aux wires supplied
 by `A`. The refinement quantifies `A` (existential in `lower_correct`, universal in
@@ -172,6 +381,24 @@ def stepAsg (old new : State) (A : List ℕ → ℕ → F) : Wire → F
   | .digest v b c => digestOf new v b c
   | .opened v b c => openedOf new v b c
   | .aux p k  => A p k
+
+/-- Step assignment whose input-wire reads share one index per state. -/
+def stepAsgIndexed (old new : IndexedState) (A : List ℕ → ℕ → F) : Wire → F
+  | .val b s  => valOfIndexed (cond b new old) s
+  | .pres b s => presOfIndexed (cond b new old) s
+  | .digest v b c => digestOfIndexed new v b c
+  | .opened v b c => openedOfIndexed new v b c
+  | .aux p k  => A p k
+
+@[simp] theorem stepAsgIndexed_eq (old new : State) (A : List ℕ → ℕ → F) :
+    stepAsgIndexed (F := F) (indexState old) (indexState new) A = stepAsg old new A := by
+  funext wire
+  cases wire with
+  | val isNew s => cases isNew <;> simp [stepAsgIndexed, stepAsg]
+  | pres isNew s => cases isNew <;> simp [stepAsgIndexed, stepAsg]
+  | digest v b c => simp [stepAsgIndexed, stepAsg]
+  | opened v b c => simp [stepAsgIndexed, stepAsg]
+  | aux p k => rfl
 
 /-- The `Int`s a state exposes (for the cast-injectivity label). -/
 def stateVals (st : State) : List ℤ := st.slots.map (·.2)
@@ -758,6 +985,94 @@ def witL (profile : CompilerProfile) : PredList → ℕ → State → State → 
       | []        => 0
       | j :: rest => if j = i then wit profile p old new rest k
                      else witL profile ps (i + 1) old new (j :: rest) k
+end
+
+mutual
+/-- Witness generation through indexes shared by the complete predicate traversal. -/
+def witIndexed (profile : CompilerProfile) :
+    Pred → IndexedState → IndexedState → List ℕ → ℕ → F
+  | .eq s v       => fun _ new _ k => auxPair (valOfIndexed new s - (v : F)) k
+  | .le s v       => fun _ new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width (new.get s).isSome (intOfIndexed new s) v k
+  | .memberOf s xs => fun _ new _ k =>
+      auxPair ((xs.map fun c : ℤ => valOfIndexed new s - (c : F)).prod) k
+  | .writeOnce s  => fun old new _ k =>
+      if k < 2 then auxPair (valOfIndexed old s) k
+      else auxPair (valOfIndexed new s - valOfIndexed old s) (k - 2)
+  | .monotone s   => fun old new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width
+          ((old.get s).isSome && (new.get s).isSome) (intOfIndexed old s) (intOfIndexed new s) k
+  | .eqSlots a b  => fun _ new _ k => auxPair (valOfIndexed new a - valOfIndexed new b) k
+  | .leSlots a b  => fun _ new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width
+          ((new.get a).isSome && (new.get b).isSome) (intOfIndexed new a) (intOfIndexed new b) k
+  | .leSlotsOff a b c => fun _ new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width
+          ((new.get a).isSome && (new.get b).isSome) (intOfIndexed new a) (intOfIndexed new b + c) k
+  | .sumEq _ _    => fun _ _ _ _ => 0
+  | .witnessed _  => fun _ _ _ _ => 0
+  | .hashEq v b c => fun _ new _ k => auxPair (digestOfIndexed new v b c - valOfIndexed new c) k
+  | .ran program  => fun _ new _ k =>
+      auxPair (valOfIndexed new (Minidregg.Pred.ranSlot program) - ((1 : Int) : F)) k
+  | .not p        => witIndexed profile p
+  | .allL ps      => witIndexedL profile ps 0
+  | .anyL ps      => witIndexedL profile ps 0
+
+def witIndexedL (profile : CompilerProfile) :
+    PredList → ℕ → IndexedState → IndexedState → List ℕ → ℕ → F
+  | .nil, _       => fun _ _ _ _ => 0
+  | .cons p ps, i => fun old new path k =>
+      match path with
+      | []        => 0
+      | j :: rest => if j = i then witIndexed profile p old new rest k
+                     else witIndexedL profile ps (i + 1) old new (j :: rest) k
+end
+
+mutual
+theorem wit_eq_indexed (profile : CompilerProfile) :
+    ∀ (p : Pred) (old new : State),
+      wit profile (F := F) p old new = witIndexed profile p (indexState old) (indexState new)
+  | .eq s v, old, new => by simp only [wit, witIndexed, valOfIndexed_eq, indexState_state]
+  | .le s v, old, new => by
+      cases h : profile.order <;> simp [wit, witIndexed, h]
+  | .memberOf s xs, old, new => by simp only [wit, witIndexed, valOfIndexed_eq, indexState_state]
+  | .writeOnce s, old, new => by simp only [wit, witIndexed, valOfIndexed_eq, indexState_state]
+  | .monotone s, old, new => by
+      cases h : profile.order <;> simp [wit, witIndexed, h]
+  | .eqSlots a b, old, new => by simp only [wit, witIndexed, valOfIndexed_eq, indexState_state]
+  | .leSlots a b, old, new => by
+      cases h : profile.order <;> simp [wit, witIndexed, h]
+  | .leSlotsOff a b c, old, new => by
+      cases h : profile.order <;> simp [wit, witIndexed, h]
+  | .sumEq _ _, _, _ | .witnessed _, _, _ => rfl
+  | .hashEq v b c, old, new => by
+      simp only [wit, witIndexed, digestOfIndexed_eq, valOfIndexed_eq, indexState_state]
+  | .ran program, old, new => by simp only [wit, witIndexed, valOfIndexed_eq, indexState_state]
+  | .not p, old, new => wit_eq_indexed profile p old new
+  | .allL ps, old, new => witL_eq_indexed profile ps 0 old new
+  | .anyL ps, old, new => witL_eq_indexed profile ps 0 old new
+
+theorem witL_eq_indexed (profile : CompilerProfile) :
+    ∀ (ps : PredList) (i : ℕ) (old new : State),
+      witL profile (F := F) ps i old new = witIndexedL profile ps i (indexState old) (indexState new)
+  | .nil, _, _, _ => rfl
+  | .cons p ps, i, old, new => by
+      funext path k
+      cases path with
+      | nil => rfl
+      | cons j rest =>
+          simp only [witL, witIndexedL]
+          by_cases same : j = i
+          · simp only [same, if_true, wit_eq_indexed]
+          · simp only [same, if_false, witL_eq_indexed]
 end
 
 end DecEqF
@@ -1768,14 +2083,16 @@ theorem lower_hashEq_binds (profile : CompilerProfile) (hprofile : profile.Admis
       Minidregg.Pred.HashEqDigest.deployed o))
     (A : List ℕ → ℕ → F) (h : systemAccepts (stepAsg old new A) (lower profile (.hashEq v b c))) :
     Minidregg.Pred.hashEqOpening new v b c = some o ∨
-      Minidregg.Theory.HashBytes.Collision Minidregg.Pred.HashEqDigest.deployed := by
+      ∃ o', Minidregg.Pred.hashEqOpening new v b c = some o' ∧
+        Minidregg.Theory.HashBytes.CollisionAmong Minidregg.Pred.HashEqDigest.deployed
+          (fun x => x = o.preimage ∨ x = o'.preimage) := by
   obtain ⟨o', ho', hc'⟩ := (lower_hashEq_correct profile hprofile hinj).mp ⟨A, h⟩
   rw [hcommit] at hc'
   have hadm' := (Minidregg.Pred.hashEqOpening_eq_some.mp ho').2.2.2.2.2.2
   rcases Minidregg.Pred.HashEqDigest.binds_or_collides _ hadm hadm' (Option.some.inj hc') with
     heq | hcol
   · exact .inl (heq ▸ ho')
-  · exact .inr hcol
+  · exact .inr ⟨o', ho', hcol⟩
 
 end DecEqF
 

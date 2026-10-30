@@ -1,3 +1,39 @@
+# Every Cargo package under native/ and prover/ is listed here: a member, or an `exclude` entry
+# with its reason on the line. scripts/check-workspace.sh (local gate `workspace`) refuses a
+# package that is neither, a member that carries its own [workspace] table, and a member that
+# carries its own Cargo.lock: the root Cargo.lock is the one lock for every member.
 [workspace]
 resolver = "2"
-members = ["native/resource-client", "native/hyperdocument-link-sqlite-store", "native/credential-signature-verifier", "native/grain-runtime", "native/inference-scheduler", "native/spk-host", "native/discord-entrance", "native/pay-watcher", "native/mini-keys", "native/mini-sdk", "native/compatible-upgrade-custody", "native/signed-api-path", "native/spk-rpc"]
+members = [
+  "native/resource-client",
+  "native/hyperdocument-link-sqlite-store",
+  "native/credential-signature-verifier",
+  "native/grain-runtime",
+  "native/inference-scheduler",
+  "native/spk-host",
+  "native/discord-entrance",
+  "native/pay-watcher",
+  "native/mini-keys",
+  "native/mini-sdk",
+  "native/compatible-upgrade-custody",
+  "native/signed-api-path",
+  "native/spk-rpc",
+  "native/oracle-appliance",
+  "native/spk-package-stream",
+  "native/launch-gate",
+  "native/hermes-test-provider",
+  "native/joint-agreement-crypto",
+  "native/portable-archive",
+  "native/mini-kernels",
+  "native/mini-web-spawn",
+  "native/mini-web",
+  "prover",
+]
+exclude = [
+  # stays in this repo (owner ruling 2026-10-27); outside the root workspace on purpose: its own [workspace] and Cargo.lock pin the aws-lc/ring stack (the root lock does not carry it). Its tests run as named rows of scripts/check-rust-tests.sh; its Lean codec agreement is the private-backend-wire gate row
+  "native/private-backend",
+  # the Oracle appliance's standalone packer (deploy/oracle/README.md); its own [workspace] and Cargo.lock
+  "deploy/oracle/pack",
+  # the Oracle attachment adversarial review harness; a standalone tool with its own [workspace] and Cargo.lock
+  "deploy/oracle/attachment-review",
+]

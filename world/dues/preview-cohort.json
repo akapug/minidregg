@@ -6,6 +6,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "onTimePays",
@@ -20,6 +31,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "fullTermCompletes",
@@ -34,6 +56,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "earlyRefused",
@@ -48,6 +81,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "doubleTriggerRefused",
@@ -62,6 +106,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "skipRefused",
@@ -76,6 +131,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "catchUpStopsAtDue",
@@ -90,6 +156,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "afterTermRefused",
@@ -104,6 +181,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelAtBoundary",
@@ -118,6 +206,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelMidPeriodRefused",
@@ -132,6 +231,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelByStrangerRefused",
@@ -146,6 +256,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelPastWindowRefused",
@@ -160,6 +281,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelWhileBehindRefused",
@@ -174,6 +306,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelledTakesNoMore",
@@ -188,6 +331,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "leaseDraws",
@@ -202,6 +356,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "leaseShortRefused",
@@ -216,6 +381,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lapseWhenShort",
@@ -230,6 +406,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lapseEarlyRefused",
@@ -244,6 +431,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "settledOnce",
@@ -258,6 +456,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "settleWhileRunningRefused",
@@ -272,6 +481,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "topUpOnlyByPayer",
@@ -286,6 +506,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "topUpThenDraw",
@@ -300,6 +531,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "payAsYouGoTakesNoTopUp",
@@ -314,6 +556,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "voidTerms",
@@ -328,6 +581,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsFresh",
@@ -342,6 +606,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsAfterThree",
@@ -356,6 +631,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsAfterFour",
@@ -370,6 +656,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsLeased",
@@ -384,6 +681,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsLeaseTwice",
@@ -398,6 +706,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsLapsed",
@@ -412,6 +731,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "lawHoldsSettled",
@@ -426,6 +756,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "paymentFromPayer",
@@ -440,6 +781,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "paymentToRoom",
@@ -454,6 +806,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "fullTermPaid",
@@ -468,6 +831,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "behindAtCatchUp",
@@ -482,6 +856,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "catchUpPaidAmount",
@@ -496,6 +881,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "behindAfterTerm",
@@ -510,6 +906,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "cancelledPaidOnce",
@@ -524,6 +931,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "settleRefunds",
@@ -538,6 +956,17 @@
     "name": "StandingDues",
     "source": "StandingDues.obend",
     "imports": []
+   },
+   {
+    "name": "DuesScenarios",
+    "source": "DuesScenarios.obend",
+    "imports": [
+     {
+      "alias": "D",
+      "path": "./StandingDues.obend",
+      "module": "0"
+     }
+    ]
    }
   ],
   "entry": "settleRefundsPayer",
@@ -555,213 +984,575 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "110"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
-    "payload": {
-     "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "120"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "130"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "110"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "120"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "4"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "30"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "130"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "4"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "30"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "5"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "40"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -801,17 +1592,10 @@
   },
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "pay",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
-     {
-      "name": "from",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
      {
       "name": "to",
       "value": {
@@ -827,10 +1611,22 @@
       }
      },
      {
-      "name": "escrow",
+      "name": "write",
       "value": {
-       "tag": "boolean",
-       "value": false
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "10"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -848,205 +1644,525 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "125"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "125"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "125"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "125"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "125"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "3"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "125"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "125"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "4"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "30"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "3"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "125"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "4"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "30"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1058,24 +2174,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "running"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "period",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "3"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "due",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "130"
+       "value": "64"
       }
      }
     ]
@@ -1093,135 +2233,287 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1233,24 +2525,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "running"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "period",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "due",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "110"
+       "value": "64"
       }
      }
     ]
@@ -1268,108 +2584,218 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "refused",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "refused",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1381,24 +2807,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "running"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "period",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "due",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "100"
+       "value": "64"
       }
      }
     ]
@@ -1416,135 +2866,287 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "cancel",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "actor",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "110"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "cancel",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "actor",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "110"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1594,135 +3196,287 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "cancel",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "actor",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "105"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "cancel",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "actor",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "105"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1734,24 +3488,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "running"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "period",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "due",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "110"
+       "value": "64"
       }
      }
     ]
@@ -1769,135 +3547,287 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "0"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "cancel",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "actor",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "110"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "cancel",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "actor",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "110"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -1909,24 +3839,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "running"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "period",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "due",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "110"
+       "value": "64"
       }
      }
     ]
@@ -1944,218 +3898,580 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": true
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "25"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
        "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "25"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "0"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "100"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "1"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "110"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "0"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "100"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "discharge",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "period",
-        "value": {
-         "tag": "natural",
-         "value": "2"
-        }
-       },
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "120"
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
         }
        }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "lapse",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "120"
-        }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
        }
-      ]
-     }
+      }
+     ]
     }
    },
    {
     "tag": "variant",
-    "label": "event",
-    "payload": {
-     "tag": "variant",
-     "label": "settle",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "now",
-        "value": {
-         "tag": "natural",
-         "value": "121"
-        }
-       }
-      ]
-     }
-    }
-   },
-   {
-    "tag": "variant",
-    "label": "settled",
+    "label": "resumed",
     "payload": {
      "tag": "record",
-     "fields": []
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "1"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "110"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "2"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "10"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "discharge",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "period",
+            "value": {
+             "tag": "natural",
+             "value": "2"
+            }
+           },
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "120"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "lapse",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "120"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "settle",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "now",
+            "value": {
+             "tag": "natural",
+             "value": "121"
+            }
+           }
+          ]
+         }
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
+    }
+   },
+   {
+    "tag": "variant",
+    "label": "resumed",
+    "payload": {
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "settled",
+        "payload": {
+         "tag": "record",
+         "fields": []
+        }
+       }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "4"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "20"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -2195,17 +4511,10 @@
   },
   "expectedLastPlan": {
    "tag": "variant",
-   "label": "pay",
+   "label": "transfer",
    "payload": {
     "tag": "record",
     "fields": [
-     {
-      "name": "from",
-      "value": {
-       "tag": "natural",
-       "value": "1"
-      }
-     },
      {
       "name": "to",
       "value": {
@@ -2221,10 +4530,22 @@
       }
      },
      {
-      "name": "escrow",
+      "name": "write",
       "value": {
-       "tag": "boolean",
-       "value": true
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "add",
+          "payload": {
+           "tag": "natural",
+           "value": "0"
+          }
+         }
+        }
+       ]
       }
      }
     ]
@@ -2242,100 +4563,168 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": true
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
+      "name": "deposit",
       "value": {
        "tag": "natural",
-       "value": "2"
+       "value": "25"
       }
      },
      {
-      "name": "amount",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
        "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "25"
    }
   ],
   "responses": [
    {
     "tag": "variant",
-    "label": "event",
+    "label": "resumed",
     "payload": {
-     "tag": "variant",
-     "label": "topUp",
-     "payload": {
-      "tag": "record",
-      "fields": [
-       {
-        "name": "actor",
-        "value": {
-         "tag": "natural",
-         "value": "9"
-        }
-       },
-       {
-        "name": "amount",
-        "value": {
-         "tag": "natural",
-         "value": "50"
+     "tag": "record",
+     "fields": [
+      {
+       "name": "outcome",
+       "value": {
+        "tag": "variant",
+        "label": "reply",
+        "payload": {
+         "tag": "variant",
+         "label": "topUp",
+         "payload": {
+          "tag": "record",
+          "fields": [
+           {
+            "name": "actor",
+            "value": {
+             "tag": "natural",
+             "value": "9"
+            }
+           },
+           {
+            "name": "amount",
+            "value": {
+             "tag": "natural",
+             "value": "50"
+            }
+           }
+          ]
+         }
         }
        }
-      ]
-     }
+      },
+      {
+       "name": "view",
+       "value": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "version",
+          "value": {
+           "tag": "natural",
+           "value": "1"
+          }
+         },
+         {
+          "name": "state",
+          "value": {
+           "tag": "record",
+           "fields": [
+            {
+             "name": "paid",
+             "value": {
+              "tag": "natural",
+              "value": "0"
+             }
+            }
+           ]
+          }
+         }
+        ]
+       }
+      }
+     ]
     }
    }
   ],
@@ -2347,24 +4736,48 @@
     "tag": "record",
     "fields": [
      {
-      "name": "phase",
+      "name": "write",
       "value": {
-       "tag": "label",
-       "value": "running"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "paid",
+         "value": {
+          "tag": "variant",
+          "label": "keep",
+          "payload": {
+           "tag": "record",
+           "fields": []
+          }
+         }
+        }
+       ]
       }
      },
      {
-      "name": "period",
+      "name": "on",
       "value": {
-       "tag": "natural",
-       "value": "0"
+       "tag": "variant",
+       "label": "reply",
+       "payload": {
+        "tag": "record",
+        "fields": [
+         {
+          "name": "decider",
+          "value": {
+           "tag": "natural",
+           "value": "3"
+          }
+         }
+        ]
+       }
       }
      },
      {
-      "name": "due",
+      "name": "patience",
       "value": {
        "tag": "natural",
-       "value": "100"
+       "value": "64"
       }
      }
     ]
@@ -2382,72 +4795,98 @@
    }
   ],
   "entry": "dues",
+  "protocol": "kernel",
   "argumentEncoding": "typed-values-v1",
   "arguments": [
    {
     "tag": "record",
     "fields": [
      {
-      "name": "payer",
+      "name": "terms",
       "value": {
-       "tag": "natural",
-       "value": "1"
+       "tag": "record",
+       "fields": [
+        {
+         "name": "payer",
+         "value": {
+          "tag": "natural",
+          "value": "1"
+         }
+        },
+        {
+         "name": "room",
+         "value": {
+          "tag": "natural",
+          "value": "2"
+         }
+        },
+        {
+         "name": "amount",
+         "value": {
+          "tag": "natural",
+          "value": "0"
+         }
+        },
+        {
+         "name": "period",
+         "value": {
+          "tag": "natural",
+          "value": "10"
+         }
+        },
+        {
+         "name": "start",
+         "value": {
+          "tag": "natural",
+          "value": "100"
+         }
+        },
+        {
+         "name": "periods",
+         "value": {
+          "tag": "natural",
+          "value": "4"
+         }
+        },
+        {
+         "name": "window",
+         "value": {
+          "tag": "natural",
+          "value": "3"
+         }
+        },
+        {
+         "name": "lease",
+         "value": {
+          "tag": "boolean",
+          "value": false
+         }
+        }
+       ]
       }
      },
      {
-      "name": "room",
-      "value": {
-       "tag": "natural",
-       "value": "2"
-      }
-     },
-     {
-      "name": "amount",
+      "name": "deposit",
       "value": {
        "tag": "natural",
        "value": "0"
       }
      },
      {
-      "name": "period",
-      "value": {
-       "tag": "natural",
-       "value": "10"
-      }
-     },
-     {
-      "name": "start",
-      "value": {
-       "tag": "natural",
-       "value": "100"
-      }
-     },
-     {
-      "name": "periods",
-      "value": {
-       "tag": "natural",
-       "value": "4"
-      }
-     },
-     {
-      "name": "window",
+      "name": "keeper",
       "value": {
        "tag": "natural",
        "value": "3"
       }
      },
      {
-      "name": "lease",
+      "name": "fresh",
       "value": {
        "tag": "boolean",
-       "value": false
+       "value": true
       }
      }
     ]
-   },
-   {
-    "tag": "natural",
-    "value": "0"
    }
   ],
   "responses": [],

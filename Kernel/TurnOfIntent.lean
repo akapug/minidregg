@@ -1,7 +1,7 @@
 /-
 # Kernel.TurnOfIntent -- the turn a deployed intent is: the diff against the held cell
 
-SURPASS §2(b).1, lane T3.  Every Host admission ends in one
+docs/SURPASS.md §2(b).1, lane T3.  Every Host admission ends in one
 `DurableDataIntent.DataIntent`: the 37 `NativeHostReplay.NativeAdmission`
 constructors are indexed by it, so one function covers all of them.
 `Turn.ofIntent` reads each written cell's canonical post image at its registry
@@ -13,8 +13,12 @@ kind and emits the leg as the **difference** against the cell the world holds:
 * a present cell whose post decodes at the same kind is a leg that guards every
   unchanged present address (a read) and modifies every changed one (`write`,
   `allocate`, `free`), in the codec's address order;
-* a read guard of a present cell is a leg of pure reads; a fresh absent
-  cell becomes an explicit absence pin (a retired absent cell refuses);
+* the pre-state is what the INTENT asserts, never what the world holds: each
+  write's `expectedPre` and each read guard's `expectedRoot` is a pin
+  (`pinsOf`, `Turn.pins`) that `World.admit` checks against the held slot's
+  digest before anything else (`World.pinCheck`), so a stale intent derives a
+  turn the World refuses as `guardFailed` (`ofIntent_stale_refused`); a read
+  guard has no leg, and a guard on a retired cell refuses;
 * the nullifiers become `spent` keys (`Bridge.key`, injective), the charge is
   the intent's charge with the storage lane replaced by the patch bytes.
 
@@ -40,7 +44,7 @@ turn's `retires`, so the cell leaves the world and its id never returns.
 What `ofIntent` refuses, by name (`Refusal`): an undecodable post image, a kind
 change, a removal of a present cell that is not a retirement, a retirement of an
 absent cell, any write of a retired cell, a post image no guarded patch reaches,
-a read guard on a retired absent cell, and five shape checks the durable preflight
+a read guard on a retired cell, and five shape checks the durable preflight
 already implies (duplicate write, duplicate retire, duplicate leg, no effect,
 storage above the charge).
 
@@ -49,14 +53,33 @@ preflight establishes, `World.step` accepts the derived turn, the post cells
 are the decoded post images (`postCell`), and the system cell is the turn's
 system patch.  `Kernel.HostRefinesWorld` lifts it to the deployed `Loaded`.
 -/
-import Kernel.World
-import Kernel.DurableDataIntent
-import Kernel.DurableReceiver
-import Theory.StoreNormalize
-import Compiler.StoreCodec
-import Mathlib.Logic.Encodable.Basic
-import Mathlib.Data.Nat.Pairing
-import Theory.AssertAxioms
+module
+
+public import Kernel.World
+public import Kernel.DurableDataIntent
+public import Kernel.DurableReceiver
+public import Theory.StoreNormalize
+public import Compiler.StoreCodec
+public import Mathlib.Logic.Encodable.Basic
+public import Mathlib.Data.Nat.Pairing
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.TurnOfIntent
 
@@ -514,25 +537,50 @@ theorem bytesCode_injective : Function.Injective bytesCode := by
       subst byte'
       exact congrArg (List.cons byte) (ih tailSame)
 
-/-- **An injective nullifier code**: every field of the stable nullifier,
-including its canonical bytes, by `Nat.pair`.  No hash, so no collision
-premise: `spent` keyed by it is the deployed consumed set exactly. -/
+/-- The stable nullifier as one length-delimited byte string. -/
+def nullifierFields : Compiler.Tower256ConcreteBackend.StreamCodec (Nat × Nat × Nat × List UInt8) :=
+  .product .nat (.product .nat (.product .nat Compiler.Tower256ConcreteBackend.bytesStream))
+
+/-- **An injective nullifier code, linear in the nullifier**: the base-256
+positional value (`bytesCode`) of the nullifier's fields as one prefix-free
+byte string.  No hash, so no collision premise: `spent` keyed by it is the
+deployed consumed set exactly.  (It was a three-deep `Nat.pair`, whose bit
+length roughly doubles per level: measured 488 bytes per nullifier in a Turn
+log against 60 canonical bytes.) -/
 def nullifierCode (n : StableNullifier) : Nat :=
-  Nat.pair n.codecVersion
-    (Nat.pair n.domain.value (Nat.pair n.nullifierId.value (bytesCode n.canonicalBytes)))
+  bytesCode (nullifierFields.encode (n.codecVersion, n.domain.value, n.nullifierId.value,
+    n.canonicalBytes))
 
 theorem nullifierCode_injective : Function.Injective nullifierCode := by
   rintro ⟨v, ⟨d⟩, ⟨i⟩, b⟩ ⟨v', ⟨d'⟩, ⟨i'⟩, b'⟩ h
-  simp only [nullifierCode, Nat.pair_eq_pair] at h
-  obtain ⟨rfl, rfl, rfl, hb⟩ := h
-  rw [bytesCode_injective hb]
+  have := Compiler.StoreCodec.streamEncode_injective nullifierFields (bytesCode_injective h)
+  simp only [Prod.mk.injEq] at this
+  obtain ⟨rfl, rfl, rfl, rfl⟩ := this
+  rfl
 
-/-- The bridge between the deployed objects and the model: the cell codec and
-an injective nullifier key. -/
+/-- The bridge between the deployed objects and the model: the cell codec, an
+injective nullifier key, and the reading of an intent's asserted root
+(`DataWrite.expectedPre`, `ReadGuard.expectedRoot`) as a pin digest
+(`Turn.pins`; deployed: the identity). -/
 structure Bridge (R : Registry) (D : Type) where
   codec : Codec R
   key : StableNullifier → D
   key_injective : Function.Injective key
+  pin : Theory.TypedAuthorization.Digest → D
+
+/-- **Pin coherence** of a bridge, a history and a per-cell root: bytes that
+decode to a slot and do not retire have, read as a pin, exactly the digest of
+the slot they decode to.  It is what makes an intent's asserted root
+(`DataWrite.expectedPre`, `ReadGuard.expectedRoot`, a `rootBytes` of a slot's
+canonical bytes) comparable with the World's `History.cellDigest` of the slot.
+(Retiring bytes are excluded: the deployed retired image decodes to the absent
+slot but is not its canonical encoding; a pinned cell is never retired.)  The
+deployed instance is `DeployedHistory.deployed_pinCoherent`. -/
+def PinCoherent {R : Registry} {D : Type} (B : Bridge R D)
+    (H : History R TransactionId StableEvent D)
+    (rootBytes : List UInt8 → Theory.TypedAuthorization.Digest) : Prop :=
+  ∀ bytes o, B.codec.decode bytes = some o → B.codec.retires bytes = false →
+    H.cellDigest o = B.pin (rootBytes bytes)
 
 /-- The deployed digest key: `⟨nullifierCode n⟩`. -/
 def digestKey (n : StableNullifier) : Theory.TypedAuthorization.Digest := ⟨nullifierCode n⟩
@@ -675,21 +723,18 @@ def writeIds (ws : List DataWrite) : List CellId := ws.map fun w => w.cellId.val
 def guardIds (ws : List DataWrite) (gs : List ReadGuard) : List CellId :=
   (gs.map fun g => g.cellId.value).eraseDups.filter fun c => c ∉ writeIds ws
 
-/-- The guard leg of a held cell: a read of every present address. -/
-def guardLeg (C : Codec R) (cells : CellId → Option (Cell R)) (c : CellId) : Option (Leg R) :=
-  (cells c).map fun cell => ⟨c, cell.kind, C.legPatch cell.kind cell.store cell.store⟩
-
-/-- The storage bytes of creates and legs: the legs' bytes plus the born
-images' (`World.patchBytes`). -/
+/-- The storage bytes of creates, legs and the event: the legs' bytes, the
+born images' and the retained event's (`World.patchBytes`). -/
 def storageOf (H : History R TransactionId StableEvent D)
-    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) : Nat :=
-  (legs.map H.legBytes).sum + (creates.map fun c => H.imageBytes c.2.1).sum
+    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (event : StableEvent) :
+    Nat :=
+  (legs.map H.legBytes).sum + (creates.map fun c => H.imageBytes c.2.1).sum + H.eventBytes event
 
 /-- The turn's charge: the intent's, with the storage lane the patch bytes. -/
 def chargeOf (H : History R TransactionId StableEvent D)
-    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (exact : Charge) :
-    Charge :=
-  fun l => if l = .storageBytes then storageOf H creates legs else exact l
+    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (event : StableEvent)
+    (exact : Charge) : Charge :=
+  fun l => if l = .storageBytes then storageOf H creates legs event else exact l
 
 /-- The creates of an intent. -/
 def createsOf (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
@@ -701,15 +746,20 @@ def retiresOf (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataI
     List CellId :=
   (deltas C cells intent.writes).filterMap fun d => d.2.retire? d.1
 
-/-- The legs of an intent: guard legs, then write legs. -/
+/-- The legs of an intent: one per written cell with an effect.  A read guard
+has no leg: what it asserts is a pin (`pinsOf`). -/
 def legsOf (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
     List (Leg R) :=
-  (guardIds intent.writes intent.readGuards).filterMap (guardLeg C cells) ++
-    (deltas C cells intent.writes).filterMap fun d => d.2.leg? C d.1
+  (deltas C cells intent.writes).filterMap fun d => d.2.leg? C d.1
 
-/-- Unwritten guard cells with no held cell become explicit absence pins. -/
-def absentOf (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) : List CellId :=
-  (guardIds intent.writes intent.readGuards).filter fun c => (cells c).isNone
+/-- **The pins of an intent: what it asserts about the pre-state.**  Each
+write's `expectedPre`, then each read guard's `expectedRoot`, read as a pin
+digest (`Bridge.pin`), in intent order with duplicates kept.  Nothing here
+reads the held cells: a stale intent derives a turn whose pins fail
+(`ofIntent_stale_refused`). -/
+def pinsOf (B : Bridge R D) (intent : DataIntent rootBytes) : List (CellId × D) :=
+  intent.writes.map (fun w => (w.cellId.value, B.pin w.expectedPre)) ++
+    intent.readGuards.map (fun g => (g.cellId.value, B.pin g.expectedRoot))
 
 /-- The turn record of an intent (no checks). -/
 def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
@@ -721,9 +771,15 @@ def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     event := intent.event
     nullifiers := intent.nullifiers.map B.key
     charge := chargeOf H (createsOf B.codec cells intent) (legsOf B.codec cells intent)
-      intent.exactCharge
+      intent.event intent.exactCharge
     subject := intent.subject
-    absent := absentOf cells intent }
+    pins := pinsOf B intent
+    credit := intent.credit }
+
+/-- The derived turn carries the intent's meter credit (M2). -/
+theorem turnOf_credit (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
+    (turnOf B H cells intent).credit = intent.credit := rfl
 
 /-- **The derived turn** against held cells and the retired set.  Every check
 is named; the first two groups are the expressibility refusals, the last five
@@ -734,7 +790,7 @@ def ofCells (B : Bridge R D) (H : History R TransactionId StableEvent D)
   match intent.writes.findSome? (writeRefusal B.codec cells retired) with
   | some e => .error e
   | none =>
-      match (guardIds intent.writes intent.readGuards).find? (fun c => (cells c).isNone && retired c) with
+      match (guardIds intent.writes intent.readGuards).find? retired with
       | some c => .error (.retiredCell c)
       | none =>
           let t := turnOf B H cells intent
@@ -742,8 +798,8 @@ def ofCells (B : Bridge R D) (H : History R TransactionId StableEvent D)
           else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateWrite
           else if ¬ t.retires.Nodup then .error .duplicateWrite
           else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLeg
-          else if t.legs.isEmpty ∧ t.creates.isEmpty then .error .noEffect
-          else if storageOf H t.creates t.legs > intent.exactCharge .storageBytes then
+          else if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.pins.isEmpty then .error .noEffect
+          else if storageOf H t.creates t.legs t.event > intent.exactCharge .storageBytes then
             .error .storageAboveCharge
           else .ok t
 
@@ -759,13 +815,13 @@ structure Derived (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (t : DTurn R D) : Prop where
   eq : t = turnOf B H cells intent
   writes_ok : ∀ w ∈ intent.writes, writeRefusal B.codec cells retired w = none
-  guards_unretired : ∀ c ∈ guardIds intent.writes intent.readGuards, cells c = none → retired c = false
+  guards_unretired : ∀ c ∈ guardIds intent.writes intent.readGuards, retired c = false
   writes_nodup : (writeIds intent.writes).Nodup
   creates_nodup : (t.creates.map Prod.fst).Nodup
   retires_nodup : t.retires.Nodup
   legs_nodup : (t.legs.map Leg.cell).Nodup
-  nonempty : ¬ (t.legs.isEmpty = true ∧ t.creates.isEmpty = true)
-  storage : storageOf H t.creates t.legs ≤ intent.exactCharge .storageBytes
+  nonempty : ¬ (t.legs.isEmpty = true ∧ t.creates.isEmpty = true ∧ t.pins.isEmpty = true)
+  storage : storageOf H t.creates t.legs t.event ≤ intent.exactCharge .storageBytes
 
 omit [DecidableEq D] in
 theorem ofCells_ok {B : Bridge R D} {H : History R TransactionId StableEvent D}
@@ -781,10 +837,10 @@ theorem ofCells_ok {B : Bridge R D} {H : History R TransactionId StableEvent D}
   simp only at h
   split_ifs at h with h1 h2 h6 h3 h4 h5
   cases h
-  refine ⟨rfl, fun w m => List.findSome?_eq_none_iff.mp hw w m, fun c m absent => ?_,
+  refine ⟨rfl, fun w m => List.findSome?_eq_none_iff.mp hw w m, fun c m => ?_,
     h1, h2, h6, h3, h4, Nat.le_of_not_gt h5⟩
   have := List.find?_eq_none.mp hg c m
-  simpa [absent] using this
+  simpa using this
 
 /-! ### Reading a derived turn -/
 
@@ -894,23 +950,14 @@ theorem mem_createsOf {C : Codec R} {cells : CellId → Option (Cell R)}
 theorem mem_legsOf {C : Codec R} {cells : CellId → Option (Cell R)}
     {intent : DataIntent rootBytes} {leg : Leg R} :
     leg ∈ legsOf C cells intent ↔
-      (∃ c ∈ guardIds intent.writes intent.readGuards, ∃ cell, cells c = some cell ∧
-          leg = ⟨c, cell.kind, C.legPatch cell.kind cell.store cell.store⟩) ∨
-      (∃ c δ, (c, δ) ∈ deltas C cells intent.writes ∧ δ.leg? C c = some leg) := by
+      ∃ c δ, (c, δ) ∈ deltas C cells intent.writes ∧ δ.leg? C c = some leg := by
   unfold legsOf
-  rw [List.mem_append, List.mem_filterMap, List.mem_filterMap]
+  rw [List.mem_filterMap]
   constructor
-  · rintro (⟨c, m, h⟩ | ⟨⟨c, δ⟩, m, h⟩)
-    · unfold guardLeg at h
-      rcases hc : cells c with _ | cell
-      · rw [hc] at h; cases h
-      · rw [hc] at h
-        cases h
-        exact .inl ⟨c, m, cell, hc, rfl⟩
-    · exact .inr ⟨c, δ, m, h⟩
-  · rintro (⟨c, m, cell, hc, rfl⟩ | ⟨c, δ, m, h⟩)
-    · exact .inl ⟨c, m, by simp [guardLeg, hc]⟩
-    · exact .inr ⟨(c, δ), m, h⟩
+  · rintro ⟨⟨c, δ⟩, m, h⟩
+    exact ⟨c, δ, m, h⟩
+  · rintro ⟨c, δ, m, h⟩
+    exact ⟨(c, δ), m, h⟩
 
 omit [DecidableEq D] in
 /-- A written cell is never retired before its turn. -/
@@ -950,6 +997,20 @@ theorem guardIds_not_written {ws : List DataWrite} {gs : List ReadGuard} {c : Ce
   rw [List.mem_filter] at m
   simpa using m.2
 
+/-- Every read guard's cell is a guarded cell (read guards never name a
+written cell: `DataIntent.guardsReadOnly`). -/
+theorem guard_mem_guardIds {intent : DataIntent rootBytes} {g : ReadGuard}
+    (hg : g ∈ intent.readGuards) : g.cellId.value ∈ guardIds intent.writes intent.readGuards := by
+  unfold guardIds
+  rw [List.mem_filter, List.mem_eraseDups]
+  refine ⟨List.mem_map_of_mem hg, ?_⟩
+  have ro := intent.guardsReadOnly g hg
+  simp only [decide_eq_true_eq]
+  intro m
+  simp only [writeIds, List.mem_map] at m
+  obtain ⟨w0, hw0, e⟩ := m
+  exact ro (List.mem_map.mpr ⟨w0, hw0, congrArg Theory.TypedAuthorization.Digest.mk e⟩)
+
 theorem deltas_written {C : Codec R} {cells : CellId → Option (Cell R)} {ws : List DataWrite}
     {c : CellId} {δ : Delta R} (m : (c, δ) ∈ deltas C cells ws) : c ∈ writeIds ws := by
   obtain ⟨w, hw, rfl, -⟩ := mem_deltas.mp m
@@ -964,32 +1025,14 @@ theorem cellIds_eraseDups_nodup : ∀ ids : List CellId, ids.eraseDups.Nodup
 termination_by ids => ids.length
 decreasing_by exact Nat.lt_succ_of_le (List.length_filter_le _ _)
 
-/-- The derived absence pins are disjoint from all writes and present guard legs. -/
+/-- A derived turn carries no exact absence pins: an unwritten guarded cell's
+asserted absence is its digest pin (`pinsOf`), so the absence shape holds
+vacuously. -/
 theorem turnOf_absentShaped (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
     AbsentShaped (turnOf B H cells intent) := by
-  change (absentOf cells intent).Nodup ∧
-    List.Disjoint (absentOf cells intent) ((createsOf B.codec cells intent).map Prod.fst) ∧
-    List.Disjoint (absentOf cells intent) ((legsOf B.codec cells intent).map Leg.cell)
-  refine ⟨?_, ?_, ?_⟩
-  · exact ((cellIds_eraseDups_nodup _).filter _).filter _
-  · apply List.disjoint_left.mpr
-    intro c ma mc
-    have mg := (List.mem_filter.mp ma).1
-    obtain ⟨x, mx, ex⟩ := List.mem_map.mp mc
-    obtain ⟨c', k, s', md, rfl⟩ := mem_createsOf.mp mx
-    rcases md with md | ⟨_, md⟩ <;> exact guardIds_not_written mg (ex ▸ deltas_written md)
-  · apply List.disjoint_left.mpr
-    intro c ma ml
-    obtain ⟨mg, missing⟩ := List.mem_filter.mp ma
-    have missing' : cells c = none := by simpa using missing
-    obtain ⟨leg, ml, el⟩ := List.mem_map.mp ml
-    rcases mem_legsOf.mp ml with ⟨c', _, cell, hc, rfl⟩ | ⟨c', δ, md, hl⟩
-    · change c' = c at el
-      subst c'
-      rw [missing'] at hc
-      cases hc
-    · exact guardIds_not_written mg ((leg?_cell hl).symm.trans el ▸ deltas_written md)
+  change ([] : List CellId).Nodup ∧ List.Disjoint [] _ ∧ List.Disjoint [] _
+  simp
 
 /-! ## 6. `ofIntent_minimal`: the leg is the normal form, its footprint the diff -/
 
@@ -1008,10 +1051,9 @@ theorem ofIntent_minimal {B : Bridge R D} {H : History R TransactionId StableEve
   have d := ofCells_ok h
   have fixed : Patch.normalize leg.patch = leg.patch := by
     rw [d.eq] at m
-    rcases mem_legsOf.mp m with ⟨c, -, cell, -, rfl⟩ | ⟨c, δ, -, hl⟩
-    · exact B.codec.legPatch_normalize _ _ _
-    · cases δ <;> simp [Delta.leg?] at hl <;> rw [← hl] <;>
-        exact B.codec.legPatch_normalize _ _ _
+    obtain ⟨c, δ, -, hl⟩ := mem_legsOf.mp m
+    cases δ <;> simp [Delta.leg?] at hl <;> rw [← hl] <;>
+      exact B.codec.legPatch_normalize _ _ _
   refine ⟨fixed, fun pre valid => ?_⟩
   have := Patch.normalize_writeFootprint_eq_diff valid
   rwa [fixed] at this
@@ -1082,7 +1124,7 @@ theorem sysCore_unroomed (H : History R TransactionId StableEvent D) {t : DTurn 
 /-- The system patch of a turn whose creates name no room and which retires
 nothing is valid when the journal id is fresh, the head is where the patch
 quotes it, the created ids are unretired, the nullifiers are fresh and
-distinct, and every charged lane holds the meter value. -/
+distinct, and every charged or credited lane holds the meter value. -/
 theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
     {s : Store (sysLayout TransactionId D)} {t : DTurn R D}
     {height : Nat} {logRoot : D} {avail : Charge}
@@ -1091,7 +1133,7 @@ theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
     (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
     (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
-    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    (hm : ∀ l, t.charge l ≠ 0 ∨ t.credit l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
     Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
   have hrows : t.parentRows = [] := by
     unfold Turn.parentRows
@@ -1109,10 +1151,10 @@ theorem sysPatch_valid_unroomed (H : History R TransactionId StableEvent D)
     rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
-  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+  · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
     intro l m
     rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
-    exact hm l (mem_chargedLanes.mp m)
+    exact hm l (mem_meteredLanes.mp m)
 
 omit [DecidableEq D] in
 theorem patchOk_of_mem {B : Bridge R D} {H : History R TransactionId StableEvent D}
@@ -1181,7 +1223,7 @@ theorem validFrom_retireAllocs (s : Store (sysLayout TransactionId D)) (rs : Lis
 /-- The system patch of a derived turn (creates naming no room, any retires) is
 valid when the journal id is fresh, the head is where the patch quotes it, the
 created and retired ids are unmarked and the retired ones distinct, the
-nullifiers are fresh and distinct, and every charged lane holds the meter value. -/
+nullifiers are fresh and distinct, and every charged or credited lane holds the meter value. -/
 theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
     {s : Store (sysLayout TransactionId D)} {t : DTurn R D}
     {height : Nat} {logRoot : D} {avail : Charge}
@@ -1191,7 +1233,7 @@ theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
     (hr : t.retires.Nodup ∧ ∀ c ∈ t.retires, s ⟨SysSpace.retired, c⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
     (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
-    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    (hm : ∀ l, t.charge l ≠ 0 ∨ t.credit l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
     Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
   rw [validFrom_sysPatch]
   refine ⟨?_, ?_, ?_⟩
@@ -1212,10 +1254,10 @@ theorem sysPatch_valid_derived (H : History R TransactionId StableEvent D)
       rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
-  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+  · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
     intro l m
     rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
-    exact hm l (mem_chargedLanes.mp m)
+    exact hm l (mem_meteredLanes.mp m)
 
 theorem applyRetires_exists : ∀ (cells : Cells R) (rs : List CellId), rs.Nodup →
     (∀ c ∈ rs, ∃ cell, cells c = some cell ∧ cell.store = 0) →
@@ -1254,7 +1296,9 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     (nodup : intent.nullifiers.Nodup)
     (unspent : ∀ n ∈ intent.nullifiers, w.spent (B.key n) = none)
     (funded : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l)
-    (fundedStorage : intent.exactCharge .storageBytes ≤ w.meter .storageBytes) :
+    (fundedStorage : intent.exactCharge .storageBytes ≤ w.meter .storageBytes)
+    (recorded : ∀ l, intent.credit l ≠ 0 → ∃ a, w.allowanceOf l = some a)
+    (pinsHold : ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2) :
     ∃ w', World.step H w t = some w' ∧
       (∀ c, w'.cells c = postCell B.codec cells intent c) ∧
       w'.system = Patch.run w.system (sysPatch H t height logRoot w.meter) := by
@@ -1265,7 +1309,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
   have hretires : t.retires = retiresOf B.codec cells intent := by rw [teq]; rfl
   have htx : t.txId = intent.transactionId := by rw [teq]; rfl
   have hnull : t.nullifiers = intent.nullifiers.map B.key := by rw [teq]; rfl
-  have hcharge : t.charge = chargeOf H t.creates t.legs intent.exactCharge := by
+  have hcharge : t.charge = chargeOf H t.creates t.legs t.event intent.exactCharge := by
     rw [teq]; rfl
   have hnb : t.notBefore = 0 := by rw [teq]; rfl
   have hvu : t.validUntil = none := by rw [teq]; rfl
@@ -1338,36 +1382,32 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       Patch.ValidFrom pre leg.patch := by
     intro leg m
     rw [hlegs] at m
-    rcases mem_legsOf.mp m with ⟨c, mg, cell, hc, rfl⟩ | ⟨c, δ, md, hl⟩
-    · refine ⟨cell.store, ?_, B.codec.legPatch_self_valid _ _⟩
-      have nc : c ∉ t.creates.map Prod.fst := fun m' =>
-        guardIds_not_written mg (created_written c m')
-      rw [c1_frame c nc, hcells, hc]
-    · have ok := patchOk_of_mem d md
-      obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp md
-      have spec := deltaOf_spec hδ
-      cases δ with
-      | absent => cases hl
-      | burn k =>
-          simp only [Delta.leg?, Option.some.injEq] at hl
-          subst hl
-          exact ⟨0, c1_burn _ k md, B.codec.legPatch_self_valid k 0⟩
-      | create k s' =>
-          simp only [Delta.leg?, Option.some.injEq] at hl
-          subst hl
-          exact ⟨romPart s', c1_created _ k s' md, of_decide_eq_true ok⟩
-      | change k s s' =>
-          simp only [Delta.leg?, Option.some.injEq] at hl
-          subst hl
-          refine ⟨s, ?_, of_decide_eq_true ok⟩
-          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
-          exact spec.1
-      | retire k s =>
-          simp only [Delta.leg?, Option.some.injEq] at hl
-          subst hl
-          refine ⟨s, ?_, of_decide_eq_true ok⟩
-          rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
-          exact spec.1
+    obtain ⟨c, δ, md, hl⟩ := mem_legsOf.mp m
+    have ok := patchOk_of_mem d md
+    obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp md
+    have spec := deltaOf_spec hδ
+    cases δ with
+    | absent => cases hl
+    | burn k =>
+        simp only [Delta.leg?, Option.some.injEq] at hl
+        subst hl
+        exact ⟨0, c1_burn _ k md, B.codec.legPatch_self_valid k 0⟩
+    | create k s' =>
+        simp only [Delta.leg?, Option.some.injEq] at hl
+        subst hl
+        exact ⟨romPart s', c1_created _ k s' md, of_decide_eq_true ok⟩
+    | change k s s' =>
+        simp only [Delta.leg?, Option.some.injEq] at hl
+        subst hl
+        refine ⟨s, ?_, of_decide_eq_true ok⟩
+        rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
+        exact spec.1
+    | retire k s =>
+        simp only [Delta.leg?, Option.some.injEq] at hl
+        subst hl
+        refine ⟨s, ?_, of_decide_eq_true ok⟩
+        rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
+        exact spec.1
   obtain ⟨c2, h2⟩ := applyLegs_exists c1 t.legs d.legs_nodup legs_pre
   have c2_leg : ∀ leg ∈ t.legs, ∀ pre, c1 leg.cell = some ⟨leg.kind, pre⟩ →
       c2 leg.cell = some ⟨leg.kind, Patch.run pre leg.patch⟩ := by
@@ -1389,13 +1429,13 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp md
       have spec := deltaOf_spec hδ
       have ml : (⟨w0.cellId.value, k, B.codec.legPatch k s 0⟩ : Leg R) ∈ t.legs := by
-        rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
+        rw [hlegs]; exact mem_legsOf.mpr ⟨_, _, md, rfl⟩
       have pre : c1 w0.cellId.value = some ⟨k, s⟩ := by
         rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
         exact spec.1
       rw [c2_leg _ ml s pre, B.codec.legPatch_run]
     · have ml : (⟨c, k, B.codec.legPatch k 0 0⟩ : Leg R) ∈ t.legs := by
-        rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
+        rw [hlegs]; exact mem_legsOf.mpr ⟨_, _, md, rfl⟩
       rw [c2_leg _ ml 0 (c1_burn c k md), B.codec.legPatch_run]
   obtain ⟨c3, h3⟩ := applyRetires_exists c2 t.retires d.retires_nodup fun c m => by
     rw [hretires] at m
@@ -1409,7 +1449,8 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
     exact h3
   -- the system half
   have shaped : Shaped t := by
-    refine ⟨fun e => d.nonempty ⟨e.1, e.2.1⟩, d.legs_nodup, d.creates_nodup, d.retires_nodup, ?_⟩
+    refine ⟨fun e => d.nonempty ⟨e.1, e.2.1, e.2.2.2⟩, d.legs_nodup, d.creates_nodup,
+      d.retires_nodup, ?_⟩
     rw [d.eq]
     exact turnOf_absentShaped B H cells intent
   have funded' : t.charge ≤ w.meter := by
@@ -1424,7 +1465,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       exact funded l e
   have hk : turnCheck H w t height = none := by
     rw [turnCheck_eq_none_iff]
-    refine ⟨?_, ⟨by simp [hnb], by simp [hvu]⟩, ?_, ?_, funded'⟩
+    refine ⟨pinsHold, ?_, ⟨by simp [hnb], by simp [hvu]⟩, ?_, ?_, funded'⟩
     · rw [hnull]; exact nodup.map B.key_injective
     · intro n m
       rw [hnull] at m
@@ -1442,22 +1483,24 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       obtain ⟨n0, m0, rfl⟩ := List.mem_map.mp m
       exact unspent n0 m0
     · intro l hl
-      have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
-      rw [meter_system] at pos ⊢
-      revert pos
-      cases w.system ⟨SysSpace.allowance, l⟩ with
-      | none => intro pos; exact absurd pos (lt_irrefl 0)
-      | some a => intro _; rfl
+      rcases hl with hl | hl
+      · have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
+        rw [meter_system] at pos ⊢
+        revert pos
+        cases w.system ⟨SysSpace.allowance, l⟩ with
+        | none => intro pos; exact absurd pos (lt_irrefl 0)
+        | some a => intro _; rfl
+      · have hcredit : t.credit = intent.credit := by rw [teq]; rfl
+        rw [hcredit] at hl
+        obtain ⟨a, ha⟩ := recorded l hl
+        rw [meter_system]
+        change w.system ⟨SysSpace.allowance, l⟩ = some a at ha
+        rw [ha]
+        rfl
   have ha : absentCheck w t = none := by
     rw [absentCheck_eq_none_iff]
     intro c m
-    have hm : c ∈ absentOf cells intent := by simpa [d.eq, turnOf] using m
-    obtain ⟨mg, missing⟩ := List.mem_filter.mp hm
-    have missing' : cells c = none := by simpa using missing
-    refine ⟨(hcells c).trans missing', ?_⟩
-    have unretired := d.guards_unretired c mg missing'
-    rw [hretired] at unretired
-    simpa using unretired
+    simp [d.eq, turnOf] at m
   have hadmit := admit_of H shaped hh (by rw [htx]; exact fresh) hk hv hcellsOk ha
   refine ⟨_, (step_eq_some H).2 hadmit, fun c => ?_, rfl⟩
   show c3 c = _
@@ -1483,26 +1526,23 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
           intro m
           obtain ⟨leg, ml, el⟩ := List.mem_map.mp m
           rw [hlegs] at ml
-          rcases mem_legsOf.mp ml with ⟨c, mg, cell, -, rfl⟩ | ⟨c, δ', md', hl⟩
-          · have e : c = w0.cellId.value := el
-            subst e
-            exact guardIds_not_written mg hw
-          · have e := leg?_cell hl
-            rw [el] at e
-            subst e
-            cases deltas_unique d md md'
-            cases hl
+          obtain ⟨c, δ', md', hl⟩ := mem_legsOf.mp ml
+          have e := leg?_cell hl
+          rw [el] at e
+          subst e
+          cases deltas_unique d md md'
+          cases hl
         rw [c2_frame _ nl, c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]
         exact spec.1
     | create k s' =>
         rw [postCell_written d.writes_nodup hw0 spec.2]
         have ml : (⟨w0.cellId.value, k, B.codec.legPatch k (romPart s') s'⟩ : Leg R) ∈ t.legs := by
-          rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
+          rw [hlegs]; exact mem_legsOf.mpr ⟨_, _, md, rfl⟩
         rw [c2_leg _ ml (romPart s') (c1_created _ k s' md), B.codec.legPatch_run]
     | change k s s' =>
         rw [postCell_written d.writes_nodup hw0 spec.2]
         have ml : (⟨w0.cellId.value, k, B.codec.legPatch k s s'⟩ : Leg R) ∈ t.legs := by
-          rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
+          rw [hlegs]; exact mem_legsOf.mpr ⟨_, _, md, rfl⟩
         have pre : c1 w0.cellId.value = some ⟨k, s⟩ := by
           rw [c1_frame _ (not_created _ _ md (fun _ _ e => by cases e) (fun _ e => by cases e)), hcells]; exact spec.1
         rw [c2_leg _ ml s pre, B.codec.legPatch_run]
@@ -1512,34 +1552,50 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
         exact absurd (by rw [hretires]; exact mem_retiresOf.mpr ⟨k, 0, .inr ⟨rfl, md⟩⟩) hr
   · rw [postCell_unwritten hw]
     have nc : c ∉ t.creates.map Prod.fst := fun m => hw (created_written c m)
-    by_cases hg : c ∈ guardIds intent.writes intent.readGuards ∧ (cells c).isSome = true
-    · obtain ⟨cell, hc⟩ := Option.isSome_iff_exists.mp hg.2
-      have ml : (⟨c, cell.kind, B.codec.legPatch cell.kind cell.store cell.store⟩ : Leg R) ∈ t.legs := by
-        rw [hlegs]; exact mem_legsOf.mpr (.inl ⟨c, hg.1, cell, hc, rfl⟩)
-      have pre : c1 c = some ⟨cell.kind, cell.store⟩ := by
-        rw [c1_frame c nc, hcells, hc]
-      rw [c2_leg _ ml _ pre, B.codec.legPatch_run, hc]
-    · have nl : c ∉ t.legs.map Leg.cell := by
-        intro m
-        obtain ⟨leg, ml, el⟩ := List.mem_map.mp m
-        rw [hlegs] at ml
-        rcases mem_legsOf.mp ml with ⟨c', mg, cell, hcell, rfl⟩ | ⟨c', δ', md', hl⟩
-        · have e : c' = c := el
-          subst e
-          exact hg ⟨mg, by simp [hcell]⟩
-        · have e := leg?_cell hl
-          rw [el] at e
-          subst e
-          exact hw (deltas_written md')
-      rw [c2_frame c nl, c1_frame c nc, hcells]
+    have nl : c ∉ t.legs.map Leg.cell := by
+      intro m
+      obtain ⟨leg, ml, el⟩ := List.mem_map.mp m
+      rw [hlegs] at ml
+      obtain ⟨c', δ', md', hl⟩ := mem_legsOf.mp ml
+      have e := leg?_cell hl
+      rw [el] at e
+      subst e
+      exact hw (deltas_written md')
+    rw [c2_frame c nl, c1_frame c nc, hcells]
+
+/-- **A derived turn's pins hold** exactly where the intent's asserted roots,
+read as pins, are the world's digests of the held slots: the pinned cells are
+unretired by the derivation's own refusals (`writeRefusal`, the guards'
+`retiredCell`). -/
+theorem pinsHold_of_intent {B : Bridge R D} {H : History R TransactionId StableEvent D}
+    {w : World R TransactionId D} {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t)
+    (pinned : ∀ wr ∈ intent.writes, H.cellDigest (w.cells wr.cellId.value) = B.pin wr.expectedPre)
+    (guarded : ∀ g ∈ intent.readGuards,
+      H.cellDigest (w.cells g.cellId.value) = B.pin g.expectedRoot) :
+    ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 := by
+  have d := ofCells_ok derived
+  have hpins : t.pins = pinsOf B intent := by rw [d.eq]; rfl
+  intro p m
+  rw [hpins] at m
+  rcases List.mem_append.mp m with m | m
+  · obtain ⟨w0, hw0, rfl⟩ := List.mem_map.mp m
+    refine ⟨?_, pinned w0 hw0⟩
+    have h := written_unretired d hw0
+    simpa using h
+  · obtain ⟨g, hg, rfl⟩ := List.mem_map.mp m
+    refine ⟨?_, guarded g hg⟩
+    have h := d.guards_unretired _ (guard_mem_guardIds hg)
+    simpa using h
 
 /-- **`ofIntent_step`**: the world side of `ofIntent_run`.  Under the world
 facts the deployed preflight establishes -- a head, a fresh transaction id,
 fresh distinct nullifiers, the charge within the meter (the storage lane
-against the intent's own storage charge) -- `World.step` accepts the derived
-turn (its retires included), every post cell is the intent's decoded post image
-(`postCell`; a retired cell reads absent), and the system cell is the turn's
-system patch. -/
+against the intent's own storage charge), and every asserted pre-root true of
+the held slot (`pinned`, `guarded`: the intent's pins hold) -- `World.step`
+accepts the derived turn (its retires included), every post cell is the
+intent's decoded post image (`postCell`; a retired cell reads absent), and the
+system cell is the turn's system patch. -/
 theorem ofIntent_step (B : Bridge R D) (H : History R TransactionId StableEvent D)
     {w : World R TransactionId D} {intent : DataIntent rootBytes} {t : DTurn R D}
     (derived : Turn.ofIntent B H w intent = .ok t)
@@ -1548,11 +1604,58 @@ theorem ofIntent_step (B : Bridge R D) (H : History R TransactionId StableEvent 
     (nodup : intent.nullifiers.Nodup)
     (unspent : ∀ n ∈ intent.nullifiers, w.spent (B.key n) = none)
     (funded : ∀ l, l ≠ .storageBytes → intent.exactCharge l ≤ w.meter l)
-    (fundedStorage : intent.exactCharge .storageBytes ≤ w.meter .storageBytes) :
+    (fundedStorage : intent.exactCharge .storageBytes ≤ w.meter .storageBytes)
+    (recorded : ∀ l, intent.credit l ≠ 0 → ∃ a, w.allowanceOf l = some a)
+    (pinned : ∀ wr ∈ intent.writes, H.cellDigest (w.cells wr.cellId.value) = B.pin wr.expectedPre)
+    (guarded : ∀ g ∈ intent.readGuards,
+      H.cellDigest (w.cells g.cellId.value) = B.pin g.expectedRoot) :
     ∃ w', World.step H w t = some w' ∧
       (∀ c, w'.cells c = postCell B.codec (fun c => w.cells c) intent c) ∧
       w'.system = Patch.run w.system (sysPatch H t height logRoot w.meter) :=
   ofCells_step B H (fun _ => rfl) (fun _ => rfl) derived hh fresh nodup unspent funded fundedStorage
+    recorded (pinsHold_of_intent derived pinned guarded)
+
+/-- A derived turn carries its intent's meter credit (M2): the World credits what the
+Host's install credits. -/
+theorem ofIntent_credit {B : Bridge R D} {H : History R TransactionId StableEvent D}
+    {w : World R TransactionId D} {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t) : t.credit = intent.credit := by
+  rw [(ofCells_ok derived).eq]
+  rfl
+
+/-- A derived turn is well-shaped (`World.Shaped`): every shape refusal of
+`admit` is one `ofCells` already made. -/
+theorem derived_shaped {B : Bridge R D} {H : History R TransactionId StableEvent D}
+    {cells : CellId → Option (Cell R)} {retired : CellId → Bool} {intent : DataIntent rootBytes}
+    {t : DTurn R D} (d : Derived B H cells retired intent t) : Shaped t := by
+  refine ⟨fun e => d.nonempty ⟨e.1, e.2.1, e.2.2.2⟩, d.legs_nodup, d.creates_nodup,
+    d.retires_nodup, ?_⟩
+  rw [d.eq]
+  exact turnOf_absentShaped B H cells intent
+
+/-- **`ofIntent_stale_refused`: staleness is refused by the World, as
+`guardFailed`.**  An intent whose derivation succeeds against the world, at a
+world with a head and its transaction id unjournaled, one of whose asserted
+pre-roots (a write's `expectedPre`, a read guard's `expectedRoot`) is not the
+held slot's digest, derives a turn `World.admit` refuses as `guardFailed c i`
+— the pin check, the first check after replay.  No receiver preflight is
+involved. -/
+theorem ofIntent_stale_refused {B : Bridge R D} {H : History R TransactionId StableEvent D}
+    {w : World R TransactionId D} {intent : DataIntent rootBytes} {t : DTurn R D}
+    (derived : Turn.ofIntent B H w intent = .ok t)
+    {height : Nat} {logRoot : D} (hh : w.head = some (height, logRoot))
+    (fresh : w.journal t.txId = none)
+    (stale : (∃ wr ∈ intent.writes, H.cellDigest (w.cells wr.cellId.value) ≠ B.pin wr.expectedPre) ∨
+      (∃ g ∈ intent.readGuards, H.cellDigest (w.cells g.cellId.value) ≠ B.pin g.expectedRoot)) :
+    ∃ c i, World.admit H w t = .error (.guardFailed c i) := by
+  have d := ofCells_ok derived
+  have hpins : t.pins = pinsOf B intent := by rw [d.eq]; rfl
+  refine admit_pin_refused H (derived_shaped d) hh fresh ?_
+  rcases stale with ⟨wr, hw, ne⟩ | ⟨g, hg, ne⟩
+  · exact ⟨(wr.cellId.value, B.pin wr.expectedPre),
+      by rw [hpins]; exact List.mem_append_left _ (List.mem_map_of_mem hw), .inr ne⟩
+  · exact ⟨(g.cellId.value, B.pin g.expectedRoot),
+      by rw [hpins]; exact List.mem_append_right _ (List.mem_map_of_mem hg), .inr ne⟩
 
 omit [DecidableEq D] in
 /-- The derived turn's system-facing fields. -/
@@ -1632,7 +1735,13 @@ end Derive
 #assert_axioms ofIntent_minimal
 #assert_axioms turnOf_absentShaped
 #assert_axioms ofCells_step
+#assert_axioms turnOf_credit
+#assert_axioms ofIntent_credit
 #assert_axioms ofIntent_step
+#assert_axioms derived_shaped
+#assert_axioms pinsHold_of_intent
+#assert_axioms ofIntent_stale_refused
+#assert_axioms guard_mem_guardIds
 #assert_axioms ofCells_fields
 #assert_axioms sysCore_unroomed
 #assert_axioms sysPatch_valid_unroomed

@@ -30,6 +30,7 @@ import Compiler.DeclaredActionBytes
 import Compiler.EmitSerialize
 import Compiler.Sp800185Cshake256
 import Compiler.Tower256ConcreteBackend
+import Theory.AxiomPin
 
 namespace Minidregg.Compiler.DeclaredActionAir
 
@@ -559,5 +560,17 @@ theorem generated_public_bytes_exact {kind : ResourceKind}
 /-- info: 'Minidregg.Compiler.DeclaredActionAir.no_descriptorAccepts_of_inadmissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms no_descriptorAccepts_of_inadmissible
+
+/-! ## Poles of `CodesBounded`
+
+A small expected value is in range; `p` itself (zig-zag code `2p + 1`) is not. -/
+
+theorem codesBounded_small : CodesBounded [⟨some 3, none⟩] := by
+  unfold CodesBounded; decide
+
+theorem codesBounded_wide_refused : ¬ CodesBounded [⟨some 2013265921, none⟩] := by
+  unfold CodesBounded; decide
+
+#assert_axioms codesBounded_small codesBounded_wide_refused
 
 end Minidregg.Compiler.DeclaredActionAir

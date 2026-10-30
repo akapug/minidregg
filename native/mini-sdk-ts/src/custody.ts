@@ -1,12 +1,20 @@
 // Attempt custody: the same state machine as native/mini-sdk/src/custody.rs.
-// A lost reply → lookup of the SAME call; a successor only after definite non-admission, with fresh nonces.
+// A lost or undecided reply → lookup of the SAME call, never a new one. A successor (fresh nonces) only
+// where the call certainly never reached the Host: never sealed, or never forwarded. A Host refusal is
+// terminal and licenses no successor until Lean declares a no-effect class (the Host's positive
+// no-record frame). A `confirmed` outcome with `disposition: "charged"` (admitted, only its price
+// posted) is terminal and is not a success.
 import { equalBytes, sha256, SdkError } from "./bytes.ts";
 import type { Json } from "./contracts.ts";
 
 export const CONFIRMATIONS = ["installed", "replayed", "recoveredAfterUncertainResponse"];
 
 export interface Receipt { confirmation: string; transactionId: string; eventId: string; acceptedCount: string; worldRoot: string }
-export type Outcome = { kind: "confirmed"; receipt: Receipt } | { kind: "refused"; refusal: Json } | { kind: "undecided"; value: Json };
+export type Outcome =
+  | { kind: "confirmed"; receipt: Receipt }
+  | { kind: "charged"; receipt: Receipt; cause: Json }
+  | { kind: "refused"; refusal: Json }
+  | { kind: "undecided"; value: Json };
 
 const field = (v: Json, k: string): string | undefined => {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
@@ -21,7 +29,12 @@ export function outcomeOf(v: Json): Outcome {
       ["confirmation", "transactionId", "eventId", "acceptedCount", "worldRoot"].map((k) => field(v, k));
     if (confirmation && CONFIRMATIONS.includes(confirmation) && transactionId !== undefined && eventId !== undefined
       && acceptedCount !== undefined && worldRoot !== undefined) {
-      return { kind: "confirmed", receipt: { confirmation, transactionId, eventId, acceptedCount, worldRoot } };
+      const receipt = { confirmation, transactionId, eventId, acceptedCount, worldRoot };
+      const obj = v as { [k: string]: Json };
+      if (!("disposition" in obj)) return { kind: "confirmed", receipt };
+      // A known disposition is `charged`; any other is no success this machine can claim.
+      if (obj.disposition === "charged") return { kind: "charged", receipt, cause: obj.cause ?? null };
+      return { kind: "undecided", value: v };
     }
     return { kind: "undecided", value: v };
   }
@@ -29,11 +42,11 @@ export function outcomeOf(v: Json): Outcome {
   return { kind: "undecided", value: v };
 }
 
-/** Any confirmation wins; otherwise the newest outcome decides. */
+/** Any confirmation (or charged admission) wins; otherwise the newest outcome decides. */
 export function classify(history: Json[]): Outcome | null {
   for (let i = history.length - 1; i >= 0; i--) {
     const o = outcomeOf(history[i]);
-    if (o.kind === "confirmed") return o;
+    if (o.kind === "confirmed" || o.kind === "charged") return o;
   }
   return history.length ? outcomeOf(history[history.length - 1]) : null;
 }
@@ -45,6 +58,7 @@ export type Phase =
   | { kind: "sealed"; call: Uint8Array }
   | { kind: "uncertain"; call: Uint8Array; detail: string }
   | { kind: "confirmed"; call: Uint8Array; receipt: Receipt }
+  | { kind: "charged"; call: Uint8Array; receipt: Receipt; cause: Json }
   | { kind: "refused"; call: Uint8Array; refusal: Json }
   | { kind: "neverSent"; call: Uint8Array; detail: string };
 
@@ -84,6 +98,7 @@ export class Attempt {
     if (t.kind === "answered") {
       const o = outcomeOf(t.outcome);
       this.phase = o.kind === "confirmed" ? { kind: "confirmed", call: sha, receipt: o.receipt }
+        : o.kind === "charged" ? { kind: "charged", call: sha, receipt: o.receipt, cause: o.cause }
         : o.kind === "refused" ? { kind: "refused", call: sha, refusal: o.refusal }
         : { kind: "uncertain", call: sha, detail: JSON.stringify(o.value) };
     } else if (t.kind === "unsent") {
@@ -93,10 +108,13 @@ export class Attempt {
     }
     return this.phase;
   }
+  /** A new attempt with fresh nonces: only before any call was sealed, or for a call never forwarded. */
   successor(intentNonce: string, commandNonce: string): Attempt {
     switch (this.phase.kind) {
       case "sealed": case "uncertain": throw new SdkError("the retained call may be admitted: look it up (same bytes) instead of a new attempt");
+      case "refused": throw new SdkError("the Host refused this call, and no Lean-declared no-effect class says the refusal left nothing behind: report it; a new operation is the member's own decision");
       case "confirmed": throw new SdkError("the invocation is confirmed; there is no successor");
+      case "charged": throw new SdkError("the call was admitted and charged; a new attempt is a new paid operation");
     }
     if (intentNonce === this.intentNonce || commandNonce === this.commandNonce) throw new SdkError("a successor attempt needs fresh nonces");
     return new Attempt(this.invocation, this.number + 1, intentNonce, commandNonce);

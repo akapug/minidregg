@@ -9,8 +9,27 @@ the invocation receiver must admit every actual source account, current law,
 funding capability and source-derived operation before selecting a joint
 intent containing the room state, return commitments and Pay usage as well.
 -/
-import Kernel.RunComputeBudgetDomain
-import Theory.CanonicalResourceBookInvariant
+module
+
+public import Kernel.RunComputeBudgetDomain
+public import Theory.CanonicalResourceBookInvariant
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceMoneyOperationDomain
 
@@ -99,6 +118,14 @@ def prepareFrom {deployment : Deployment} {physical : Physical}
 variable {deployment : Deployment} {physical : Physical}
   {book : LoadedBook deployment physical} {expectedOriginalRoot : Digest}
   {funding : RunComputeBudget.PreparedBook book.cell} {operations : List Operation}
+
+/-- The prepared operations are pinned to the original Book: `expectedOriginalRoot` is the
+physical Book cell's root, and `operations` are admitted in order on the Book after the
+`funding` prefix. -/
+theorem Prepared.admitted (prepared : Prepared book expectedOriginalRoot funding operations) :
+    expectedOriginalRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment) ∧
+      OperationsAdmitted (logicalBook funding.post.logical) operations :=
+  ⟨prepared.rootExact, prepared.applicationAdmitted⟩
 
 def Prepared.applicationPre
     (_prepared : Prepared book expectedOriginalRoot funding operations) : Book :=
@@ -204,6 +231,14 @@ def Prepared.checkSamples (prepared : Prepared book expectedOriginalRoot funding
     else throw .samplesRefused
   else throw .duplicateSampleCoordinate
 
+/-- The checked `samples` name distinct (account, asset) coordinates, and each sample's account
+is present in, with its balance equal to, the `prepared` post-funding application Book. -/
+theorem CheckedSamples.sampled {prepared : Prepared book expectedOriginalRoot funding operations}
+    {samples : List Sample} (checked : CheckedSamples prepared samples) :
+    (samples.map fun sample => (sample.account, sample.asset)).Nodup ∧
+      SamplesExact prepared.applicationPre samples :=
+  ⟨checked.distinct, checked.exact⟩
+
 /-- Sampling precedes source execution. Bind the exact original Book and
 validated funding prefix without requiring application operations first. -/
 structure SampledFunding {deployment : Deployment} {physical : Physical}
@@ -231,6 +266,15 @@ def sampleFunding {deployment : Deployment} {physical : Physical}
     else throw .originalBookLaw
   else throw .staleBookRoot
 
+/-- `expectedRoot` is the physical Book cell's root, and the `samples` name distinct
+coordinates each present in, with its balance equal to, the Book after the `funding` prefix. -/
+theorem SampledFunding.sampled {expectedRoot : Digest} {samples : List Sample}
+    (sampled : SampledFunding book expectedRoot funding samples) :
+    expectedRoot = physical.model.roots (RunComputeBudgetDomain.bookId deployment) ∧
+      (samples.map fun sample => (sample.account, sample.asset)).Nodup ∧
+      SamplesExact (logicalBook funding.post.logical) samples :=
+  ⟨sampled.rootExact, sampled.distinct, sampled.exact⟩
+
 theorem stale_root_refused (suppliedRoot : Digest)
     (stale : suppliedRoot ≠ physical.model.roots (RunComputeBudgetDomain.bookId deployment)) :
     prepareFrom book suppliedRoot funding operations = .error .staleBookRoot := by
@@ -250,18 +294,20 @@ theorem CheckedSamples.account_present
     sample.account ∈ prepared.applicationPre.accounts := (checked.exact sample member).1
 
 /-- Every application debit is checked after funding AND all earlier source
-operations. Repeating a solvent initial snapshot cannot admit a later overdraft. -/
-theorem Prepared.source_solvent_at
+operations, against the source's floor on that intermediate book. Repeating a
+solvent initial snapshot cannot admit a later overdraft. -/
+theorem Prepared.source_within_floor_at
     (prepared : Prepared book expectedOriginalRoot funding operations)
     (prior suffix : List Operation) (operation : Operation)
-    (position : operations = prior ++ operation :: suffix)
-    (notMint : operation.isIssuerMint ≠ true) :
+    (position : operations = prior ++ operation :: suffix) :
     Int.ofNat operation.posting.amount ≤
       (applyOperations prepared.applicationPre prior).balance
-        operation.posting.source operation.posting.asset := by
+        operation.posting.source operation.posting.asset +
+      Int.ofNat ((applyOperations prepared.applicationPre prior).floor
+        operation.posting.source operation.posting.asset) := by
   have ordered := prepared.applicationAdmitted
   rw [position, operationsAdmitted_append] at ordered
-  exact ordered.2.1.sourceSolvent.resolve_left notMint
+  exact ordered.2.1.sourceWithinFloor
 
 /-- The parent uses this list instead of accounting.writes: usage is retained,
 and the funding Book post is replaced by the ONE funding+application Book post.

@@ -35,8 +35,7 @@ deps() { blobs lake-manifest.json '*Cargo.lock' '*bun.lock*' '*package-lock.json
 gate() {
   (cd "$TOOLS" && find . -maxdepth 1 -type f ! -name '*.pyc' -print0 | sort -z | xargs -0 sha256sum)
   blobs 'scripts/check-*.sh' 'scripts/check-*.ts' 'scripts/check-*.lean' scripts/lean-build-surfaces.py scripts/host-operations.py \
-    scripts/gen-sheetlaw.py website/gen-status.py scripts/HypothesisLedger.lean 'Verify/*.lean' scripts/local-gates.sh \
-    scripts/objective-manifest.py 'scripts/ObjectiveManifest*.lean'
+    scripts/gen-sheetlaw.py scripts/gen-storylaw.py scripts/check-receiver-verifier.sh scripts/check-ran-mint.sh scripts/RanMintCensus.lean website/gen-status.py scripts/HypothesisLedger.lean 'Verify/*.lean' scripts/local-gates.sh
 }
 fixtures() { git ls-files -s | awk '{print $2, $4}' | grep -i 'fixture' || true; }
 generated() { blobs 'scripts/gates/*' 'protocol/*.json' 'protocol/fn/*' ResearchWip.lean; }

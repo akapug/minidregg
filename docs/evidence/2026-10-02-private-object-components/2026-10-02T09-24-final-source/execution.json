@@ -1,0 +1,29 @@
+{
+  "arguments": [
+    "/Users/ember/workbox/mini-private-objects-20261002/component-refresh-target/release/mini-object-components",
+    "/Users/ember/workbox/mini-private-objects-20261002/src/native/resource-client/benchmarks/object-components/wait-for-codec.sh",
+    "/home/ember/build/mini-private-objects-20261002/src",
+    "/Users/ember/dev/minidregg/docs/evidence/2026-10-02-private-object-components/2026-10-02T09-24-final-source"
+  ],
+  "benchmark_binary_sha256": "278f986ee541d716995f9ac894c858aee9a9600aa5c4a4871562319b9cc5340d",
+  "compiled_source_sha256": {
+    "benchmarks/object-components/Cargo.lock": "033618687901f6cf93a7bdd0515edd050b9436c95d0ce045d7ad3ee1782eb74e",
+    "benchmarks/object-components/src/main.rs": "5e299a1912ad4bc196fc24aa89e7662048e1408567fd3a4e11038943f1821331",
+    "src/object_keys_hybrid.rs": "797fe18ad996c3ee01f00cc93ff7dd696050ff41f0769500ea7ca39e60d3e8c6",
+    "src/object_messages.rs": "5b4f4e44bacd9160aa0a05133ec186ea870f6d037a5c60ba17b615036d314c12",
+    "src/private.rs": "7d330315784aa4e6354d86a31bda4efca20042a63df8521d0aed6ea8ce83f0f7",
+    "src/roomkey.rs": "66f591a86cbc5c9244787c360b6d03eb61823ae8a62872fcf00323c46dadf703"
+  },
+  "device_counts": [
+    1,
+    10,
+    100
+  ],
+  "fixture": "single source2000, actual source roster/device commitments; synthetic authority/history/context labels; no accepted authority",
+  "samples": {
+    "epoch_per_device_count": 10,
+    "keygen": 100,
+    "message": 100
+  },
+  "timing": "Instant wall ns; getrusage user+system CPU microsecond resolution; one primitive warmup; release process; excludes codec/key provisioning/network/native admission/custody/fsync"
+}

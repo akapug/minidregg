@@ -238,6 +238,13 @@ n=1 and n=all coincide by construction. Nothing lands beside; everything replace
 16. **One lane can hold it.** The 19-concurrent-lanes-one-tree process produced the
     parked pins, the baseline laundering, the committed merge conflicts. Minidregg's
     size target is also a *process* target.
+17. **Never slower over time.** Per-operation cost is at most O(log n) in accumulated history and state:
+    no turn, read or check does work that grows linearly with history length, document size, cell count or member
+    count. Whole-state recomputation per turn made a GET cost 1.3 s and a document append grow 26 ms per append
+    already present (28 Oct 2026). Persistent maps, Merkle paths, indexes and incremental checkpoints; a flatness
+    bench in the gate (small vs large history within a log factor) is the one performance property that gates.
+
+
 ## 7. The architecture carve
 
 ```
@@ -297,7 +304,7 @@ Rough total: **100–150K lines** — half the budget, for the whole re-expressi
    soundness argument amenable to full Lean mechanization with an honest, *inhabited*
    floor, (b) **recursion support** (hard requirement — light-client aggregation is the
    product), (c) transparency, (d) field faithfulness we can commit to at line one.
-   Survey in flight → `docs/PROOF-SYSTEM-SURVEY.md`.
+   Survey: `docs/PROOF-SYSTEM-SURVEY.md`; decision: Selvage (`docs/decisions/D-0004-why-selvage.md`).
 3. **Hyperedge-as-primitive design pass: approved.** Forests as tree-shaped instances;
    delegation edges as executed attenuations to be re-examined in the pass.
 4. **Frontier items: undecided** — refusal-reason export, trace-shaped guards,

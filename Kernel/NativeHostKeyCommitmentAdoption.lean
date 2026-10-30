@@ -1,6 +1,10 @@
 /- Host adapters for the source-owned first next-key commitment action. -/
-import Kernel.NativeHost
-import Kernel.SubjectKeyCommitmentAdoption
+module
+
+public import Kernel.NativeHost
+public import Kernel.SubjectKeyCommitmentAdoption
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostKeyCommitmentAdoption
 open Minidregg.Compiler Minidregg.Kernel Minidregg.Theory

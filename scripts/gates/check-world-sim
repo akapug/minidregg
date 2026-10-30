@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# HP-6 SIM gate (HP-DESIGN §4): seeded deterministic simulation of the Host path
+# (receiver -> Turn.ofIntent -> World.admit, persisted records + Turn entries) against
+# the follower (TurnLog.followFrom over the entries), with a crash-restart every K steps.
+#
+#   scripts/gates/check-world-sim [EXE]
+#
+# Default (merge gate): seeds 1..3 x 300 steps, crash every 50.  Nightly knob:
+#   WORLD_SIM_FIRST=<fresh> WORLD_SIM_SEEDS=64 WORLD_SIM_STEPS=10000 WORLD_SIM_K=500
+# Corpus (optional): WORLD_SIM_STORES=<stores.json of {row, config}> drives each retained
+# Store's own records through both sides (scripts/kern/turn-log-follower.sh's inputs).
+#
+# The plants, each red at the seed and step recorded when it was first observed (10-15,
+# burst4, lane/hp-6-sim); a plant that stops firing, or fires elsewhere, is red too:
+#   follower-skips-guard  the follower skips the guard that failed (that cell's pins and leg reads);
+#                         re-recorded 10-15 (TURN-LOG guards-from-intent): seed 1 step 29 -> step 41,
+#                         since the failing guard is now the intent's pin, checked before any leg
+#   reopen-drops-last     the Host's reopen loses its last persisted Turn entry (a torn append)
+set -uo pipefail
+exe=${1:-.lake/build/bin/world-sim}
+[[ -x $exe ]] || { echo "check-world-sim: $exe is not executable" >&2; exit 2; }
+first=${WORLD_SIM_FIRST:-1} seeds=${WORLD_SIM_SEEDS:-3} steps=${WORLD_SIM_STEPS:-300} k=${WORLD_SIM_K:-50}
+status=0
+start=$(date +%s)
+"$exe" seeds "$first" "$seeds" "$steps" "$k" || status=1
+plant() {  # NAME SEED STEP FACT-GLOB
+  local out rc=0
+  out=$("$exe" "$2" "$steps" "$k" --plant "$1") || rc=$?
+  echo "$out"
+  if [[ $rc == 1 && $out == "SIM seed=$2 FAIL step=$3 "$4 ]]; then
+    echo "PLANT $1 RED-AS-EXPECTED seed=$2 step=$3"
+  else
+    echo "PLANT $1 NOT-CAUGHT-AS-RECORDED (want seed=$2 step=$3)"; status=1
+  fi
+}
+plant follower-skips-guard 1 41 '*follower admitted*'
+plant reopen-drops-last 1 49 'crash-restart: resumed != uninterrupted*'
+if [[ -n ${WORLD_SIM_STORES:-} ]]; then
+  "$exe" corpus "$WORLD_SIM_STORES" "$k" || status=1
+fi
+echo "WORLD-SIM seeds=$first+$seeds steps=$steps k=$k wall=$(( $(date +%s) - start ))s status=$status"
+exit $status

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-E2 (PAY.md §11.9 P3b-1): the self-enrollment decision with real signatures,
+# J-PAY-E2 (docs/PAY.md §11.9 P3b-1): the self-enrollment decision with real signatures,
 # the public enrollment view, and the pay-cell observer replaced at runtime.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
@@ -41,6 +41,10 @@ resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || e
 exec python3 - "$DIR" <<'PY'
 import base64, hashlib, json, os, struct, subprocess, sys, time
 import nacl.signing
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 
 DIR = sys.argv[1]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
@@ -102,14 +106,22 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "factoryControllerSubject": str(EMBER),
            "factoryControllerCapability": str(FACTORY_CONTROL),
            "clockTickers": [],
-           "tailBound": "1000000",
+           "tailBound": "1000000", "issuanceCap":"1000000000000000",
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
+           "payControlCapability": str(PAY_CONTROL),
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(PAY_CONTROL), "enrolCapability": "4032"}}
+                           "enrolCapability": "4032"}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+# The genesis clock the helper filled (`clockGenesisNow`, seconds): the pay clock at genesis (Kernel/ClockCell
+# `genesisStore`), so a fresh Store's enrollment view reports `clock.hour = genesisNow / 3600`
+# (Kernel/PayEnrolDecision: the chain hour), never 0.
+GENESIS_HOUR = int(json.load(open(path("genesis.json")))["clockGenesisNow"]) // 3600
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
@@ -334,7 +346,7 @@ def mini_submit(name, intent, signer):
                            "--key", path(f"subject-{signer}.key"), "--dir", path(f"{name}-attempt")],
                           capture_output=True)
     result_path = path(f"{name}-attempt/outcome.json")
-    result = json.load(open(result_path)) if os.path.exists(result_path) else {}
+    result = attempt_answer(result_path) if os.path.exists(result_path) else {}
     return done.returncode, result, (done.stdout + done.stderr).decode("utf-8", "replace")[-300:]
 def mini_policy(name, signer, capability):
     intent = {"subject": str(signer), "nonce": fresh(),
@@ -360,9 +372,10 @@ def law(observer):
 host = Host()
 op, data = host.call(112)
 ev = inspect("pay-enrolment-view", data) if op == 112 else {}
-row("op 112 on a fresh Store (the ROSTER-SYNC shape)", "view DREGG/PAY/ENROLMENT-VIEW/v3, clock.hour 0, no entries, no journal",
+row("op 112 on a fresh Store (the ROSTER-SYNC shape)",
+    f"view DREGG/PAY/ENROLMENT-VIEW/v3, clock.hour {GENESIS_HOUR} (the genesis clock's hour), no entries, no journal",
     json.dumps(ev, sort_keys=True)[:200],
-    op == 112 and ev.get("view") == "DREGG/PAY/ENROLMENT-VIEW/v3" and ev.get("clock") == {"hour": 0}
+    op == 112 and ev.get("view") == "DREGG/PAY/ENROLMENT-VIEW/v3" and ev.get("clock") == {"hour": GENESIS_HOUR}
     and ev.get("journal") == []
     and ev.get("entries") == [])
 v = view(host)

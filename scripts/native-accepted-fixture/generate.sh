@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# generate.sh -- regenerate Assurance/NativeAcceptedFixtureData.lean from a real native run.
+# generate.sh -- regenerate Fixtures/NativeAcceptedFixtureData.lean from a real native run.
 #
 #   scripts/native-accepted-fixture/generate.sh WORLD [FIRST] [REFUSED]
 #
@@ -54,12 +54,12 @@ cd "$root"
 for name in first refused; do
   h=$height; [ "$name" = refused ] && h=$((height + 1))
   REAL_VERIFIER=$verifier VERIFY_LOG=$work/$name-verify.jsonl \
-    lake env lean --run "$here/replay.lean" "$work/$name" "$settings" "$here/verify-logger.py" "$h" \
+    lake env lean --load-dynlib=.lake/native/libmini_kernels_lean.so --run "$here/replay.lean" "$work/$name" "$settings" "$here/verify-logger.py" "$h" \
     >"$work/$name.out" 2>"$work/$name.err" || { cat "$work/$name.err" >&2; echo "generate: replay of $name failed" >&2; exit 1; }
   echo "replay $name: $(cat "$work/$name.out")"
 done
 
-python3 - "$world" "$first" "$refused" "$work" "$root/Assurance/NativeAcceptedFixtureData.lean" "$verifier" <<'PY'
+python3 - "$world" "$first" "$refused" "$work" "$root/Fixtures/NativeAcceptedFixtureData.lean" "$verifier" <<'PY'
 import json, pathlib, sqlite3, sys, hashlib
 world, first, refused, work, out, verifier = sys.argv[1:7]
 world, work = pathlib.Path(world), pathlib.Path(work)
@@ -75,7 +75,7 @@ for r in (world / "results").glob("*.json"):
         host_reason = d.get("detail")
 refused_lines = (work / "refused.out").read_text().splitlines()
 ro = refused_lines[0].split()
-# The semantic projection of the re-run (replay.lean prints Assurance.NativeAcceptedFixtureProjection,
+# The semantic projection of the re-run (replay.lean prints Fixtures.NativeAcceptedFixtureProjection,
 # the definition the fixture checks) must be the hand-written authority. This script never writes the
 # authority; a difference refuses, field by field, before any data is written.
 def parse(text):
@@ -118,8 +118,8 @@ lines = [
 f"World: {world} (objective-native-acceptance.py all), accepted call `{first}` at",
 f"Store height {height + 1}, refused call `{refused}` (Host: {host_reason}).",
 f"Verifier: {verifier} (sha256 {hashlib.sha256(open(verifier,'rb').read()).hexdigest()}).",
-"The consumer is Assurance.NativeAcceptedFixture. -/",
-"namespace Minidregg.Assurance.NativeAcceptedFixtureData", "",
+"The consumer is Fixtures.NativeAcceptedFixture. -/",
+"namespace Minidregg.Fixtures.NativeAcceptedFixtureData", "",
 "/-! The deployment's pinned config (w/deployment/pinned-config.json). -/",
 ]
 for lean, key in (("pinDomain","domain"),("pinFactoryId","factoryId"),("pinResourceBookId","resourceBookId"),
@@ -143,7 +143,7 @@ lines += ["]", "", "/-! The accepted call, and the record and world root the Hos
           "", "/-! Every (publicKey, frame, signature) the verifier answered `verified` on during the two admissions. -/",
           "def verifiedTriples : List (String × String × String) := ["]
 lines += [f'  ("{k}", "{f}", "{s}")' + ("," if i < len(triples) - 1 else "") for i, (k, f, s) in enumerate(triples)]
-lines += ["]", "", "end Minidregg.Assurance.NativeAcceptedFixtureData", ""]
+lines += ["]", "", "end Minidregg.Fixtures.NativeAcceptedFixtureData", ""]
 pathlib.Path(out).write_text("\n".join(lines))
 print(f"generate: wrote {out} ({len(triples)} triples, {height} records)")
 PY

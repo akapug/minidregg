@@ -6,8 +6,27 @@ authenticate a provider invoice. The native receiver still decides whether an
 authored settlement is admitted, under the provider purse's route law
 (`Kernel.ProviderRoute`), which charges by the route recorded at reserve.
 -/
-import Kernel.AgentGrain
-import Theory.AssertAxioms
+module
+
+public import Kernel.AgentGrain
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ProviderMetering
 
@@ -240,44 +259,131 @@ def requestDigest (bytes : List UInt8) : Digest :=
 def responseDigest (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash "DREGG.PROVIDER.RESPONSE/v1".toUTF8.toList bytes).digest
 
-/-- The amount a quote may name: a user-route call is its fee whatever the
-response says; a metered route needs the parsed usage. -/
-def quoteAmount (tariff : Tariff) : Route → Option Usage → Option Nat
-  | .user, _ => some tariff.userPerOp
-  | route, some usage => some (charge tariff route usage)
-  | _, none => none
+/-- How a metered call's provider leg ended. The four failure classes of the triage
+(RUST-TRIAGE §4 rank 6; grain-runtime H1–H4) and the one success class:
+* `complete`: a complete reply with an HTTP status. At 200 its usage record is read;
+  at any other status it is a refused reply;
+* `timeout`: the upstream deadline passed with no complete reply;
+* `truncated`: a reply was received but is malformed or truncated, so no usage can be
+  read (a complete 200 whose body the Host cannot read is classed here too);
+* `lost`: the controller crashed after the durable send boundary and before any outcome. -/
+inductive Leg where
+  | complete
+  | timeout
+  | truncated
+  | lost
+  deriving DecidableEq, Repr
+
+def Leg.name : Leg → String
+  | .complete => "complete"
+  | .timeout => "timeout"
+  | .truncated => "truncated"
+  | .lost => "lost"
+
+def Leg.ofName? : String → Option Leg
+  | "complete" => some .complete
+  | "timeout" => some .timeout
+  | "truncated" => some .truncated
+  | "lost" => some .lost
+  | _ => none
+
+theorem Leg.ofName_name (leg : Leg) : Leg.ofName? leg.name = some leg := by
+  cases leg <;> rfl
+
+/-- What a quote's amount rests on. -/
+inductive Basis where
+  /-- A user-route call: the per-operation fee alone; no usage is read. -/
+  | perOperation
+  /-- A complete 200 reply with one terminal usage record. -/
+  | reported (usage : Usage)
+  /-- A complete reply with a non-200 status: the provider refused the call. -/
+  | refusedReply (status : Nat)
+  /-- No usage can be read: the leg failed in the named way. -/
+  | undecided (leg : Leg)
+  deriving DecidableEq, Repr
+
+def Basis.usage? : Basis → Option Usage
+  | .reported usage => some usage
+  | _ => none
+
+/-- A basis is valid when the usage it reports (if any) is. -/
+def Basis.valid : Basis → Prop
+  | .reported usage => usage.valid
+  | _ => True
+
+instance : (basis : Basis) → Decidable basis.valid
+  | .reported usage => inferInstanceAs (Decidable usage.valid)
+  | .perOperation => inferInstanceAs (Decidable True)
+  | .refusedReply _ => inferInstanceAs (Decidable True)
+  | .undecided _ => inferInstanceAs (Decidable True)
+
+theorem Basis.valid_reported {basis : Basis} (valid : basis.valid) (usage : Usage)
+    (reported : basis = .reported usage) : usage.valid := by
+  subst reported; exact valid
+
+theorem Basis.valid_of_no_usage {basis : Basis} (failed : basis.usage? = none) : basis.valid := by
+  cases basis <;> simp_all [Basis.usage?, Basis.valid]
+
+def Basis.name : Basis → String
+  | .perOperation => "per-operation"
+  | .reported _ => "reported"
+  | .refusedReply _ => "refused-reply"
+  | .undecided _ => "undecided"
+
+/-- The amount a quote names, by route and basis, against the held allowance `reserve`.
+Total: every leg of every route has a decided charge.
+* user route: the per-operation fee whatever the reply (the friend's key paid the provider);
+* metered route, usage reported: the tariff charge;
+* metered route, refused reply: the route's per-operation fee, the DECLARED REFUSAL FEE.
+  Zero is the purse law's release of a call that never left (`ProviderRoute.settleRule`),
+  and this call left; providers do not bill a non-2xx reply, so the operator's exposure is
+  the fee it declared for a turn, and that is what the purse pays;
+* metered route, undecided leg: the HOLD, the pessimistic number (ATLAS law 14). The
+  provider may have completed and billed anything up to the held maximum and nothing
+  retained bounds it lower; the member authorised exactly this maximum at reserve. -/
+def quoteAmount (tariff : Tariff) (route : Route) (basis : Basis) (reserve : Nat) : Nat :=
+  match route, basis with
+  | .user, _ => tariff.userPerOp
+  | route, .reported usage => charge tariff route usage
+  | route, .refusedReply _ => tariff.perOp route
+  | route, .perOperation => tariff.perOp route
+  | _, .undecided _ => reserve
 
 /-- A quote identifies the exact retained request/response bytes, the route,
-the reported usage (metered routes only), the configured tariff and the held
-allowance. Its evidence is external data; the proof fields establish only
-arithmetic and allowance bounds. -/
+the basis of its amount (reported usage, refused reply, undecided leg), the
+configured tariff and the held allowance. Its evidence is external data; the
+proof fields establish only arithmetic and allowance bounds. -/
 structure Quote where
   tariff : Tariff
   tariffValid : tariff.valid
   route : Route
-  usage : Option Usage
-  usageValid : ∀ observed, usage = some observed → observed.valid
+  basis : Basis
+  basisValid : basis.valid
   request : List UInt8
   response : List UInt8
   reserve : Nat
   amount : Nat
-  amountExact : quoteAmount tariff route usage = some amount
+  amountExact : quoteAmount tariff route basis reserve = amount
   amountBound : amount ≤ reserve
 
-def prepare (tariff : Tariff) (route : Route) (usage : Option Usage)
+/-- The reported usage, when the basis is one. -/
+def Quote.usage (quote : Quote) : Option Usage := quote.basis.usage?
+
+theorem Quote.usageValid (quote : Quote) (observed : Usage)
+    (reported : quote.basis = .reported observed) : observed.valid :=
+  Basis.valid_reported quote.basisValid observed reported
+
+def prepare (tariff : Tariff) (route : Route) (basis : Basis)
     (request response : List UInt8) (reserve : Nat) : Option Quote :=
   if ht : tariff.valid then
-    if hv : ∀ observed, usage = some observed → observed.valid then
-      match ha : quoteAmount tariff route usage with
-      | none => none
-      | some amount =>
-          if hb : amount ≤ reserve then
-            some ⟨tariff, ht, route, usage, hv, request, response, reserve, amount, ha, hb⟩
-          else none
+    if hv : basis.valid then
+      if hb : quoteAmount tariff route basis reserve ≤ reserve then
+        some ⟨tariff, ht, route, basis, hv, request, response, reserve, _, rfl, hb⟩
+      else none
     else none
   else none
 
-/-- A user-route quote is exactly the per-operation fee. -/
+/-- A user-route quote is exactly the per-operation fee, whatever the basis. -/
 theorem Quote.user_is_per_op (quote : Quote) (user : quote.route = .user) :
     quote.amount = quote.tariff.userPerOp := by
   have exact := quote.amountExact
@@ -285,18 +391,135 @@ theorem Quote.user_is_per_op (quote : Quote) (user : quote.route = .user) :
   simp [quoteAmount] at exact
   exact exact.symm
 
-/-- A pool-route quote is the per-operation fee plus the metered usage. -/
-theorem Quote.pool_is_metered (quote : Quote) (pool : quote.route = .pool) :
-    ∃ usage, quote.usage = some usage ∧
-      quote.amount = quote.tariff.pool.perOp + metered quote.tariff.pool usage := by
+/-- A pool-route quote on reported usage is the per-operation fee plus the metered usage. -/
+theorem Quote.pool_is_metered (quote : Quote) (pool : quote.route = .pool) (usage : Usage)
+    (reported : quote.basis = .reported usage) :
+    quote.amount = quote.tariff.pool.perOp + metered quote.tariff.pool usage := by
   have exact := quote.amountExact
-  rw [pool] at exact
-  cases h : quote.usage with
-  | none => rw [h] at exact; simp [quoteAmount] at exact
-  | some usage =>
-      rw [h] at exact
-      simp [quoteAmount, charge_pool] at exact
-      exact ⟨usage, rfl, exact.symm⟩
+  rw [pool, reported] at exact
+  simp [quoteAmount, charge_pool] at exact
+  exact exact.symm
+
+/-- A metered quote on a refused reply is the route's per-operation fee. -/
+theorem Quote.refused_reply_is_fee (quote : Quote) (metered : quote.route ≠ .user)
+    (status : Nat) (refused : quote.basis = .refusedReply status) :
+    quote.amount = quote.tariff.perOp quote.route := by
+  have exact := quote.amountExact
+  rw [refused] at exact
+  cases route : quote.route with
+  | user => exact absurd route metered
+  | pool => rw [route] at exact; simpa [quoteAmount] using exact.symm
+  | homelab => rw [route] at exact; simpa [quoteAmount] using exact.symm
+
+/-- A metered quote on an undecided leg is the hold. -/
+theorem Quote.undecided_is_hold (quote : Quote) (metered : quote.route ≠ .user)
+    (leg : Leg) (undecided : quote.basis = .undecided leg) :
+    quote.amount = quote.reserve := by
+  have exact := quote.amountExact
+  rw [undecided] at exact
+  cases route : quote.route with
+  | user => exact absurd route metered
+  | pool => rw [route] at exact; simpa [quoteAmount] using exact.symm
+  | homelab => rw [route] at exact; simpa [quoteAmount] using exact.symm
+
+/-- **Every failed provider leg has a decided settle.** For a valid tariff, a metered
+route and any of the four failure classes (a complete non-200 reply; an upstream
+timeout; a truncated or malformed reply; a crash after the send boundary), `prepare`
+yields a quote whenever the hold covers the route fee (the purse law guarantees this
+at reserve: `ProviderRoute.reserveRule`), and the quote's amount is the declared
+charge: the route fee for a refused reply, the hold for an undecided leg; in every
+case at most the hold. Before this lane `quoteAmount` was `none` for a metered route
+without a usage record, so this statement was false at every one of the four classes
+and one 429 left a purse held forever (RUST-TRIAGE §4 rank 6). -/
+theorem failed_leg_settle_decided (tariff : Tariff) (valid : tariff.valid) (route : Route)
+    (metered : route ≠ .user) (basis : Basis) (failed : basis.usage? = none)
+    (request response : List UInt8) (reserve : Nat) (held : tariff.perOp route ≤ reserve) :
+    ∃ quote, prepare tariff route basis request response reserve = some quote ∧
+      quote.amount ≤ reserve ∧
+      ((∃ status, basis = .refusedReply status ∧ quote.amount = tariff.perOp route) ∨
+        (∃ leg, basis = .undecided leg ∧ quote.amount = reserve) ∨
+        (basis = .perOperation ∧ quote.amount = tariff.perOp route)) := by
+  have noUsage : basis.valid := Basis.valid_of_no_usage failed
+  have bound : quoteAmount tariff route basis reserve ≤ reserve := by
+    cases basis with
+    | reported usage => simp [Basis.usage?] at failed
+    | perOperation => cases route <;> simp_all [quoteAmount, Tariff.perOp, Tariff.schedule, Schedule.perOp]
+    | refusedReply status => cases route <;> simp_all [quoteAmount, Tariff.perOp, Tariff.schedule, Schedule.perOp]
+    | undecided leg => cases route <;> simp_all [quoteAmount]
+  refine ⟨⟨tariff, valid, route, basis, noUsage, request, response, reserve, _, rfl, bound⟩, ?_, bound, ?_⟩
+  · unfold prepare
+    rw [dif_pos valid, dif_pos noUsage, dif_pos bound]
+  · cases basis with
+    | reported usage => simp [Basis.usage?] at failed
+    | perOperation =>
+        right; right
+        refine ⟨rfl, ?_⟩
+        cases route with
+        | user => exact absurd rfl metered
+        | pool => rfl
+        | homelab => rfl
+    | refusedReply status =>
+        left
+        refine ⟨status, rfl, ?_⟩
+        cases route with
+        | user => exact absurd rfl metered
+        | pool => rfl
+        | homelab => rfl
+    | undecided leg =>
+        right; left
+        refine ⟨leg, rfl, ?_⟩
+        cases route with
+        | user => exact absurd rfl metered
+        | pool => rfl
+        | homelab => rfl
+
+/-- Every quote on a metered route is a settle the purse's route law admits
+(`ProviderRoute.pool_route_charges_metered` / `homelab_route_charges_metered` shape):
+zero, or at least the route fee and at most the hold. Needs only that the hold covered
+the fee, which the reserve rule enforced. -/
+theorem Quote.admissible_metered_settle (quote : Quote) (metered : quote.route ≠ .user)
+    (held : quote.tariff.perOp quote.route ≤ quote.reserve) :
+    quote.amount = 0 ∨
+      (quote.tariff.perOp quote.route ≤ quote.amount ∧ quote.amount ≤ quote.reserve) := by
+  right
+  refine ⟨?_, quote.amountBound⟩
+  have exact := quote.amountExact
+  cases basis : quote.basis with
+  | perOperation =>
+      rw [basis] at exact
+      cases route : quote.route with
+      | user => exact absurd route metered
+      | pool => rw [route] at exact; simp [quoteAmount] at exact; omega
+      | homelab => rw [route] at exact; simp [quoteAmount] at exact; omega
+  | reported usage =>
+      rw [basis] at exact
+      cases route : quote.route with
+      | user => exact absurd route metered
+      | pool => rw [route] at exact; simp [quoteAmount, charge_pool, Tariff.perOp, Tariff.schedule, Schedule.perOp] at exact ⊢; omega
+      | homelab => rw [route] at exact; simp [quoteAmount, charge_homelab, Tariff.perOp, Tariff.schedule, Schedule.perOp] at exact ⊢; omega
+  | refusedReply status =>
+      rw [basis] at exact
+      cases route : quote.route with
+      | user => exact absurd route metered
+      | pool => rw [route] at exact; simp [quoteAmount] at exact; omega
+      | homelab => rw [route] at exact; simp [quoteAmount] at exact; omega
+  | undecided leg =>
+      rw [basis] at exact
+      cases route : quote.route with
+      | user => exact absurd route metered
+      | pool => rw [route] at exact held; simp [quoteAmount] at exact; omega
+      | homelab => rw [route] at exact held; simp [quoteAmount] at exact; omega
+
+/-- Satisfiable at a concrete tariff (pool fee 2): a 429 on the pool route is charged the
+pool fee, 2, not nothing and not the hold; `failed_leg_settle_decided` supplies the quote. -/
+theorem refused_reply_quoted_fee_witness :
+    quoteAmount ⟨1, "m", 4, ⟨2, 1000000, 2000000⟩, ⟨0, 1, 1⟩⟩ .pool (.refusedReply 429) 500 = 2 := rfl
+
+/-- Teeth: a crash after the send boundary is charged the whole hold. An implementation
+that released the hold for free, or that still refused to quote (the state before this
+lane), fails this witness. -/
+theorem lost_leg_quoted_hold_witness :
+    quoteAmount ⟨1, "m", 4, ⟨2, 1000000, 2000000⟩, ⟨0, 1, 1⟩⟩ .pool (.undecided .lost) 500 = 500 := rfl
 
 def Quote.operation (quote : Quote) : AgentGrain.Operation :=
   .settle (Int.ofNat quote.amount)
@@ -342,8 +565,15 @@ theorem Quote.admitted_budget_nonincrease (quote : Quote) (state : AgentGrain.St
 #assert_axioms charge_homelab
 #assert_axioms metered_monotone
 #assert_axioms charge_le_maxCharge
+#assert_axioms Leg.ofName_name
 #assert_axioms Quote.user_is_per_op
 #assert_axioms Quote.pool_is_metered
+#assert_axioms Quote.refused_reply_is_fee
+#assert_axioms Quote.undecided_is_hold
+#assert_axioms failed_leg_settle_decided
+#assert_axioms Quote.admissible_metered_settle
+#assert_axioms refused_reply_quoted_fee_witness
+#assert_axioms lost_leg_quoted_hold_witness
 #assert_axioms Quote.charge_within_signed_hold
 #assert_axioms Quote.exact_budget_change
 #assert_axioms Quote.admitted_budget_nonincrease

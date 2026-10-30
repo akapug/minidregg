@@ -8,10 +8,31 @@ external operator authorization, the fixed semantic transformation, and actual
 new-profile validation are separate receiving obligations in CarriedSegmentIO;
 a caller cannot obtain those obligations by supplying this manifest alone.
 -/
-import Compiler.DurableReceiverIO
-import Compiler.ResourceBirthCodec
-import Compiler.NativeHostCodec
-import Kernel.ReceiptContinuity
+module
+
+public import Compiler.DurableReceiverIO
+public import Compiler.ResourceBirthCodec
+public import Compiler.NativeHostCodec
+public import Kernel.ReceiptContinuity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CarriedSegment
 
@@ -240,7 +261,7 @@ theorem install_journal (before : DataSnapshot ResourceBirthCodec.rootBytes)
 theorem install_history (before : DataSnapshot ResourceBirthCodec.rootBytes)
     (body : Body) (changes : List (CellId × List UInt8)) :
     (DataSnapshot.install before (intent before body changes)).model.history =
-      before.model.history ++ [(intent before body changes).erase.event] := rfl
+      (intent before body changes).erase.event :: before.model.history := rfl
 
 /-- Preserve every original byte and its ordering. No regenerated genesis,
 filtered origin index, balance reset or journal reset exists on this path. -/

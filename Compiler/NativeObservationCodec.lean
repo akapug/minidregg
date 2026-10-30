@@ -4,9 +4,28 @@ only explicitly public commitments, clock/key/policy coordinates (inside the
 actual canonical signing headers), and the client's own intent. Protected
 payloads are released only by the source-owned observation controller.
 -/
-import Compiler.NativeProtocolFrames
-import Compiler.NativeHostCodec
-import Compiler.FnEvidenceCodec
+module
+
+public import Compiler.NativeProtocolFrames
+public import Compiler.NativeHostCodec
+public import Compiler.FnEvidenceCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeObservationCodec
 
@@ -31,7 +50,7 @@ inductive QueryView where
   /-- Only the exact observation grant used to authorize this query. -/
   | capability
   /-- The room's members, each with the greatest height at which it wrote a
-  cell under the room that the reader's grant covers (PLACE §2.5). -/
+  cell under the room that the reader's grant covers (docs/PLACE.md §2.5). -/
   | who
   /-- The log entries above this height that wrote a cell under the room that
   the reader's grant covers, with those cells alone. -/
@@ -157,6 +176,9 @@ def queryViewStream : StreamCodec QueryView :=
       | .inl (.inr (.inr (.inr (start, count)))) => .tail start count
       | .inr () => .resourceScope)
     (by intro view; cases view <;> rfl)
+    (by
+      rintro ((((wire | wire) | wire) | (height | height | ⟨start, count⟩)) | ⟨⟩) <;>
+        (try cases wire) <;> rfl)
 
 /-- Existing resource/capability observation bytes stay usable for retained
 birth preparation and historical exact recovery. -/
@@ -268,9 +290,7 @@ private theorem framed_refuses_prefix {A : Type} (frame old : List UInt8)
     have recoveredPrefix : old = frame.take old.length := by
       simpa [List.take_take, Nat.min_eq_left shorter] using prefixEquality
     exact different recoveredPrefix.symm
-  have raw : (NativeHostCodec.framedRaw frame stream).decode (old ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, mismatch]
-  simp [NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [NativeHostCodec.framed_decode, mismatch]
 
 /-- A v6 challenge refuses to decode. -/
 theorem v6_challenge_refused (payload : List UInt8) :
@@ -291,19 +311,13 @@ theorem v3_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredV3IntentFrame ++ payload) = none := by
   have lengthExact : intentFrame.length = retiredV3IntentFrame.length := by decide +kernel
   have different : retiredV3IntentFrame ≠ intentFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw intentFrame intentStream).decode
-      (retiredV3IntentFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [intentCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [intentCodec, NativeHostCodec.framed_decode, lengthExact, different]
 
 theorem v4_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredIntentFrame ++ payload) = none := by
   have lengthExact : intentFrame.length = retiredIntentFrame.length := by decide +kernel
   have different : retiredIntentFrame ≠ intentFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw intentFrame intentStream).decode
-      (retiredIntentFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [intentCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [intentCodec, NativeHostCodec.framed_decode, lengthExact, different]
 
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v4_intent_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v4_intent_refused
@@ -345,10 +359,7 @@ theorem v5_intent_refused (payload : List UInt8) :
     intentCodec.decode (retiredDocuverseIntentFrame ++ payload) = none := by
   have lengthExact : intentFrame.length = retiredDocuverseIntentFrame.length := by decide +kernel
   have different : retiredDocuverseIntentFrame ≠ intentFrame := by decide +kernel
-  have raw : (NativeHostCodec.framedRaw intentFrame intentStream).decode
-      (retiredDocuverseIntentFrame ++ payload) = none := by
-    simp [NativeHostCodec.framedRaw, lengthExact, different]
-  simp [intentCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+  simp [intentCodec, NativeHostCodec.framed_decode, lengthExact, different]
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v7_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v7_challenge_refused
 /-- info: 'Minidregg.Compiler.NativeObservationCodec.v7_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -386,10 +397,18 @@ def validBatch (reads : List (List UInt8)) : Bool :=
   !reads.isEmpty && decide (reads.length ≤ maxBatchReads)
 def isBatch (bytes : List UInt8) : Bool := bytes.take batchFrame.length == batchFrame
 
-#guard validBatch [] = false
-#guard validBatch [[]] = true
-#guard validBatch (List.replicate 16 []) = true
-#guard validBatch (List.replicate 17 []) = false
+/-- The batch gate, for every batch: `validBatch` accepts exactly the nonempty batches of at most
+`maxBatchReads` reads. The four boundary instances below are corollaries (kernel-checked). -/
+theorem validBatch_iff (reads : List (List UInt8)) :
+    validBatch reads = true ↔ reads ≠ [] ∧ reads.length ≤ maxBatchReads := by
+  cases reads <;> simp [validBatch]
+
+theorem validBatch_nil : validBatch [] = false := by decide
+theorem validBatch_singleton : validBatch [[]] = true := by decide
+theorem validBatch_at_max : validBatch (List.replicate 16 []) = true := by decide
+theorem validBatch_over_max : validBatch (List.replicate 17 []) = false := by decide
+#assert_axioms validBatch_iff validBatch_nil validBatch_singleton validBatch_at_max
+  validBatch_over_max
 
 theorem batch_roundtrip (reads : List (List UInt8)) :
     batchCodec.decode (batchCodec.encode reads) = some reads :=

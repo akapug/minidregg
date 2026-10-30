@@ -16,13 +16,34 @@ generation. Every later use checks the newly selected source. The current source
 still governs its own replacement, so a deliberately restrictive new law may
 refuse future installations even though the control grant remains current.
 -/
-import Compiler.NativeProtocolFrames
-import Kernel.ObjectAudienceInstall
-import Kernel.PolicyInstallController
-import Kernel.ResourceBirthController
-import Compiler.DurableReceiverIO
-import Compiler.CredentialAuthorityReplay
-import Compiler.WorldKindLawDependencies
+module
+
+public import Compiler.NativeProtocolFrames
+public import Kernel.ObjectAudienceInstall
+public import Kernel.PolicyInstallController
+public import Kernel.ResourceBirthController
+public import Compiler.DurableReceiverIO
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.WorldKindLawDependencies
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PolicyInstallReceiver
 
@@ -66,17 +87,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressRawCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec ingressRawCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 def retiredIngressFrame : List UInt8 := "DREGG/POLICY/INSTALL/SIGNED-INGRESS".toUTF8.toList ++ [1]
 
@@ -84,7 +95,8 @@ theorem retired_ingress_refused (payload : List UInt8) :
     ingressCodec.decode (retiredIngressFrame ++ payload) = none := by
   have lengthExact : ingressFrame.length = retiredIngressFrame.length := by decide +kernel
   have different : retiredIngressFrame ≠ ingressFrame := by decide +kernel
-  simp [ingressCodec, strictCodec, ingressRawCodec, lengthExact, different]
+  simp [ingressCodec, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap, StreamCodec.product,
+    StreamCodec.literal, lengthExact, different]
 
 structure DecodedIngress where
   private mk ::
@@ -94,6 +106,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode
     ingress.envelopeBytes = some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    PolicyInstallController.decodeDeclaration decoded.ingress.declarationBytes = some decoded.declaration ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.envelopeBytes =
+        some decoded.envelope :=
+  ⟨decoded.declarationExact, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -122,7 +139,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       · split at decoded
         · contradiction
         · cases Option.some.inj decoded
-          exact strictCodec_canonical ingressRawCodec parsed
+          exact (StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 /-- Subject, target and nonce scope transaction identity. Changing a payload,
 root, control-capability choice or signature at the same identity conflicts
@@ -242,6 +259,19 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
   physicalShape : PhysicalShape deployment ground
     (planWrites (representationCreates deployment semantic.declaration)
       (ground.authorityWrites semantic.update.validated.apply))
+theorem Prepared.sound {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {ground : Ground deployment} {federation : FederationId} {height : Height} {ingress : DecodedIngress}
+    (prepared : Prepared profile deployment ground federation height ingress) :
+    WorldKindLawDependencies.loadTarget deployment ground.directory
+        ingress.declaration.source.policyId.value = some prepared.structural ∧
+      prepared.semantic.additional = prepared.structural.additional ∧
+      prepared.semantic.declaration = ingress.declaration ∧
+      ingress.marker = (PolicyInstallController.requestDigest profile ground.authority
+        (context federation height ground.authority ingress) prepared.semantic.declaration).value ∧
+      ResourceBirth.allocate Registry ground.directory
+        (representationCreates deployment prepared.semantic.declaration) = .ok prepared.allocated :=
+  ⟨prepared.structuralExact, prepared.additionalExact, prepared.declarationExact, prepared.markerExact,
+    prepared.allocationExact⟩
 
 def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
     (ground : Ground deployment) (federation : FederationId) (height : Height)
@@ -394,6 +424,13 @@ structure AcceptedInstall (profile : CanonicalRuntimeProfile.Profile F) (deploym
   /-- Every birth write the installation commits (its successor source) is named by
   the step the old source's law admitted. -/
   named : ResourceBirthController.Concrete.Named prepared.semantic.step prepared.writes
+theorem AcceptedInstall.sound (accepted : AcceptedInstall profile deployment ground federation height) :
+    accepted.receipt.envelopeBytes = accepted.ingress.ingress.envelopeBytes ∧
+      accepted.prepared.semantic.admit (payloadStore ground) accepted.ingress.ingress.controlCapability
+        accepted.receipt = .ok accepted.semantic ∧
+      dependencyGuards accepted.prepared accepted.semantic = some accepted.lawGuards ∧
+      accepted.lawGuards.all (fun guard => decide (guard.2 = ground.view.model.roots ⟨guard.1⟩)) = true :=
+  ⟨accepted.envelopeExact, accepted.admitted, accepted.lawGuardsExact, accepted.lawGuardsBound⟩
 
 /-- Admission on a ground. The marker's spent bit is answered declared and
 unspent by `prepare` before the native verifier reads the authority's spent set
@@ -538,9 +575,7 @@ def charge (accepted : AcceptedInstall profile deployment ground federation heig
   | .memoryTouches => accepted.prepared.writes.length + accepted.readGuards.length
   | .witnessBytes => accepted.ingress.ingress.envelopeBytes.length
   | .proofWork => 3
-  | .storageBytes =>
-      (accepted.prepared.writes.map fun write => write.canonicalPostBytes.length).sum +
-        accepted.ingress.bytes.length
+  | .storageBytes => DeployedCharge.storageCharge ground.view accepted.prepared.writes (event deployment.domain accepted.ingress)
   | .sideEffectCount => 1
   | .feeDebit | .networkBytes | .leaseByteBlocks => 0
 
@@ -549,7 +584,7 @@ def intent (accepted : AcceptedInstall profile deployment ground federation heig
   writes := accepted.prepared.writes
   readGuards := accepted.readGuards
   nullifiers := [operationNullifier deployment.domain accepted.ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain accepted.ingress
   subject := some accepted.ingress.ingress.subject
   postRootsBound := accepted.prepared.write_roots_bound
@@ -588,7 +623,7 @@ theorem intent_exact_source (accepted : AcceptedInstall profile deployment groun
         (PolicyInstallController.requestDigest profile ground.authority
           (context federation height ground.authority accepted.ingress)
           accepted.prepared.semantic.declaration).value] := by
-  refine ⟨rfl, rfl, rfl, ?_⟩
+  refine ⟨rfl, Minidregg.Theory.ResourceCost.Charge.materialize_eq _, rfl, ?_⟩
   change [CredentialAuthorityReplay.nullifier deployment.domain accepted.ingress.marker] = _
   rw [accepted.prepared.markerExact]
 
@@ -630,7 +665,7 @@ theorem installed_head_and_source (accepted : AcceptedInstall profile deployment
       some (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source)) := by
   refine ⟨accepted.actual_post_head, ?_⟩
   rw [installed_source_bytes]
-  simpa only [LifecycleImage.codec, strictCodec, LifecycleImage.rawCodec] using
+  simpa only [LifecycleImage.codec, LifecycleImage.rawCodec] using
     (LifecycleImage.codec Registry).decode_encode
       (.live (CanonicalCellRegistry.policySourceCell accepted.ingress.declaration.source))
 

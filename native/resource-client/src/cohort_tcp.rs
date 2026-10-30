@@ -471,7 +471,7 @@ struct Roster {
 }
 fn roster_entry(v: &serde_json::Value) -> Result<RosterEntry> {
     let field = |name: &str| -> Result<Vec<u8>> {
-        crate::decode_hex(v[name].as_str().ok_or("roster entry field must be hex text")?)
+        mini_sdk::hex::decode(v[name].as_str().ok_or("roster entry field must be hex text")?).map_err(|e| e.0)
     };
     let native = field("native")?;
     if native.len() == 32 {
@@ -505,7 +505,7 @@ fn parse_roster(bytes: &[u8]) -> Result<Roster> {
         return Err("cohort roster type/shape refused".into());
     }
     let generation: [u8; 16] =
-        crate::decode_hex(v["generation"].as_str().ok_or("roster generation must be hex")?)?
+        mini_sdk::hex::decode(v["generation"].as_str().ok_or("roster generation must be hex")?).map_err(|e| e.0)?
             .try_into()
             .map_err(|_| "roster generation must be 16 bytes")?;
     let list = |name: &str| -> Result<Vec<RosterEntry>> {
@@ -1787,7 +1787,7 @@ mod tests {
             &[0x44; hybrid_kem::KEM_CT_LEN],
             &recipient,
         );
-        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let hex = mini_sdk::hex::encode;
         assert_eq!(hex(&Sha256::digest(&transcript)), "8a4ca4c498ff6a08641fe91ba671836b8a2311a3281c47a5e2711c4fefa39f30");
         let kek = hybrid_kem::combine(LINK_SUITE, &[0x11; 32], &[0x22; 32], &transcript);
         assert_eq!(hex(&kek[..]), "cb54d24b78c8747aba524b9b4b73507f7e9ada833f2f71bbb35486a37b707847");

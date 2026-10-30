@@ -11,7 +11,7 @@
 //!
 //! What is NOT shown, because it needs a Host: in the real flow the key signs only header bytes
 //! the member's local consent process returned, and only under a `Confirmation` of what
-//! `explain()` rendered (`flow::Client`, feature `native`). Here the key signs the intent bytes
+//! `explain()` rendered (`flow::Flow`, feature `native`). Here the key signs the intent bytes
 //! directly, to show the signer interface.
 use mini_sdk::contracts::{Cut, Dec, Intent, InvokeTarget, ObjectRef, RevisionRef};
 use mini_sdk::signer::{verify, Scheme};
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
                 },
                 capability: Dec::new("9591460230184716503")?,
                 observe_capability: Dec::new("9591460230184716503")?,
-                schema_version: Dec::new("9")?,
+                schema_version: Dec::new("10")?,
                 payload: json!({"type":"content","actions":[{"type":"createAtom","atom":"1","kind":{"type":"text"},"payload":"68656c6c6f"}]}),
             }],
             family: None,

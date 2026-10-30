@@ -1,0 +1,70 @@
+PASS	login-confirm	200
+PASS	login	cookie=1 second=403
+PASS	stage-member	200
+PASS	csrf-refused	403
+PASS	origin-refused	403
+PASS	term-open	/term/[ephemeral-route] ws=/ws/term/[ephemeral-route]
+PASS	term-whoami	t": "/run/user/1000/jm.LNY3vM/world.sock",    "subject": "12382386700318854750",    "type": "minidregg-shell-session-v1",    "workspace": "/run/user/1000/jwf-m-
+PASS	doc-new	200 Admitted
+PASS	doc-append	200 receipt=w-699cec60dae0 Admitted
+PASS	receipt	200
+PASS	receipt-anchor	acceptedCount 19 worldRoot 62134907251949591186786682066913355415003759243813310347470743847104153628055
+PASS	publish	200 Admitted
+PASS	public-read-published	anonymous GET /doc/jwf126414 -> 200
+PASS	public-front-doc	anonymous GET / -> 200
+PASS	public-read-unpublished	anonymous GET /doc/jwf126414x -> 404
+PASS	unpublish	200 Admitted
+PASS	public-read-revoked	anonymous GET /doc/jwf126414 after unpublish -> 403
+PASS	public-republish	republish then anonymous GET /doc/jwf126414 -> 200
+PASS	consent-enrol	200 contributed for research (CC0)
+PASS	consent-flip	to none: Admitted
+PASS	subscribe-page	200
+PASS	export-start	200 world-1793210217
+PASS	export-ready	200 after 6 s, 3 references
+PASS	export-download	200 application/x-tar 1576960 bytes
+PASS	export-deleted	the box keeps no copy once downloaded
+PASS	export-document	 documents=3 attempts=43
+PASS	export-consent	manifest none, the world none
+PASS	export-root	manifest height 36 root 6867127134417988 | live height 36 root 6867127134417988
+PASS	private-room	room new priv438297 --private rc=0; declaration rc=0 workspace attempt: /run/user/1000/jwf-m-23022062/home/workspace/attempts/rk-found-9071296353609827-w room 10563659208579615645: pinned founder key 373896b7f11fed8ee678355a689409499ab137bc41a4881dfa652a
+PASS	hermes-tools-none	200 room new: Admitted; data-hermes-tools="0"
+PASS	hermes-tools-grant	Admitted; then data-hermes-tools="9"
+PASS	hermes-tools-revoke	Admitted; then data-hermes-tools="1"
+PASS	hermes-tools-refused	403 refused:
+PASS	bend-programs	200 0 programs
+PASS	bend-await-read	200 object 11198000485889308605: data-phase="none" Answered
+PASS	bend-answer-refused	403 alt=6 refused:
+PASS	parity	74 verbs, 216 leaves in help, 216 dry-run leaves, 0 usage refusals, 0 world refusals; without a face: none; usage: none; world: none
+PASS	parity-redproof	404 for a verb the shell lacks
+PASS	verb-index	200
+PASS	verb-run	200 whoami through the derived form answers (a local verb, never admitted)
+PASS	tour	200 steps=12
+PASS	tour-step	200 Answered
+PASS	tour-lose	200 alt=24 fields=a2,a3,a4 undecided: uncertain host response: reply deliberately not read (--lose-reply-once); the Host decided as it would, so look
+PASS	tour-lose-retry	200 lines=1 Admitted
+PASS	tour-refused	200 /doc/jwf126414/edit/aecee28af2386575f1925ade13dc9d93 data-save-status="refused" class="note">The Store refused this operation: law-denied: any [ verb in {read,delegate,install,revoke}, all [ verb == write, slot &q
+PASS	tour-can-any	200 can --any jwf126414: jwf126414  law version 0   a write exists in principle (e.g. verb = write, slot "content/atom-edits" = 0, slot "content/tombstones" = 0)   paste:     doc append | paste=doc append ID jwf126414 'hello': Admitted
+PASS	rules-check	200 alt=3 Answered satisfiable: admits e.g. any step at all (the law reads no slot) writes: admits e.g. slot "content/payload-bytes/after"
+PASS	rules-install	200 alt=4 fields=a1,a2,a3 Admitted
+PASS	rules-refused	403 refused:
+PASS	rules-revised	200 Admitted
+PASS	rules-admitted	200 Admitted
+PASS	tour-purse-later	200
+PASS	purse-meter	200 class="n">951
+PASS	story-new	200 alt=0 fields=a2,a3 Admitted /run/user/1000/jwf-m-23022062/home/workspace/sources/create-tale436520.authoring/g0001/intent.bin {
+PASS	story-seal	200 Admitted
+PASS	story-invite	200 Admitted invitation={"author":"12382386700318854750","cell":"1294616823605753367
+PASS	story-page-invited	200 data-story="tale436520" data-file="tale436520-invite.json" data-to-me="true" data-story="tale436520" data-file="tale436520-other.json" data-to-me="false"
+PASS	story-front-notice	200 data-invited="1"
+PASS	story-join-refused	400 form for another's invitation: none; usage: this invitation is not addressed to you (12382386700318854750)
+PASS	story-join	200 fields=8 Answered joined tale436520 as player; it is your current story (look)
+PASS	story-page-joined	200    tale436520  (current)  player   12382386700318854750    12382386700
+PASS	story-move	200 Admitted go north: admitted
+PASS	story-refused	200 refused:
+PASS	grants-many	200 60 grants listed, each judged on its own
+PASS	grants-judge	200 jwf126414  object 13691929536318786701 (document)  held: append, delegate, installPolicy, mutate, ob
+PASS	can-bare	400 error: 7 of 60 grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time) 7 of 60 grants judged within 100 s; narrow with `can REF` (the Grants page judges them one at a time)
+PASS	tour-chromium	steps=12 step4=outcome answered step4-ms=26627 terminal=whoami-ok errors=0
+PASS	logout	logout=303 then /term=401
+PASS	public-reader	200 error: no market index at /var/lib/mini-market/index.json (cannot read /var/lib/mini-market/index.json:
+J-WEB-FRONTEND PASS 69/69

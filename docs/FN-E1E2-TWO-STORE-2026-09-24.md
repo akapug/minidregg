@@ -149,7 +149,7 @@ means that Mini durably observed and correlated Q, not that an external effect
 ran exactly once.
 
 `lake build Kernel.FnReplyConsumption Host.Main` passed. The retained
-`scripts/fn-e1e2/check_reply_consumption.lean` passed against the exact
+`scripts.fn-e1e2.check_reply_consumption [deleted 1e68f88d]` passed against the exact
 previous B3 Q source at
 `/tmp/mini-fn-reply-plan-20260924/live-b3-retry-1/reply.source`; it checked
 canonical inbox codec and fresh operation command, and refused absent local

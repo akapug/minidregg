@@ -7,9 +7,10 @@ use std::collections::BTreeMap;
 
 pub(super) const MAX_FORM: usize = 3 * 64 * 1024 + 64;
 
-/// POST has a stricter boundary than browsing: an exact same-origin Origin,
-/// one bounded Content-Length, one form content type, no transfer coding.
-pub(super) fn body_length(request: &Request) -> Result<usize> {
+/// POST has a stricter boundary than browsing: an exact same-origin Origin
+/// (one of the front's origins, whose authority is this request's Host), one
+/// bounded Content-Length, one form content type, no transfer coding.
+pub(super) fn body_length(request: &Request, front: &Front) -> Result<usize> {
     let one = |key: &str| -> Result<&str> {
         let values: Vec<_> = request.headers.iter().filter(|(k, _)| k == key).collect();
         if values.len() != 1 {
@@ -25,7 +26,12 @@ pub(super) fn body_length(request: &Request) -> Result<usize> {
         return Err("transfer encoding is not supported".into());
     }
     let host = one("host")?;
-    if one("origin")? != format!("http://{host}") {
+    let origin = one("origin")?;
+    if !front
+        .origins
+        .iter()
+        .any(|allowed| allowed == origin && allowed.split_once("://").is_some_and(|(_, authority)| authority == host))
+    {
         return Err("saving requires this page's exact origin".into());
     }
     if one("content-type")? != "application/x-www-form-urlencoded" {
@@ -371,8 +377,7 @@ fn render(site: &Site, edit: &Edit) -> Page {
         edit.status.as_str(),
         "saved" | "unchanged" | "refused" | "failed"
     );
-    let mut body = format!("<style>.editing{{display:grid;grid-template-columns:minmax(0,2fr) minmax(16rem,1fr);gap:2rem}}body{{max-width:90rem}}textarea{{display:block;box-sizing:border-box;width:100%;min-height:22rem;font:15px/1.6 ui-monospace,monospace;padding:1rem}}button{{padding:.6rem 1rem;margin:.5rem 0;font:inherit}}.inspector{{border-left:1px solid #ddd;padding-left:1rem}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}code{{overflow-wrap:anywhere}}details{{margin:.5rem 0}}@media(max-width:800px){{.editing{{display:block}}.inspector{{border:0;padding:0}}}}</style>\
-        <p><a href=\"{base}/doc/{name}\">Read current document</a> · <a href=\"{url}\">Permalink to this draft and save</a></p>\
+    let mut body = format!("<p><a href=\"{base}/doc/{name}\">Read current document</a> · <a href=\"{url}\">Permalink to this draft and save</a></p>\
         <div class=editing><section><p class=note>Editing the document as read at height {}. Unchanged transclusion markers preserve their source links.</p>",escape(&edit.height));
     if !edit.message.is_empty() {
         body.push_str(&format!(
@@ -434,6 +439,7 @@ fn render(site: &Site, edit: &Edit) -> Page {
             height: edit.height.clone(),
             authority_root: edit.authority_root.clone(),
             cell_root: edit.cell_root.clone(),
+            world_root: String::new(),
         }),
         body,
     }
@@ -460,6 +466,8 @@ mod tests {
             ("content-type", "application/x-www-form-urlencoded"),
             ("content-length", "9"),
         ];
+        let front = Front::loopback(3, false);
+        let body_length = |request: &Request| super::body_length(request, &front);
         assert_eq!(body_length(&post(&good)).unwrap(), 9);
         for key in ["origin", "host", "content-length", "content-type"] {
             let missing: Vec<_> = good.iter().copied().filter(|(k, _)| *k != key).collect();

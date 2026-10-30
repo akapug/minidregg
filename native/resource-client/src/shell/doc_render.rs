@@ -98,20 +98,15 @@ pub(crate) fn doc_flags(words: &[String]) -> Result<Vec<(&'static str, String)>,
             ("name", (*name).into()),
         ],
         ["doc", "mark", name, line, kind] | ["doc", "mark", name, line, kind, _] => {
-            if !matches!(*kind, "bold" | "italic" | "code" | "heading" | "link") {
-                return Err(format!("unknownKind: {kind} (expected bold, italic, code, heading or link)"));
-            }
+            // The grammar admits a style alone, or `link` with its TARGET.
             let mut flags = vec![
                 ("action", "mark".into()),
                 ("name", (*name).into()),
                 ("line", number(line, "LINE")?),
                 ("kind", (*kind).into()),
             ];
-            match (w.get(5), *kind) {
-                (Some(target), "link") => flags.push(("to", (*target).into())),
-                (None, "link") => return usage("doc mark NAME LINE link TARGET"),
-                (Some(_), _) => return usage("doc mark NAME LINE KIND (a TARGET is a link's only)"),
-                (None, _) => {}
+            if let Some(target) = w.get(5) {
+                flags.push(("to", (*target).into()));
             }
             flags
         }
@@ -239,13 +234,22 @@ mod tests {
 
     #[test]
     fn malformed_lines_are_refused_before_anything_is_sent() {
+        // The shell parses a `doc` line through its grammar (typed arguments, choices, arity)
+        // before this lowering sees it; the lowering keeps only what the grammar cannot know.
+        // Both run before anything is sent: a malformed line is refused by one of them.
+        let refused = |line: &str| -> Result<(), String> {
+            let w: Vec<String> = line.split(' ').map(str::to_owned).collect();
+            crate::shell_grammar::parse(&crate::shell_grammar::DOC, &w)?;
+            flags(line).map(|_| ())
+        };
         for bad in ["doc", "doc show", "doc show p --pdf", "doc mark p 0 bold", "doc mark p 2 underline",
             "doc mark p 2 link", "doc mark p 2 bold extra", "doc unmark p x", "doc move p 1",
             "doc remove p two", "doc transclude p w 1 2 at", "doc follow p", "doc show p --at",
             "doc show p --at x", "doc show p --raw --html", "doc diff p 1", "doc history p --raw", "doc range p 0 2",
             "doc pull"] {
-            assert!(flags(bad).is_err(), "{bad} should be refused");
+            assert!(refused(bad).is_err(), "{bad} should be refused");
         }
-        assert!(flags("doc mark p 2 underline").unwrap_err().starts_with("unknownKind: underline"));
+        assert!(refused("doc mark p 2 underline").unwrap_err().contains("bold|italic|code|heading"));
+        assert!(refused("doc mark p 2 link").unwrap_err().contains("doc mark"));
     }
 }

@@ -23,7 +23,26 @@ object law can say "these two balances sum to the reserve". A domain can: it nam
   record cell, so a concurrent turn that changes an unwritten member's state, or registers a domain
   over a written object, conflicts instead of slipping past the joint law.
 -/
-import Kernel.ObjectiveActivityUpgrade
+module
+
+public import Kernel.ObjectiveActivityUpgrade
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveActivity
 open Minidregg.Theory Minidregg.Compiler
@@ -736,6 +755,16 @@ structure Registration {rootBytes : Bytes → Digest} (config : Config) (snapsho
     ((request.members.zip records).map (fun (member, record) =>
       postAt snapshot (objectCell config.domain member) (objectImage member (joined record request.id))) ++
       [posted.write config snapshot])
+theorem Registration.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : RegisterRequest} (registered : Registration config snapshot height request) :
+    (request.members ≠ [] ∧ request.members.Nodup ∧ request.members.length ≤ domainMemberCap) ∧
+      readDomain config snapshot request.id = .ok none ∧
+      request.members.mapM (readMember config snapshot) = .ok registered.records ∧
+      consentAll request height (request.members.zip registered.records) = .ok () ∧
+      request.members.mapM (readState config snapshot) = .ok registered.states ∧
+      judgeJoint request.law request.id registered.states = .ok () :=
+  ⟨registered.shape, registered.absent, registered.recordsExact, registered.consented, registered.statesExact,
+    registered.judged⟩
 
 def register {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes) (height : Nat)
     (request : RegisterRequest) : Except Refusal (Registration config snapshot height request) :=

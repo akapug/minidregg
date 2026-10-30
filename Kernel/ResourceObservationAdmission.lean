@@ -10,24 +10,43 @@ A read commits nothing, so the clock it was judged at is not pinned by a CAS:
 it is the clock cell of the very snapshot the read is answered from, and the
 read's challenge names it beside the world root and height
 (`NativeObservationController.challenge_names_clock`). -/
-import Compiler.CanonicalRuntimeProfileCore
-import Compiler.PredRangeLeaf
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.WorldKindLawDependencies
-import Kernel.WorldKindProjection
-import Compiler.PhysicalLawResolution
-import Compiler.ComposedLawDiagnostics
-import Compiler.ResourceTargetAdmission
-import Compiler.CanonicalAccountView
-import Compiler.ResourceAuthorityProjection
-import Kernel.ContentResource
-import Kernel.DeclaredResourceProjection
-import Theory.RoomAuthorization
-import Theory.StoreFootprint
-import Kernel.ClockCellDomain
-import Theory.AssertAxioms
-import Compiler.ServedBasis
+module
+
+public import Compiler.CanonicalRuntimeProfileCore
+public import Compiler.PredRangeLeaf
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.CredentialAuthorityPolicyRegistry
+public import Compiler.WorldKindLawDependencies
+public import Kernel.WorldKindProjection
+public import Compiler.PhysicalLawResolution
+public import Compiler.ComposedLawDiagnostics
+public import Compiler.ResourceTargetAdmission
+public import Compiler.CanonicalAccountView
+public import Compiler.ResourceAuthorityProjection
+public import Kernel.ContentResource
+public import Kernel.DeclaredResourceProjection
+public import Theory.RoomAuthorization
+public import Theory.StoreFootprint
+public import Kernel.ClockCellDomain
+public import Theory.AssertAxioms
+public import Compiler.ServedBasis
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceObservationAdmission
 
@@ -529,7 +548,7 @@ theorem read_after_tick_admitted :
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_lawDenied
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_leaf_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_leaf_fails
-/-! ## Room confidentiality at the controller (PRIVACY row 8)
+/-! ## Room confidentiality at the controller
 
 The observation portal is the source-capability portal: it has no signature
 and no proof witness, so no signature-mode or proof-mode evidence exists for an
@@ -719,6 +738,7 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
   | .streamEntry, _ | .system, _ => none
   | .objectiveActivity, _ => none
   | .seat, _ => none
+  | .platform, _ => none
 
 /-- A read under `fields` keeps an address exactly when its field is named;
 an address with no field is kept only by a scope naming every field. -/

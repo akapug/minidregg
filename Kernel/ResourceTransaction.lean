@@ -2,25 +2,44 @@
 operations share one command, exact old directory and authority snapshot, one
 nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
-import Compiler.NativeProtocolFrames
-import Compiler.NativeInvocationStatement
-import Compiler.ObjectiveInvocationClaim
-import Kernel.DeclaredResourceScalar
-import Kernel.WorldKindProjection
-import Kernel.WorldKindMethods
-import Kernel.WorldPrototypeConstruction
-import Compiler.ObjectAudienceRoster
-import Kernel.ObjectAudience
-import Kernel.ContentResource
-import Compiler.StreamCell
-import Compiler.ResourceAuthorityProjection
-import Kernel.Run
-import Kernel.NockDoor
-import Kernel.ClockCellDomain
-import Kernel.RunComputeBudgetDomain
-import Kernel.ResourceMoneyReceiver
-import Kernel.ResourceObservationAdmission
-import Kernel.ObjectiveWorkAccount
+module
+
+public import Compiler.NativeProtocolFrames
+public import Compiler.NativeInvocationStatement
+public import Compiler.ObjectiveInvocationClaim
+public import Kernel.DeclaredResourceScalar
+public import Kernel.WorldKindProjection
+public import Kernel.WorldKindMethods
+public import Kernel.WorldPrototypeConstruction
+public import Compiler.ObjectAudienceRoster
+public import Kernel.ObjectAudience
+public import Kernel.ContentResource
+public import Compiler.StreamCell
+public import Compiler.ResourceAuthorityProjection
+public import Kernel.Run
+public import Kernel.NockDoor
+public import Kernel.ClockCellDomain
+public import Kernel.RunComputeBudgetDomain
+public import Kernel.ResourceMoneyReceiver
+public import Kernel.ResourceObservationAdmission
+public import Kernel.ObjectiveWorkAccount
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -115,7 +134,7 @@ structure Command where
   subject : SubjectId
   nonce : Nat
   targets : List Target
-  /-- A Nock run whose product these writes claim to be (NOCK §2.4). Signed with
+  /-- A Nock run whose product these writes claim to be (docs/NOCK.md §2.4). Signed with
   the command: the claim's steps are the fee its signer consents to. When
   present, every write of every target must be a field write the re-executed
   program's product names (`Kernel.Run.checkRun`). -/
@@ -249,11 +268,12 @@ def commandStream : StreamCodec Command :=
     (fun (body,family) => Command.ofBody body family)
     (by intro command; cases command; rfl)
 
-/-- Transaction13: a family command over the transaction10 body. Frame 11 (the
-retired signed Bend claim) and frame 12 (a family over a body that still carried
-the Bend claim option) are not decoded: they refuse instead of being
-reinterpreted. -/
-def familyCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [13]
+/-- Transaction15: a family command over the transaction14 body. Frame 11 (the
+retired signed Bend claim), frame 12 (a family over a body that still carried
+the Bend claim option), and frames 10 and 13 (the body and family command over
+the Book before its floors section) are not decoded: they refuse instead of
+being reinterpreted. -/
+def familyCommandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [15]
 
 /-- Complete unsigned body, excluding only the family, in exact transaction10
 framing: not a lossy projection or a supplied byte string. -/
@@ -362,6 +382,22 @@ theorem v12_command_refused (payload : List UInt8) :
   simp [rawCommandCodec, commandFrame, familyCommandFrame,
     List.append_assoc, take_tagged_frame]
 
+/-- A transaction10 command (the body over the Book before its floors section)
+refuses to decode rather than being read under the transaction14 body. -/
+theorem v10_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 10 :: payload) = none := by
+  simp [rawCommandCodec, commandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
+
+/-- A transaction13 family command (over the Book before its floors section)
+refuses to decode rather than being read under the transaction15 body. -/
+theorem v13_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 13 :: payload) = none := by
+  simp [rawCommandCodec, commandFrame, familyCommandFrame,
+    List.append_assoc, take_tagged_frame]
+
+#assert_axioms v10_command_refused
+#assert_axioms v13_command_refused
 #assert_axioms v11_command_refused
 #assert_axioms v12_command_refused
 
@@ -409,11 +445,11 @@ theorem statement_body_exact (domain semantics : Digest) (command : Command) :
     (statement domain semantics command).bodyBytes = command.bodyBytes := rfl
 
 def argsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.ARGS/v4".toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 def effectsDigest (domain semantics : Digest) (command : Command) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.EFFECT/v4".toUTF8.toList
     (commandBytes domain semantics command)).digest
 
 /-- The operation identity is (domain, semantics, subject, nonce) for EVERY
@@ -495,9 +531,9 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     target := ⟨target.target⟩
     verb := target.verb
     argsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList framedBytes).digest
+      "DREGG.RESOURCE.TRANSACTION.ARGS/v4".toUTF8.toList framedBytes).digest
     effectsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.EFFECT/v3".toUTF8.toList framedBytes).digest
+      "DREGG.RESOURCE.TRANSACTION.EFFECT/v4".toUTF8.toList framedBytes).digest
     nonce := command.nonce
     height := ambient.height
     preStateRoot := preRoot
@@ -705,11 +741,47 @@ def contentContext (snapshot : AuthoritySnapshot) (ambient : Ambient) (command :
       fun target => target.observeCapability.map fun capability =>
         ⟨capability, sourcePolicy snapshot source⟩⟩
 
+/-- The state keys an action's guards read: `Action.ops` is one guarded set per key, and its
+guard is the key's exact expected value (`guardedSet_enabled_iff`). -/
+def guardKeys : DeclaredActionLowering.Action → List EffectDeclaration.StateKey
+  | .create key _ | .write key _ _ => [key]
+  | .move source destination resource _ _ _ =>
+      [.accountBalance source resource, .accountBalance destination resource]
+
+/-- A scalar leg's guards read only fields its stored capability names. A guard is a read: a
+refusal `guardRejected` (or a passed guard) tells the requester whether the guarded field
+holds the value it named, so a guard over a field the capability does not name would be an
+equality oracle on that field, decided before admission (where `fieldsCheck` names it).
+`none` names the capability the authority cell does not hold: refused `capabilityRejected`,
+the name admission gives it, before any guard runs. -/
+def scalarScope (snapshot : AuthoritySnapshot) (kind : ResourceKind)
+    (capability : CapabilityId) (actions : List DeclaredActionLowering.Action) : Option Reject :=
+  match CredentialAuthorityState.readCapability snapshot.cell kind capability with
+  | none => some .capabilityRejected
+  | some stored =>
+      if actions.all fun action => (guardKeys action).all fun key =>
+          decide (CellField.NamedBy stored.head.scope.fields (ResourceObservationAdmission.declaredField key))
+      then none else some .fieldNotNamed
+
+/-- A scalar leg's computation once its scope is checked: the source operation's guarded patch
+at the loaded cell, then the blinding ratchet. -/
+def scalarLeg (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (actions : List DeclaredActionLowering.Action)
+    (pre : DeclaredResourceScalar.EffectCell) : Except Reject (Store EffectDeclaration.effectLayout) :=
+  match DeclaredResourceScalar.prepareCell snapshot semantics ambient pre
+      (scalarCommand command target actions) with
+  | .error reason => .error (.scalar reason)
+  | .ok prepared => .ok (Patch.run prepared.post
+      (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
+
 /-- The only target computation. It invokes source-owned typed operations,
 never a host supplied post. Every branch returns the post store the source
 operation computed at the loaded cell; a scalar or content write then advances
 the cell's blinding ratchet one link at the admission height
-(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding. -/
+(`StoreCodec.Blinding.patch`, K-HIDE-ROTATE).  A stream append has no blinding.
+Every payload is refused `staleTarget` when the loaded root is not the root its plan
+names, except a commuting content command (append-only `createAtom`s), which reads
+nothing a concurrent append moves. -/
 def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
@@ -717,11 +789,12 @@ def computeTarget (snapshot : AuthoritySnapshot)
   | mk kind id capability version root payload observe audienceEpoch audienceRoster =>
     cases payload with
     | scalar actions =>
-      let projected := scalarCommand command ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ actions
-      exact match DeclaredResourceScalar.prepareCell snapshot semantics ambient pre projected with
-        | .error reason => .error (.scalar reason)
-        | .ok prepared => .ok (Patch.run prepared.post
-            (DeclaredEffectCell.blinding.patch pre.logical ambient.height))
+      -- A guard over a field the capability does not name is refused before any guard runs.
+      exact match scalarScope snapshot kind capability actions with
+        | some reason => .error reason
+        | none => scalarLeg snapshot semantics ambient command
+            ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
+            actions pre
     | computeFunding _ => exact do
         if kind != .account then throw .wrongRole
         if version != 1 then throw .unsupportedVersion
@@ -737,7 +810,9 @@ def computeTarget (snapshot : AuthoritySnapshot)
     | content content => exact do
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
-        if root != pre.root then throw .staleTarget
+        -- An append-only command is computed at the cell it meets: it pins no root
+        -- (`ContentResource.Command.commutes`, `Kernel.ContentCommutingAppend`).
+        if root != pre.root && !content.commutes then throw .staleTarget
         match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
             (contentOperation snapshot semantics command) (ContentResource.documentOf id)
             (contentContext snapshot ambient command) pre content with
@@ -901,6 +976,82 @@ structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Re
   source : CanonicalCellRegistry.LoadedPolicySource snapshot.domain directory
     (snapshot.authState.policyAddress ⟨target.target⟩ (snapshot.authState.policyRevision ⟨target.target⟩))
   audienceFresh : ObjectAudience.checkFresh source.record.audience target.target target.audienceEpoch = .ok ()
+theorem PreparedTarget.bound {deployment : Deployment}
+    {directory : Directory Nat Registry} {snapshot : AuthoritySnapshot} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {target : Target}
+    (prepared : PreparedTarget deployment directory snapshot semantics ambient command target) :
+    directory.slots target.target = .present prepared.before ∧
+      selectTarget deployment target prepared.before = some prepared.pre ∧
+      CanonicalCellRegistry.FinalPostLaw deployment target.target prepared.before
+        (packTarget target prepared.candidate.post) :=
+  ⟨prepared.present, prepared.selected, prepared.postLaw⟩
+
+/-- **A guard never reads a field outside the requester's capability** (JDISCLOSE
+narrow-guess). A scalar leg any of whose guards reads a field its stored capability does not
+name is refused `fieldNotNamed` before any guard runs, at EVERY loaded cell: the refusal is
+the same whatever the cell holds, so a narrowed grant cannot learn an unnamed field by
+guessing it in a write's `expected` (or a `create`'s absence). Premise inhabitation: a grant
+narrowed to field 1 (`fields = some {slot 1}`) and `write (objectField vault 2) (some 4242) 1`. -/
+theorem computeTarget_scalar_unnamed_refused (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (stored : CredentialAuthorityState.StoredCapability kind)
+    (found : CredentialAuthorityState.readCapability snapshot.cell kind capability = some stored)
+    (action : DeclaredActionLowering.Action) (member : action ∈ actions)
+    (key : EffectDeclaration.StateKey) (guarded : key ∈ guardKeys action)
+    (unnamed : ¬ CellField.NamedBy stored.head.scope.fields (ResourceObservationAdmission.declaredField key))
+    (pre : TargetCell ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) :
+    computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      .error .fieldNotNamed := by
+  have check : scalarScope snapshot kind capability actions = some .fieldNotNamed := by
+    have notAll : (actions.all fun action => (guardKeys action).all fun key =>
+        decide (CellField.NamedBy stored.head.scope.fields
+          (ResourceObservationAdmission.declaredField key))) = false := by
+      simp only [List.all_eq_false]
+      exact ⟨action, member, by simpa [List.all_eq_false] using ⟨key, guarded, unnamed⟩⟩
+    simp only [scalarScope, found, notAll, Bool.false_eq_true, if_false]
+  simp only [computeTarget, check]
+
+/-- **No guard runs for a capability the authority cell does not hold.** Refused
+`capabilityRejected` at every loaded cell, so a requester with no grant learns nothing of
+the cell's fields from a guard either. -/
+theorem computeTarget_scalar_unheld_refused (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (unheld : CredentialAuthorityState.readCapability snapshot.cell kind capability = none)
+    (pre : TargetCell ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) :
+    computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      .error .capabilityRejected := by
+  have check : scalarScope snapshot kind capability actions = some .capabilityRejected := by
+    simp only [scalarScope, unheld]
+  simp only [computeTarget, check]
+
+/- Owed (audit pass 25, A2; not claimed here): the confinement of the remaining checks of a
+scoped leg, `computeTarget … pre = .error e → e = .staleTarget ∨ e = f (namedPart pre)
+declaration command` for one `f` fixed across `pre`. The root check is the one whole-cell bit
+RefusalReason's header concedes; preLaw, admissionCheck, FieldClosure and postLaw remain. -/
+
+/-- The accepting pole: a scalar leg under a held capability whose guards read only named
+fields is computed exactly as before (`scalarLeg`, the arm's whole former body). -/
+theorem computeTarget_scalar_named_as_before (snapshot : AuthoritySnapshot) (semantics : Digest)
+    (ambient : Ambient) (command : Command) (kind : ResourceKind) (id : Nat)
+    (capability : CapabilityId) (version : Nat) (root : Digest)
+    (actions : List DeclaredActionLowering.Action) (observe : Option CapabilityId)
+    (audienceEpoch : Option Nat) (audienceRoster : Option Minidregg.Theory.ObjectAudienceRoster.Roster)
+    (named : scalarScope snapshot kind capability actions = none)
+    (pre : TargetCell ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩) :
+    computeTarget snapshot semantics ambient command
+      ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩ pre =
+      scalarLeg snapshot semantics ambient command
+        ⟨kind, id, capability, version, root, .scalar actions, observe, audienceEpoch, audienceRoster⟩
+        actions pre := by
+  simp only [computeTarget, named]
 
 /-- An observe-only content read computes only when its named capability is its
 observe capability: the read's one authorization is its observation. -/
@@ -1096,7 +1247,7 @@ def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
     CanonicalPolicyRegistry.PayloadStore where
   fetch := CanonicalCellRegistry.fetchPolicySource domain directory
 
-/-! ## The run check (K-RAN, NOCK §2.4) -/
+/-! ## The run check (K-RAN, docs/NOCK.md §2.4) -/
 
 /-- The policy slots of one stream append: the entry's fields as request
 slots, so a stream law can name its author (`request/subject`), its topics
@@ -1446,6 +1597,17 @@ structure PreparedOn {F : Type} [Field F]
   runChecked : checkCommandRun profile.disabledEvaluators deployment.domain directory
     ambient command (fun i => (targets i).pre.logical) (computeFundingIndex compute) = .ok run
   computeRunExact : computeExecutionMatches command compute run = true
+theorem PreparedOn.checked {F : Type} [Field F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {directory : Directory Nat Registry} {authority : AuthoritySnapshot}
+    {cells : RunComputeBudgetDomain.Physical} {declared : Bool} {command : Command}
+    (prepared : PreparedOn deployment profile ambient directory authority cells declared command) :
+    prepareCompute deployment cells prepared.clock.clock command = .ok prepared.compute ∧
+      prepareMoney deployment cells command prepared.compute = .ok prepared.money ∧
+      checkCommandRun profile.disabledEvaluators deployment.domain directory ambient command
+        (fun i => (prepared.targets i).pre.logical) (computeFundingIndex prepared.compute) =
+          .ok prepared.run :=
+  ⟨prepared.computeChecked, prepared.moneyChecked, prepared.runChecked⟩
 
 /-- Whether a ground answers an invocation's operation marker replay nullifier.
 Irreducible: its argument is a cSHAKE256 digest, which elaboration must never
@@ -1642,6 +1804,9 @@ theorem prepare_refuses_lone_read {F : Type} [Field F] (deployment : Deployment)
 #assert_axioms PreparedInvocation.markerSpent_false
 #assert_axioms prepare_undeclared
 #assert_axioms computeTarget_read_observe
+#assert_axioms computeTarget_scalar_unnamed_refused
+#assert_axioms computeTarget_scalar_unheld_refused
+#assert_axioms computeTarget_scalar_named_as_before
 #assert_axioms PreparedTarget.read_names_observe_capability
 #assert_axioms targetPatch_observeOnly
 
@@ -1902,7 +2067,7 @@ kernel accepted at one admission is accepted, with the same verdict, at any
 other — another height, another signer, another command — over the same
 targets, whenever the ABI's named slots hold the values they held. A job whose
 sample reads only its order's write-once fields therefore has one truth at
-every height (COMPUTE §2.2). -/
+every height (docs/COMPUTE.md §2.2). -/
 theorem pinned_claim_admissible_across_heights {E : Evaluator} {program : NockProgramCodec.Program}
     {validatedFundingIndex : Option Nat}
     {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}

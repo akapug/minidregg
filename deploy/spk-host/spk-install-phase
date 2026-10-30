@@ -68,6 +68,27 @@ for component in "${components[@]}"; do
   }
 done
 
+# This config was checked above as operator-owned/private. Package contents and
+# untrusted app requests cannot select these limits. Native config parsing repeats
+# the fixed-name check before any lifecycle operation.
+(( $(stat -c '%s' -- "$config") <= 16384 )) || { echo 'INSTALL config too large' >&2; exit 1; }
+profile=$(jq -er '.importProfile // "standard-v1" | select(type == "string")' "$config")
+source_spk=$(jq -er '.sourceSpk | select(type == "string" and startswith("/"))' "$config")
+image_dir=$(jq -er '.imageDir | select(type == "string" and startswith("/"))' "$config")
+source_parent=$(dirname -- "$source_spk")
+image_store=$(dirname -- "$image_dir")
+case $profile in
+  standard-v1|market-large-v1|operator-appliance-v1) ;;
+  *) echo 'unknown SPK import profile' >&2; exit 2 ;;
+esac
+# The pinned Host states the profile's decoded bound and the wall clock for this package
+# (spk-host import-limits). An install phase also writes the image, so it keeps the longer of
+# the scaled intake clock and 900 s.
+[[ -f $source_spk && ! -L $source_spk ]] || { echo 'INSTALL source SPK absent' >&2; exit 1; }
+read -r _ file_limit seconds < <("$host_binary" import-limits "$profile" "$(stat -c '%s' -- "$source_spk")") || exit 2
+[[ $file_limit =~ ^[0-9]+$ && $seconds =~ ^[0-9]+$ ]] || { echo 'SPK import limits unavailable' >&2; exit 2; }
+(( seconds >= 900 )) || seconds=900
+
 unit=mini-spk-install-$(date -u +%Y%m%d%H%M%S)-$$
 stdout_log=$(mktemp /var/lib/minidregg/spk/.install-stdout.XXXXXXXX)
 stderr_log=$(mktemp /var/lib/minidregg/spk/.install-stderr.XXXXXXXX)
@@ -77,7 +98,7 @@ cleanup() {
 }
 trap cleanup EXIT
 run_rc=0
-timeout --kill-after=5s 930s systemd-run --unit="$unit" --wait --pipe --collect \
+timeout --kill-after=5s "$((seconds + 30))s" systemd-run --unit="$unit" --wait --pipe --collect \
   -p Type=exec \
   -p "User=$operator_uid" \
   -p NoNewPrivileges=yes \
@@ -85,11 +106,13 @@ timeout --kill-after=5s 930s systemd-run --unit="$unit" --wait --pipe --collect 
   -p PrivateTmp=yes \
   -p ProtectSystem=strict \
   -p "ReadWritePaths=$journal" \
+  -p "ReadWritePaths=$source_parent" \
+  -p "ReadWritePaths=$image_store" \
   -p MemoryMax=1G \
   -p CPUQuota=100% \
   -p TasksMax=16 \
-  -p RuntimeMaxSec=900 \
-  -p LimitFSIZE=268435456 \
+  -p "RuntimeMaxSec=$seconds" \
+  -p "LimitFSIZE=$file_limit" \
   -p KillMode=control-group \
   -- "$host_binary" "$phase" "$config" \
   >"$stdout_log" 2>"$stderr_log" || run_rc=$?

@@ -6,7 +6,26 @@ delegation at the original verifier-authenticated prefix, check current law,
 the installed record, and a fresh parent execution witness at the loaded tip.
 The old event21 ticket and enrollment remain generation-bound.
 -/
-import Kernel.ApplicationShareIssueSource
+module
+
+public import Kernel.ApplicationShareIssueSource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrant
 

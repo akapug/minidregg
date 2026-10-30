@@ -1,0 +1,14 @@
+candidate 203ed84c5873d207fe7761b187cd2e866928b401  method /build/lanes/un-world/world/call/Calls.obend  entry deposit  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create-counter                               installed confirmed  
+create-relayA                                installed confirmed  
+create-relayB                                installed confirmed  
+leaf-deposit-5                               installed confirmed  
+leaf-report-and-state-5                      check     ok {"report": {"tag": "natural", "value": "5"}, "total": 5}
+twice-2                                      installed confirmed  
+second-callee-sees-first-write               check     ok {"report": {"tag": "natural", "value": "9"}, "total": 9}
+reentry-refused                              charged   confirmed  32488455583, 11401017788112701895]) 3199918 82) { source := 17476, core := 87084, postageSource := 0, postageCore := 0 }
+reentry-commits-nothing                      check     ok {"counter": 9}
+{"rows": 11, "failed": []}
+overall rc=0

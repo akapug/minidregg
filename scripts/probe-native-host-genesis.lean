@@ -40,6 +40,7 @@ def config (alice bob : List UInt8) : Config where
   tailBound := 64
   clockGenesisNow := 0
   clockMaxStepSeconds := 300
+  issuanceCap := 1000000000000000
 
 def require (label : String) (condition : Bool) : IO Unit :=
   unless condition do throw (IO.userError s!"FAIL native genesis: {label}")

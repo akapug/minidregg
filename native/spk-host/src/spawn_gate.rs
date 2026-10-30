@@ -4,12 +4,12 @@
 //! native-admitted lifecycle adapter may choose its SPK image, app UID/GID,
 //! exact bubblewrap image and fd3/4/5 bindings. The caller must hold the
 //! operation journal's flock throughout `spawn_bounded` and its Running fsync.
-#![allow(dead_code)] // Staged until the native BEGIN adapter can call it; no public launch path.
 
 use crate::sandbox::{
     open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
-    VAR_FD,
+    VAR_FD, PUBLIC_DATA_FD, SHIM_FD,
 };
+use crate::io_context::IoContext;
 use sha2::{Digest, Sha256};
 use std::ffi::{CString, OsStr};
 use std::fs::File;
@@ -22,6 +22,11 @@ use std::time::{Duration, Instant};
 
 const MAX_ELF_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_HANDSHAKE: Duration = Duration::from_secs(10);
+/// RLIMIT_NOFILE for the app generation (bubblewrap and everything under it).
+pub(crate) const APP_MAX_FILES: libc::rlim_t = 1024;
+// Linux's maximum extended-attribute value size. The shared launcher can have
+// an entry for every operator-provisioned app identity, not merely 64 entries.
+const MAX_ACCESS_ACL_BYTES: usize = 64 * 1024;
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
@@ -37,6 +42,7 @@ pub(crate) struct AppFds {
     pub persistent_var: RawFd,
     pub seccomp: RawFd,
     pub output: RawFd,
+    pub public_data: Option<RawFd>,
 }
 
 #[derive(Debug)]
@@ -63,11 +69,7 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
                 spec.program.file_name().and_then(OsStr::to_str),
                 Some("bwrap" | "mini-grain-bwrap")
             ))
-        || spec.sha256.len() != 64
-        || !spec
-            .sha256
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !crate::canonical::hex64(&spec.sha256)
         || spec.args.len() > MAX_BWRAP_ARGS
     {
         return Err(invalid("invalid pinned app launch shape"));
@@ -78,7 +80,11 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
         return Err(invalid("invalid or oversized bubblewrap arguments"));
     }
     if let Some(fds) = spec.fds {
-        let sources = [fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        let mut sources = vec![fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        sources.extend(fds.public_data);
+        if crate::sandbox::has_public_data_args(&spec.args) != fds.public_data.is_some() {
+            return Err(invalid("public data mount and descriptor differ"));
+        }
         let distinct = sources
             .iter()
             .enumerate()
@@ -93,6 +99,9 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
     } else if !test_mode {
         return Err(invalid("SPK launch requires fd1-6"));
     }
+    if spec.fds.is_none() && crate::sandbox::has_ifaddrs_shim_args(&spec.args) {
+        return Err(invalid("platform shim mount without descriptors"));
+    }
     Ok(())
 }
 
@@ -104,12 +113,55 @@ pub(crate) fn execute_mode_permits(owner: u32, group: u32, mode: u32, uid: u32, 
     mode & bit != 0
 }
 
-/// Refuse an unexecutable pinned launcher before consuming a native START
-/// claim. Repeat the same check at the actual one-shot spawn boundary.
-pub(crate) fn preflight(spec: &SpawnSpec) -> io::Result<()> {
-    validate(spec, false)?;
-    let _executable = pinned_executable(spec)?;
-    Ok(())
+/// The execute decision of the kernel's discretionary check for exactly
+/// `uid`/`gid` with no supplementary groups, from the file's POSIX access ACL
+/// (`system.posix_acl_access`, the kernel's own v2 encoding) when it has one:
+/// owner entry; else a named-user entry under the mask; else the owning-group
+/// or a named-group entry for `gid` under the mask (a matching group class that
+/// grants nothing denies); else other. Without an ACL it is the mode bits.
+/// LSM policy is still decided only at the exec boundary.
+pub(crate) fn acl_execute_permits(acl: Option<&[u8]>, owner: u32, group: u32, mode: u32, uid: u32, gid: u32) -> Option<bool> {
+    let Some(acl) = acl else { return Some(execute_mode_permits(owner, group, mode, uid, gid)); };
+    if owner == uid {
+        return Some(mode & 0o100 != 0);
+    }
+    if acl.len() < 4 || (acl.len() - 4) % 8 != 0 || u32::from_le_bytes(acl[..4].try_into().ok()?) != 2 {
+        return None;
+    }
+    let entries: Vec<(u16, u16, u32)> = acl[4..]
+        .chunks_exact(8)
+        .map(|e| (u16::from_le_bytes([e[0], e[1]]), u16::from_le_bytes([e[2], e[3]]), u32::from_le_bytes([e[4], e[5], e[6], e[7]])))
+        .collect();
+    const USER: u16 = 0x02; const GROUP_OBJ: u16 = 0x04; const GROUP: u16 = 0x08; const MASK: u16 = 0x10; const OTHER: u16 = 0x20;
+    let mask = entries.iter().find(|e| e.0 == MASK).map_or(7, |e| e.1);
+    if let Some(e) = entries.iter().find(|e| e.0 == USER && e.2 == uid) {
+        return Some(e.1 & mask & 1 != 0);
+    }
+    let groups: Vec<u16> = entries
+        .iter()
+        .filter(|e| (e.0 == GROUP_OBJ && group == gid) || (e.0 == GROUP && e.2 == gid))
+        .map(|e| e.1)
+        .collect();
+    if !groups.is_empty() {
+        return Some(groups.iter().any(|p| p & mask & 1 != 0));
+    }
+    entries.iter().find(|e| e.0 == OTHER).map(|e| e.1 & 1 != 0)
+}
+
+fn access_acl(file: &File) -> io::Result<Option<Vec<u8>>> {
+    let name = c"system.posix_acl_access";
+    let mut buffer = vec![0_u8; MAX_ACCESS_ACL_BYTES];
+    let n = unsafe { libc::fgetxattr(file.as_raw_fd(), name.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
+    if n < 0 {
+        let e = io::Error::last_os_error();
+        return match e.raw_os_error() {
+            Some(libc::ENODATA) | Some(libc::EOPNOTSUPP) => Ok(None),
+            Some(libc::ERANGE) => Err(invalid("launch executable access ACL exceeds 64 KiB bound")),
+            _ => Err(e),
+        };
+    }
+    buffer.truncate(n as usize);
+    Ok(Some(buffer))
 }
 
 fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
@@ -137,15 +189,22 @@ fn pinned_executable(spec: &SpawnSpec) -> io::Result<OwnedFd> {
     }
     let file = unsafe { File::from_raw_fd(raw) };
     let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.uid() == spec.app_uid
-        || meta.mode() & 0o022 != 0
-        || !crate::os::executes_as_app(meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid)
-        || meta.len() > MAX_ELF_BYTES
-    {
-        return Err(invalid(
-            "launch executable is writable, untrusted, unexecutable after identity drop or oversized",
-        ));
+    if !meta.is_file() {
+        return Err(invalid("launch executable is not a regular file"));
+    }
+    if meta.uid() == spec.app_uid {
+        return Err(invalid("launch executable is owned by the app identity"));
+    }
+    if meta.mode() & 0o022 != 0 {
+        return Err(invalid("launch executable is group- or other-writable"));
+    }
+    if meta.len() > MAX_ELF_BYTES {
+        return Err(invalid("launch executable is oversized"));
+    }
+    match acl_execute_permits(access_acl(&file)?.as_deref(), meta.uid(), meta.gid(), meta.mode(), spec.app_uid, spec.app_gid) {
+        Some(true) => {}
+        Some(false) => return Err(invalid("launch executable is not executable by the app identity after identity drop (mode/ACL)")),
+        None => return Err(invalid("launch executable access ACL is malformed")),
     }
     let mut hash = Sha256::new();
     let mut reader = &file;
@@ -173,6 +232,37 @@ fn duplicate_high(fd: RawFd) -> io::Result<OwnedFd> {
         return Err(io::Error::last_os_error());
     }
     Ok(unsafe { OwnedFd::from_raw_fd(duplicate) })
+}
+
+/// A sealed memfd holding the platform shim, for bubblewrap's `--ro-bind-data` on fd 8. The bytes are
+/// the spk-host binary's own (`sandbox::IFADDRS_SHIM`); nothing is read from the host filesystem.
+fn shim_memfd() -> io::Result<OwnedFd> {
+    let raw = unsafe { libc::memfd_create(c"mini-ifaddrs-shim".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if raw < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    let bytes = crate::sandbox::IFADDRS_SHIM;
+    let mut written = 0;
+    while written < bytes.len() {
+        let n = unsafe { libc::write(fd.as_raw_fd(), bytes[written..].as_ptr().cast(), bytes.len() - written) };
+        if n < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        written += n as usize;
+    }
+    let seals = libc::F_SEAL_SEAL | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_WRITE;
+    if bytes.is_empty()
+        || unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_ADD_SEALS, seals) } != 0
+        || unsafe { libc::lseek(fd.as_raw_fd(), 0, libc::SEEK_SET) } != 0
+    {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "platform shim is empty or cannot be sealed"));
+    }
+    duplicate_high(fd.as_raw_fd())
 }
 
 unsafe fn fail(write_fd: RawFd) -> ! {
@@ -204,6 +294,8 @@ struct ChildExecInput<'a> {
     argv: &'a [*const libc::c_char],
     environ: &'a [*const libc::c_char],
     keep: &'a [u32],
+    /// Source of fd 8 when the arguments carry the platform shim mount.
+    shim: Option<RawFd>,
 }
 
 unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
@@ -216,6 +308,7 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
         argv,
         environ,
         keep,
+        shim,
     } = input;
     libc::close(read_fd);
     #[cfg(test)]
@@ -242,6 +335,16 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
                 fail(write_fd);
             }
         }
+        if let Some(source) = fds.public_data {
+            if libc::dup2(source, PUBLIC_DATA_FD) != PUBLIC_DATA_FD || libc::fcntl(PUBLIC_DATA_FD, libc::F_SETFD, 0) != 0 {
+                fail(write_fd);
+            }
+        }
+        if let Some(source) = shim {
+            if libc::dup2(source, SHIM_FD) != SHIM_FD || libc::fcntl(SHIM_FD, libc::F_SETFD, 0) != 0 {
+                fail(write_fd);
+            }
+        }
         for target in [RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD] {
             if libc::fcntl(target, libc::F_SETFD, 0) != 0 {
                 fail(write_fd);
@@ -255,6 +358,23 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
         fail(write_fd);
     }
     if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+        fail(write_fd);
+    }
+    // The app's descriptor bound (Sandstorm's supervisor sets one; the unit's
+    // inherited limit is the resident's, not the app's). Hard and soft, so the
+    // app cannot raise it.
+    let mut files = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut files) != 0 {
+        fail(write_fd);
+    }
+    // Never above the inherited hard limit: only lowering needs no privilege.
+    let bound = files.rlim_max.min(APP_MAX_FILES);
+    files.rlim_cur = bound;
+    files.rlim_max = bound;
+    if libc::setrlimit(libc::RLIMIT_NOFILE, &files) != 0 {
         fail(write_fd);
     }
     if !crate::os::child_assume_app_identity(spec.app_uid, spec.app_gid) {
@@ -272,6 +392,7 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     fail(write_fd)
 }
 
+#[cfg(test)]
 fn wait_reap(pid: libc::pid_t) -> io::Result<i32> {
     let mut status = 0;
     loop {
@@ -341,12 +462,21 @@ impl BoundedChild {
     pub fn pid(&self) -> u32 {
         self.pid as u32
     }
+    /// The app's published tree, through the remote launch worker (the only
+    /// process with the app's identity outside the sandbox).
+    pub(crate) fn open_www_file(&mut self, components: &[String]) -> io::Result<crate::resident_privilege::WwwFile> {
+        match &mut self.remote {
+            Some(client) if !self.reaped => client.open_www_file(self.pid as u32, components),
+            _ => Err(invalid("published tree needs the live remote launch worker")),
+        }
+    }
     pub fn kill_and_reap(&mut self) -> bool {
         if !self.reaped {
             self.reaped = if let Some(client)=&mut self.remote {client.kill_and_reap(self.pid as u32).unwrap_or(false)} else {kill_reap(self.pid)};
         }
         self.reaped
     }
+    #[cfg(test)]
     pub fn wait(&mut self) -> io::Result<i32> {
         if !self.reaped {
             let status = if let Some(client)=&mut self.remote {client.wait(self.pid as u32)?} else {wait_reap(self.pid)?};
@@ -366,7 +496,7 @@ impl Drop for BoundedChild {
 fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     validate(spec, test_mode)?;
     let executable = pinned_executable(spec)?;
-    let dev_null = File::open("/dev/null")?;
+    let dev_null = File::open("/dev/null").ctx("open", &"/dev/null")?;
     let dev_null = duplicate_high(dev_null.as_raw_fd())?;
     let mut pipe = [0_i32; 2];
     if unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
@@ -385,9 +515,16 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
     let mut argv: Vec<*const libc::c_char> = argv_strings.iter().map(|arg| arg.as_ptr()).collect();
     argv.push(std::ptr::null());
     let environ: [*const libc::c_char; 1] = [std::ptr::null()];
+    let shim = if spec.fds.is_some() && crate::sandbox::has_ifaddrs_shim_args(&spec.args) { Some(shim_memfd()?) } else { None };
     let mut keep = vec![executable.as_raw_fd() as u32, write_fd.as_raw_fd() as u32];
     if spec.fds.is_some() {
         keep.extend([RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD].map(|fd| fd as u32));
+    }
+    if spec.fds.is_some_and(|fds| fds.public_data.is_some()) {
+        keep.push(PUBLIC_DATA_FD as u32);
+    }
+    if shim.is_some() {
+        keep.push(SHIM_FD as u32);
     }
     keep.sort_unstable();
     keep.dedup();
@@ -406,6 +543,7 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
                 argv: &argv,
                 environ: &environ,
                 keep: &keep,
+                shim: shim.as_ref().map(AsRawFd::as_raw_fd),
             })
         }
     }
@@ -497,6 +635,32 @@ pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn public_data_fd_must_match_fixed_mount_arguments() {
+        let opened: Vec<_> = (0..6).map(|_| {
+            let file = std::fs::File::open("/dev/null").unwrap();
+            crate::sandbox::inherited_fd(file.as_raw_fd()).unwrap()
+        }).collect();
+        let sandbox = crate::sandbox::SandboxSpec {
+            bwrap: "/usr/bin/bwrap".into(), image_root: "/image".into(), persistent_var: "/var-test".into(),
+            persistent_var_max_bytes: 1024, argv: vec!["/app".into()], environ: vec![], app_output: "/private/output".into(),
+            ifaddrs_shim: false,
+        };
+        let mut spec = SpawnSpec {
+            program: sandbox.bwrap.clone(), sha256: "0".repeat(64),
+            args: crate::sandbox::bwrap_args_with_public_data(&sandbox, true).unwrap(), app_uid: 1001, app_gid: 1001,
+            fds: Some(AppFds {rpc:opened[0].as_raw_fd(),image:opened[1].as_raw_fd(),persistent_var:opened[2].as_raw_fd(),
+                seccomp:opened[3].as_raw_fd(),output:opened[4].as_raw_fd(),public_data:None}),
+        };
+        assert!(validate(&spec, false).is_err());
+        spec.fds.as_mut().unwrap().public_data = Some(opened[5].as_raw_fd());
+        validate(&spec, false).unwrap();
+        spec.args = crate::sandbox::bwrap_args(&sandbox).unwrap();
+        assert!(validate(&spec, false).is_err());
+        spec.fds.as_mut().unwrap().public_data = None;
+        validate(&spec, false).unwrap();
+    }
+
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
@@ -529,6 +693,60 @@ mod tests {
         // Unix owner/group classes take precedence over other execute bits.
         assert!(!execute_mode_permits(64010, 0, 0o655, 64010, 64010));
         assert!(!execute_mode_permits(0, 64010, 0o705, 64010, 64010));
+    }
+
+    fn acl(entries: &[(u16, u16, u32)]) -> Vec<u8> {
+        let mut b = 2_u32.to_le_bytes().to_vec();
+        for (tag, perm, id) in entries {
+            b.extend(tag.to_le_bytes()); b.extend(perm.to_le_bytes()); b.extend(id.to_le_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn launch_acl_named_app_entry_under_mask_decides_execute() {
+        let u = u32::MAX;
+        // root:hbox 0750 + user:165536:r-x + mask r-x (hbox's profiled bwrap).
+        let a = acl(&[(1, 7, u), (2, 5, 165536), (4, 5, u), (0x10, 5, u), (0x20, 0, u)]);
+        assert_eq!(acl_execute_permits(Some(&a), 0, 1000, 0o750, 165536, 165536), Some(true));
+        assert_eq!(acl_execute_permits(Some(&a), 0, 1000, 0o750, 165552, 165552), Some(false));
+        assert_eq!(acl_execute_permits(None, 0, 1000, 0o750, 165536, 165536), Some(false));
+        // The mask limits a named entry; a matching group class that grants nothing denies.
+        let m = acl(&[(1, 7, u), (2, 5, 165536), (4, 5, u), (0x10, 4, u), (0x20, 5, u)]);
+        assert_eq!(acl_execute_permits(Some(&m), 0, 1000, 0o745, 165536, 165536), Some(false));
+        let g = acl(&[(1, 7, u), (4, 5, u), (8, 4, 165536), (0x10, 5, u), (0x20, 1, u)]);
+        assert_eq!(acl_execute_permits(Some(&g), 0, 1000, 0o751, 165536, 165536), Some(false));
+        assert_eq!(acl_execute_permits(Some(&g), 0, 1000, 0o751, 165552, 165552), Some(true));
+        // The owner class is the mode's owner bits, never a named entry.
+        assert_eq!(acl_execute_permits(Some(&a), 165536, 1000, 0o650, 165536, 165536), Some(false));
+        assert_eq!(acl_execute_permits(Some(&a[..7]), 0, 1000, 0o750, 165536, 165536), None);
+    }
+
+    #[test]
+    fn launch_acl_reads_more_than_64_entries_from_actual_inode() {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = std::env::temp_dir().join(format!("mini-launch-acl-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).mode(0o700).open(&path).unwrap();
+        // The inode remains held, while even a failed assertion leaves no path.
+        std::fs::remove_file(&path).unwrap();
+        let u = u32::MAX;
+        let mut entries = vec![(1, 7, u)];
+        for uid in 200000..200128 {
+            entries.push((2, if uid == 200127 { 4 } else { 5 }, uid));
+        }
+        entries.extend([(4, 5, u), (0x10, 5, u), (0x20, 0, u)]);
+        let expected = acl(&entries);
+        assert!(expected.len() > 4 + 8 * 64);
+        let rc = unsafe { libc::fsetxattr(file.as_raw_fd(), c"system.posix_acl_access".as_ptr(),
+            expected.as_ptr().cast(), expected.len(), 0) };
+        assert_eq!(rc, 0, "{}", io::Error::last_os_error());
+        let actual = access_acl(&file).unwrap().unwrap();
+        assert_eq!(actual, expected);
+        let meta = file.metadata().unwrap();
+        for (uid, expected) in [(200000, true), (200126, true), (200127, false), (200128, false)] {
+            assert_eq!(acl_execute_permits(Some(&actual), meta.uid(), meta.gid(), meta.mode(), uid, uid), Some(expected));
+        }
     }
 
     #[test]

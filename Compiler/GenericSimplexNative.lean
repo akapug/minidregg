@@ -228,10 +228,10 @@ engine journal transaction. No wire decoder constructs source-validation input. 
 def authenticate (n : Native) (context : Context) (self : Nat)
     (packet : Bytes) : IO (Option (Message × Option CommitWitness)) := do
   let some (body,tag) := packetStream.toLawful.decode packet | return none
-  if packetStream.encode (body,tag) != packet || tag.length != 32 then return none
+  if tag.length != 32 then return none
   let some (recipient,sequence,message,signature) := wireBodyStream.toLawful.decode body
     | return none
-  if wireBodyStream.encode (recipient,sequence,message,signature) != body || recipient != self ||
+  if recipient != self ||
       message.sender ≥ context.config.parties || message.sender == self then return none
   let e : Envelope := ⟨context,recipient,sequence,message⟩
   let macValid ← try n.helper.verifyMac message.sender (authenticatedFrame e signature) tag
@@ -315,9 +315,9 @@ def sealCandidate (runtime : Runtime) (recipient : Nat) (block : Block) : IO Byt
 def authenticateCandidate (n : Native) (context : Context) (self : Nat)
     (bytes : Bytes) : IO (Option Block) := do
   let some (body,tag) := packetStream.toLawful.decode bytes | return none
-  if packetStream.encode (body,tag) != bytes || tag.length != 32 then return none
+  if tag.length != 32 then return none
   let some (sender,recipient,block) := candidateBodyStream.toLawful.decode body | return none
-  if candidateBodyStream.encode (sender,recipient,block) != body || recipient != self ||
+  if recipient != self ||
       sender ≥ context.config.parties || sender == self || block.isEmpty then return none
   let valid ← try n.helper.verifyMac sender (candidateMACFrame context body) tag
     catch _ => pure false

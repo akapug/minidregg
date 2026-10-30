@@ -41,6 +41,7 @@
 # NEWCOMER_SUBJECT JOURNEY_STEP_DIR. Exit 0 = every row as expected. Last
 # stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 mkdir -p "$D/req"
@@ -50,7 +51,7 @@ bad=0
 
 run() { local name=$1; shift; "$@" >"$D/$name.out" 2>"$D/$name.err"; echo $? >"$D/$name.rc"; }
 must() { [ "$(cat "$D/$1.rc")" = 0 ] || { echo "setup $1 failed: $(tail -1 "$D/$1.err")" >&2; exit 1; }; }
-installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
+installed() { attempt_answer "$1" | jq -e '.type == "confirmed" and .confirmation == "installed"' >/dev/null 2>&1; }
 record() { # NAME EXPECT GOT DETAIL
   printf '%s\texpect=%s\tgot=%s\t%s\n' "$1" "$2" "$3" "$4" >>"$rows"
   [ "$2" = "$3" ] || bad=$((bad + 1))
@@ -88,7 +89,7 @@ A_KEY=$(jq -r .key "$SPONSOR_WS/workspace.json")
 G=$(jq -r .genesisHeight "$W/genesis-params.json")
 HEIGHTS=""
 add_height() { # OUTCOME.json
-  local c; c=$(jq -r .acceptedCount "$1")
+  local c; c=$(attempt_answer "$1" | jq -r .acceptedCount)
   HEIGHTS="${HEIGHTS:+$HEIGHTS,}$((G + c - 1))"
 }
 

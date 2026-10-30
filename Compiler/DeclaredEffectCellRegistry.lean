@@ -51,6 +51,12 @@ def kindAtTag : UInt8 -> Option Kind
   cases kind
   rfl
 
+/-- The tag table has no aliases: a tag that names a kind is that kind's tag. -/
+theorem tag_of_kindAtTag (t : UInt8) (kind : Kind) (found : kindAtTag t = some kind) :
+    kind.tag = t := by
+  unfold kindAtTag at found
+  split at found <;> first | (cases found; rfl) | cases found
+
 /-- Schema id 91004, version 4: the store frame at `DeclaredEffectCell.wire`. -/
 def effectCellSchemaRef : SchemaRef := ⟨⟨91004⟩, 5⟩
 
@@ -68,6 +74,15 @@ def layout : Kind -> Store.Layout.{0, 0, 0}
 
 def materializer : (kind : Kind) -> Materializer (layout kind) Digest
   | .declaredEffect => DeclaredEffectCell.materializer
+
+/-- Every materializer codec accepts only encodings: each is a `StoreCodec`
+frame (`StoreCodec.decode_reencodes`). -/
+theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
+    (logical : Store.Store (layout kind))
+    (accepted : (materializer kind).codec.decode bytes = some logical) :
+    (materializer kind).codec.encode logical = bytes := by
+  cases kind
+  exact StoreCodec.decode_reencodes _ accepted
 
 /-- `DREGG.EFFECT.CELL.REGISTRY.ROOT/v1`. -/
 def directoryRootCustomization : List UInt8 :=
@@ -87,10 +102,12 @@ def registry : TypeRegistry Digest where
   tag := Kind.tag
   kindAtTag := kindAtTag
   kindAtTag_tag := kindAtTag_tag
+  tag_of_kindAtTag := tag_of_kindAtTag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
   layout := layout
   materializer := materializer
+  materializer_canonical := materializer_canonical
   rootBytes := directoryRoot
 
 @[simp] theorem registry_schemaRef :

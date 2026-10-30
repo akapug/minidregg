@@ -3,9 +3,30 @@ Tuple-indexed current-law admission for a grain-backed birth. No independent
 bare-birth or marker-only grain acceptance is composed here: every request
 and policy projection is derived from the one composite tuple.
 -/
-import Kernel.GrainResourceBirthTransaction
-import Compiler.PhysicalLawResolution
-import Compiler.WorldKindLawDependencies
+module
+
+public import Kernel.GrainResourceBirthTransaction
+public import Compiler.PhysicalLawResolution
+public import Compiler.WorldKindLawDependencies
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GrainResourceBirthAdmission
 
@@ -224,7 +245,45 @@ inductive Reject where
   /-- A birth write of the composite patch that the admitted factory step does not
   name (`ReceivingLaw.namesBirth`). -/
   | neutralBirthUnjudged (cell : Nat)
+  /-- The composite patch would write the platform cell, which the birth reads as its
+  price (only the install family writes it). -/
+  | platformWritten
   deriving Repr
+
+/-- The grain-birth tariff a platform record pins: its `grainBirth` pin, when its base is
+positive (the validity `PlatformCellLayout.Platform.valid` asks of it). -/
+def grainTariffOf (record : PlatformCellLayout.Platform) : Option Tariff :=
+  match record.grainBirth with
+  | none => none
+  | some pin => if positive : 0 < pin.base then some ⟨pin.base, pin.perBirth, positive⟩ else none
+
+theorem grainTariffOf_pin {record : PlatformCellLayout.Platform} {tariff : Tariff}
+    (priced : grainTariffOf record = some tariff) :
+    record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩ := by
+  unfold grainTariffOf at priced
+  split at priced
+  · cases priced
+  · rename_i pin pinned
+    split at priced
+    · cases priced
+      exact pinned
+    · cases priced
+
+/-- The grain-birth tariff the image `durable` prices grain births by: its platform record's.
+Hosts read it here, never from the config's genesis pin. -/
+def grainTariffAt (deployment : Deployment) (durable : Durable) : Option Tariff :=
+  (ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable).bind grainTariffOf
+
+theorem grainTariffAt_record {deployment : Deployment} {durable : Durable} {tariff : Tariff}
+    (priced : grainTariffAt deployment durable = some tariff) :
+    ∃ record, ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+        some record ∧ record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩ := by
+  unfold grainTariffAt at priced
+  cases recorded : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => rw [recorded] at priced; cases priced
+  | some record =>
+      rw [recorded] at priced
+      exact ⟨record, rfl, grainTariffOf_pin priced⟩
 
 /-- This carries one fixed tuple and its union physical proof. Every later
 policy step, native request and final intent must consume this exact value. -/
@@ -242,12 +301,25 @@ structure Pending {F : Type} [Field F]
   physical : GrainResourceBirthTransaction.PhysicalShape birth grain
   checked : ResourceBirthPolicyController.Checked pins CanonicalCellRegistry.sourceEncoding
     birth.prepared.pre.authority.snapshot.authState source.birth
-  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound profile.template
+  /-- The platform record of the image the birth is prepared against. -/
+  record : PlatformCellLayout.Platform
+  recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+    some record
+  /-- The factory pins carry the record's creation tariff. -/
+  priced : pins.tariff = record.creation
+  /-- The grain settlement is priced by the record's grain-birth pin. -/
+  grainPriced : record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩
+  templateBound : ResourceBirthPolicyController.Concrete.TemplateBound
+    (ResourceBirthPolicyController.Concrete.templateAt profile.template record)
     birth.prepared.pre.authority.snapshot.authState ambient.height source.birth
   bornLineage : ResourceBirthPolicyController.Concrete.BornLineage
     (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
     source.birth
   requestsDistinct : Function.Injective (branchIdentity birth grain ambient.height)
+  /-- The platform cell, read as the birth's price, is not written by the composite patch,
+  so its guard stands in the CAS (`Accepted.platformGuarded`). -/
+  platformUnwritten : PlatformCellDomain.cellIdOf deployment ∉
+    (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId
 
 def preparePending {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
@@ -269,16 +341,29 @@ def preparePending {F : Type} [Field F]
   let checked ← (ResourceBirthPolicyController.check pins
     CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
     source.birth).mapError Reject.metadata
-  let templateBound ← (ResourceBirthPolicyController.Concrete.checkTemplateAt profile.template
-      birth.prepared.pre.authority.snapshot.authState ambient.height source.birth).mapError
-    Reject.metadata
-  let bornLineage ← (ResourceBirthPolicyController.require
-    (ResourceBirthPolicyController.Concrete.BornLineage
-      (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
-      source.birth) .roomLineage).mapError Reject.metadata
-  if distinct : Function.Injective (branchIdentity birth grain ambient.height) then
-    return ⟨tuple, physical.down, checked.down, templateBound.down, bornLineage.down, distinct⟩
-  else .error .ambiguousRequests
+  match recordExact : ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable with
+  | none => .error (.metadata .platformUnavailable)
+  | some record =>
+    let priced ← (ResourceBirthPolicyController.require (pins.tariff = record.creation)
+      .platformStale).mapError Reject.metadata
+    let grainPriced ← (ResourceBirthPolicyController.require
+      (record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩) .platformStale).mapError
+        Reject.metadata
+    let templateBound ← (ResourceBirthPolicyController.Concrete.checkTemplateAt
+        (ResourceBirthPolicyController.Concrete.templateAt profile.template record)
+        birth.prepared.pre.authority.snapshot.authState ambient.height source.birth).mapError
+      Reject.metadata
+    let bornLineage ← (ResourceBirthPolicyController.require
+      (ResourceBirthPolicyController.Concrete.BornLineage
+        (ResourceBirthPolicyController.Concrete.placementLineage birth.prepared.pre.authority.snapshot.cell)
+        source.birth) .roomLineage).mapError Reject.metadata
+    if distinct : Function.Injective (branchIdentity birth grain ambient.height) then
+      if platformUnwritten : PlatformCellDomain.cellIdOf deployment ∉
+          (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId then
+        return ⟨tuple, physical.down, checked.down, record, recordExact, priced.down,
+          grainPriced.down, templateBound.down, bornLineage.down, distinct, platformUnwritten⟩
+      else .error .platformWritten
+    else .error .ambiguousRequests
 
 /-- Changing the primary selector for one policy branch leaves every old cell,
 validated patch, physical guard and joint source exactly the same. The native
@@ -687,7 +772,7 @@ def readRequest {F : Type} [Field F]
       (grain.targets index).before.payload.root with
     verb := DeclaredResourceController.observeVerb command.targets[index].kind
     effectsDigest := (Sp800185Cshake256.hash
-      "DREGG.RESOURCE.TRANSACTION.OBSERVE/v3".toUTF8.toList
+      "DREGG.RESOURCE.TRANSACTION.OBSERVE/v8".toUTF8.toList
       ((Tower256ConcreteBackend.StreamCodec.product
         Tower256ConcreteBackend.bytesStream Tower256ConcreteBackend.StreamCodec.nat).encode
         (DeclaredResourceController.commandBytes birth.prepared.pre.authority.snapshot.domain
@@ -1093,8 +1178,14 @@ theorem Accepted.post_exact {F : Type} [Field F] [DecidableEq F]
   (accepted.pending.tuple.accepted_posts_exact accepted.portals accepted.apex
     accepted.admissionEvidence incidence).trans (by rfl)
 
-/-- The CAS observes every physical source and every admitted policy source.
-Read-only source cells may overlap each other, but none may overlap a write. -/
+/-- The platform cell at the image's root: the price a grain birth read
+(`Pending.recordExact`). A concurrent install changes that root and makes the birth stale. -/
+def platformGuard (deployment : Deployment) (durable : Durable) : ReadGuard :=
+  { cellId := PlatformCellDomain.cellIdOf deployment
+    expectedRoot := durable.snapshot.model.roots (PlatformCellDomain.cellIdOf deployment) }
+
+/-- The CAS observes every physical source, every admitted policy source and the platform
+cell. Read-only source cells may overlap each other, but none may overlap a write. -/
 def Accepted.readGuards {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
@@ -1108,7 +1199,8 @@ def Accepted.readGuards {F : Type} [Field F] [DecidableEq F]
     (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
     List ReadGuard :=
   GrainResourceBirthTransaction.readGuards birth grain ++
-    policySourceGuards accepted.signed accepted.checked accepted.observations
+    policySourceGuards accepted.signed accepted.checked accepted.observations ++
+    [platformGuard deployment durable]
 
 theorem Accepted.readGuards_readonly {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
@@ -1123,9 +1215,13 @@ theorem Accepted.readGuards_readonly {F : Type} [Field F] [DecidableEq F]
     (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress)
     (guard : ReadGuard) (member : guard ∈ accepted.readGuards) :
     guard.cellId ∉ (GrainResourceBirthTransaction.writes birth grain).map DataWrite.cellId := by
-  rcases List.mem_append.mp member with physical | policy
-  · exact accepted.pending.physical.2.2.2.1 guard physical
-  · exact accepted.guardShape.1 guard policy
+  rcases List.mem_append.mp member with sources | platform
+  · rcases List.mem_append.mp sources with physical | policy
+    · exact accepted.pending.physical.2.2.2.1 guard physical
+    · exact accepted.guardShape.1 guard policy
+  · simp only [List.mem_singleton] at platform
+    subst guard
+    exact accepted.pending.platformUnwritten
 
 theorem Accepted.readGuards_exact {F : Type} [Field F] [DecidableEq F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
@@ -1140,9 +1236,32 @@ theorem Accepted.readGuards_exact {F : Type} [Field F] [DecidableEq F]
     (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress)
     (guard : ReadGuard) (member : guard ∈ accepted.readGuards) :
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
-  rcases List.mem_append.mp member with physical | policy
-  · exact accepted.pending.physical.2.2.2.2 guard physical
-  · exact accepted.guardShape.2 guard policy
+  rcases List.mem_append.mp member with sources | platform
+  · rcases List.mem_append.mp sources with physical | policy
+    · exact accepted.pending.physical.2.2.2.2 guard physical
+    · exact accepted.guardShape.2 guard policy
+  · simp only [List.mem_singleton] at platform
+    subst guard
+    rfl
+
+/-- **The platform cell guards every grain birth**: the record the birth is priced by
+(`Accepted.indexed`) is read on `durable`, and that cell's exact root on `durable` is one
+of the CAS guards, so an install between preparation and commit makes the birth stale. -/
+theorem Accepted.platformGuarded {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+        some accepted.pending.record ∧
+      platformGuard deployment durable ∈ accepted.readGuards :=
+  ⟨accepted.pending.recordExact, List.mem_append_right _ (List.mem_singleton_self _)⟩
 
 /-- **Neutral births named, grain-backed.**  Every birth write of the composite patch
 the grain birth commits is named by the factory branch's step, and the factory's
@@ -1178,6 +1297,43 @@ theorem Accepted.births_named {F : Type} [Field F] [DecidableEq F]
           (accepted.pending.branchStep (.inl .factory)).newState = true :=
   ⟨accepted.named, (accepted.checked (.inl .factory)).law_admits_step⟩
 
-#assert_axioms CheckedBranch.law_admits_step Accepted.births_named
+/-- **An accepted grain-backed birth is bound to its indices.** Both signed carriers of
+`ingress` describe the operation `source` derives under `profile`, `deployment` and `tariff`;
+the union of `birth`'s and `grain`'s writes has its physical shape; every read guard of the
+CAS is at `durable`'s exact root; the platform record `durable` holds prices it (the pins
+carry its creation tariff, `tariff` is its grain-birth pin) and the descriptor obeys the
+factory template under that record over the loaded authority at `ambient`'s height; and every birth write of the composite patch is named
+by the admitted factory step. -/
+theorem Accepted.indexed {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : Accepted profile deployment pins durable ambient tariff source birth grain ingress) :
+    SignedShape profile deployment tariff source ingress ∧
+      GrainResourceBirthTransaction.PhysicalShape birth grain ∧
+      (∀ guard ∈ accepted.readGuards,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+      ResourceBirthPolicyController.Concrete.platformRecordAt deployment durable =
+        some accepted.pending.record ∧
+      pins.tariff = accepted.pending.record.creation ∧
+      accepted.pending.record.grainBirth = some ⟨tariff.base, tariff.perBirth⟩ ∧
+      ResourceBirthPolicyController.Concrete.TemplateBound
+        (ResourceBirthPolicyController.Concrete.templateAt profile.template accepted.pending.record)
+        birth.prepared.pre.authority.snapshot.authState ambient.height source.birth ∧
+      ResourceBirthController.Concrete.Named (accepted.pending.branchStep (.inl .factory))
+        (GrainResourceBirthTransaction.writes birth grain) :=
+  ⟨accepted.signed, accepted.pending.physical, accepted.readGuards_exact,
+    accepted.pending.recordExact, accepted.pending.priced, accepted.pending.grainPriced,
+    accepted.pending.templateBound, accepted.named⟩
+
+#assert_axioms CheckedBranch.law_admits_step Accepted.births_named Accepted.indexed
+#assert_axioms Accepted.platformGuarded
+#assert_axioms grainTariffOf_pin grainTariffAt_record
 
 end Minidregg.Kernel.GrainResourceBirthAdmission

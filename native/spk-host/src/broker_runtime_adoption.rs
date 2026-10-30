@@ -1,6 +1,7 @@
 //! Per-Store root runtime adoption. The broker's baseline and other Stores
 //! retain their existing images. A pending record fences START until all exact
 //! supervisor instances are rendered and systemd acknowledges daemon-reload.
+use crate::io_context::IoContext;
 use super::*;
 use minidregg_compatible_upgrade_custody as custody;
 use std::collections::BTreeSet;
@@ -119,7 +120,7 @@ impl Broker {
     }
     fn store_apps(&self, store: &str) -> io::Result<BTreeSet<String>> {
         let mut apps = BTreeSet::new();
-        for entry in fs::read_dir(self.broker_dir().join("placements"))? {
+        for entry in fs::read_dir(self.broker_dir().join("placements")).ctx("list", &(self.broker_dir().join("placements")))? {
             let entry = entry?;
             let placement: Placement =
                 serde_json::from_slice(&read_private_operator(&entry.path(), MAX_CONFIG)?)?;
@@ -205,7 +206,7 @@ impl Broker {
         let mut checked_units = BTreeSet::new();
         for app in apps {
             let app_dir = self.root().join(store).join("host/apps").join(app);
-            for entry in fs::read_dir(&app_dir)? {
+            for entry in fs::read_dir(&app_dir).ctx("list", &app_dir)? {
                 let entry = entry?;
                 let name = entry.file_name().to_string_lossy().into_owned();
                 let Some(generation) = name.strip_prefix('g').filter(|g| decimal(g)) else {
@@ -238,7 +239,7 @@ impl Broker {
             unit_quiescent(&supervisor_unit(&self.config.unit_prefix, store, app))?;
         }
         // Also fence installed units whose retained operator journal disappeared.
-        for entry in fs::read_dir(self.broker_dir().join("units"))? {
+        for entry in fs::read_dir(self.broker_dir().join("units")).ctx("list", &(self.broker_dir().join("units")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             if self.unit_store(&name)?.as_deref() == Some(store) {
                 let (_, app, _) = Self::check_resident_unit_name(&name)?;
@@ -264,7 +265,7 @@ impl Broker {
                 if !meta.is_file()
                     || meta.uid()!=self.operator_uid
                     || meta.mode() & 0o022 != 0
-                    || !fs::read_to_string(&path)?.starts_with(&format!(
+                    || !fs::read_to_string(&path).ctx("read", &path)?.starts_with(&format!(
                         "# rendered by mini-spk-broker store={store} app={app}\n"
                     ))
                 {
@@ -280,7 +281,7 @@ impl Broker {
         Ok(unit)
     }
     pub(super) fn render_adopted_supervisors(&self) -> io::Result<()> {
-        for entry in fs::read_dir(self.broker_dir().join("runtimes"))? {
+        for entry in fs::read_dir(self.broker_dir().join("runtimes")).ctx("list", &(self.broker_dir().join("runtimes")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             let store = name
                 .strip_suffix(".json")
@@ -455,9 +456,9 @@ fn supervisor_text(
     let spk = unit_argument(&pin.spk_host)?;
     let root = unit_argument(&config.grains_root)?;
     Ok(format!("# rendered by mini-spk-broker store={store} app={app}\n[Unit]\nDescription=Mini SPK grain supervisor {store}-{app}\n\
-        StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\nSlice=s{store}-{prefix}-grains.slice\n\
+        StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\nSlice={slice}\n\
         ExecStart={spk} grain supervise-instance {root} {store}-{app}\nRestart=on-failure\nRestartSec=30\nRestartPreventExitStatus=3\n\
-        NoNewPrivileges=yes\nUMask=0077\n",prefix=config.unit_prefix))
+        NoNewPrivileges=yes\nUMask=0077\n",slice=super::grains_slice(&config.unit_prefix,store)))
 }
 fn quiescent_cgroup(text: &str) -> io::Result<Option<&str>> {
     if !text
@@ -664,8 +665,9 @@ mod tests {
         assert!(check_install_pin(Some("other"), "hash", false).is_err());
         assert!(check_install_pin(Some("hash"), "hash", true).is_ok());
         let config = BrokerConfig {
+            import_profile: None,
             resident_home_read_only_paths: Vec::new(),
-            protocol: "mini-spk-broker-config-v2".into(),
+            protocol: "mini-spk-broker-config-v3".into(),
             store: "0123456789abcdef".into(),
             grains_root: "/var/lib/grains".into(),
             broker_socket: None,
@@ -674,6 +676,8 @@ mod tests {
             unit_prefix: "mini".into(),
             spk_host: "/old/spk-host".into(),
             spk_host_sha256: "a".repeat(64),
+            bwrap: "/usr/bin/bwrap".into(),
+            bwrap_sha256: "b".repeat(64),
             ingest_helper: "/ingest".into(),
             volume_helper: "/volume".into(),
             app_uids: vec![1000],

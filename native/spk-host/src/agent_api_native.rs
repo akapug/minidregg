@@ -2,9 +2,10 @@
 //! Only op46's freshly returned committed frame can cross into physical RPC.
 #![allow(dead_code)] // Resident listener is enabled only with the reverse v2 reserve client.
 
+use crate::io_context::IoContext;
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_wire::Request;
-use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
+use crate::dispatch_native::{private_dir, write_new, write_new_unsynced, PrivateOperator};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -18,30 +19,14 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use crate::canonical::{decimal, lower_hex};
+pub(crate) use crate::canonical::hex;
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
-const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
+const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn lower_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -77,7 +62,7 @@ fn source_bytes(
     kind: &str,
     request: &Value,
 ) -> io::Result<Vec<u8>> {
-    let input = write_new(dir, &format!("{name}.json"), &serde_json::to_vec(request)?)?;
+    let input = write_new_unsynced(dir, &format!("{name}.json"), &serde_json::to_vec(request)?)?;
     operator.tool("author", kind, &input, &dir.join(format!("{name}.bin")))
 }
 
@@ -88,7 +73,7 @@ fn source_inspect(
     kind: &str,
     bytes: &[u8],
 ) -> io::Result<Value> {
-    let input = write_new(dir, &format!("{name}.bin"), bytes)?;
+    let input = write_new_unsynced(dir, &format!("{name}.bin"), bytes)?;
     let raw = operator.tool("inspect", kind, &input, &dir.join(format!("{name}.json")))?;
     serde_json::from_slice(&raw).map_err(Into::into)
 }
@@ -99,7 +84,7 @@ fn signatures(
     name: &str,
     values: &Value,
 ) -> io::Result<Vec<u8>> {
-    let input = write_new(dir, &format!("{name}.json"), &serde_json::to_vec(values)?)?;
+    let input = write_new_unsynced(dir, &format!("{name}.json"), &serde_json::to_vec(values)?)?;
     operator.tool("signatures", "", &input, &dir.join(format!("{name}.bin")))
 }
 
@@ -216,18 +201,19 @@ impl ReverseCustodyClient {
             .ancestors()
             .enumerate()
         {
-            let meta = std::fs::symlink_metadata(ancestor)?;
-            let sticky_root = depth > 0 && meta.uid() == 0 && meta.mode() & 0o1000 != 0;
+            let meta = std::fs::symlink_metadata(&ancestor).ctx("inspect", &ancestor)?;
+            let root_owned = crate::namespace_identity::root_owned(ancestor, &meta);
+            let sticky_root = depth > 0 && root_owned && meta.mode() & 0o1000 != 0;
             if !meta.is_dir()
                 || meta.mode() & 0o022 != 0 && !sticky_root
-                || !matches!(meta.uid(), 0)
+                || !root_owned
                     && meta.uid() != self.controller_uid
                     && meta.uid() != unsafe { libc::geteuid() }
             {
                 return Err(invalid("reverse socket ancestor not protected"));
             }
         }
-        let before = std::fs::symlink_metadata(&self.socket)?;
+        let before = std::fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !before.file_type().is_socket() || before.uid() != self.controller_uid {
             return Err(invalid("reverse custody socket owner/type drift"));
         }
@@ -248,7 +234,7 @@ impl ReverseCustodyClient {
         {
             return Err(invalid("reverse custody peer UID drift"));
         }
-        let after = std::fs::symlink_metadata(&self.socket)?;
+        let after = std::fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !after.file_type().is_socket()
             || (before.dev(), before.ino()) != (after.dev(), after.ino())
         {
@@ -644,14 +630,14 @@ pub(crate) struct CommittedAgent {
 
 impl CommittedAgent {
     pub(crate) fn clear_committed_submit_marker(&self) -> io::Result<()> {
-        let metadata = std::fs::symlink_metadata(&self.active_marker)?;
+        let metadata = std::fs::symlink_metadata(&self.active_marker).ctx("inspect", &self.active_marker)?;
         if !metadata.is_file()
             || (metadata.dev(), metadata.ino()) != self.active_identity
-            || std::fs::read(&self.active_marker)? != self.active_bytes
+            || std::fs::read(&self.active_marker).ctx("read", &self.active_marker)? != self.active_bytes
         {
             return Err(invalid("agent native submit marker drift"));
         }
-        std::fs::remove_file(&self.active_marker)?;
+        std::fs::remove_file(&self.active_marker).ctx("remove", &self.active_marker)?;
         File::open(
             self.active_marker
                 .parent()
@@ -743,7 +729,7 @@ pub(crate) fn authorize_once(
         "application-agent-paid-request",
         &paid_json,
     )?;
-    let paid_plan = reply(&operator.invoke(48, &paid_request)?, 48)?.to_vec();
+    let paid_plan = reply(&operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_PLAN, &paid_request)?, crate::host_operations::AGENT_PAID_DISPATCH_PLAN)?.to_vec();
     let paid_view = source_inspect(
         operator,
         attempt_dir,
@@ -766,16 +752,8 @@ pub(crate) fn authorize_once(
     if canonical_http_hex.is_empty() || !lower_hex(canonical_http_hex) {
         return Err(invalid("paid canonical HTTP is not source hex"));
     }
-    let canonical_http = canonical_http_hex
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16)
-                .map_err(|_| invalid("paid canonical HTTP hex byte"))
-        })
-        .collect::<io::Result<Vec<_>>>()?;
+    let canonical_http = crate::canonical::unhex(canonical_http_hex)
+        .ok_or_else(|| invalid("paid canonical HTTP hex byte"))?;
     let canonical_http_sha256 = hex(&Sha256::digest(&canonical_http));
     let app = custody.sign_slots(&paid_view, &paid_plan, "appSlots", &custody.app_signers)?;
     let payer = reserve.sign_payer_once(&paid_plan, &paid_view, cancelled)?;
@@ -787,8 +765,8 @@ pub(crate) fn authorize_once(
     let payer_bytes = signatures(operator, attempt_dir, "payer-signatures", &payer)?;
     let paid_signatures = pair(&app_bytes, &payer_bytes)?;
     let ingress = reply(
-        &operator.invoke(49, &pair(&paid_plan, &paid_signatures)?)?,
-        49,
+        &operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_ASSEMBLE, &pair(&paid_plan, &paid_signatures)?)?,
+        crate::host_operations::AGENT_PAID_DISPATCH_ASSEMBLE,
     )?
     .to_vec();
     write_new(attempt_dir, "paid-ingress.bin", &ingress)?;
@@ -802,23 +780,23 @@ pub(crate) fn authorize_once(
     let mut active = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&active_marker)?;
+        .open(&active_marker).ctx("open", &active_marker)?;
     active.write_all(&marker_bytes)?;
     active.sync_all()?;
     let active_metadata = active.metadata()?;
     let active_identity = (active_metadata.dev(), active_metadata.ino());
-    File::open(parent)?.sync_all()?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     if cancelled.load(Ordering::Acquire) {
-        if std::fs::read(&active_marker)? != marker_bytes {
+        if std::fs::read(&active_marker).ctx("read", &active_marker)? != marker_bytes {
             return Err(invalid("agent marker drift before cancelled op46"));
         }
-        std::fs::remove_file(&active_marker)?;
-        File::open(parent)?.sync_all()?;
+        std::fs::remove_file(&active_marker).ctx("remove", &active_marker)?;
+        File::open(&parent).ctx("open", &parent)?.sync_all()?;
         return Err(invalid("agent caller cancelled before op46"));
     }
-    let frame = operator.invoke(46, &ingress)?;
+    let frame = operator.invoke(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op46-frame.bin", &frame)?;
-    let permit = reply(&frame, 46)?;
+    let permit = reply(&frame, crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT)?;
     if !permit.starts_with(COMMITTED)
         || permit.len() <= COMMITTED.len()
         || permit.starts_with(OUTCOME)
@@ -834,7 +812,7 @@ pub(crate) fn authorize_once(
         &permit,
     )?;
     if str_field(&inspection, "type")? != "application-agent-dispatch-committed-inspection-v2"
-        || str_field(&inspection, "frameHex")? != hex(&permit)
+        || !crate::canonical::hex_matches(str_field(&inspection, "frameHex")?, &permit)
     {
         return Err(invalid(
             "source committed inspection differs from private op46 bytes",
@@ -872,8 +850,8 @@ mod tests {
     fn committed_agent_requires_exact_op46_and_distinct_tag() {
         let mut permit = COMMITTED.to_vec();
         permit.push(1);
-        assert_eq!(reply(&frame(46, &permit), 46).unwrap(), permit);
-        assert!(reply(&frame(47, &permit), 46).is_err());
+        assert_eq!(reply(&frame(crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT, &permit), crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT).unwrap(), permit);
+        assert!(reply(&frame(crate::host_operations::AGENT_PAID_DISPATCH_LOOKUP, &permit), crate::host_operations::AGENT_PAID_DISPATCH_SUBMIT).is_err());
         assert!(!OUTCOME.starts_with(COMMITTED));
         assert!(pair(b"abc", b"def")
             .unwrap()

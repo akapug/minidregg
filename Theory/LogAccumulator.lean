@@ -26,7 +26,26 @@ Theorems:
 * decided poles over a toy injective pairing: honest accepted; a tampered leaf
   at height 2 of 5 refused; a tampered sibling node refused.
 -/
-import Theory.AssertAxioms
+module
+
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.LogAccumulator
 
@@ -168,13 +187,32 @@ theorem verify_complete [DecidableEq D] (n j : Nat) (pos : 1 ≤ j) (within : j 
   rw [rootOfPath_honest node leaf j nodes honestNodes k e low high, isBlock]
   simp
 
-/-- Two different child pairs with one parent digest. -/
+/-- Two different child pairs with one parent digest. At a finite `D` this holds
+by pigeonhole, so the soundness theorems end in `NodeCollisionBelow` instead. -/
 def NodeCollision : Prop := ∃ a b c d : D, (a, b) ≠ (c, d) ∧ node a b = node c d
+
+/-- A child pair that hits the parent digest of one of the honest blocks at a level
+below `K` ending at or before `E`: a second preimage of one of finitely many honest
+targets, which pigeonhole does not supply. -/
+def NodeCollisionBelow (K E : Nat) : Prop :=
+  ∃ a b k' e', k' < K ∧ e' ≤ E ∧
+    (a, b) ≠ (block node leaf k' (e' - 2 ^ k'), block node leaf k' e') ∧
+    node a b = node (block node leaf k' (e' - 2 ^ k')) (block node leaf k' e')
+
+theorem NodeCollisionBelow.mono {K E K' E' : Nat} (hK : K ≤ K') (hE : E ≤ E')
+    (c : NodeCollisionBelow node leaf K E) : NodeCollisionBelow node leaf K' E' := by
+  obtain ⟨a, b, k', e', hk, he, ne, eq⟩ := c
+  exact ⟨a, b, k', e', by omega, by omega, ne, eq⟩
+
+theorem NodeCollisionBelow.global {K E : Nat} (c : NodeCollisionBelow node leaf K E) :
+    NodeCollision node := by
+  obtain ⟨a, b, k', e', -, -, ne, eq⟩ := c
+  exact ⟨a, b, _, _, ne, eq⟩
 
 theorem rootOfPath_sound (j : Nat) (claimed : D) (nodes : Nat → Nat → Option D) :
     ∀ k e, e - 2 ^ k < j → j ≤ e →
       rootOfPath node claimed nodes j k e = some (block node leaf k e) →
-      claimed = leaf j ∨ NodeCollision node
+      claimed = leaf j ∨ NodeCollisionBelow node leaf k e
   | 0, e, low, high, climbed => by
       have : j = e := by simp at low; omega
       subst this
@@ -196,8 +234,9 @@ theorem rootOfPath_sound (j : Nat) (claimed : D) (nodes : Nat → Nat → Option
                 by_cases same : (l, r) = (block node leaf k (e - 2 ^ k), block node leaf k e)
                 · simp only [Prod.mk.injEq] at same
                   rw [same.1] at sub
-                  exact rootOfPath_sound j claimed nodes k (e - 2 ^ k) (by omega) left sub
-                · exact Or.inr ⟨_, _, _, _, same, climbed⟩
+                  exact (rootOfPath_sound j claimed nodes k (e - 2 ^ k) (by omega) left sub).imp_right
+                    (NodeCollisionBelow.mono node leaf (by omega) (by omega))
+                · exact Or.inr ⟨_, _, k, e, by omega, Nat.le_refl e, same, climbed⟩
       · rename_i right
         cases sib : nodes k (e - 2 ^ k) with
         | none => simp [sib] at climbed
@@ -210,23 +249,26 @@ theorem rootOfPath_sound (j : Nat) (claimed : D) (nodes : Nat → Nat → Option
                 by_cases same : (l, r) = (block node leaf k (e - 2 ^ k), block node leaf k e)
                 · simp only [Prod.mk.injEq] at same
                   rw [same.2] at sub
-                  exact rootOfPath_sound j claimed nodes k e (by omega) high sub
-                · exact Or.inr ⟨_, _, _, _, same, climbed⟩
+                  exact (rootOfPath_sound j claimed nodes k e (by omega) high sub).imp_right
+                    (NodeCollisionBelow.mono node leaf (by omega) (Nat.le_refl e))
+                · exact Or.inr ⟨_, _, k, e, by omega, Nat.le_refl e, same, climbed⟩
 
 /-- **Soundness**: under an honest frontier, a claimed leaf that verifies with
-ANY sibling nodes is the honest leaf of `j`, or the run exhibits a collision
-of `node`. The nodes are untrusted Store bytes; only the frontier is trusted. -/
+ANY sibling nodes is the honest leaf of `j`, or some child pair hits the parent
+digest of an honest block below the frontier block that covers `j`. The nodes are untrusted Store bytes; only the frontier is trusted. -/
 theorem verify_sound [DecidableEq D] (n j : Nat) (pos : 1 ≤ j) (within : j ≤ n)
     (frontier : List (Nat × D)) (honest : Honest node leaf n frontier)
     (claimed : D) (nodes : Nat → Nat → Option D)
     (accepted : verify node frontier n j claimed nodes = true) :
-    claimed = leaf j ∨ NodeCollision node := by
+    claimed = leaf j ∨ ∃ k e d, locate j n frontier = some (k, e, d) ∧
+      NodeCollisionBelow node leaf k e := by
   obtain ⟨k, e, d, found, isBlock, low, high⟩ := locate_honest node leaf j pos frontier n honest within
   unfold verify at accepted
   rw [found] at accepted
   have climbed : rootOfPath node claimed nodes j k e = some (block node leaf k e) := by
     rw [← isBlock]; simpa using accepted
-  exact rootOfPath_sound node leaf j claimed nodes k e low high climbed
+  exact (rootOfPath_sound node leaf j claimed nodes k e low high climbed).imp_right
+    fun c => ⟨k, e, d, found, c⟩
 
 /-- Every sibling a read of `j` needs is a stored block `(level, end)` with
 `end ≤ n`: nodes come from the Store's settled prefix only. -/

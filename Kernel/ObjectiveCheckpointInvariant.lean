@@ -47,10 +47,29 @@ disjointness:
 What it does NOT state: liveness. A typed record may still await for ever (its
 decider silent, nobody delivering); that is the disposal turn `abandon`'s job,
 not this invariant's. -/
-import Kernel.ObjectiveResumeContract
-import Kernel.ObjectiveActivityGate
-import Kernel.ActivitySeatEnd
-import Kernel.ObjectiveAdmittedTurn
+module
+
+public import Kernel.ObjectiveResumeContract
+public import Kernel.ObjectiveActivityGate
+public import Kernel.ActivitySeatEnd
+public import Kernel.ObjectiveAdmittedTurn
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveCheckpointInvariant
 open Minidregg.Theory Minidregg.Compiler
@@ -232,7 +251,9 @@ theorem packageBytes_eq {rootBytes : Bytes → Digest} {config : Config} {snapsh
 
 theorem decodeStored_nil : decodeStored [] = none := by
   have frame : storedFrame ≠ [] := by decide +kernel
-  simp [decodeStored, storedCodec, framed, framedRaw, ResourceBirthCodec.strictCodec, frame.symm]
+  simp [decodeStored, storedCodec, framed, Tower256ConcreteBackend.StreamCodec.toLawful,
+    Tower256ConcreteBackend.StreamCodec.framed, Tower256ConcreteBackend.StreamCodec.xmap,
+    Tower256ConcreteBackend.StreamCodec.product, Tower256ConcreteBackend.StreamCodec.literal, frame.symm]
 
 /-- A program loads only from a package the snapshot holds. -/
 theorem loadProgram_present {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
@@ -391,11 +412,11 @@ theorem slot_retire_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
   postSafe_inert pre recordIn_retired
 
 /-- A yield's posts (its declared-state write and the answer slot it opens) are safe. -/
-theorem commitYield_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem commitYield_safe {rootBytes : Bytes → Digest} {funds : Funds} {reserve : Await → Nat} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat} {checkpoint : Digest}
     {current : Option ObjectState} {viewed : Bool} {plan : PlanAwait} {committed : YieldCommit}
     {seen : Option ObjectState} (read : readState config snapshot object = .ok seen)
-    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan =
+    (ok : commitYield config snapshot height transaction cell object generation checkpoint current viewed plan funds reserve =
       .ok committed) :
     ∀ post ∈ committed.posts, PostSafe config snapshot post := by
   unfold commitYield at ok
@@ -436,12 +457,25 @@ theorem commitYield_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
           · simp only [Except.ok.injEq] at ok
             subst ok
             exact stateSafe
+        · split at ok
+          · cases ok
+          · split at ok
+            · simp only [Except.ok.injEq] at ok
+              subst ok
+              exact stateSafe
+            · split at ok
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                exact stateSafe
+              · simp only [Except.ok.injEq] at ok
+                subst ok
+                intro post member; cases member
 
-theorem segmentCommit_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem segmentCommit_safe {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {committed : YieldCommit}
     {seen : Option ObjectState} (read : readState config snapshot object = .ok seen)
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok (some committed)) :
     ∀ post ∈ committed.posts, PostSafe config snapshot post := by
   obtain ⟨_, _, _, committedExact⟩ := segmentCommit_spec ok
@@ -483,6 +517,7 @@ theorem settle_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot :
     · split at settled
       · simp only [Except.ok.injEq] at settled; subst settled; simp
       · cases settled
+  · simp only [Except.ok.injEq] at settled; subst settled; simp
 
 theorem abandonSlot_safe {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
     {await : Await} {posts : List Post} {claims : List StableNullifier}
@@ -490,6 +525,8 @@ theorem abandonSlot_safe {rootBytes : Bytes → Digest} {config : Config} {snaps
     ∀ post ∈ posts, PostSafe config snapshot post := by
   unfold abandonSlot at ok
   split at ok
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+    rw [← ok.1]; simp
   · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
     rw [← ok.1]; simp
   · rename_i name _ _
@@ -1113,10 +1150,10 @@ theorem quiet_recordPost {rootBytes : Bytes → Digest} (config : Config) (snaps
 
 /-- A yield's posts (its declared-state write, the slot it opens) are quiet: the
 slot it opens is open. -/
-theorem yielded_posts_quiet {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+theorem yielded_posts_quiet {rootBytes : Bytes → Digest} {funds : Funds} {config : Config} {snapshot : Snapshot rootBytes}
     {height : Nat} {transaction : TransactionId} {cell object : CellId} {generation : Nat}
     {current : Option ObjectState} {viewed : Bool} {segment : Segment} {yielded : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed segment =
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds segment =
       .ok yielded) :
     ∀ post ∈ (yielded.map YieldCommit.posts).getD [], Quiet post.bytes := by
   intro post member
@@ -1172,6 +1209,8 @@ theorem abandonSlot_quiet {rootBytes : Bytes → Digest} {config : Config} {snap
     ∀ post ∈ posts, Quiet post.bytes := by
   unfold abandonSlot at ok
   split at ok
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
+    rw [← ok.1]; simp
   · simp only [Except.ok.injEq, Prod.mk.injEq] at ok
     rw [← ok.1]; simp
   · rename_i name _ _

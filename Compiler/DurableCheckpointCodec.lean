@@ -5,7 +5,7 @@ The host's durable store is three objects (the whole-image `DREGG.DURABLE.IMAGE`
 record is gone):
 
 * the **seed**, written once at bootstrap (`DREGG.DURABLE.SEED/v1`);
-* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG/v2`: the record and its signing subject)
+* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG`, frame byte 4: the record, its signing subject and its meter credit)
   and a 32-byte tag. The log is chained by C1's log root: `chain₀ = logStart seed`
   (the host passes `NativeHostCodec.logRoot0 domain semantics`), and
   `chainₕ = Kernel.WorldRoot.chainDigest chainₕ₋₁ (recordDigest recordₕ)`; the tag of
@@ -15,7 +15,7 @@ record is gone):
   height, its world root, the log chain at that height, and
   `KMAC256(key, (keyId, height, root, H(body bytes)))`.
 
-**MAC custody (DATAMODEL §6 Q1).** The key is 32 bytes generated at
+**MAC custody (docs/DATAMODEL.md §6 Q1).** The key is 32 bytes generated at
 `mini bootstrap`, stored mode 0600 beside the operator configuration, one per
 Store; it authenticates only that Store's checkpoints and log tags. Rotation is
 a new checkpoint at the head under the new key (the checkpoint's chain value
@@ -29,19 +29,50 @@ recomputed over every stored record; the latest checkpoint's MAC, key id, world
 root and chain value must all match; every entry's tag must verify
 (`Compiler.DurableLogTags`), refused by height. Any mismatch refuses to open — nothing reinterprets.
 
-The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
+The world root is the parameterised `Checkpoint.check` of docs/DATAMODEL.md §5 B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root
 function; it is recomputed from the checkpoint's cells, never trusted.
 -/
-import Compiler.PersistedCodecTags
-import Compiler.CanonicalCellRegistry
-import Compiler.DurableReceiverCodec
-import Compiler.Sp800185Cshake256
-import Compiler.Sp800185Kmac256
-import Kernel.DurableCheckpoint
-import Kernel.WorldRootCache
-import Theory.AssertAxioms
-import Theory.AssertCompiled
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.CanonicalCellRegistry
+public import Compiler.DurableReceiverCodec
+public import Compiler.Sp800185Cshake256
+public import Compiler.Sp800185Kmac256
+public import Kernel.DurableCheckpoint
+public import Kernel.WorldRootCache
+public import Kernel.WorldSystemCodec
+public import Theory.AssertAxioms
+public import Theory.AssertCompiled
+meta import Compiler.PersistedCodecTags
+meta import Compiler.CanonicalCellRegistry
+meta import Compiler.DurableReceiverCodec
+meta import Compiler.Sp800185Cshake256
+meta import Compiler.Sp800185Kmac256
+meta import Kernel.DurableCheckpoint
+meta import Kernel.WorldRootCache
+meta import Kernel.WorldSystemCodec
+meta import Theory.AssertAxioms
+meta import Theory.AssertCompiled
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+meta import Compiler.PersistedCodecTagRegistry
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableCheckpointCodec
 
@@ -59,8 +90,10 @@ set_option autoImplicit false
 
 /-! ## Framed objects -/
 
-/-- A fixed frame followed by one stream value, recovered only on exact
-re-encoding (no aliases, no trailing bytes). -/
+/-- A fixed frame (length-prefixed) followed by one stream value.  The frame is
+CHECKED by the stream (`StreamCodec.framed`), and the stream is canonical, so a
+decode accepts exactly the encodings (`decode_canonical`): no aliases, no
+trailing bytes, no re-encode. -/
 structure Framed (α : Type) where
   frame : List UInt8
   stream : StreamCodec α
@@ -69,32 +102,26 @@ namespace Framed
 
 variable {α : Type}
 
-def encode (framed : Framed α) (value : α) : List UInt8 :=
-  (StreamCodec.product bytesStream framed.stream).encode (framed.frame, value)
+/-- The checked frame octets, then the value. -/
+def codec (framed : Framed α) : StreamCodec α :=
+  StreamCodec.framed (bytesStream.encode framed.frame) framed.stream
 
-def decode (framed : Framed α) (bytes : List UInt8) : Option α := do
-  let (frame, value) ← (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes
-  if frame = framed.frame ∧ framed.encode value = bytes then some value else none
+def encode (framed : Framed α) (value : α) : List UInt8 :=
+  framed.codec.encode value
+
+theorem encode_eq (framed : Framed α) (value : α) :
+    framed.encode value = bytesStream.encode framed.frame ++ framed.stream.encode value := rfl
+
+def decode (framed : Framed α) (bytes : List UInt8) : Option α :=
+  framed.codec.toLawful.decode bytes
 
 theorem decode_encode (framed : Framed α) (value : α) :
-    framed.decode (framed.encode value) = some value := by
-  have roundtrip : (StreamCodec.product bytesStream framed.stream).toLawful.decode
-      (framed.encode value) = some (framed.frame, value) :=
-    (StreamCodec.product bytesStream framed.stream).toLawful.decode_encode (framed.frame, value)
-  unfold decode
-  rw [roundtrip]
-  simp
+    framed.decode (framed.encode value) = some value :=
+  framed.codec.toLawful.decode_encode value
 
 theorem decode_canonical (framed : Framed α) {bytes : List UInt8} {value : α}
-    (decoded : framed.decode bytes = some value) : framed.encode value = bytes := by
-  unfold decode at decoded
-  cases raw : (StreamCodec.product bytesStream framed.stream).toLawful.decode bytes with
-  | none => simp [raw] at decoded
-  | some pair =>
-      simp only [raw, bind, Option.bind] at decoded
-      split at decoded
-      next ok => cases Option.some.inj decoded; exact ok.2
-      next => contradiction
+    (decoded : framed.decode bytes = some value) : framed.encode value = bytes :=
+  framed.codec.toLawful_canonical bytes value decoded
 
 /-- Bytes carrying any other frame refuse: the frame is the first stream
 value, so a decode would re-encode to a different first value. -/
@@ -106,8 +133,7 @@ theorem decode_other_frame (framed : Framed α) {other : List UInt8}
   | some value =>
       have exact := decode_canonical framed decoded
       have prefixed := bytesStream.decodePrefix_encode framed.frame (framed.stream.encode value)
-      simp only [encode, StreamCodec.product] at exact
-      rw [exact, bytesStream.decodePrefix_encode] at prefixed
+      rw [← encode_eq, exact, bytesStream.decodePrefix_encode] at prefixed
       exact absurd (congrArg Prod.fst (Option.some.inj prefixed)) different
 
 end Framed
@@ -160,30 +186,27 @@ def persistedCellDescriptors : List (Nat × Nat × Nat × List UInt8) :=
       | none => []
     pure (tag, schema.schemaId.value, schema.version, descriptor)
 
-/-- Canonical, length-prefixed corpus: the automatically collected source tag
-entries plus the actual exhaustive cell schema/layout descriptors. -/
+/-- Canonical, length-prefixed receiving identities and actual cell layout
+descriptors. Implementation bodies and proof terms are not persisted formats. -/
 def persistedCodecCorpus : List UInt8 :=
   let entries := PersistedCodecTags.canonicalSet (PersistedCodecTags.entries.map (·.bytes))
-  (StreamCodec.product
-    (StreamCodec.list bytesStream)
+  (StreamCodec.product (StreamCodec.list bytesStream)
     (StreamCodec.list (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat bytesStream))))).encode
     (entries, persistedCellDescriptors)
 
-/-- Derived from the content of every registered persisted tag and cell
-descriptor. This is a flag day: every old schema-refs/v5 Store requires
-re-genesis. The late `#assert_persisted_codec_tags` check closes the corpus over
-actual receiving codecs, including byte-erased activity event payloads. -/
+/-- The content of the persisted identities and cell descriptors. Removing the
+implementation fingerprints changes this corpus once; old Stores refuse through
+`SeedEpoch.refusalFor`, before their log records are decoded. -/
 def persistedSchemaRefs : String :=
   s!"schema-refs/{(Sp800185Cshake256.hash
     "MINI.PERSISTED-CODEC-CORPUS/v1".toUTF8.toList persistedCodecCorpus).digest.value}"
 
-/-- The epoch this Host writes and reads. The registry supplies the
-schema component, and the named census checks equality against receiving tags. -/
+/-- The epoch this Host writes and reads, including the cell layout descriptors. -/
 def StoreEpoch.current : StoreEpoch :=
   ⟨DeclaredEffectCell.stateKeyCodecId, persistedSchemaRefs, logTagLabel,
-    "history/mmr-v1;index/trie-v1;checkpoint/v4", "commands/v2"⟩
+    "history/mmr-v1;index/trie-v1;checkpoint/v5", "commands/v2"⟩
 
 /-- The label carried in the seed frame: every component, `;`-separated (the
 accumulator is itself two parts, `history/…;spent/…`). -/
@@ -204,7 +227,7 @@ def StoreEpoch.accumulatorParts : List String := ["history", "spent", "index", "
 
 /-- Every part name a label may carry, in label order. -/
 def StoreEpoch.partNames : List String :=
-  ["state-key", "schema-refs", Minidregg.Compiler.PersistedCodecTags.native_host_log_tag] ++ StoreEpoch.accumulatorParts ++ ["commands"]
+  ["state-key", "schema-refs", Minidregg.Compiler.PersistedCodecTags.prefix_native_host_log_tag] ++ StoreEpoch.accumulatorParts ++ ["commands"]
 
 /-- The part of a label named `name`, if present. -/
 def StoreEpoch.partNamed (parts : List String) (name : String) : Option String :=
@@ -222,7 +245,7 @@ def StoreEpoch.parse (text : String) : Option StoreEpoch :=
   let names := parts.map StoreEpoch.partName
   if names = StoreEpoch.partNames.filter (names.contains ·) then
     match StoreEpoch.partNamed parts "state-key", StoreEpoch.partNamed parts "schema-refs",
-        StoreEpoch.partNamed parts Minidregg.Compiler.PersistedCodecTags.native_host_log_tag with
+        StoreEpoch.partNamed parts Minidregg.Compiler.PersistedCodecTags.prefix_native_host_log_tag with
     | some stateKey, some schemaRefs, some logTag =>
         let accumulator := match StoreEpoch.accumulatorParts.filterMap (StoreEpoch.partNamed parts) with
           | [] => "none"
@@ -279,10 +302,11 @@ theorem StoreEpoch.differing_logTag (host : StoreEpoch) (logTag : String)
 
 def seedFrameName : List UInt8 := Minidregg.Compiler.PersistedCodecTags.durable_seed.toUTF8.toList
 
-/-- Seed frame v2: the name, version byte 2, then the epoch label. The v1 frame
+/-- Seed frame v3: the name, version byte 3, then the epoch label. The v1 frame
 (name and byte 1) carried no epoch, so a v1 Store's components are unknown (it
 may be of any earlier epoch, including this one's components): it refuses as
-unlabelled. -/
+unlabelled. A v2 frame (labelled, but its seed codec nests the cell codecs from
+before the Book's floors section) refuses as retired, whatever its label says. -/
 def seedFrameFor (epoch : StoreEpoch) : Framed Seed :=
   ⟨seedFrameName ++ [UInt8.ofNat PersistedCodecTags.seedWireVersion] ++ epoch.label.toUTF8.toList, seedStream⟩
 
@@ -292,6 +316,7 @@ def seedFrame : Framed Seed := seedFrameFor StoreEpoch.current
 inductive SeedEpoch where
   | labelled (epoch : StoreEpoch)
   | unlabelled (version : UInt8)
+  | retired (version : UInt8)
   | foreign
 
 def SeedEpoch.ofBytesFor (host : StoreEpoch) (bytes : List UInt8) : SeedEpoch :=
@@ -299,14 +324,15 @@ def SeedEpoch.ofBytesFor (host : StoreEpoch) (bytes : List UInt8) : SeedEpoch :=
   | none => .foreign
   | some (frame, _) =>
       if frame = (seedFrameFor host).frame then .labelled host
-      else if frame = seedFrameName ++ [1] then .unlabelled 1
       else if frame.take seedFrameName.length = seedFrameName then
         match frame.drop seedFrameName.length with
-        | 2 :: label =>
-            match String.fromUTF8? label.toByteArray >>= StoreEpoch.parse with
-            | some epoch => .labelled epoch
-            | none => .foreign
         | [version] => .unlabelled version
+        | version :: label =>
+            if version = UInt8.ofNat PersistedCodecTags.seedWireVersion then
+              match String.fromUTF8? label.toByteArray >>= StoreEpoch.parse with
+              | some epoch => .labelled epoch
+              | none => .foreign
+            else .retired version
         | _ => .foreign
       else .foreign
 
@@ -321,6 +347,8 @@ def SeedEpoch.refusalFor (host : StoreEpoch) : SeedEpoch → Option String
       | named => some s!"this Store was born in another epoch ({String.intercalate "; " named}); re-genesis the world"
   | .unlabelled version =>
       some s!"this Store's seed frame is version {version}, which carries no epoch label (it was born before Store epochs were labelled, so its state-key codec, schema references and log tags are unknown); this Host reads {host.label}; re-genesis the world"
+  | .retired version =>
+      some s!"this Store's seed frame is version {version}, retired: this Host reads seed frame version {PersistedCodecTags.seedWireVersion} ({host.label}), and a retired frame's seed codec is never reinterpreted; re-genesis the world"
   | .foreign => some "the Store's seed is not a durable seed frame"
 
 def SeedEpoch.refusal (epoch : SeedEpoch) : Option String :=
@@ -361,13 +389,88 @@ theorem seedEpoch_v1_refusedFor (host : StoreEpoch) (rest : List UInt8) :
   have older : seedFrameName ++ [1] ≠ (seedFrameFor host).frame := by
     intro same
     have tails := List.append_cancel_left
-      (same.trans (by simp [seedFrameFor, PersistedCodecTags.seedWireVersion, List.append_assoc]) :
-      seedFrameName ++ [1] = seedFrameName ++ (2 :: host.label.toUTF8.toList))
-    simp at tails
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ [1] = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
   unfold SeedEpoch.ofBytesFor
   rw [bytesStream.decodePrefix_encode]
-  simp only [older, if_false, if_true]
+  simp only [older, if_false, List.take_left, List.drop_left, if_true]
   exact ⟨_, rfl⟩
+
+/-- **Every v2 Store refuses by name**, whatever label it carries: its seed
+codec predates the Book's floors section, and a retired frame is not read as a
+labelled epoch. -/
+theorem seedEpoch_v2_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ 2 :: label) ++ rest)).refusalFor host =
+      some named := by
+  have notCurrent : seedFrameName ++ 2 :: label ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ 2 :: label = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
+  cases label with
+  | nil => exact ⟨_, rfl⟩
+  | cons byte bytes =>
+      simp only [PersistedCodecTags.seedWireVersion]
+      exact ⟨_, rfl⟩
+
+theorem seedEpoch_v2_refused (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 2 :: label) ++ rest)).refusal =
+      some named := seedEpoch_v2_refusedFor StoreEpoch.current label rest
+
+/-- **Every v3 Store refuses by name**, whatever label it carries: its registry predates
+the platform cell kind (loaded-law label `STORE-CELLS/v17`), and a retired frame is not
+read as a labelled epoch. -/
+theorem seedEpoch_v3_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ 3 :: label) ++ rest)).refusalFor host =
+      some named := by
+  have notCurrent : seedFrameName ++ 3 :: label ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ 3 :: label = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
+  cases label with
+  | nil => exact ⟨_, rfl⟩
+  | cons byte bytes =>
+      simp only [PersistedCodecTags.seedWireVersion]
+      exact ⟨_, rfl⟩
+
+theorem seedEpoch_v3_refused (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 3 :: label) ++ rest)).refusal =
+      some named := seedEpoch_v3_refusedFor StoreEpoch.current label rest
+
+/-- **Every v4 Store refuses by name**, whatever label it carries: its seed predates
+the structure re-emitted with seed frame version 5, and a retired frame is not read as a
+labelled epoch. -/
+theorem seedEpoch_v4_refusedFor (host : StoreEpoch) (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytesFor host (bytesStream.encode (seedFrameName ++ 4 :: label) ++ rest)).refusalFor host =
+      some named := by
+  have notCurrent : seedFrameName ++ 4 :: label ≠ (seedFrameFor host).frame := by
+    intro same
+    have tails := List.append_cancel_left
+      (same.trans (by simp [seedFrameFor, List.append_assoc]) :
+      seedFrameName ++ 4 :: label = seedFrameName ++ (UInt8.ofNat PersistedCodecTags.seedWireVersion :: host.label.toUTF8.toList))
+    simp [PersistedCodecTags.seedWireVersion] at tails
+  unfold SeedEpoch.ofBytesFor
+  rw [bytesStream.decodePrefix_encode]
+  simp only [notCurrent, if_false, List.take_left, List.drop_left, if_true]
+  cases label with
+  | nil => exact ⟨_, rfl⟩
+  | cons byte bytes =>
+      simp only [PersistedCodecTags.seedWireVersion]
+      exact ⟨_, rfl⟩
+
+theorem seedEpoch_v4_refused (label rest : List UInt8) :
+    ∃ named, (SeedEpoch.ofBytes (bytesStream.encode (seedFrameName ++ 4 :: label) ++ rest)).refusal =
+      some named := seedEpoch_v4_refusedFor StoreEpoch.current label rest
 
 /-- **Every v1 Store refuses by name**: its frame carries no epoch. -/
 theorem seedEpoch_v1_refused (rest : List UInt8) :
@@ -389,7 +492,8 @@ theorem StoreEpoch.differing_commands (host : StoreEpoch) (commands : String)
   simp [StoreEpoch.differing, changed]
 
 /-- The seed frame of a Store whose label is `label`. -/
-def labelledFrame (label : String) : List UInt8 := seedFrameName ++ 2 :: label.toUTF8.toList
+def labelledFrame (label : String) : List UInt8 :=
+  seedFrameName ++ UInt8.ofNat PersistedCodecTags.seedWireVersion :: label.toUTF8.toList
 
 /-- The refusal for a Store labelled `label`, which `SeedEpoch.ofBytes` reads
 from its frame alone (whatever follows). -/
@@ -431,7 +535,7 @@ theorem seedEpoch_commandsV1_refused (rest : List UInt8) :
 
 theorem seedEpoch_noAccumulator_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelWithoutAccumulator) ++ rest)).refusal =
-      some "this Store was born in another epoch (history accumulator: Store none, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some s!"this Store was born in another epoch (history accumulator: Store none, this Host {StoreEpoch.current.accumulator}); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -443,7 +547,7 @@ def labelSpentMap : String :=
 accumulator), never read as this Host's. -/
 theorem seedEpoch_spentMap_refused (rest : List UInt8) :
     (SeedEpoch.ofBytes (bytesStream.encode (labelledFrame labelSpentMap) ++ rest)).refusal =
-      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host DREGG/NATIVE-HOST/LOG-TAG/v4; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host history/mmr-v1;index/trie-v1;checkpoint/v4); re-genesis the world" := by
+      some s!"this Store was born in another epoch (cell schema references: Store schema-refs/v5, this Host {persistedSchemaRefs}; log tags: Store DREGG/NATIVE-HOST/LOG-TAG/v3, this Host {logTagLabel}; history accumulator: Store history/mmr-v1;spent/trie-v1;checkpoint/v3, this Host {StoreEpoch.current.accumulator}); re-genesis the world" := by
   rw [seedEpoch_ofBytes_labelled]
   native_decide
 
@@ -461,13 +565,33 @@ theorem seedEpoch_spentMap_refused (rest : List UInt8) :
 #assert_axioms seedEpoch_current
 #assert_axioms seedEpoch_ofBytes_forCurrent
 #assert_axioms seedEpoch_currentFor
+#assert_axioms seedEpoch_v2_refusedFor
+#assert_axioms seedEpoch_v2_refused
+#assert_axioms seedEpoch_v3_refusedFor
+#assert_axioms seedEpoch_v3_refused
+#assert_axioms seedEpoch_v4_refusedFor
+#assert_axioms seedEpoch_v4_refused
 #assert_axioms seedEpoch_v1_refusedFor
 #assert_axioms seedEpoch_v1_refused
-/-- Version 2: a record carries its signing subject (`IntentRecord.subject`),
-which the presence index folds. A v1 record refuses (`v1_record_refused`). -/
-def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v2, intentStream⟩
+/-- Frame byte 4: a record carries its signing subject (`IntentRecord.subject`, which the
+presence index folds) and its meter credit (`IntentRecord.credit`, the seed-meter refill's).
+Bytes 1-3 refuse (`v1_record_refused`, `v2_record_refused`, `v3_record_refused`; byte 3 is
+the subject-only record of the A11 regen). -/
+def recordFrame : Framed IntentRecord := ⟨Minidregg.Compiler.PersistedCodecTags.durable_log_byte_v4, intentStream⟩
+
+def retiredRecordFrameV3 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [3]
+
+theorem v3_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV3 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
 
 def retiredRecordFrameV1 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [1]
+
+def retiredRecordFrameV2 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [2]
+
+theorem v2_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV2 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
 
 theorem v1_record_refused (tail : List UInt8) :
     recordFrame.decode (bytesStream.encode retiredRecordFrameV1 ++ tail) = none :=
@@ -517,8 +641,8 @@ theorem storedRecordDigest_eq {bytes : List UInt8} {record : IntentRecord}
     storedRecordDigest bytes = recordDigest record := by
   have canonical := Framed.decode_canonical recordFrame decoded
   unfold storedRecordDigest recordDigest
-  rw [← canonical]
-  simp [Framed.encode, StreamCodec.product, recordFrame]
+  rw [← canonical, Framed.encode_eq]
+  simp [recordFrame]
 
 /-- One chain link from a record's stored bytes. -/
 def chainStepStored (previous : Digest) (bytes : List UInt8) : Digest :=
@@ -569,6 +693,13 @@ structure Body where
   /-- The index trie's root after `height` records (`DurableIndex`). -/
   indexRoot : Digest
   state : State
+  /-- The fold's World's system store at `height` (journal, head, retired, parent, spent,
+  allowance; `Kernel.WorldSystemCodec`); its cells are `state`'s, decoded. `none` when the
+  sealing session's World was lost: the open then folds from genesis. -/
+  system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)
+  /-- The identity of the fold that produced `system` (`foldSemantics`): a body sealed by
+  another fold under the same Store key is refused by name (`OpenError.foreignSemantics`). -/
+  semantics : Digest
 
 def frontierStream : StreamCodec (List (Nat × Digest)) :=
   StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)
@@ -577,9 +708,14 @@ def bodyStream : StreamCodec Body :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream
       (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream
-        (StreamCodec.product frontierStream (StreamCodec.product digestStream stateStream)))))
-    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.indexRoot, body.state))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+        (StreamCodec.product frontierStream (StreamCodec.product digestStream
+          (StreamCodec.product stateStream
+            (StreamCodec.product (StreamCodec.option Kernel.WorldSystemCodec.systemStream)
+              digestStream)))))))
+    (fun body => (body.keyId, body.height, body.chain, body.frontier, body.indexRoot, body.state,
+      body.system, body.semantics))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2.1, tuple.2.2.2.2.2.1,
+      tuple.2.2.2.2.2.2.1, tuple.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 /-- The world-root entries of a materialized state at a height: the system slot
@@ -606,11 +742,12 @@ def sealedStream : StreamCodec Sealed :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- v3: the body carries the accumulator frontier and the spent root, and its
-state no consumed nullifiers. An older checkpoint refuses (`malformed`): its
-frame differs; the Store epoch (`StoreEpoch.accumulator`) names the change. -/
+/-- v4: the body carries the fold's World's system store and the fold's semantics
+(HOT-PATH §2(h)), beside v3's accumulator frontier and spent root. An older checkpoint
+refuses (`malformed`): its frame differs; the Store epoch (`StoreEpoch.accumulator`,
+`checkpoint/v5`) names the change. -/
 def checkpointFrame : Framed Sealed :=
-  ⟨Minidregg.Compiler.PersistedCodecTags.durable_checkpoint_byte_v3, sealedStream⟩
+  ⟨Minidregg.Compiler.PersistedCodecTags.durable_checkpoint_byte_v4, sealedStream⟩
 
 def macInputStream : StreamCodec (List UInt8 × Nat × Digest × List UInt8) :=
   StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat
@@ -623,34 +760,49 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
       cshake256Bytes "DREGG/NATIVE-HOST/CHECKPOINT-BODY/v1".toUTF8.toList
         (bodyStream.encode body)))
 
+/-- The fold's version: bumped whenever `DurableReceiverIO.foldRecords`' World semantics (the
+turn derivation, `admit`, the system rows it writes) change, so a checkpoint's World sealed by
+another fold is refused by name rather than trusted. -/
+def foldVersion : String := "FOLD/turn-of-intent-v1"
+
+/-- The fold's identity a v4 body carries: the epoch (every persisted codec and layout) and the
+fold's version. -/
+def foldSemantics : Digest :=
+  (Sp800185Cshake256.hash "DREGG/NATIVE-HOST/FOLD-SEMANTICS/v1".toUTF8.toList
+    (StoreEpoch.current.label ++ ";" ++ foldVersion).toUTF8.toList).digest
+
 /-- Seal a checkpoint body under a supplied world root. The host supplies its
 cached root (`DurableReceiverIO.sealCheckpoint_uses_cached_root`); `openSealed`
 recomputes it from the body and refuses any other. -/
 def sealAt (key : MacKey) (height : Nat) (chain : Digest) (frontier : List (Nat × Digest))
-    (indexRoot : Digest) (state : State) (root : Digest) : Sealed :=
-  let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state⟩
+    (indexRoot : Digest) (state : State) (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys))
+    (root : Digest) : Sealed :=
+  let body : Body := ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩
   ⟨body, root, checkpointMac key body root⟩
 
 /-- The specification seal: the root evaluated in full from the body. -/
 def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
-    (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) : Sealed :=
-  sealAt key height chain frontier indexRoot state
-    (worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state⟩)
+    (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) : Sealed :=
+  sealAt key height chain frontier indexRoot state system
+    (worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩)
 
 /-- Sealing under any root equal to the body's world root is the
 specification seal, byte for byte. -/
 theorem sealAt_eq_sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
     (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
-    {root : Digest}
-    (exact : root = worldRoot rootBytes ⟨key.id, height, chain, frontier, indexRoot, state⟩) :
-    sealAt key height chain frontier indexRoot state root =
-      sealCheckpoint key rootBytes height chain frontier indexRoot state := by
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) {root : Digest}
+    (exact : root = worldRoot rootBytes
+      ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩) :
+    sealAt key height chain frontier indexRoot state system root =
+      sealCheckpoint key rootBytes height chain frontier indexRoot state system := by
   subst exact
   rfl
 
 inductive OpenError where
   | malformed
   | foreignKey
+  | foreignSemantics
   | rootMismatch
   | badMac
   deriving DecidableEq, Repr
@@ -661,16 +813,103 @@ def openSealed (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List 
     Except OpenError Body := do
   let some sealed := checkpointFrame.decode bytes | throw .malformed
   unless sealed.body.keyId = key.id do throw .foreignKey
+  unless sealed.body.semantics = foldSemantics do throw .foreignSemantics
   unless sealed.root = worldRoot rootBytes sealed.body do throw .rootMismatch
   unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
   pure sealed.body
 
+/-- `openSealed` with the world-root evaluation handed to the caller: `derive`
+evaluates something from which `rootOf` reads the body's world root (`exact`);
+the open compares the sealed root against it and returns it beside the body, so
+a caller that needs the evaluated tree (`DurableServed.openHead`) does not
+evaluate the root a second time. The checks and their order are `openSealed`'s
+(`openSealedWith_fst`). -/
+def openSealedWith {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 → Digest)
+    (bytes : List UInt8) (derive : (body : Body) → α body) (rootOf : (body : Body) → α body → Digest)
+    (_exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body) :
+    Except OpenError ((body : Body) × α body) := do
+  let some sealed := checkpointFrame.decode bytes | throw .malformed
+  unless sealed.body.keyId = key.id do throw .foreignKey
+  unless sealed.body.semantics = foldSemantics do throw .foreignSemantics
+  let derived := derive sealed.body
+  unless sealed.root = rootOf sealed.body derived do throw .rootMismatch
+  unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
+  pure ⟨sealed.body, derived⟩
+
+/-- **The cached open is the open**: same refusals, same body. -/
+theorem openSealedWith_fst {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 → Digest)
+    (bytes : List UInt8) (derive : (body : Body) → α body) (rootOf : (body : Body) → α body → Digest)
+    (exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body) :
+    (openSealedWith key rootBytes bytes derive rootOf exact).map Sigma.fst =
+      openSealed key rootBytes bytes := by
+  unfold openSealedWith openSealed
+  cases checkpointFrame.decode bytes with
+  | none => rfl
+  | some sealed =>
+      simp only [exact]
+      by_cases keyOk : sealed.body.keyId = key.id
+      · by_cases semOk : sealed.body.semantics = foldSemantics
+        · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+          · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
+              simp [keyOk, semOk, rootOk, macOk] <;> rfl
+          · simp [keyOk, semOk, rootOk]
+            rfl
+        · simp [keyOk, semOk]
+          rfl
+      · simp [keyOk]
+        rfl
+
+#assert_axioms openSealedWith_fst
+
+/-- **The cached open is the open, paired**: `openSealed` with the derived value
+of the body beside it. -/
+theorem openSealedWith_eq {α : Body → Type} (key : MacKey) (rootBytes : List UInt8 → Digest)
+    (bytes : List UInt8) (derive : (body : Body) → α body) (rootOf : (body : Body) → α body → Digest)
+    (exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body) :
+    openSealedWith key rootBytes bytes derive rootOf exact =
+      (fun body => (⟨body, derive body⟩ : (body : Body) × α body)) <$> openSealed key rootBytes bytes := by
+  unfold openSealedWith openSealed
+  cases checkpointFrame.decode bytes with
+  | none => rfl
+  | some sealed =>
+      simp only [exact]
+      by_cases keyOk : sealed.body.keyId = key.id
+      · by_cases semOk : sealed.body.semantics = foldSemantics
+        · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+          · by_cases macOk : sealed.mac = checkpointMac key sealed.body (worldRoot rootBytes sealed.body) <;>
+              simp [keyOk, semOk, rootOk, macOk]
+          · simp [keyOk, semOk, rootOk]
+            rfl
+        · simp [keyOk, semOk]
+          rfl
+      · simp [keyOk]
+        rfl
+
+/-- What an accepted cached open hands back: the body `openSealed` accepts, and
+a derived value whose root is that body's world root. -/
+theorem openSealedWith_ok {α : Body → Type} {key : MacKey} {rootBytes : List UInt8 → Digest}
+    {bytes : List UInt8} {derive : (body : Body) → α body} {rootOf : (body : Body) → α body → Digest}
+    {exact : ∀ body, rootOf body (derive body) = worldRoot rootBytes body} {body : Body} {derived : α body}
+    (opened : openSealedWith key rootBytes bytes derive rootOf exact = .ok ⟨body, derived⟩) :
+    openSealed key rootBytes bytes = .ok body ∧ rootOf body derived = worldRoot rootBytes body := by
+  rw [openSealedWith_eq] at opened
+  cases plain : openSealed key rootBytes bytes with
+  | error reason => rw [plain] at opened; cases opened
+  | ok found =>
+      rw [plain] at opened
+      cases opened
+      exact ⟨rfl, exact _⟩
+
+#assert_axioms openSealedWith_eq
+#assert_axioms openSealedWith_ok
+
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State) :
+    (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest) (state : State)
+    (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys)) :
     openSealed key rootBytes (checkpointFrame.encode
-        (sealCheckpoint key rootBytes height chain frontier indexRoot state)) =
-      .ok ⟨key.id, height, chain, frontier, indexRoot, state⟩ := by
+        (sealCheckpoint key rootBytes height chain frontier indexRoot state system)) =
+      .ok ⟨key.id, height, chain, frontier, indexRoot, state, system, foldSemantics⟩ := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt]
   rfl
 
@@ -683,14 +922,18 @@ theorem openSealed_bad_mac (key : MacKey) (rootBytes : List UInt8 → Digest)
   unfold openSealed
   simp only [Framed.decode_encode]
   by_cases keyOk : sealed.body.keyId = key.id
-  · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
-    · have forged' : sealed.mac ≠ checkpointMac key sealed.body
-          (worldRoot rootBytes sealed.body) := rootOk ▸ forged
-      refine ⟨.badMac, ?_, by decide⟩
-      simp [keyOk, rootOk, forged']
-      rfl
-    · refine ⟨.rootMismatch, ?_, by decide⟩
-      simp [keyOk, rootOk]
+  · by_cases semOk : sealed.body.semantics = foldSemantics
+    · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
+      · have forged' : sealed.mac ≠ checkpointMac key sealed.body
+            (worldRoot rootBytes sealed.body) := rootOk ▸ forged
+        refine ⟨.badMac, ?_, by decide⟩
+        simp [keyOk, semOk, rootOk, forged']
+        rfl
+      · refine ⟨.rootMismatch, ?_, by decide⟩
+        simp [keyOk, semOk, rootOk]
+        rfl
+    · refine ⟨.foreignSemantics, ?_, by decide⟩
+      simp [keyOk, semOk]
       rfl
   · refine ⟨.foreignKey, ?_, by decide⟩
     simp [keyOk]
@@ -707,9 +950,10 @@ theorem empty_mac_forged (key : MacKey) (body : Body) (root : Digest) :
 id refuses. -/
 theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → Digest)
     (height : Nat) (chain : Digest) (frontier : List (Nat × Digest)) (indexRoot : Digest)
-    (state : State) (distinct : other.id ≠ key.id) :
+    (state : State) (system : Option (Minidregg.Theory.Store.Store Kernel.WorldSystemCodec.DSys))
+    (distinct : other.id ≠ key.id) :
     openSealed key rootBytes (checkpointFrame.encode
-        (sealCheckpoint other rootBytes height chain frontier indexRoot state)) =
+        (sealCheckpoint other rootBytes height chain frontier indexRoot state system)) =
       .error .foreignKey := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, sealAt, distinct]
   rfl

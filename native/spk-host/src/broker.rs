@@ -2,6 +2,7 @@
 //! provide grain isolation. Only the registered one-shot helper holds volume
 //! mount/freeze privilege; the broker never runs with host uid zero.
 
+use crate::io_context::IoContext;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -14,9 +15,12 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use crate::canonical::hex64;
 
 #[path = "broker_endpoint.rs"]
 mod endpoint;
+#[cfg(test)]
+pub(crate) fn connect_for_test(path: &Path) -> io::Result<std::os::unix::net::UnixStream> { endpoint::connect_for_test(path) }
 
 #[path = "broker_runtime_adoption.rs"]
 mod runtime_adoption;
@@ -46,7 +50,7 @@ pub struct SizeClass {
     pub io_weight: u32,
     pub volume_mib: u64,
     /// Concurrent WebSockets one grain generation may hold open. The open is
-    /// a Mini dispatch; frames are unmetered by design (SPK-HOSTING §348), so
+    /// a Mini dispatch; frames are not Mini writes and carry no fee, so
     /// this and `ws_bytes_per_minute` are their physical bound. The open past
     /// the cap is refused `wsConcurrencyCap` before any Mini write.
     pub ws_max_open: usize,
@@ -98,31 +102,20 @@ pub fn class(name: &str) -> io::Result<SizeClass> {
 }
 
 pub fn store_key(text: &str) -> bool {
-    text.len() == 16
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::lower_hex_of(&text, 8)
 }
 
+/// A positive canonical decimal that fits an unsigned 64-bit integer (at most 20 digits): a member's
+/// application is a participant-namespace id, which is at least 2^63.
 pub fn decimal(text: &str) -> bool {
-    !text.is_empty()
-        && text.len() <= 18
-        && !(text.len() > 1 && text.starts_with('0'))
-        && text.bytes().all(|b| b.is_ascii_digit())
-        && text != "0"
-}
-
-fn hex64(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::decimal_u64(text).is_some_and(|value| value != 0)
 }
 
 /// Mini's lifecycle receivers pin the resident unit name (Kernel
 /// `ApplicationLifecycleResidentProfile.processIdentity`): the Store key (Mini's
-/// `storeTag` of the genesis seed identity), the app and the generation. Two
-/// Stores on one host never name the same unit.
+/// `storeTag` of the Store identity, the genesis seed at the Store's root), the
+/// app and the generation. Two Stores on one host never name the same unit, a
+/// world restored or forked to another root included.
 /// Canonical Store coordinate; an absent or malformed id cannot name a unit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreId(String);
@@ -167,8 +160,30 @@ pub fn volume_name(store: &str, app: &str) -> String {
     format!("{store}-{app}")
 }
 
-pub fn app_slice(prefix: &str, store: &str, app: &str) -> String {
-    format!("s{store}-{prefix}-grains-a{app}.slice")
+/// The slice tree is derived by systemd from dashes, and these three functions
+/// are the only place its names are written:
+///
+/// ```text
+/// s{store}-{prefix}-grains.slice                  everything (supervisors sit here)
+///   s{store}-{prefix}-grains-{S|M|L}.slice        one class
+///     s{store}-{prefix}-grains-{S|M|L}-a{app}.slice   one app: its resident grain
+/// ```
+///
+/// A drop-in on the class slice bounds the class in aggregate; a prefix drop-in
+/// `s{store}-{prefix}-grains-{S|M|L}-.slice.d/` bounds each app of that class
+/// (a `CPUQuota` there is per app, i.e. per resident grain unit, not shared).
+/// The class is the one `set-cgroup` recorded from the app's declared size
+/// class; there is no class-less app slice.
+pub fn grains_slice(prefix: &str, store: &str) -> String {
+    format!("s{store}-{prefix}-grains.slice")
+}
+
+pub fn class_slice(prefix: &str, store: &str, class: &SizeClass) -> String {
+    format!("s{store}-{prefix}-grains-{}.slice", class.name)
+}
+
+pub fn app_slice(prefix: &str, store: &str, class: &SizeClass, app: &str) -> String {
+    format!("s{store}-{prefix}-grains-{}-a{app}.slice", class.name)
 }
 
 pub fn supervisor_unit(prefix: &str, store: &str, app: &str) -> String {
@@ -190,7 +205,14 @@ pub struct BrokerConfig {
     pub unit_prefix: String,
     pub spk_host: PathBuf,
     pub spk_host_sha256: String,
+    /// The physical bubblewrap that creates each resident's user namespace (and
+    /// sandboxes its app): one of `namespace_identity::PHYSICAL_BWRAPS`, pinned.
+    pub bwrap: PathBuf,
+    pub bwrap_sha256: String,
     pub ingest_helper: PathBuf,
+    /// Operator-selected physical intake budget; never accepted in an Ingest request.
+    #[serde(default)]
+    pub import_profile: Option<String>,
     pub volume_helper: PathBuf,
     pub app_uids: Vec<u32>,
     #[serde(default)]
@@ -212,17 +234,17 @@ fn spk_namespace_paths(root: Option<&Path>) -> io::Result<(PathBuf, PathBuf)> {
 fn validate_spk_namespace(root: Option<&Path>) -> io::Result<()> {
     let root=root.ok_or_else(||invalid("SPK namespace requires an explicit store-scoped root"))?;
     let (packages,inbox)=spk_namespace_paths(Some(root))?;
-    if fs::canonicalize(root)? != root {
+    if fs::canonicalize(&root).ctx("resolve", &root)? != root {
         return Err(invalid("SPK root traverses a symlink"));
     }
     for entry in root.ancestors() {
-        let metadata=fs::symlink_metadata(entry)?;
+        let metadata=fs::symlink_metadata(&entry).ctx("inspect", &entry)?;
         if !metadata.is_dir() || !(crate::os::root_owner(metadata.uid()) || metadata.uid()==unsafe{libc::geteuid()}) || metadata.mode()&0o022!=0 {
             return Err(invalid(format!("SPK root custody differs: {}",entry.display())));
         }
     }
     for (path,mode) in [(root,0o755),(packages.as_path(),0o755),(inbox.as_path(),0o700)] {
-        let metadata=fs::symlink_metadata(path)?;
+        let metadata=fs::symlink_metadata(&path).ctx("inspect", &path)?;
         if !metadata.is_dir() || !(crate::os::root_owner(metadata.uid()) || metadata.uid()==unsafe{libc::geteuid()}) || metadata.mode()&0o777!=mode {
             return Err(invalid(format!("SPK namespace directory custody differs: {}",path.display())));
         }
@@ -240,7 +262,7 @@ fn validate_world_package_namespace(store: &str, world: &Path, packages: Option<
     Ok(())
 }
 
-fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32) -> io::Result<Vec<String>> {
+fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Path, uid: u32, profile: crate::materialize::ImportProfile) -> io::Result<Vec<String>> {
     let (_,expected_inbox)=spk_namespace_paths(root)?;
     if inbox.parent()!=Some(expected_inbox.as_path()) {
         return Err(invalid("ingest package is outside selected SPK inbox"));
@@ -249,9 +271,17 @@ fn ingest_arguments(root: Option<&Path>, host: &Path, host_sha: &str, inbox: &Pa
     if let Some(root)=root {
         args.extend(["--root".to_owned(),root.to_str().ok_or_else(||invalid("SPK root path"))?.to_owned()]);
     }
+    if profile != crate::materialize::ImportProfile::Standard {
+        args.extend(["--import-profile".to_owned(), profile.as_str().to_owned()]);
+    }
     args.extend([host.to_str().ok_or_else(||invalid("Host path"))?.to_owned(),host_sha.to_owned(),
         inbox.to_str().ok_or_else(||invalid("inbox path"))?.to_owned(),uid.to_string()]);
     Ok(args)
+}
+
+fn import_profile(config: &BrokerConfig) -> io::Result<crate::materialize::ImportProfile> {
+    config.import_profile.as_deref().unwrap_or("standard-v1").parse()
+        .map_err(|_| invalid("unknown operator importProfile"))
 }
 
 pub(crate) fn image_path_from_identity(identity: &Value, raw_sha256: &str) -> io::Result<PathBuf> {
@@ -373,7 +403,7 @@ fn read_private_operator(path: &Path, max: u64) -> io::Result<Vec<u8>> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.uid()!=unsafe{libc::geteuid()} || meta.mode() & 0o077 != 0 || meta.len() > max {
         return Err(invalid(format!("{} must be operator 0600", path.display())));
@@ -396,8 +426,35 @@ fn file_sha256(file: &mut File) -> io::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+/// HOT-PATH 2g: the digest of a pinned executable, computed ONCE per file identity per process.
+/// The 159 MB spk-host image was hashed on every broker config load, adoption pin and runtime
+/// status (five times across one STOP). The key is the file's full identity (device, inode, size,
+/// mtime, ctime): a replaced, rewritten or touched image is a new key and is hashed again; the
+/// cached value is the DIGEST, never the verdict, so a different pin against the same bytes is still
+/// compared. `PINNED_HASHES` counts the hashes taken (the test's witness).
+static PINNED_DIGESTS: std::sync::Mutex<Option<std::collections::HashMap<(u64, u64, u64, i64, i64, i64, i64), String>>> =
+    std::sync::Mutex::new(None);
+static PINNED_HASHES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn pinned_digest(path: &Path, meta: &fs::Metadata) -> io::Result<String> {
+    let key = (meta.dev(), meta.ino(), meta.size(), meta.mtime(), meta.mtime_nsec(), meta.ctime(), meta.ctime_nsec());
+    if let Some(known) = PINNED_DIGESTS.lock().ok().and_then(|cache| cache.as_ref().and_then(|c| c.get(&key).cloned())) {
+        return Ok(known);
+    }
+    let digest = file_sha256(&mut File::open(&path).ctx("open", &path)?)?;
+    PINNED_HASHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // The identity must still be the one hashed: a file replaced mid-read is not remembered.
+    let after = fs::symlink_metadata(&path).ctx("inspect", &path)?;
+    if (after.dev(), after.ino(), after.size(), after.mtime(), after.mtime_nsec(), after.ctime(), after.ctime_nsec()) == key {
+        if let Ok(mut cache) = PINNED_DIGESTS.lock() {
+            cache.get_or_insert_with(Default::default).insert(key, digest.clone());
+        }
+    }
+    Ok(digest)
+}
+
 fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute() || !meta.is_file() || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()}) || meta.mode() & 0o022 != 0 {
         return Err(invalid(format!(
             "{} must be a root-owned executable",
@@ -405,7 +462,7 @@ fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
         )));
     }
     if let Some(sha) = sha {
-        if !hex64(sha) || file_sha256(&mut File::open(path)?)? != sha {
+        if !hex64(sha) || pinned_digest(path, &meta)? != sha {
             return Err(invalid(format!(
                 "{} SHA-256 differs from its pin",
                 path.display()
@@ -420,13 +477,13 @@ fn pinned_root_executable(path: &Path, sha: Option<&str>) -> io::Result<()> {
 fn operator_dir(path: &Path, mode: u32) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path)?;
-            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+            fs::create_dir(&path).ctx("create directory", &path)?;
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).ctx("set permissions", &path)?;
         }
         Err(error) => return Err(error),
         Ok(_) => {}
     }
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !meta.is_dir()
         || meta.uid()!=unsafe{libc::geteuid()}
         || meta.gid()!=unsafe{libc::getegid()}
@@ -535,7 +592,7 @@ fn helper(program: &Path, args: &[&str]) -> io::Result<String> {
 fn write_operator_text(path: &Path, text: &str, mode: u32, replace: bool) -> io::Result<bool> {
     if let Ok(current) = fs::read(path) {
         if current == text.as_bytes() {
-            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).ctx("set permissions", &path)?;
             return Ok(false);
         }
         if !replace {
@@ -552,18 +609,18 @@ fn write_operator_text(path: &Path, text: &str, mode: u32, replace: bool) -> io:
             .and_then(|n| n.to_str())
             .unwrap_or("broker")
     ));
-    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_file(&temp).ctx("remove", &temp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(mode)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     // The broker's umask is 077; unit files are meant to be world-readable.
     file.set_permissions(fs::Permissions::from_mode(mode))?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
-    fs::rename(&temp, path)?;
-    File::open(parent)?.sync_all()?;
+    fs::rename(&temp, path).ctx("rename", &temp)?;
+    File::open(&parent).ctx("open", &parent)?.sync_all()?;
     Ok(true)
 }
 
@@ -597,7 +654,8 @@ impl Broker {
     fn load(config_path: &Path) -> io::Result<Self> {
         let config: BrokerConfig =
             serde_json::from_slice(&read_private_operator(config_path, MAX_CONFIG)?)?;
-        if config.protocol != "mini-spk-broker-config-v2"
+        import_profile(&config)?;
+        if config.protocol != "mini-spk-broker-config-v3"
             || !store_key(&config.store)
             || config.grains_root.file_name().and_then(|n|n.to_str())!=Some(config.store.as_str())
             || config.spk_root.is_none()
@@ -617,6 +675,7 @@ impl Broker {
         validate_world_package_namespace(&config.store, &config.grains_root, config.spk_root.as_deref())?;
         validate_spk_namespace(config.spk_root.as_deref())?;
         pinned_root_executable(&config.spk_host, Some(&config.spk_host_sha256))?;
+        crate::namespace_identity::pinned_bwrap(&config.bwrap, &config.bwrap_sha256)?;
         pinned_root_executable(&config.ingest_helper, None)?;
         let registry=crate::volume_helper::Registry::load(&config.store)?;
         if registry.grains_root!=config.grains_root || registry.app_uids!=config.app_uids || registry.helper!=config.volume_helper {
@@ -643,7 +702,7 @@ impl Broker {
             if prefix == config.grains_root {
                 break;
             }
-            let meta = fs::symlink_metadata(&prefix)?;
+            let meta = fs::symlink_metadata(&prefix).ctx("inspect", &prefix)?;
             if !meta.is_dir() || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()}) || meta.mode() & 0o022 != 0 {
                 return Err(invalid(format!(
                     "grains root ancestor {} is not root-owned",
@@ -651,7 +710,7 @@ impl Broker {
                 )));
             }
         }
-        let root=fs::symlink_metadata(&config.grains_root)?;
+        let root=fs::symlink_metadata(&config.grains_root).ctx("inspect", &config.grains_root)?;
         if !root.is_dir() || root.uid()!=0 || root.mode()&0o7777!=0o755 { return Err(invalid("protected world root custody refused")); }
         let broker = config.grains_root.join("broker");
         operator_dir(&broker, 0o700)?;
@@ -664,7 +723,7 @@ impl Broker {
             .append(true)
             .create(true)
             .mode(0o600)
-            .open(broker.join("broker.log"))?;
+            .open(broker.join("broker.log")).ctx("open", &(broker.join("broker.log")))?;
         Ok(Self {
             config,
             operator_uid,
@@ -681,38 +740,30 @@ impl Broker {
         eprintln!("{line}");
     }
 
-    /// The supervisor template and the grains slice, rendered at startup.
-    /// The supervisor is `Type=exec`, not oneshot: while an `OnFailure=`
-    /// target's start job is pending, systemd keeps the failed resident unit
-    /// loaded with its old InvocationID, and STOP's exact post-stop audit
-    /// requires that InvocationID cleared (Mini's `managerInvocationCleared`).
+    /// The grains slice, rendered at startup; supervisor instances are
+    /// rendered per app (`render_store_supervisor`), the names `OnFailure=` uses.
     fn render_static(&self) -> io::Result<()> {
         let prefix = &self.config.unit_prefix;
         let store = &self.config.store;
         let slice = "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grains\n\n\
              [Slice]\nCPUWeight=50\nIOWeight=50\n";
         write_operator_text(
-            &crate::os::runtime_units().join(format!("s{store}-{prefix}-grains.slice")),
+            &crate::os::runtime_units().join(grains_slice(prefix, store)),
             slice,
             0o644,
             true,
         )?;
-        let supervisor = format!(
-            "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grain supervisor %i\n\
-             StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\n\
-             Slice=s{store}-{prefix}-grains.slice\n\
-             ExecStart={spk} grain supervise-instance {root} %i\n\
-             Restart=on-failure\nRestartSec=30\nRestartPreventExitStatus=3\n\
-             NoNewPrivileges=yes\nUMask=0077\n",
-            spk = self.config.spk_host.display(),
-            root = self.root().display(),
-        );
-        write_operator_text(
-            &crate::os::runtime_units().join(format!("{prefix}-spk-supervisor-s{store}@.service")),
-            &supervisor,
-            0o644,
-            true,
-        )?;
+        for class in CLASSES {
+            write_operator_text(
+                &crate::os::runtime_units().join(class_slice(prefix, store, class)),
+                &format!(
+                    "# rendered by mini-spk-broker class={c}\n[Unit]\nDescription=Mini SPK grains class {c}\n",
+                    c = class.name
+                ),
+                0o644,
+                true,
+            )?;
+        }
         self.render_adopted_supervisors()?;
         systemctl(&["daemon-reload"])?;
         Ok(())
@@ -765,9 +816,27 @@ impl Broker {
         parse_resident_unit(unit).ok_or_else(|| invalid("resident unit name refused"))
     }
 
+    /// Resident units installed for this app (any state).
+    fn app_units_installed(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
+        let mut installed = Vec::new();
+        for entry in fs::read_dir(self.broker_dir().join("units")).ctx("list", &(self.broker_dir().join("units")))? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            let Ok((unit_store, unit_app, _)) = Self::check_resident_unit_name(&name) else {
+                continue;
+            };
+            if unit_app == app
+                && unit_store == store
+                && self.unit_store(&name)?.as_deref() == Some(store)
+            {
+                installed.push(name);
+            }
+        }
+        Ok(installed)
+    }
+
     fn app_units_active(&self, store: &str, app: &str) -> io::Result<Vec<String>> {
         let mut active = Vec::new();
-        for entry in fs::read_dir(self.broker_dir().join("units"))? {
+        for entry in fs::read_dir(self.broker_dir().join("units")).ctx("list", &(self.broker_dir().join("units")))? {
             let name = entry?.file_name().to_string_lossy().into_owned();
             let Ok((unit_store, unit_app, _)) = Self::check_resident_unit_name(&name) else {
                 continue;
@@ -810,18 +879,18 @@ impl Broker {
                 let dir = self.root().join(&store);
                 match fs::symlink_metadata(&dir) {
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        fs::create_dir(&dir)?;
+                        fs::create_dir(&dir).ctx("create directory", &dir)?;
                         std::os::unix::fs::chown(
                             &dir,
                             Some(self.operator_uid),
                             Some(self.operator_gid),
                         )?;
-                        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+                        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).ctx("set permissions", &dir)?;
                     }
                     Err(error) => return Err(error),
                     Ok(_) => {}
                 }
-                let meta = fs::symlink_metadata(&dir)?;
+                let meta = fs::symlink_metadata(&dir).ctx("inspect", &dir)?;
                 if !meta.is_dir()
                     || meta.uid() != self.operator_uid
                     || meta.mode() & 0o7777 != 0o700
@@ -845,7 +914,7 @@ impl Broker {
                     );
                 }
                 let mut bound = Vec::new();
-                for entry in fs::read_dir(self.broker_dir().join("placements"))? {
+                for entry in fs::read_dir(self.broker_dir().join("placements")).ctx("list", &(self.broker_dir().join("placements")))? {
                     let path = entry?.path();
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
@@ -886,11 +955,11 @@ impl Broker {
                 let class = class(&name)?;
                 let mut placement = self.placement(&store, &app)?;
                 if let Some(existing) = &placement.class {
-                    if existing != class.name && !self.app_units_active(&store, &app)?.is_empty() {
-                        return Err(invalid("class change refused while the app is running"));
+                    if existing != class.name && !self.app_units_installed(&store, &app)?.is_empty() {
+                        return Err(invalid("class change refused once a unit is installed: the unit names its class slice"));
                     }
                 }
-                let slice = app_slice(&self.config.unit_prefix, &store, &app);
+                let slice = app_slice(&self.config.unit_prefix, &store, &class, &app);
                 let text = format!(
                     "# rendered by mini-spk-broker store={store} app={app} class={c}\n\
                      [Unit]\nDescription=Mini SPK grain {app} store {store} class {c}\n\n\
@@ -923,31 +992,38 @@ impl Broker {
                 let image = package_store.join(format!("sha256-{sha256}"));
                 if fs::symlink_metadata(&image).is_err() {
                     let package = format!("sha256-{sha256}");
-                    let mut source = open_operator_file(
+                    let source = open_operator_file(
                         self.root(),
                         &[&store, "host", "packages", &package, "package.spk"],
                         self.operator_uid,
                     )?;
-                    if source.metadata()?.len() > 256 * 1024 * 1024 {
+                    let profile = import_profile(&self.config)?;
+                    let bound = profile.limits().raw_bytes;
+                    let source_length = source.metadata()?.len();
+                    if source_length > bound {
                         return Err(invalid("staged package exceeds bound"));
                     }
                     let inbox = private_inbox.join(format!("grain-{sha256}.spk"));
                     let temp = private_inbox.join(format!(".grain-{sha256}.broker"));
-                    let _ = fs::remove_file(&temp);
+                    let _ = fs::remove_file(&temp).ctx("remove", &temp);
                     let mut out = OpenOptions::new()
                         .write(true)
                         .create_new(true)
                         .mode(0o600)
-                        .open(&temp)?;
-                    io::copy(&mut source, &mut out)?;
+                        .open(&temp).ctx("open", &temp)?;
+                    let copied = io::copy(&mut source.take(bound + 1), &mut out)?;
+                    if copied > bound || copied != source_length {
+                        let _ = fs::remove_file(&temp).ctx("remove", &temp);
+                        return Err(invalid("staged package changed or exceeds import profile bound"));
+                    }
                     out.sync_all()?;
-                    if file_sha256(&mut File::open(&temp)?)? != sha256 {
-                        let _ = fs::remove_file(&temp);
+                    if file_sha256(&mut File::open(&temp).ctx("open", &temp)?)? != sha256 {
+                        let _ = fs::remove_file(&temp).ctx("remove", &temp);
                         return Err(invalid("staged package differs from its SHA-256"));
                     }
-                    fs::rename(&temp, &inbox)?;
+                    fs::rename(&temp, &inbox).ctx("rename", &temp)?;
                     let arguments=ingest_arguments(self.config.spk_root.as_deref(),&runtime.spk_host,
-                        &runtime.spk_host_sha256,&inbox,placement.app_uid)?;
+                        &runtime.spk_host_sha256,&inbox,placement.app_uid,profile)?;
                     let borrowed=arguments.iter().map(String::as_str).collect::<Vec<_>>();
                     helper(&self.config.ingest_helper,&borrowed)?;
                 }
@@ -987,9 +1063,9 @@ impl Broker {
                     self.adoption_exists(&store)?,
                 )?;
                 let placement = self.placement(&store, &app)?;
-                if placement.class.is_none() {
-                    return Err(invalid("set-cgroup must precede install-unit"));
-                }
+                let unit_class = class(
+                    placement.class.as_deref().ok_or_else(|| invalid("set-cgroup must precede install-unit"))?,
+                )?;
                 let unit = resident_unit(&store, &app, &generation)?;
                 if let Some(owner) = self.unit_store(&unit)? {
                     if owner != store {
@@ -1033,7 +1109,8 @@ impl Broker {
                      OnFailure={supervisor}\n\n[Service]\nType=exec\n\
                      Slice={slice}\n\
                      Environment=MINI_SPK_APP_UID={uid} MINI_SPK_APP_GID={gid} MINI_SPK_OPERATOR_UID={operator_uid} MINI_SPK_OPERATOR_GID={operator_gid} \
-                     MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store} MINI_SPK_UNIT={unit} MINI_SPK_BROKER_SOCKET={broker_socket}\n\
+                     MINI_SPK_GRAINS_ROOT={root} MINI_SPK_STORE={store} MINI_SPK_UNIT={unit} MINI_SPK_BROKER_SOCKET={broker_socket} \
+                     MINI_SPK_BWRAP={bwrap} MINI_SPK_BWRAP_SHA256={bwrap_sha256}\n\
                      ExecStart={spk} resident-bootstrap {config}\n\
                      AmbientCapabilities=\n\
                      NoNewPrivileges=no\n\
@@ -1041,12 +1118,14 @@ impl Broker {
                     supervisor = supervisor_unit(prefix, &store, &app),
                     operator_uid = self.operator_uid,
                     operator_gid = self.operator_gid,
-                    slice = app_slice(prefix, &store, &app),
+                    slice = app_slice(prefix, &store, &unit_class, &app),
                     uid = placement.app_uid,
                     gid = placement.app_gid,
                     root = self.root().display(),
                     broker_socket = socket_path(self.root(), self.config.broker_socket.as_deref())?.display(),
                     spk = runtime.spk_host.display(),
+                    bwrap = self.config.bwrap.display(),
+                    bwrap_sha256 = self.config.bwrap_sha256,
                     config = config.display(),
                 );
                 self.render_store_supervisor(&store, &app, &runtime)?;
@@ -1062,14 +1141,14 @@ impl Broker {
                 // dead incarnation by. `start` and `stop` reset it.
                 if !visibility.is_empty() {
                     let drop_dir=crate::os::runtime_units().join(format!("{unit}.d"));
-                    fs::create_dir_all(&drop_dir)?;
-                    fs::set_permissions(&drop_dir,fs::Permissions::from_mode(0o755))?;
+                    fs::create_dir_all(&drop_dir).ctx("create directory", &drop_dir)?;
+                    fs::set_permissions(&drop_dir,fs::Permissions::from_mode(0o755)).ctx("set permissions", &drop_dir)?;
                     write_operator_text(&drop_dir.join("10-native-visibility.conf"),&visibility,0o644,false)?;
                 }
                 systemctl(&["daemon-reload"])?;
                 self.save_unit_runtime(&unit, &runtime)?;
                 Ok(
-                    json!({"unit":unit,"slice":app_slice(prefix, &store, &app),"spkHostSha256":runtime.spk_host_sha256}),
+                    json!({"unit":unit,"slice":app_slice(prefix, &store, &unit_class, &app),"spkHostSha256":runtime.spk_host_sha256}),
                 )
             }
             Request::Start { unit } => {
@@ -1201,7 +1280,13 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
         let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
         let cred = match peer_credentials(&stream) {
             Ok(cred) => cred,
-            Err(_) => continue,
+            Err(error) => {
+                broker.log(&json!({
+                    "at":SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                    "ok":false,"error":format!("peer credentials unavailable: {error}"),
+                }));
+                continue;
+            }
         };
         let mut line = Vec::new();
         let read = BufReader::new((&stream).take(MAX_REQUEST + 1)).read_until(b'\n', &mut line);
@@ -1244,6 +1329,31 @@ pub fn serve(config_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// HOT-PATH 2g: one hash per image identity; a rewritten image is a new identity and is hashed
+    /// (and refused against the old pin); a wrong pin against cached bytes is refused.
+    #[test]
+    fn pinned_executable_is_hashed_once_per_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("spk-pinned-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir).unwrap();
+        let image = dir.join("spk-host");
+        std::fs::write(&image, b"candidate image bytes v1").unwrap();
+        std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let pin = format!("{:x}", super::Sha256::digest(b"candidate image bytes v1"));
+        let before = super::PINNED_HASHES.load(std::sync::atomic::Ordering::Relaxed);
+        super::pinned_root_executable(&image, Some(&pin)).unwrap();
+        super::pinned_root_executable(&image, Some(&pin)).unwrap();
+        super::pinned_root_executable(&image, Some(&pin)).unwrap();
+        assert_eq!(super::PINNED_HASHES.load(std::sync::atomic::Ordering::Relaxed) - before, 1, "three checks, one hash");
+        let wrong = format!("{:x}", super::Sha256::digest(b"another pin"));
+        assert!(super::pinned_root_executable(&image, Some(&wrong)).is_err(), "the verdict is never cached");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&image, b"candidate image bytes v2 (longer)").unwrap();
+        assert!(super::pinned_root_executable(&image, Some(&pin)).is_err(), "a rewritten image is hashed again and refused");
+        assert_eq!(super::PINNED_HASHES.load(std::sync::atomic::Ordering::Relaxed) - before, 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
 
     #[test]
@@ -1259,7 +1369,7 @@ mod tests {
     #[test]
     fn spk_namespace_refuses_missing_world_namespace() {
         assert!(spk_namespace_paths(None).is_err());
-        assert!(ingest_arguments(None,Path::new("/operator/spk-host"),"hash",Path::new("/var/lib/minidregg/spk/inbox/grain-package.spk"),165536).is_err());
+        assert!(ingest_arguments(None,Path::new("/operator/spk-host"),"hash",Path::new("/var/lib/minidregg/spk/inbox/grain-package.spk"),165536,crate::materialize::ImportProfile::Standard).is_err());
     }
 
     #[test]
@@ -1269,11 +1379,11 @@ mod tests {
         assert_eq!(packages,root.join("packages"));
         assert_eq!(inbox,root.join("inbox"));
         let args=ingest_arguments(Some(root),Path::new("/root/candidate/spk-host"),"hash",
-            &inbox.join("grain-package.spk"),64010).unwrap();
+            &inbox.join("grain-package.spk"),64010,crate::materialize::ImportProfile::Standard).unwrap();
         assert_eq!(&args[..2],["--root","/var/lib/mini-bigstep-hbox-r2/spk"]);
         assert_eq!(args[4],"/var/lib/mini-bigstep-hbox-r2/spk/inbox/grain-package.spk");
         assert!(ingest_arguments(Some(root),Path::new("/root/spk-host"),"hash",
-            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010).is_err());
+            Path::new("/var/lib/minidregg/spk/inbox/package.spk"),64010,crate::materialize::ImportProfile::Standard).is_err());
     }
 
     #[test]
@@ -1301,6 +1411,9 @@ mod tests {
     #[test]
     fn protocol_refuses_unknown_verbs_and_fields() {
         assert!(serde_json::from_str::<Request>(
+            r#"{"verb":"ingest","store":"0123456789abcdef","app":"7","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","importProfile":"operator-appliance-v1"}"#
+        ).is_err());
+        assert!(serde_json::from_str::<Request>(
             r#"{"verb":"start","unit":"mini-spk-s0123456789abcdef-a1-g2.service"}"#
         )
         .is_ok());
@@ -1313,6 +1426,19 @@ mod tests {
             r#"{"verb":"install-unit","store":"0123456789abcdef","app":"7","generation":"2","unitText":"x"}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn operator_import_profile_reaches_helper_without_changing_package_coordinates() {
+        let root = Path::new("/var/lib/mini-spk-worlds/0123456789abcdef/spk");
+        let package = root.join("inbox/package.spk");
+        let args = ingest_arguments(Some(root), Path::new("/operator/spk-host"), "pin",
+            &package, 64010, crate::materialize::ImportProfile::OperatorAppliance).unwrap();
+        assert_eq!(&args[2..4], ["--import-profile", "operator-appliance-v1"]);
+        assert_eq!(args[4], "/operator/spk-host");
+        assert_eq!(args[6], package.to_str().unwrap());
+        assert_eq!(args[7], "64010");
+        assert!("unlimited".parse::<crate::materialize::ImportProfile>().is_err());
     }
 
     #[test]
@@ -1364,9 +1490,70 @@ mod tests {
             "0123456789abcdef-7701"
         );
         assert_eq!(
-            app_slice("mini", "0123456789abcdef", "7701"),
-            "s0123456789abcdef-mini-grains-a7701.slice"
+            app_slice("mini", "0123456789abcdef", &class("M").unwrap(), "7701"),
+            "s0123456789abcdef-mini-grains-M-a7701.slice"
         );
+    }
+
+    /// systemd nests a slice under the slice named by dropping its last dash
+    /// segment.
+    fn systemd_parent(slice: &str) -> String {
+        let stem = slice.strip_suffix(".slice").unwrap();
+        format!("{}.slice", stem.rsplit_once('-').unwrap().0)
+    }
+
+    /// Mirrors Kernel `ApplicationLifecycleCompletionReport.controlGroupBound` (323): the longest
+    /// control group a resident unit can have, built from the real naming functions at their
+    /// maximum components (10-digit uid, 16-hex Store tag, u64 app and generation: 20 digits).
+    #[test]
+    fn resident_control_group_stays_within_the_lean_bound() {
+        let (uid, st, big) = ("4294967295", "0123456789abcdef", "18446744073709551615");
+        let longest = CLASSES.iter().map(|c| {
+            let unit = format!("mini-spk-s{st}-a{big}-g{big}.service");
+            assert!(parse_resident_unit(&unit).is_some(), "the unit is a resident unit");
+            let path = format!("/user.slice/user-{uid}.slice/user@{uid}.service/s{st}.slice/s{st}-mini.slice/{}/{}/{}/{unit}",
+                grains_slice("mini", st), class_slice("mini", st, c), app_slice("mini", st, c, big));
+            assert!(path.split('/').all(|part| part.len() <= 255), "NAME_MAX");
+            path.len()
+        }).max().unwrap();
+        assert_eq!(longest, 323);
+        assert!(longest < 4096, "the control-group cap");
+        // the 260-byte group observed on dregg-build (app 9101, generation 2, uid 1000)
+        let seen = format!("/user.slice/user-1000.slice/user@1000.service/s{st}.slice/s{st}-mini.slice/{}/{}/{}/mini-spk-s{st}-a9101-g2.service",
+            grains_slice("mini", st), class_slice("mini", st, &class("S").unwrap()), app_slice("mini", st, &class("S").unwrap(), "9101"));
+        assert_eq!(seen.len(), 260);
+    }
+    /// The u64 poles of a coordinate: a namespace id (at least 2^63) and the largest u64 are admitted;
+    /// 2^64, a 21-digit string, a leading zero and zero are refused.
+    #[test]
+    fn coordinates_admit_exactly_the_positive_u64() {
+        for good in ["1", "999999999999999999", "13827490942341725565", "18446744073709551615"] { assert!(decimal(good), "{good}"); }
+        for bad in ["0", "01", "18446744073709551616", "100000000000000000000", "123456789012345678901", "", "-1", "1a"] { assert!(!decimal(bad), "{bad}"); }
+        assert!(parse_resident_unit("mini-spk-s0123456789abcdef-a13827490942341725565-g18446744073709551615.service").is_some());
+        assert!(parse_resident_unit("mini-spk-s0123456789abcdef-a18446744073709551616-g1.service").is_none());
+    }
+    #[test]
+    fn grain_class_slices_nest_by_class() {
+        let (p, st) = ("mini", "0123456789abcdef");
+        for (name, mem) in [("S", "512M"), ("M", "1G"), ("L", "2G")] {
+            // a small grain lands in S, a large in L: the class is the one the
+            // size class table names, read through `class`, never a default
+            let c = class(name).unwrap();
+            assert_eq!(c.memory_max, mem);
+            let app = app_slice(p, st, &c, "7701");
+            assert_eq!(app, format!("s{st}-mini-grains-{name}-a7701.slice"));
+            assert_eq!(systemd_parent(&app), class_slice(p, st, &c));
+            assert_eq!(class_slice(p, st, &c), format!("s{st}-mini-grains-{name}.slice"));
+            assert_eq!(systemd_parent(&class_slice(p, st, &c)), grains_slice(p, st));
+        }
+        // every class has its own slice, so no two classes share a quota
+        let mut names: Vec<_> = CLASSES.iter().map(|c| app_slice(p, st, c, "1")).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), CLASSES.len());
+        // there is no class-less size: an unknown class is refused, not defaulted
+        assert!(class("").is_err());
+        assert!(class("l").is_err());
     }
 }
 

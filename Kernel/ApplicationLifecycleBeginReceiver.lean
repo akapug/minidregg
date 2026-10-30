@@ -4,10 +4,31 @@ records a Mini-owned pending request only after ordinary current DRC mutation
 admission and a separately authorized, same-image package observation. It
 does not launch, attest, complete, or reconcile a physical process.
 -/
-import Kernel.ApplicationLifecycleBeginIngress
-import Kernel.PhysicalResourceReadGuard
-import Kernel.ApplicationDispatchManifest
-import Kernel.ResourceObservationAdmission
+module
+
+public import Kernel.ApplicationLifecycleBeginIngress
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.ApplicationDispatchManifest
+public import Kernel.ResourceObservationAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginReceiver
 
@@ -206,11 +227,11 @@ by DRC; the extra package guard is checked against this same old image.
 The new event and second nullifier distinguish an executable pending request
 from a generic begin mutation. The source charge replaces ordinary turn bytes
 with this full ingress, adds one authorized package-observation incidence and
-proof unit, and counts the one extra read guard. Ordinary DRC `storageBytes`
-counts only post-write bytes; this special source tariff additionally counts
-the ingress and new nullifier bytes. Neither ordinary nor special charge is a
-claim to measure every physical journal byte. No external physical effect is
-charged, because none has occurred. -/
+proof unit, and counts the one extra read guard. Its `storageBytes` is the
+World's storage of this intent (`DeployedCharge.storageCharge`: the new values
+it writes and the event it retains, which carries the full ingress); the
+second nullifier adds nothing. No external physical effect is charged,
+because none has occurred. -/
 def intent {F : Type} [Field F] [DecidableEq F]
     {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
     {ambient : Ambient} {ground : Ground deployment}
@@ -242,16 +263,14 @@ def intent {F : Type} [Field F] [DecidableEq F]
       readGuards := ordinary.readGuards ++ [packageGuard source packageBefore]
       nullifiers := ordinary.nullifiers ++
         [stableNullifier deployment.domain profile.semantics source]
-      exactCharge := fun dimension => match dimension with
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
         | .incidences => ordinary.exactCharge .incidences + 1
         | .turnBytes => ingress.canonicalBytes.length
         | .witnessBytes => ingress.canonicalBytes.length
         | .proofWork => ordinary.exactCharge .proofWork + 1
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 1
-        | .storageBytes => ordinary.exactCharge .storageBytes +
-            ingress.canonicalBytes.length +
-            (stableNullifier deployment.domain profile.semantics source).canonicalBytes.length
-        | other => ordinary.exactCharge other
+        | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (event ingress)
+        | other => ordinary.exactCharge other)).toCharge
       event := event ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound

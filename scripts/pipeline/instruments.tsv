@@ -1,0 +1,9 @@
+# scripts/pipeline/instruments.tsv -- the files an instrument's SELF-TESTS depend on (merge-gate-checks.sh).
+# NAME<TAB>git pathspecs, space separated: the instrument's own scripts and programs, and every module its plants
+# patch or name. The gate runs NAME's self-tests only when FROM..TO touched one of them, or the gate itself
+# (merge-gate-checks.sh, this table); otherwise it prints "NAME: instrument unchanged since <sha>: self-tests skipped"
+# and runs the instrument alone. A self-test checks the INSTRUMENT (can it still see a planted fault?); an unchanged
+# instrument over unchanged plant targets gives the same answer it gave at <sha>.
+# Not listed, so always run: TokenCensus's per-row plants. They run inside `lake build TokenCensus`, whose trace does
+# not see an environment switch: a build that skipped them would leave an olean a later planting build reuses.
+kernel-transport	scripts/check-kernel-transport.sh scripts/KernelTransportCensus.lean Kernel/NativeHost.lean Kernel/NativeHostContext.lean Kernel/NativeHostGenesis.lean

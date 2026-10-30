@@ -19,14 +19,33 @@ authenticated authorization state, verifies its membership under the policy
 root, and requires the witness to name that address.  This module owns the
 canonical `PredCompile` implementation of that committed verifier.
 -/
-import Compiler.PredCompile
-import Compiler.Tower256ConcreteBackend
-import Compiler.Sp800185Cshake256
-import Theory.PolicyInstall
-import Pred.LawComposition
-import Theory.ObjectAudience
-import Theory.TypedAuthorization
-import Kernel.MultiCellHyperedge
+module
+
+public import Compiler.PredCompile
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.Sp800185Cshake256
+public import Theory.PolicyInstall
+public import Pred.LawComposition
+public import Theory.ObjectAudience
+public import Theory.TypedAuthorization
+public import Kernel.MultiCellHyperedge
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CanonicalPolicyAdmission
 
@@ -391,6 +410,29 @@ def compiledLawAccepts {F : Type} [Field F] [DecidableEq F]
   decide (systemAccepts
     (stepAsg witness.oldState witness.newState witness.auxiliary)
     (lower profile.compiler predicate))
+
+/-- `compiledLawAccepts` as compiled: the two state indexes (`PredCompile.indexState`) are
+built once per check. They are bound here, in a definition whose result is a `Bool`: a
+definition whose result is a function is eta-expanded by the compiler, which moves such
+bindings under the lambda, so they would run once per wire read. -/
+def compiledLawAcceptsFast {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F) (predicate : Pred)
+    (witness : CompiledPolicyWitness F) : Bool :=
+  let oldIndexed := indexState witness.oldState
+  let newIndexed := indexState witness.newState
+  supported profile.compiler predicate &&
+  inputsInRange profile.compiler predicate witness.oldState witness.newState &&
+  decide (castInjOn F (intsOf predicate witness.oldState witness.newState)) &&
+  decide (systemAccepts
+    (stepAsgIndexed oldIndexed newIndexed witness.auxiliary)
+    (lower profile.compiler predicate))
+
+@[csimp] theorem compiledLawAccepts_eq_fast :
+    @compiledLawAccepts = @compiledLawAcceptsFast := by
+  funext F _ _ profile predicate witness
+  unfold compiledLawAccepts compiledLawAcceptsFast
+  dsimp only
+  rw [stepAsgIndexed_eq]
 
 theorem compiledLawAccepts_sound {F : Type} [Field F] [DecidableEq F]
     (profile : PolicyCompilerProfile F) (predicate : Pred)

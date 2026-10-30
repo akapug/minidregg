@@ -1,6 +1,6 @@
 # Launch-bound native receiver source checkpoint (2026-09-27)
 
-These new modules were compiled serially in the independent hbox overlay `/tank/dregg-build/minidregg-55d3868-launch-v2-narrow`, over the committed typed v3 Replay source (commit `a2cce78`, SHA-256 `2a1bdafde58aef3aa5c8cbc8c9902abeea23309a6f5b8f62d99db2b628426ea2`) and the immutable prefix-292 dependencies. The three direct `lake env lean -o .lake/build/lib/lean/Kernel/MODULE.olean Kernel/MODULE.lean` checks exited 0 under one atomically claimed seat with `LEAN_NUM_THREADS=2`. Each corresponding `/tmp/mini-v3-MODULE.log` is empty (SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`).
+These new modules were compiled serially in the independent hbox overlay `/tank/dregg-build/minidregg-55d3868-launch-v2-narrow`, over the committed typed v3 Replay source (commit `a2cce78`, SHA-256 `2a1bdafde58aef3aa5c8cbc8c9902abeea23309a6f5b8f62d99db2b628426ea2`) and the immutable prefix-292 dependencies. The three direct `lake env lean -o .lake/build/lib/lean/Kernel/MODULE.olean Kernel/<Module>.lean` checks exited 0 under one atomically claimed seat with `LEAN_NUM_THREADS=2`. Each corresponding `/tmp/mini-v3-MODULE.log` is empty (SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`).
 
 | Module | Source SHA-256 | OLean SHA-256 |
 | --- | --- | --- |

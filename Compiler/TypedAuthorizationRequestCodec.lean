@@ -3,11 +3,32 @@
 
 All request consumers use the source-owned RequestWire projection, including
 resource kind and explicit policy revision. Typed and existential codecs share
-this one representation. Exact prefix re-encoding rejects noncanonical natural
-spellings; kind mismatch and omitted revision are refused, never defaulted.
+this one representation. Every stream decoder is canonical by construction
+(the natural codec refuses leading zeros and the word, kind and verb decoders
+are partial inverses), so no prefix is re-encoded; kind mismatch and omitted
+revision are refused, never defaulted.
 -/
-import Compiler.Tower256ConcreteBackend
-import Theory.AuthorizationDeclaration
+module
+
+public import Compiler.Tower256ConcreteBackend
+public import Theory.AuthorizationDeclaration
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.TypedAuthorizationRequestCodec
 
@@ -48,53 +69,37 @@ abbrev requestWireOfWords_exact :=
 abbrev requestWords_injective :=
   Minidregg.Theory.AuthorizationDeclaration.requestWords_injective
 
-/-- The exact consumed prefix is checked without needing value equality. -/
-private def canonicalStream {α : Type} (codec : StreamCodec α) : StreamCodec α where
-  encode := codec.encode
-  decodePrefix bytes :=
-    match codec.decodePrefix bytes with
-    | none => none
-    | some (value, suffix) =>
-      if bytes = codec.encode value ++ suffix then some (value, suffix) else none
-  decodePrefix_encode := by
-    intro value suffix
-    simp [codec.decodePrefix_encode]
+/-! ## The request words are a canonical spelling
 
-private theorem canonicalStream_exact {α : Type} (codec : StreamCodec α)
-    {bytes suffix : List UInt8} {value : α}
-    (decoded : (canonicalStream codec).decodePrefix bytes = some (value, suffix)) :
-    bytes = (canonicalStream codec).encode value ++ suffix := by
-  cases parsed : codec.decodePrefix bytes with
-  | none => simp [canonicalStream, parsed] at decoded
-  | some pair =>
-    rcases pair with ⟨actual, rest⟩
-    simp only [canonicalStream, parsed] at decoded
-    split at decoded
-    next exactBytes =>
-      cases Option.some.inj decoded
-      exact exactBytes
-    next => contradiction
+`decodeResourceKind`, `decodeVerb` and `decodeRequest` are partial inverses of
+their encoders: whatever they accept is the tag of what they return. The
+stream codecs below are therefore canonical by construction, with no
+re-encode of the consumed prefix. -/
 
-private theorem canonicalStream_whole {α : Type} (codec : StreamCodec α)
-    {bytes : List UInt8} {value : α}
-    (decoded : (canonicalStream codec).toLawful.decode bytes = some value) :
-    (canonicalStream codec).encode value = bytes := by
-  unfold StreamCodec.toLawful at decoded
-  cases parsed : (canonicalStream codec).decodePrefix bytes with
-  | none => simp [parsed] at decoded
-  | some pair =>
-    rcases pair with ⟨actual, rest⟩
-    simp only [parsed] at decoded
-    change (if rest = [] then some actual else none) = some value at decoded
-    split at decoded
-    next empty =>
-      have same : actual = value := Option.some.inj decoded
-      subst actual
-      have exactBytes := canonicalStream_exact codec parsed
-      simpa only [empty, List.append_nil] using exactBytes.symm
-    next => contradiction
+theorem resourceKindTag_of_decode {tag : Nat} {kind : ResourceKind}
+    (decoded : decodeResourceKind tag = some kind) : resourceKindTag kind = tag := by
+  unfold decodeResourceKind at decoded
+  split at decoded <;> first | cases decoded; rfl | cases decoded
 
-private def rawRequestWireStream : StreamCodec RequestWire where
+theorem verbTag_of_decode {kind : ResourceKind} {tag : Nat} {verb : Verb kind}
+    (decoded : decodeVerb kind tag = some verb) : verbTag verb = tag := by
+  unfold decodeVerb at decoded
+  split at decoded <;> first | cases decoded; rfl | cases decoded
+
+theorem encodeRequest_of_decode {wire : RequestWire} {request : SomeRequest}
+    (decoded : decodeRequest wire = some request) : encodeRequest request = wire := by
+  cases kindOk : decodeResourceKind wire.resourceKind with
+  | none => simp [decodeRequest, kindOk] at decoded
+  | some kind =>
+    cases verbOk : decodeVerb kind wire.verb with
+    | none => simp [decodeRequest, kindOk, verbOk] at decoded
+    | some verb =>
+      simp only [decodeRequest, kindOk, verbOk, bind, Option.bind, Option.some.injEq] at decoded
+      subst decoded
+      cases wire
+      simp only [encodeRequest, resourceKindTag_of_decode kindOk, verbTag_of_decode verbOk]
+
+def requestWireStream : StreamCodec RequestWire where
   encode request := (StreamCodec.list StreamCodec.nat).encode (requestWords request)
   decodePrefix bytes := do
     let (count, afterCount) ← StreamCodec.nat.decodePrefix bytes
@@ -111,14 +116,36 @@ private def rawRequestWireStream : StreamCodec RequestWire where
       requestWireOfWords, Minidregg.Theory.AuthorizationDeclaration.requestWords,
       Minidregg.Theory.AuthorizationDeclaration.requestWordCount,
       Minidregg.Theory.AuthorizationDeclaration.requestWireOfWords]
-
-def requestWireStream : StreamCodec RequestWire := canonicalStream rawRequestWireStream
+  encode_decodePrefix := by
+    intro bytes request suffix decoded
+    cases countOk : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [countOk] at decoded
+    | some countPair =>
+      obtain ⟨count, afterCount⟩ := countPair
+      by_cases exact : count = requestWordCount
+      · subst exact
+        cases wordsOk : StreamCodec.decodeMany StreamCodec.nat requestWordCount afterCount with
+        | none => simp [countOk, wordsOk] at decoded
+        | some wordsPair =>
+          obtain ⟨words, rest⟩ := wordsPair
+          cases wireOk : requestWireOfWords words with
+          | none => simp [countOk, wordsOk, wireOk] at decoded
+          | some wire =>
+            simp only [countOk, wordsOk, wireOk, bind, Option.bind, if_true,
+              Option.some.injEq, Prod.mk.injEq] at decoded
+            obtain ⟨rfl, rfl⟩ := decoded
+            obtain ⟨length, encoded⟩ := StreamCodec.encodeMany_decodeMany _ _ _ _ _ wordsOk
+            have spelled : requestWords wire = words := requestWireOfWords_exact wireOk
+            change StreamCodec.nat.encode (requestWords wire).length ++
+              StreamCodec.encodeMany StreamCodec.nat (requestWords wire) ++ rest = bytes
+            rw [spelled, List.append_assoc, encoded, length]
+            exact StreamCodec.nat.encode_decodePrefix _ _ _ countOk
+      · simp [countOk, exact] at decoded
 
 theorem requestWireStream_wrong_count (count : Nat) (payload : List UInt8)
     (wrong : count ≠ requestWordCount) :
     requestWireStream.decodePrefix (StreamCodec.nat.encode count ++ payload) = none := by
-  simp [requestWireStream, canonicalStream, rawRequestWireStream,
-    StreamCodec.nat.decodePrefix_encode, wrong]
+  simp [requestWireStream, StreamCodec.nat.decodePrefix_encode, wrong]
 
 /-- The preceding request vocabulary cannot acquire a fabricated zero revision. -/
 theorem requestWireStream_rejects_omitted_revision (payload : List UInt8) :
@@ -130,14 +157,14 @@ def requestWireCodec : LawfulCodec RequestWire := requestWireStream.toLawful
 theorem requestWireStream_canonical {bytes suffix : List UInt8} {request : RequestWire}
     (decoded : requestWireStream.decodePrefix bytes = some (request, suffix)) :
     bytes = requestWireStream.encode request ++ suffix :=
-  canonicalStream_exact rawRequestWireStream decoded
+  (requestWireStream.encode_decodePrefix _ _ _ decoded).symm
 
 theorem requestWireCodec_canonical {bytes : List UInt8} {request : RequestWire}
     (decoded : requestWireCodec.decode bytes = some request) :
     requestWireCodec.encode request = bytes :=
-  canonicalStream_whole rawRequestWireStream decoded
+  requestWireStream.toLawful_canonical _ _ decoded
 
-private def rawSomeRequestStream : StreamCodec SomeRequest where
+def someRequestStream : StreamCodec SomeRequest where
   encode request := requestWireStream.encode (encodeRequest request)
   decodePrefix bytes := do
     let (wire, suffix) ← requestWireStream.decodePrefix bytes
@@ -146,28 +173,40 @@ private def rawSomeRequestStream : StreamCodec SomeRequest where
   decodePrefix_encode := by
     intro request suffix
     simp [requestWireStream.decodePrefix_encode, decodeRequest_encodeRequest]
-
-def someRequestStream : StreamCodec SomeRequest := canonicalStream rawSomeRequestStream
+  encode_decodePrefix := by
+    intro bytes request suffix decoded
+    cases wireOk : requestWireStream.decodePrefix bytes with
+    | none => simp [wireOk] at decoded
+    | some wirePair =>
+      obtain ⟨wire, rest⟩ := wirePair
+      cases requestOk : decodeRequest wire with
+      | none => simp [wireOk, requestOk] at decoded
+      | some decodedRequest =>
+        simp only [wireOk, requestOk, bind, Option.bind, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        change requestWireStream.encode (encodeRequest decodedRequest) ++ rest = bytes
+        rw [encodeRequest_of_decode requestOk]
+        exact requestWireStream.encode_decodePrefix _ _ _ wireOk
 
 def someRequestCodec : LawfulCodec SomeRequest := someRequestStream.toLawful
 
 theorem someRequestStream_canonical {bytes suffix : List UInt8} {request : SomeRequest}
     (decoded : someRequestStream.decodePrefix bytes = some (request, suffix)) :
     bytes = someRequestStream.encode request ++ suffix :=
-  canonicalStream_exact rawSomeRequestStream decoded
+  (someRequestStream.encode_decodePrefix _ _ _ decoded).symm
 
 theorem someRequestCodec_canonical {bytes : List UInt8} {request : SomeRequest}
     (decoded : someRequestCodec.decode bytes = some request) :
     someRequestCodec.encode request = bytes :=
-  canonicalStream_whole rawSomeRequestStream decoded
+  someRequestStream.toLawful_canonical _ _ decoded
 
 theorem someRequestStream_rejects_wire (wire : RequestWire) (suffix : List UInt8)
     (invalid : decodeRequest wire = none) :
     someRequestStream.decodePrefix (requestWireStream.encode wire ++ suffix) = none := by
-  simp [someRequestStream, canonicalStream, rawSomeRequestStream,
-    requestWireStream.decodePrefix_encode, invalid]
+  simp [someRequestStream, requestWireStream.decodePrefix_encode, invalid]
 
-private def rawRequestStreamFor (kind : ResourceKind) : StreamCodec (Request kind) where
+def requestStreamFor (kind : ResourceKind) : StreamCodec (Request kind) where
   encode request := someRequestStream.encode ⟨kind, request⟩
   decodePrefix bytes := do
     let (⟨actualKind, request⟩, suffix) ← someRequestStream.decodePrefix bytes
@@ -175,9 +214,19 @@ private def rawRequestStreamFor (kind : ResourceKind) : StreamCodec (Request kin
   decodePrefix_encode := by
     intro request suffix
     simp [someRequestStream.decodePrefix_encode]
-
-def requestStreamFor (kind : ResourceKind) : StreamCodec (Request kind) :=
-  canonicalStream (rawRequestStreamFor kind)
+  encode_decodePrefix := by
+    intro bytes request suffix decoded
+    cases someOk : someRequestStream.decodePrefix bytes with
+    | none => simp [someOk] at decoded
+    | some somePair =>
+      obtain ⟨⟨actualKind, actual⟩, rest⟩ := somePair
+      by_cases same : actualKind = kind
+      · subst same
+        simp only [someOk, bind, Option.bind, dite_true, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        exact someRequestStream.encode_decodePrefix _ _ _ someOk
+      · simp [someOk, same] at decoded
 
 def requestCodecFor (kind : ResourceKind) : LawfulCodec (Request kind) :=
   (requestStreamFor kind).toLawful
@@ -186,20 +235,19 @@ theorem requestStreamFor_canonical (kind : ResourceKind)
     {bytes suffix : List UInt8} {request : Request kind}
     (decoded : (requestStreamFor kind).decodePrefix bytes = some (request, suffix)) :
     bytes = (requestStreamFor kind).encode request ++ suffix :=
-  canonicalStream_exact (rawRequestStreamFor kind) decoded
+  ((requestStreamFor kind).encode_decodePrefix _ _ _ decoded).symm
 
 theorem requestCodecFor_canonical (kind : ResourceKind)
     {bytes : List UInt8} {request : Request kind}
     (decoded : (requestCodecFor kind).decode bytes = some request) :
     (requestCodecFor kind).encode request = bytes :=
-  canonicalStream_whole (rawRequestStreamFor kind) decoded
+  (requestStreamFor kind).toLawful_canonical _ _ decoded
 
 theorem requestStreamFor_wrong_kind {actual expected : ResourceKind}
     (request : Request actual) (suffix : List UInt8) (different : actual ≠ expected) :
     (requestStreamFor expected).decodePrefix
       (someRequestStream.encode ⟨actual, request⟩ ++ suffix) = none := by
-  simp [requestStreamFor, canonicalStream, rawRequestStreamFor,
-    someRequestStream.decodePrefix_encode, different]
+  simp [requestStreamFor, someRequestStream.decodePrefix_encode, different]
 
 abbrev requestCodecVersion := Minidregg.Theory.AuthorizationDeclaration.requestCodecVersion
 

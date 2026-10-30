@@ -1,0 +1,115 @@
+{
+  "adapter_files": {
+    "README.md": "5b563cb330a26ec87b1cef0e0c115f80e4e4093068a673a0501adfa0b890712d",
+    "builder_operations.py": "fddec537922f9f072bae9bf1e8af6adbea9c2145c822f4846496ca19519b0c5d",
+    "component_operations.py": "e4cee111efb9ca72bf0417d4c28a94eb38a1355857fb8b148f99bfc9d086e897",
+    "operations.py": "7a2f53fcc72ab1b0715456c8b31e5eb9a95f588e4f33a29f5c1ba53d70f07d61",
+    "serve.py": "9c0bd9bfb82372187609aa81e15faedf29f56dd7fd6216237fb6682d3dff97d8",
+    "visual_operations.py": "c9106d91f333b9eb395c3a87e6e4b93085e29b56db651604b504bd97a20f69d6",
+    "workbench_operations.py": "387cdb94d4afdb8ebe5e4761d72078b56a22781424948cc3a2c30bf73394cf49"
+  },
+  "app_id": "ephaf4h4cx8f9s36hmukm4yzkznyhqjhvj8efp3at9cru2zn10mh",
+  "app_version": 5,
+  "appliance_receipt_sha256": "05c15112339540e3d1329babbbd86f231c2a91722b360379090ddf98b61092fa",
+  "artifact": "oracle-runtime-v5.spk",
+  "bridge_source_files": {
+    "native/oracle-appliance/Cargo.toml": "3af88acc67120c6924722eead06e10a4dafb3f8c17863739b98bd7af23e6b6bf",
+    "native/oracle-appliance/src/lib.rs": "4aecec3143c02b543ea0499e62f41b15d288381bb9a625e1e14f30fa66186536",
+    "native/oracle-appliance/src/main.rs": "e8ad389c09415592c78de576053ed7e3b02b6e4cbb6f19e032b3831521e23ca6",
+    "native/oracle-appliance/tests/bridge.rs": "5db7d86d3b1ea87713b32b77e1bd8b5db10979ea6cb28f4dd658dee7aa755a33",
+    "native/spk-host/src/http_response.rs": "1158fb8e2bc82922d56732b5b6a3e952a5b47082ec2d88426e9041ec806ca2da"
+  },
+  "changes_from_v4": [
+    "Discoverable structured operations and invocation through the packaged bridge; 65536-byte request ceiling.",
+    "Core query, Workbench and sibling component providers are pinned in the candidate receipt.",
+    "Pillow11.3.0 pinned Linux wheel and image execution probes in a new immutable rootfs.",
+    "Repaired date/premise/head behavior and updated date_precision_v1.json remain runtime package members."
+  ],
+  "component_manifests": {
+    "artist": "27e4bf681ecd4555c833644a07bf69755c9598c55a36a094276760f9806649df",
+    "chameleon": "769eef0641f2f27ca0e49aa90b04ecbfd5409d8b91cc4f9305c2ccdca0e5cf7f",
+    "deepspace": "2930f52b2ff0b0872b9174ebb78f9a8117a245a17c7f645eb0c58e52ac030b0c",
+    "infrastructure": "eb1cdda87854cdfe9c5501af42c7fdcf481c4718724e27e356d131d211fa4396",
+    "operations": "a231f9bf4e2af1cbfcbb74d07ca9963034a28ee1cc4d14a6e4466dbfa284b176",
+    "trafficcop": "384e33806b60e56091e03abdb060d46d069ad7413e7b538afaa689c81470c518",
+    "vision": "81def1b3670ecac01333b76271b048ade982226d40fa8273d4c9a6f8691bc705",
+    "workbench": "b6d52fe3013dba27dd5d24c1f4a5a5d88f076e831636460c00534b5acf98dc1b"
+  },
+  "date": "2026-10-27",
+  "date_sidecar": {
+    "executable": false,
+    "kind": "file",
+    "sha256": "e986e9b1351f36b68c0ad8649b25f28768efb943b4ce87f95896f6fa03d8f59e",
+    "size": 2627008
+  },
+  "decoded_bytes": 519614440,
+  "empty_files_preserved": 239,
+  "exact_inventory_verified": true,
+  "inspector_sha256": "4768ac187a3e5a4a58ae8f59a497b3f706306d13c7616efc8e228bd925644795",
+  "integrated_source_commit": "43948a29dd4d93e40243c87f99086cb91b482386",
+  "kernel_overlay_binaries": {
+    "earth": "61646341c4baa7b68eef779baa1c67e9faa6f27f9ec2ac233bd5fca00d87674e",
+    "space": "63f5248b8f8beac41fb791d791f6a7038e0fd7c0ae141dced5e6d450d2a9c667"
+  },
+  "linux_bridge_cargo_lock_sha256": "5af000d835e7d93cd2ee678612475edd0332ab1d54ae5ff5c244423c15948f78",
+  "linux_bridge_sha256": "fa7443ef8c9de087ecd727e438dea83bfb76b0c71e338c02e6436a30e8d2669b",
+  "members": 15358,
+  "mini_source_revision_at_staging": "5e6d13d984cf8b632498e4fec0528f4f4002d5c9",
+  "oracle_runtime_source_bytes": 90144917,
+  "package_inventory_sha256": "6a435b25566f1f490be089a9c856edb03a774a765436ef959ec8050b2126ac60",
+  "packer_sha256": "5455f7cdbeac38e3887408f411c27f6d6614ad45b9cb2fdf641d4ccb60c762f7",
+  "patches": [
+    {
+      "name": "oracle7-slim-4.9-correctness.patch",
+      "sha256": "feb44d407634699545634350281e530b1bcc0ecf7bd951bdfc01655dbf99ecd6"
+    },
+    {
+      "name": "oracle7-slim-4.9-usage.patch",
+      "sha256": "1a2f69d0bdfe112f67ac01557ddb1c923e5e6c6a1fbaab1097852ade20e3e625"
+    },
+    {
+      "name": "oracle7-slim-4.9-dates-mars.patch",
+      "sha256": "963b1f91ba8330b2cd1a099ddf72df05813c94a0156931ed40b257b13e93a57c"
+    },
+    {
+      "name": "oracle7-slim-4.9-operations-v3.patch",
+      "sha256": "9d83ee0122f6897c7e901df6d72137060d09a75c251120a02e3209cbbd097350"
+    }
+  ],
+  "post_pack_profile": "standard-v1",
+  "public_key_hex": "6d60a712045f50e4e06684f52993df97e9e85a30dc50d7546aca577d0bf40827",
+  "raw_bytes": 96985616,
+  "raw_sha256": "eabd644ffabd7f21ffd9a6e44e6d5d461cb4b1dd2c3db2fcfcdad121de96295d",
+  "recipe_files": {
+    "deploy/oracle/data-selection-v5.json": "c2e3c87e801e51e6fc2cad255d37635b0e11a0ed887e7bc6a3509d7fdb0e5bba",
+    "deploy/oracle/launch.py": "dec8b8ac63e8801e17ce1cacd3fab8ab73762c21926a71e0089dbec31ce61642",
+    "deploy/oracle/pack/Cargo.lock": "73686a4d35eafe784d583e218ca46c401e23e8917a01a6894c53c73e5a93a209",
+    "deploy/oracle/pack/Cargo.toml": "fe7027dd63d04a756d9f33b6dd20f18c16b621a2f419359ab55f7b49a9e36e01",
+    "deploy/oracle/pack/src/main.rs": "34e785be889e2a9315a74d09c1497864407b71d5ed950c84ae61583903d01d1f",
+    "deploy/oracle/rootfs/check-visual.py": "6870d276100f1fd32aaa98526924041bf76f7549e7dc6c5e9e99b88738169625",
+    "deploy/oracle/rootfs/inputs-v5.lock.json": "50ae6804cbc5c1758c27f9ee93e033ed4198e167eda741a0347c9a6bafce9d5c",
+    "deploy/oracle/rootfs/requirements-v5.lock": "a1eecd9162f0f2923c5b4fab016ab5f70f0dc34226598b15c0f66dbafef96705",
+    "deploy/oracle/stage.py": "9d2eb413daf7131d8afcfd7e99b0e7f5aa5423954146cea974ec2b13365ead06"
+  },
+  "required_host_fix": "Native HTTP serializer must preserve validated x-sandstorm-app-http-status; bridge source tests include actual host serialization.",
+  "rootfs_archive_sha256": "9341c4d75b640bbaaae9c88ccdea5a05371fd0a705d124dc05b973b4e9b6ebb2",
+  "rootfs_inventory_sha256": "0d97d99485b4bd33d154e8a29c13f025a6c621b41b369dde41fac0f7f086ee6b",
+  "rootfs_recipe_receipt_sha256": "fbf1a44b619e2de8081f6521aa012f898174f5808745af9b45dde34101bfdd2d",
+  "schema": "oracle-shared-runtime-receipt-v1",
+  "scope": "Signed runtime package byte identity and composition. Shared data publication and Mini admission/receiving acceptance have separate receipts; no specialist panel or public-deployment claim.",
+  "shared_data_bytes": 15046949326,
+  "shared_data_files": 26,
+  "shared_data_inventory_sha256": "32bb3cf1a6337ee2c7b6ec902bb5bfdff11ba1fd5f1fa3b730dc269431b27d0a",
+  "signature_verified": true,
+  "source_revision": "083e3a6c0e2cfc131e62bdc16cb4ec1346194635",
+  "source_revision_semantics": "Base checkout recorded during staging; exact working source overrides are pinned in bridge_source_files and recipe_files.",
+  "stage_sha256": "de6863f1c89261f932cfc74af24689f3bb79e347816d05d671e4e880741a54da",
+  "tests": {
+    "python_stage_lifecycle": 10,
+    "rootfs_elf_failures": 0,
+    "rootfs_elf_files": 1010,
+    "rootfs_visual_probe": "PNG/JPEG decode, NumPy pixels, Lanczos resize, Gaussian blur, alpha composite and PNG encode passed",
+    "rust_bridge_linux": 9,
+    "rust_host_http_response_included_linux": 8
+  }
+}

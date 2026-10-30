@@ -16,9 +16,29 @@ The former use one cSHAKE domain for durable CAS; the latter remain the exact
 selected schema materializer's roots. No equality between those functions is
 postulated.
 -/
-import Theory.ResourceBirth
-import Compiler.CredentialAuthorityEntryCodec
-import Compiler.Sp800185Cshake256
+module
+
+public import Theory.ResourceBirth
+public import Compiler.CredentialAuthorityEntryCodec
+public import Compiler.Sp800185Cshake256
+public import Compiler.CompiledListOps
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ResourceBirthCodec
 
@@ -35,23 +55,6 @@ open Minidregg.Compiler.CredentialAuthorityEntryCodec
 set_option autoImplicit false
 
 /-! ## Exact canonical transport -/
-
-/-- Compare two byte lists in tail position, avoiding the recursive list
-equality call chain on large native envelopes. -/
-def bytesEqual : List UInt8 → List UInt8 → Bool
-  | [], [] => true
-  | left :: lefts, right :: rights =>
-      if left = right then bytesEqual lefts rights else false
-  | _, _ => false
-
-theorem bytesEqual_eq_true_iff (left right : List UInt8) :
-    bytesEqual left right = true ↔ left = right := by
-  induction left generalizing right with
-  | nil => cases right <;> simp [bytesEqual]
-  | cons left lefts ih =>
-      cases right with
-      | nil => simp [bytesEqual]
-      | cons right rights => simp [bytesEqual, ih]
 
 def strictCodec {α : Type} (codec : LawfulCodec α) : LawfulCodec α where
   encode := codec.encode
@@ -101,6 +104,20 @@ def packedCellStream (registry : TypeRegistry Digest) :
   decodePrefix_encode := by
     intro cell suffix
     simp [bytesStream.decodePrefix_encode, PackedCell.decode_bytes]
+  encode_decodePrefix := by
+    intro bytes cell suffix decoded
+    cases ok : bytesStream.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨payload, rest⟩ := pair
+      cases unpacked : PackedCell.decode registry payload with
+      | none => simp [ok, unpacked] at decoded
+      | some decodedCell =>
+        simp only [ok, unpacked, bind, Option.bind, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PackedCell.bytes_of_decode registry unpacked]
+        exact bytesStream.encode_decodePrefix _ _ _ ok
 
 def resourceKindStream : StreamCodec ResourceKind where
   encode
@@ -341,7 +358,10 @@ def rawCodec : LawfulCodec (LifecycleImage registry) where
   decode := rawDecode registry
   decode_encode := rawDecode_bytes registry
 
-def codec : LawfulCodec (LifecycleImage registry) := strictCodec (rawCodec registry)
+/-- The three tagged images, the live one over the canonical packed-cell
+decoder (`PackedCell.bytes_of_decode`): canonical without a re-encode
+(`decode_canonical`). -/
+def codec : LawfulCodec (LifecycleImage registry) := rawCodec registry
 
 theorem decode_encode (image : LifecycleImage registry) :
     (codec registry).decode ((codec registry).encode image) = some image :=
@@ -349,8 +369,16 @@ theorem decode_encode (image : LifecycleImage registry) :
 
 theorem decode_canonical {encoded : List UInt8} {image : LifecycleImage registry}
     (accepted : (codec registry).decode encoded = some image) :
-    bytes registry image = encoded :=
-  strictCodec_canonical (rawCodec registry) accepted
+    bytes registry image = encoded := by
+  change rawDecode registry encoded = some image at accepted
+  unfold rawDecode at accepted
+  split at accepted
+  · cases accepted; rfl
+  · cases accepted; rfl
+  · rename_i payload
+    obtain ⟨cell, decoded, rfl⟩ := Option.map_eq_some_iff.mp accepted
+    simp [bytes, PackedCell.bytes_of_decode registry decoded]
+  · cases accepted
 
 def view (directory : Directory Nat registry) (cellId : Nat) : LifecycleImage registry :=
   match directory.slots cellId with
@@ -662,6 +690,32 @@ theorem ofRows_view (rows : Rows registry)
           simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot, wasUsed]
       | live cell => simp [LifecycleImage.view, ofRows, found, LifecycleImage.slot]
 
+/-- `ofRows` as compiled: the rows are hashed into an identifier table once, so
+a slot read is a table probe instead of a `List.lookup` over every row, and the
+used set is a hashed dedup instead of `List.toFinset`'s quadratic one. -/
+def ofRowsVia (rows : Rows registry) (table : Std.HashMap Nat (LifecycleImage registry))
+    (exact : ∀ id, table[id]? = rows.lookup id) : Directory Nat registry where
+  slots id := LifecycleImage.slot registry (table[id]?.getD .fresh)
+  used := CompiledListOps.usedSet
+    ((rows.filter fun row => LifecycleImage.everUsed registry row.2).map Prod.fst)
+  present_used := by
+    intro id cell present
+    rw [exact] at present
+    rw [CompiledListOps.usedSet_eq]
+    exact (ofRows registry rows).present_used present
+
+def ofRowsFast (rows : Rows registry) : Directory Nat registry :=
+  ofRowsVia registry rows (CompiledListOps.rowTable rows) (CompiledListOps.rowTable_get? rows)
+
+@[csimp] theorem ofRows_eq_fast : @ofRows = @ofRowsFast := by
+  funext registry rows
+  unfold ofRowsFast ofRowsVia ofRows
+  congr 1
+  · funext id
+    rw [CompiledListOps.rowTable_get?]
+  · rw [CompiledListOps.usedSet_eq]
+    rfl
+
 def decodeRows : List (Nat × List UInt8) -> Option (Rows registry)
   | [] => some []
   | (identifier, bytes) :: rest => do
@@ -704,6 +758,22 @@ fresh; tombstones enter the permanent used set. -/
 def decode (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
   let rows ← decodeRows registry input
   if (rows.map Prod.fst).Nodup then some (ofRows registry rows) else none
+
+/-- `decode` as compiled: the identity check is one hashed pass (`nodupNat_iff`). -/
+def decodeFast (input : List (Nat × List UInt8)) : Option (Directory Nat registry) := do
+  let rows ← decodeRows registry input
+  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (ofRows registry rows) else none
+
+@[csimp] theorem decode_eq_fast : @decode = @decodeFast := by
+  funext registry input
+  unfold decode decodeFast
+  cases decodeRows registry input with
+  | none => rfl
+  | some rows =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      by_cases unique : (rows.map Prod.fst).Nodup
+      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
+      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
 
 theorem decode_exact {input : List (Nat × List UInt8)} {directory : Directory Nat registry}
     (decoded : decode registry input = some directory) (id : Nat) :

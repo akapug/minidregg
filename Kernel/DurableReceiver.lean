@@ -11,7 +11,26 @@ controller-bound `DataIntent`. Decoding a journal does not authenticate a new
 user request. The physical store must preserve the exact image bytes supplied
 by that trusted controller; SQLite/OS durability remains an external floor.
 -/
-import Kernel.DurableDataIntent
+module
+
+public import Kernel.DurableDataIntent
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableDataIntent.DataSnapshot
 
@@ -72,11 +91,14 @@ structure IntentRecord where
   event : StableEvent
   /-- The signing subject (`DataIntent.subject`). -/
   subject : Option SubjectId
+  /-- The meter credit (`DataIntent.credit`): zero but for the seed-meter refill. Replay
+  reproduces the meter from it (durable log and image frame v3). -/
+  credit : Charge := 0
 
 def IntentRecord.ofIntent {rootBytes : List UInt8 → Digest}
     (intent : DataIntent rootBytes) : IntentRecord :=
   ⟨intent.transactionId, intent.writes, intent.readGuards, intent.nullifiers,
-    intent.exactCharge, intent.event, intent.subject⟩
+    intent.exactCharge, intent.event, intent.subject, intent.credit⟩
 
 def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecord) :
     Option (DataIntent rootBytes) :=
@@ -93,7 +115,8 @@ def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecor
           event := record.event
           subject := record.subject
           postRootsBound := by simpa using roots
-          guardsReadOnly := by simpa using guards }
+          guardsReadOnly := by simpa using guards
+          credit := record.credit }
     else none
   else none
 
@@ -152,10 +175,46 @@ def Seed.snapshot (rootBytes : List UInt8 → Digest) (seed : Seed) :
   coherent := fun _ => rfl
 
 /-- The whole image is finite. Its journal is chronological; the restored
-protocol's own journal remains newest-first exactly as `execute` defines it. -/
+protocol's own journal remains newest-first exactly as `execute` defines it.
+The runtime stores that journal newest-first so extending it is one cons;
+`accepted` remains the chronological semantic view. -/
 structure Image where
   seed : Seed
-  accepted : List IntentRecord
+  acceptedRev : List IntentRecord
+
+/-- Construct an image from its chronological journal (an open or decode, never
+the per-record append). -/
+def Image.ofAccepted (seed : Seed) (accepted : List IntentRecord) : Image :=
+  ⟨seed, accepted.reverse⟩
+
+@[simp] theorem Image.ofAccepted_seed (seed : Seed) (accepted : List IntentRecord) :
+    (Image.ofAccepted seed accepted).seed = seed :=
+  rfl
+
+/-- The chronological accepted journal. -/
+def Image.accepted (image : Image) : List IntentRecord :=
+  image.acceptedRev.reverse
+
+@[simp] theorem Image.accepted_ofAccepted (seed : Seed) (accepted : List IntentRecord) :
+    (Image.ofAccepted seed accepted).accepted = accepted := by
+  simp [Image.ofAccepted, Image.accepted]
+
+@[simp] theorem Image.ofAccepted_accepted (image : Image) :
+    Image.ofAccepted image.seed image.accepted = image := by
+  cases image
+  simp [Image.ofAccepted, Image.accepted]
+
+/-- One raw record appended in constant time. -/
+def Image.snoc (image : Image) (record : IntentRecord) : Image :=
+  { image with acceptedRev := record :: image.acceptedRev }
+
+@[simp] theorem Image.snoc_seed (image : Image) (record : IntentRecord) :
+    (image.snoc record).seed = image.seed :=
+  rfl
+
+@[simp] theorem Image.accepted_snoc (image : Image) (record : IntentRecord) :
+    (image.snoc record).accepted = image.accepted ++ [record] := by
+  simp [Image.snoc, Image.accepted]
 
 /-- Replay only genuinely new accepted commits. A recorded retry or rejection
 inside the stored acceptance log is malformed and must not become a new event. -/
@@ -176,7 +235,12 @@ def Image.restore (rootBytes : List UInt8 → Digest) (image : Image) :
 
 def Image.append {rootBytes : List UInt8 → Digest} (image : Image)
     (intent : DataIntent rootBytes) : Image :=
-  { image with accepted := image.accepted ++ [IntentRecord.ofIntent intent] }
+  image.snoc (IntentRecord.ofIntent intent)
+
+@[simp] theorem Image.accepted_append {rootBytes : List UInt8 → Digest} (image : Image)
+    (intent : DataIntent rootBytes) :
+    (image.append intent).accepted = image.accepted ++ [IntentRecord.ofIntent intent] :=
+  Image.accepted_snoc image _
 
 /-- Every identifier ever explicitly seeded or written remains enumerable,
 including tombstones. Enumeration does not reinterpret or compact a cell. -/
@@ -345,7 +409,7 @@ def seed : Seed :=
   { absentBytes := [], cells := [(readCell, [1, 2, 3]), (writeCell, [4, 5])]
     available := fun _ => 10 }
 
-def image : Image := ⟨seed, []⟩
+def image : Image := Image.ofAccepted seed []
 
 theorem seed_represents : image.restore lengthRoot = some (seed.snapshot lengthRoot) := by
   simp [image, Image.restore, seed, replay, readCell, writeCell]

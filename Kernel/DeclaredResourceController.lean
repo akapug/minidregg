@@ -3,19 +3,40 @@ an ordinary finite transaction, not a separate admission or persistence path.
 Every target and the authority read incidence form one actual MultiCellHyperedge
 PreparedTuple; all signatures and current policies precede its single CAS.  The
 shared replay marker is the intent's durable nullifier. -/
-import Kernel.ResourceTransaction
-import Kernel.ResourceInvocationSignatureFirst
-import Kernel.ObjectiveBendNativeAdmission
-import Compiler.NativeInvocationProfile
-import Kernel.RefusalLane
-import Compiler.PhysicalLawResolution
-import Compiler.ComposedLawDiagnostics
-import Compiler.WorldKindLawDependencies
-import Kernel.ResourceObservationAdmission
-import Compiler.ResourceAuthorityProjection
-import Kernel.JointSlots
-import Kernel.StreamWrite
-import Kernel.ConfidentialAudienceAdmission
+module
+
+public import Kernel.ResourceTransaction
+public import Kernel.ResourceInvocationSignatureFirst
+public import Kernel.ObjectiveBendNativeAdmission
+public import Compiler.NativeInvocationProfile
+public import Kernel.RefusalLane
+public import Compiler.PhysicalLawResolution
+public import Compiler.ComposedLawDiagnostics
+public import Compiler.WorldKindLawDependencies
+public import Kernel.ResourceObservationAdmission
+public import Compiler.ResourceAuthorityProjection
+public import Kernel.JointSlots
+public import Kernel.StreamWrite
+public import Kernel.ConfidentialAudienceAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceMoneyReceiver
 open Minidregg.Kernel.DeclaredResourceController
@@ -183,7 +204,7 @@ def readRequest (prepared : PreparedInvocation deployment profile ambient ground
   { requestFor ground.authority profile.semantics ambient command command.targets[i]
       (prepared.targets i).before.payload.root with
     verb := observeVerb command.targets[i].kind
-    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v3".toUTF8.toList
+    effectsDigest := (Sp800185Cshake256.hash "DREGG.RESOURCE.TRANSACTION.OBSERVE/v8".toUTF8.toList
       ((StreamCodec.product bytesStream StreamCodec.nat).encode
         (commandBytes ground.authority.domain profile.semantics command,
           command.targets[i].target))).digest }
@@ -1673,17 +1694,7 @@ def signedIngressStream : StreamCodec SignedIngress :=
       (domain, semantics, ⟨command, targets, observe, authority⟩))
     (by rintro ⟨domain, semantics, signed⟩; cases signed; rfl)
 
-def signedIngressRawCodec : LawfulCodec SignedIngress where
-  encode ingress := signedIngressFrame ++ signedIngressStream.encode ingress
-  decode bytes := if bytes.take signedIngressFrame.length = signedIngressFrame then
-    signedIngressStream.toLawful.decode (bytes.drop signedIngressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have exact := signedIngressStream.toLawful.decode_encode ingress
-    change signedIngressStream.toLawful.decode (signedIngressStream.encode ingress) = some ingress at exact
-    simp [exact]
-
-def signedIngressCodec : LawfulCodec SignedIngress := ResourceBirthCodec.strictCodec signedIngressRawCodec
+def signedIngressCodec : LawfulCodec SignedIngress := (StreamCodec.framed signedIngressFrame signedIngressStream).toLawful
 
 def signedBytes (domain semantics : Digest) (signed : SignedCommand) : List UInt8 :=
   signedIngressCodec.encode (domain, semantics, signed)
@@ -1694,7 +1705,7 @@ theorem decodeSignedBytes_encode (domain semantics : Digest) (signed : SignedCom
   signedIngressCodec.decode_encode _
 theorem decodeSignedBytes_canonical {bytes : List UInt8} {ingress : SignedIngress}
     (decoded : decodeSignedBytes bytes = some ingress) : signedBytes ingress.1 ingress.2.1 ingress.2.2 = bytes :=
-  ResourceBirthCodec.strictCodec_canonical signedIngressRawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 
 /-- Complete guards before final execution/capacity admission. -/
@@ -1702,6 +1713,13 @@ def admissionGuards [DecidableEq F] (prepared : PreparedInvocation deployment pr
     (audience : AudienceChecks prepared) : List ReadGuard :=
   readGuards prepared ++ (audienceGuards audience.targets).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
+
+/-- The invocation's retained event: the signed bytes. -/
+def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
+  codecVersion := 3
+  domain := domain
+  eventId := effectsDigest domain semantics command
+  canonicalBytes := signedBytes domain semantics signed
 
 /- Current signature, observation and law checks only. This token cannot create
 an effect intent and carries no accepted source execution. -/
@@ -1844,6 +1862,13 @@ structure AuthorityInvocation [DecidableEq F]
   only authorization is its `ReadLeg` in `observations`. -/
   checked : (incidence : Incidence command) → incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple incidence (signed.envelope command incidence)
+theorem AuthorityInvocation.incidence_authorized [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
+    (authority : AuthorityInvocation prepared signed) :
+    commandCodec.encode command = signed.commandBytes ∧
+    ∀ incidence, incidenceObserveOnly command incidence = false →
+      Nonempty (CheckedLeg prepared authority.tuple incidence (signed.envelope command incidence)) :=
+  ⟨authority.ingressExact, fun incidence written => ⟨authority.checked incidence written⟩⟩
 
 structure AcceptedInvocation [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command) (signed : SignedCommand) where
@@ -1858,7 +1883,7 @@ structure AcceptedInvocation [DecidableEq F]
   audience : AudienceChecks prepared
   route : InvocationRouteAdmission prepared signed
   execution : Option (ObjectiveBendNativeAdmission.Admitted prepared
-    (signedBytes ground.authority.domain profile.semantics signed)
+    (invocationEvent ground.authority.domain profile.semantics command signed)
     (writes prepared) (completeAdmissionGuards prepared signed audience route))
   executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true
   tuple : PreparedTuple (plan prepared)
@@ -2029,7 +2054,7 @@ private def finishAdmission [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command) (signed : SignedCommand)
     (authority : AuthorityInvocation prepared signed) (route : InvocationRouteAdmission prepared signed)
     (execution : Option (ObjectiveBendNativeAdmission.Admitted prepared
-      (signedBytes ground.authority.domain profile.semantics signed)
+      (invocationEvent ground.authority.domain profile.semantics command signed)
       (writes prepared) (completeAdmissionGuards prepared signed authority.audience route))) :
     Except Reject (AcceptedInvocation prepared signed) := do
   if executionRequired : command.family.any (fun family => family.route == .objectiveMethod) = true → execution.isSome = true then
@@ -2078,7 +2103,7 @@ def admitObjective [DecidableEq F] {m : Type → Type} [Monad m] (native : Crede
               let route : InvocationRouteAdmission prepared signed :=
                 .objective family selected kind registered guards readonly roots
               match ObjectiveBendNativeAdmission.admit selection
-                  (signedBytes ground.authority.domain profile.semantics signed)
+                  (invocationEvent ground.authority.domain profile.semantics command signed)
                   (writes prepared) (completeAdmissionGuards prepared signed authority.audience route) with
               | .error reason => return .error reason
               | .ok completed => return finishAdmission prepared signed authority route (some completed)
@@ -2279,14 +2304,16 @@ theorem AcceptedInvocation.audience_dependency_cas [DecidableEq F]
 
 abbrev invocationNullifier := CredentialAuthorityReplay.nullifier
 
-def invocationEvent (domain semantics : Digest) (command : Command) (signed : SignedCommand) : StableEvent where
-  codecVersion := 3
-  domain := domain
-  eventId := effectsDigest domain semantics command
-  canonicalBytes := signedBytes domain semantics signed
-
 def transactionId (domain semantics : Digest) (command : Command) : Digest :=
   ⟨operationMarker domain semantics command⟩
+
+/-- The storage lane of an invocation writing `ws` under `guards`: the World's
+(`DeployedCharge.storageCharge` against the ground's image, the retained event
+the signed bytes). -/
+def storageFrom (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard)
+    (_prepared : PreparedInvocation deployment profile ambient ground command) : Nat :=
+  DeployedCharge.storageCharge ground.view ws
+    (invocationEvent ground.authority.domain profile.semantics command signed)
 
 def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) :
@@ -2294,17 +2321,22 @@ def legacySourceChargeFrom (prepared : PreparedInvocation deployment profile amb
   | .incidences => command.targets.length + 1
   | .turnBytes => (signedBytes ground.authority.domain profile.semantics signed).length
   | .memoryTouches => ws.length + guards.length
-  | .storageBytes => (ws.map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => storageFrom signed ws guards prepared
   | .proofWork => (prepared.run.map fun checked => checked.verdict.steps).getD 0
   | .feeDebit => (prepared.compute.map RunComputeBudgetDomain.Prepared.credits).getD 0
   | .witnessBytes | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-/-- Fixed public capacity is the actual admitted application charge. Exact
-private branch usage was checked against this envelope before Accepted existed. -/
+/-- Fixed public capacity is the actual admitted application charge on every
+lane but storage. Exact private branch usage was checked against this envelope
+before Accepted existed (`ObjectiveBendNativeAdmission.Admitted.fits`); the
+storage lane is the World's actual number, which that check bounds by the
+capacity's. -/
 def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient ground command)
     (signed : SignedCommand) (ws : List DataWrite) (guards : List ReadGuard) : ResourceCost.Charge :=
   match command.objectiveClaim with
-  | .ok (some claim) => ObjectiveBendNativeAdmission.charge claim.capacity
+  | .ok (some claim) => fun lane =>
+      if lane = .storageBytes then storageFrom signed ws guards prepared
+      else ObjectiveBendNativeAdmission.charge claim.capacity lane
   | _ => legacySourceChargeFrom prepared signed ws guards
 
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient ground command)
@@ -2328,35 +2360,45 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     readGuards := guards
     nullifiers := [invocationNullifier ground.authority.domain
       (operationMarker ground.authority.domain profile.semantics command)]
-    exactCharge := sourceChargeFrom prepared signed ws guards
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (sourceChargeFrom prepared signed ws guards)).toCharge
     event := invocationEvent ground.authority.domain profile.semantics command signed
     subject := some command.subject
     postRootsBound := writes_roots_bound prepared
     guardsReadOnly := accepted.readGuards_readonly shape }
 
-/-- **Charging rule: a record is charged the bytes it writes.**  The storage
-charge of an accepted invocation is exactly the canonical bytes of the cells
-its record writes: each non-read target plus its fresh stream append entry.
-Authority and observe-only targets are guards, neither stored nor charged. -/
+/-- **Charging rule: a record is charged what the World retains.**  The
+storage charge of an accepted invocation, ordinary or Objective, is exactly the
+World's storage of its intent against the ground's image: the new values its
+record writes (each non-read target plus its fresh stream append entry), the
+born images, and the retained event.  Authority and observe-only targets are
+guards, neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
-    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared)
-    (ordinary : command.objectiveClaim = .ok none) :
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
-        ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
+        DeployedCharge.storageCharge ground.view (accepted.dataIntent shape).writes (accepted.dataIntent shape).event ∧
       (accepted.dataIntent shape).writes =
         (List.finRange command.targets.length).filterMap (fun i =>
           if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=
   by
     constructor
-    · simp [AcceptedInvocation.dataIntent, sourceChargeFrom, ordinary, legacySourceChargeFrom]
+    · change (Minidregg.Theory.ResourceCost.Charge.materialize
+        (sourceChargeFrom prepared signed _ _)).toCharge .storageBytes = _
+      rw [Minidregg.Theory.ResourceCost.Charge.materialize_eq]
+      unfold sourceChargeFrom
+      cases command.objectiveClaim with
+      | error _ => rfl
+      | ok claim =>
+        cases claim with
+        | none => rfl
+        | some _ => exact if_pos rfl
     · rfl
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge = accepted.sourceCharge := by
-  rfl
+  exact Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- Sharing the runtime write and guard values leaves the complete original
 receiver intent, including every write, charge, event and proof field, exact. -/
@@ -2374,7 +2416,8 @@ theorem AcceptedInvocation.dataIntent_original_exact [DecidableEq F]
         subject := some command.subject
         postRootsBound := writes_roots_bound prepared
         guardsReadOnly := accepted.readGuards_readonly shape } := by
-  rfl
+  simp only [AcceptedInvocation.dataIntent, Minidregg.Theory.ResourceCost.Charge.materialize_eq,
+    AcceptedInvocation.sourceCharge]
 
 /-- The keys an invocation consults beyond the state: its transaction id (replay
 detection) and its operation marker's replay nullifier (`PreparedInvocation.markerDeclared`).

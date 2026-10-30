@@ -25,9 +25,30 @@ use crate::{env_required, env_u64, now_s};
 pub const DISCORD_API: &str = "https://discord.com/api/v10";
 pub const MAX_CONNECTIONS: usize = 64;
 pub const LOG_FILE: &str = "discord.log";
+/// Unapplied door link requests the entrance will queue at once.
+pub const MAX_PENDING_LINKS: usize = 64;
+/// Bytes of each output stream kept in a completed custody record (the reply itself is at most
+/// 2,000 characters; the full output is the session's own business).
+pub const CUSTODY_STREAM: usize = 64 * 1024;
+
+/// How interactions arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Discord POSTs signed interactions to the application's Interactions Endpoint URL.
+    Http,
+    /// The application has no endpoint URL: Discord delivers `INTERACTION_CREATE` to the bot
+    /// over the gateway WebSocket (`crate::gateway`), and replies go to the REST callback.
+    Gateway,
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub mode: Mode,
+    /// Gateway mode: the bot token's file (`MINI_DISCORD_BOT_TOKEN_FILE`, systemd's
+    /// `LoadCredential=`), the gateway URL and the trust-anchor bundle.
+    pub bot_token_file: Option<PathBuf>,
+    pub gateway_url: String,
+    pub ca_file: PathBuf,
     pub listen: String,
     pub application_id: String,
     pub public_key_hex: String,
@@ -43,12 +64,26 @@ pub struct Config {
     /// write the sessions tree (split tenancy; requires `MINI_SESSION_RUNNER`).
     /// None: custody in `SESSIONS/.discord-custody`, the log in `HOME/discord.log`.
     pub state: Option<PathBuf>,
+    /// The door's link spool (`MINI_DISCORD_DOOR_LINKS`, default `STATE/door-links` under split
+    /// tenancy): `/mini line:link CODE` from an unrostered user lands here for the door's root
+    /// processor. None: this box has no door and the line is refused.
+    pub door_links: Option<PathBuf>,
+    /// The door's public URL for the unrostered reply (`MINI_DISCORD_DOOR_URL`), if any.
+    pub door_url: Option<String>,
+    /// Retention of interaction custody (`MINI_DISCORD_CUSTODY_DAYS`, default 7, and
+    /// `MINI_DISCORD_CUSTODY_MAX`, default 2000 records).
+    pub retention: crate::session::Retention,
 }
 
 impl Config {
     /// Everything comes from the environment (the unit's 0600 `EnvironmentFile`); nothing is
     /// read from argv.
     pub fn from_env() -> Result<Self, String> {
+        let mode = match std::env::var("MINI_DISCORD_MODE").as_deref() {
+            Err(_) | Ok("") | Ok("http") => Mode::Http,
+            Ok("gateway") => Mode::Gateway,
+            Ok(other) => return Err(format!("MINI_DISCORD_MODE is http or gateway, not {other:?}")),
+        };
         let application_id = env_required("MINI_DISCORD_APPLICATION_ID")?;
         if !interaction::is_snowflake(&application_id) {
             return Err("MINI_DISCORD_APPLICATION_ID must be a Discord snowflake".into());
@@ -64,9 +99,20 @@ impl Config {
             }
         };
         Ok(Config {
+            mode,
+            bot_token_file: match mode {
+                Mode::Gateway => Some(crate::env_path("MINI_DISCORD_BOT_TOKEN_FILE")?),
+                Mode::Http => None,
+            },
+            gateway_url: std::env::var("MINI_DISCORD_GATEWAY_URL").ok().filter(|v| !v.is_empty())
+                .unwrap_or_else(|| crate::gateway::GATEWAY.to_string()),
+            ca_file: path_or("MINI_DISCORD_CA_FILE", "/etc/ssl/certs/ca-certificates.crt")?,
             listen: std::env::var("MINI_DISCORD_LISTEN").unwrap_or_else(|_| "127.0.0.1:8793".to_string()),
             application_id,
-            public_key_hex: env_required("MINI_DISCORD_PUBLIC_KEY")?,
+            public_key_hex: match mode {
+                Mode::Http => env_required("MINI_DISCORD_PUBLIC_KEY")?,
+                Mode::Gateway => std::env::var("MINI_DISCORD_PUBLIC_KEY").unwrap_or_default(),
+            },
             api_base: api_base.trim_end_matches('/').to_string(),
             roster: path_or("MINI_DISCORD_ROSTER", "/etc/mini/discord-roster.json")?,
             roster_owner_uid: env_u64("MINI_DISCORD_ROSTER_OWNER_UID", 0)? as u32,
@@ -82,6 +128,27 @@ impl Config {
                 Ok(v) if !v.is_empty() => Some(crate::env_path("MINI_DISCORD_STATE")?),
                 _ => None,
             },
+            door_links: None,
+            door_url: match std::env::var("MINI_DISCORD_DOOR_URL") {
+                Ok(v) if !v.is_empty() => {
+                    if !crate::curl::is_plain_url(&v) || !v.starts_with("https://") {
+                        return Err("MINI_DISCORD_DOOR_URL must be a plain https URL".into());
+                    }
+                    Some(v)
+                }
+                _ => None,
+            },
+            retention: crate::session::Retention {
+                max_age_s: env_u64("MINI_DISCORD_CUSTODY_DAYS", 7)?.saturating_mul(86_400),
+                max_records: env_u64("MINI_DISCORD_CUSTODY_MAX", 2000)? as usize,
+            },
+        })
+        .and_then(|mut c: Config| {
+            c.door_links = match std::env::var("MINI_DISCORD_DOOR_LINKS") {
+                Ok(v) if !v.is_empty() => Some(crate::env_path("MINI_DISCORD_DOOR_LINKS")?),
+                _ => c.state.as_ref().map(|s| s.join("door-links")),
+            };
+            Ok(c)
         })
         .and_then(|c: Config| {
             // Half the split shape is neither shape: refuse it by name.
@@ -102,6 +169,10 @@ pub struct Job {
     session: Session,
     line: String,
     record: Record,
+    /// The custody value to retain before running; saved only AFTER the deferral is on the
+    /// wire, so no fsync stands between Discord's signed request and its 3 s deadline (a missed
+    /// deadline made the user re-issue the line under a new interaction id: a double run).
+    accept: Option<Value>,
     world_page: Option<usize>,
 }
 
@@ -123,7 +194,9 @@ impl Reply {
 
 pub struct App {
     cfg: Config,
-    verifier: Verifier,
+    /// The HTTP mode's signature check. None in gateway mode, where the TLS connection the
+    /// bot opened to Discord is the authentication of every event on it.
+    verifier: Option<Verifier>,
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     inflight: Arc<AtomicUsize>,
 }
@@ -138,7 +211,10 @@ impl Drop for Inflight {
 
 impl App {
     pub fn new(cfg: Config) -> Result<Arc<Self>, String> {
-        let verifier = Verifier::from_hex(&cfg.public_key_hex)?;
+        let verifier = match cfg.mode {
+            Mode::Http => Some(Verifier::from_hex(&cfg.public_key_hex)?),
+            Mode::Gateway => None,
+        };
         Ok(Arc::new(App {
             cfg,
             verifier,
@@ -157,7 +233,10 @@ impl App {
         if req.method != "POST" {
             return (Reply::text(405, "Method Not Allowed", "POST only\n"), None);
         }
-        if let Err(e) = self.verifier.verify(
+        let Some(verifier) = &self.verifier else {
+            return (Reply::text(404, "Not Found", "this entrance takes interactions over the gateway\n"), None);
+        };
+        if let Err(e) = verifier.verify(
             req.header("x-signature-ed25519"),
             req.header("x-signature-timestamp"),
             &req.body,
@@ -166,7 +245,13 @@ impl App {
             eprintln!("mini-discord: 401 {}", e.as_str());
             return (Reply::text(401, "Unauthorized", e.as_str()), None);
         }
-        let cmd = match interaction::parse(&req.body) {
+        self.handle_interaction(&req.body, now)
+    }
+
+    /// One interaction, however it arrived (a signed HTTP POST, or an `INTERACTION_CREATE`
+    /// event on the gateway): the reply to send back, and the line to run once it is sent.
+    pub fn handle_interaction(&self, body: &[u8], now: u64) -> (Reply, Option<(Job, Inflight)>) {
+        let cmd = match interaction::parse(body) {
             Ok(Interaction::Ping) => return (Reply::json(&interaction::pong()), None),
             Ok(Interaction::Unsupported(t)) => {
                 return (Reply::text(400, "Bad Request", &format!("unsupported interaction type {t}")), None)
@@ -194,6 +279,12 @@ impl App {
                 Err(e) => return (say(Ending::entrance("usage", &e)), None),
             },
             (interaction::COMMAND_STATUS, _) => String::new(),
+            // The same report the shell's `feedback` makes, as this member's own turn; the text is
+            // quoted whole so no word of it can be read as a flag of the verb.
+            (interaction::COMMAND_FEEDBACK, _) => match cmd.text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                Some(text) => format!("feedback --via discord \"{text}\""),
+                None => return (say(Ending::entrance("usage", "/feedback text: say what went wrong or what you wish were different")), None),
+            },
             (other, _) => return (say(Ending::entrance("error", &format!("unknown command /{other}"))), None),
         };
 
@@ -204,12 +295,17 @@ impl App {
                 return (say(Ending::entrance("error", "the Discord roster is unavailable on this box; nothing ran")), None);
             }
         };
+        if cmd.name == COMMAND_LINE {
+            if let Some(code) = crate::door::link_line(&line) {
+                return (say(self.link(&roster, &cmd.id, &cmd.user_id, code, now)), None);
+            }
+        }
         let Some(name) = roster.session_of(&cmd.user_id) else {
             eprintln!("mini-discord: user {} is not rostered; line not run", cmd.user_id);
-            let text = format!(
-                "Discord user {} is not on this Mini's roster; nothing ran. Ember must add you: send ember this id.",
-                cmd.user_id
-            );
+            let text = match &self.cfg.door_url {
+                Some(url) => format!("You have no Mini account linked to this Discord user yet; nothing ran. Get one at {url} and its page gives you the line `/mini line:link CODE`."),
+                None => format!("Discord user {} is not on this Mini's roster; nothing ran.", cmd.user_id),
+            };
             return (say(Ending::entrance("error", &text)), None);
         };
         let session = match self.cfg.sessions.open(name) {
@@ -251,24 +347,59 @@ impl App {
             return (refuse(Ending::entrance("error", &text)), None);
         }
         let key = format!("{}-{}", self.cfg.application_id, cmd.id);
-        let mut record = match Record::lock(&custody, &key) {
+        let record = match Record::lock(&custody, &key) {
             Ok(Some(record)) => record,
             Ok(None) => return (say(Ending::entrance("undecided", &format!("interaction {} is already held by a worker; /mini-status target:{}", cmd.id, cmd.id))), None),
             Err(e) => { eprintln!("mini-discord: custody unavailable: {e}"); return (say(Ending::entrance("error", "durable custody unavailable; nothing ran")), None); }
         };
         let binding=json!({"application":self.cfg.application_id,"user":cmd.user_id,"session":session.name,
             "workspace":session.workspace,"home":session.home,"line":line,"worldPage":world_page});
-        if let Some(v)=&record.value {
+        let accept = if let Some(v)=&record.value {
             if v["binding"] != binding {return (Reply::text(409,"Conflict","interaction id is bound to another request"),None)}
             if v["phase"] != "accepted" {
                 return (Reply::json(&interaction::message(&record_content(v,&cmd.id))),None);
             }
-        } else if let Err(e)=record.save(json!({"version":1,"binding":binding,"phase":"accepted","acceptedAt":now,"interaction":cmd.id})) {
-            eprintln!("mini-discord: custody save failed: {e}");
-            return (say(Ending::entrance("error","durable custody unavailable; nothing ran")),None);
-        }
-        let job = Job { user: cmd.user_id, interaction: cmd.id, token: cmd.token, session, line, record, world_page };
+            None
+        } else {
+            Some(json!({"version":1,"binding":binding,"phase":"accepted","acceptedAt":now,"interaction":cmd.id}))
+        };
+        let job = Job { user: cmd.user_id, interaction: cmd.id, token: cmd.token, session, line, record, accept, world_page };
         (Reply::json(&interaction::deferred()), Some((job, guard)))
+    }
+
+    /// `/mini line:link CODE` from a Discord user: queue one link request for the door's root
+    /// processor, which alone writes the roster. The entrance only proves the Discord id (the
+    /// signed interaction) and never decides the mapping.
+    fn link(&self, roster: &Roster, interaction: &str, user: &str, code: String, now: u64) -> Ending {
+        if let Some(name) = roster.session_of(user) {
+            return Ending::entrance("error", &format!("this Discord user is already linked to session {name}; nothing changed"));
+        }
+        let Some(spool) = &self.cfg.door_links else {
+            return Ending::entrance("error", "this box has no door; nothing changed");
+        };
+        if let Err(e) = mini_sdk::private::ensure_dir(spool) {
+            eprintln!("mini-discord: door link spool: {e}");
+            return Ending::entrance("error", "the door's link queue is unavailable; nothing changed");
+        }
+        match crate::door::spool_list(spool) {
+            Ok(files) if files.len() < MAX_PENDING_LINKS => {}
+            Ok(_) => return Ending::entrance("error", "the door's link queue is full; try again in a few minutes"),
+            Err(e) => {
+                eprintln!("mini-discord: door link spool: {e}");
+                return Ending::entrance("error", "the door's link queue is unavailable; nothing changed");
+            }
+        }
+        let link = crate::door::Link { interaction: interaction.into(), user: user.into(), code, at: now };
+        match crate::door::spool_write(spool, &link.file_name(), &link.to_json()) {
+            Ok(()) => {
+                eprintln!("mini-discord: user {user}: link request queued ({interaction})");
+                Ending { word: "ok".into(), line: "link request queued: within a minute `/mini line:home` answers as your door account. If it does not, the code was wrong, expired or used.".into() }
+            }
+            Err(e) => {
+                eprintln!("mini-discord: door link spool: {e}");
+                Ending::entrance("error", "the door's link queue is unavailable; nothing changed")
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -298,7 +429,7 @@ impl App {
             let allowed=Roster::load(&self.cfg.roster,self.cfg.roster_owner_uid)
                 .is_ok_and(|r|r.session_of(&job.user)==Some(job.session.name.as_str()));
             if !allowed {return;}
-            let mut value=job.record.value.clone().expect("accepted record");
+            let mut value=match job.record.value.clone() {Some(v)=>v,None=>return};
             value["phase"]=json!("started");value["startedAt"]=json!(now_s());
             if let Err(e)=job.record.save(value){eprintln!("mini-discord: cannot retain start: {e}");return;}
             self.cfg.deployment.run(&job.session, &job.line)
@@ -311,7 +442,8 @@ impl App {
         let mut value=job.record.value.clone().expect("started record");
         value["phase"]=json!("completed");value["finishedAt"]=json!(now_s());
         value["content"]=json!(content);value["ending"]=json!(outcome.ending.word);
-        value["stdout"]=json!(outcome.stdout);value["stderr"]=json!(outcome.stderr);
+        value["stdout"]=json!(crate::session::bounded_text(&outcome.stdout, CUSTODY_STREAM));
+        value["stderr"]=json!(crate::session::bounded_text(&outcome.stderr, CUSTODY_STREAM));
         value["exit"]=json!(outcome.exit);value["delivery"]=json!("pending");
         if let Err(e)=job.record.save(value){eprintln!("mini-discord: cannot retain outcome: {e}; execution remains UNKNOWN");return;}
         let url = format!(
@@ -326,6 +458,12 @@ impl App {
             }
             Ok(code) => eprintln!("mini-discord: follow-up for {} answered HTTP {code}", job.interaction),
             Err(e) => eprintln!("mini-discord: follow-up for {} failed: {e}", job.interaction),
+        }
+        let custody = match &self.cfg.state { Some(state) => state.join("custody"), None => self.cfg.sessions.dir.join(".discord-custody") };
+        match crate::session::prune_custody(&custody, &self.cfg.retention, now_s()) {
+            Ok(0) => {}
+            Ok(n) => eprintln!("mini-discord: retention removed {n} completed custody record(s)"),
+            Err(e) => eprintln!("mini-discord: custody retention: {e}"),
         }
     }
 
@@ -348,8 +486,29 @@ impl App {
                 eprintln!("mini-discord: deferral for {} not delivered ({e}); line not run", job.interaction);
                 return;
             }
-            self.run_job(job, guard);
+            self.accept_and_run(job, guard);
         }
+    }
+
+    /// After the reply reached Discord: retain the acceptance, then run. A line whose
+    /// acceptance could not be retained does not run.
+    pub fn accept_and_run(&self, mut job: Job, guard: Inflight) {
+        if let Some(accept) = job.accept.take() {
+            if let Err(e) = job.record.save(accept) {
+                eprintln!("mini-discord: custody save failed for {}: {e}; line not run", job.interaction);
+                return;
+            }
+        }
+        self.run_job(job, guard);
+    }
+
+    /// The interaction id and token a job answers (the gateway posts its callback with them).
+    pub fn api_base(&self) -> &str {
+        &self.cfg.api_base
+    }
+
+    pub fn poster(&self) -> &Poster {
+        &self.cfg.poster
     }
 
     pub fn serve(self: &Arc<Self>, listener: TcpListener) -> ! {

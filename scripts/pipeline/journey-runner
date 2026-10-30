@@ -42,14 +42,37 @@ scratch_base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}; [ -d "$scratch_base" ] && [
 # Product driver input plumbing lives here. Paths belong to this artifact set;
 # ancillary inputs have explicit names and no developer-machine defaults.
 product_inputs() {
+  # One world template per variant per tip (newparticipant-acceptance.sh NEWPARTICIPANT_TEMPLATE_DIR): the
+  # first row of a variant builds its world and leaves it; the others restore it. Removed with the tip's run.
+  # JOURNEY_WORLD_TEMPLATES=0 builds every world fresh (the before/after wall measurement; a suspected template).
+  if [ "${JOURNEY_WORLD_TEMPLATES:-1}" = 0 ]; then export NEWPARTICIPANT_TEMPLATE_DIR=""
+  else export NEWPARTICIPANT_TEMPLATE_DIR=$J/world-templates; mkdir -p -m 700 "$NEWPARTICIPANT_TEMPLATE_DIR"; fi
   export HOST=$set/bin/minidregg-host MINI=$set/bin/mini STORE=$set/bin/minidregg-link-sqlite-store
   export VERIFIER=$set/bin/minidregg-credential-signature-verifier SHELL_BIN=$set/bin/mini
   export GRAIN=$set/bin/grain-runtime SPK_HOST_BIN=$set/bin/spk-host PAY_WATCHER_BIN=$set/bin/pay-watcher
   export CANDIDATE=$set/provenance.json
-  export M7_REFERENCE=${MINI_M7_REFERENCE:-}
-  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/bin/mini-hermes-test-provider}
+  export M7_REFERENCE=${MINI_M7_REFERENCE:-$(m7_reference_for "$set")}
+  export TEST_PROVIDER=${MINI_TEST_PROVIDER_BIN:-$set/fixtures/mini-hermes-test-provider}  # a journey fixture, not a candidate output (package.py --fixture-roles)
   export LAUNCH_GATE=${MINI_LAUNCH_GATE_BIN:-$set/bin/launch-gate}
   export MINI_FN_LAUNCHER=${MINI_FN_LAUNCHER:-} MINI_FN_CORE=${MINI_FN_CORE:-}
+}
+
+# M7's reproduction reference (journey.d/m7.sh step 3): another READY set on this box, built by its own
+# publish-artifacts run in its own work directory, whose compiled inputs (journey.d/lib/m7-compiled.sh,
+# the definition m7.sh compares by) are byte-identical to SET's. The newest such set; none -> empty, and
+# the row names M7_REFERENCE missing. MINI_M7_REFERENCE overrides. m7.sh then re-checks everything
+# (identical compiled inputs, identical output SHA-256 set, both SHA256SUMS, runtime identity).
+m7_reference_for() {  # SET -> a provenance.json path or nothing
+  local set=$1 lib=$src/native/resource-client/journey.d/lib/m7-compiled.sh want d
+  [ -f "$lib" ] && [ -f "$set/logs/source-files.sha256" ] || return 0
+  ( . "$lib"
+    want=$(m7_compiled_inputs "$set" | sha256sum) || exit 0
+    for d in $(ls -1td "$ARTIFACT_ROOT"/*/READY 2>/dev/null); do
+      d=$(dirname "$d")
+      [[ $(basename "$d") =~ ^[0-9a-f]{40}$ ]] && [ "$(realpath "$d")" != "$(realpath "$set")" ] || continue
+      [ -f "$d/provenance.json" ] && [ -f "$d/logs/source-files.sha256" ] || continue
+      [ "$(m7_compiled_inputs "$d" | sha256sum)" = "$want" ] && { echo "$d/provenance.json"; exit 0; }
+    done; exit 0 )
 }
 
 owner_for() {  # SET ROW SRC -> a lane or commit naming who last changed the row's driver
@@ -83,12 +106,16 @@ run_row() {  # ROW: one row in its own scratch world and scope; its lines go to 
   # hook forgot, setsid'd children) is stopped with it, by cgroup, not by matching command lines.
   local unit=pj-$row-$(basename "$R" | tr -cd 'A-Za-z0-9')
   product_inputs
+  # A row's consent anchors and resident providers live in its scratch world, never
+  # under the runner's real HOME (~/.mini/consent-anchors): client_consent.rs anchor_dir.
+  export MINI_CONSENT_ANCHOR_DIR=$R/consent-anchors
   if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
     echo "no systemd user session" >"$O/row.err"; rc=98
   else
   SRC=$src SET=$set BIN=$set/bin MANIFEST=$set/manifest.json RUN=$R OUT=$O LEANENV=$leanenv ROWSFILE=$rowsfile ROW=$row \
     systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${PIPELINE_ROW_MEM_MAX:-24G}" -p MemorySwapMax=0 \
       --setenv=SRC --setenv=SET --setenv=BIN --setenv=MANIFEST --setenv=RUN --setenv=OUT --setenv=LEANENV \
+      --setenv=NEWPARTICIPANT_TEMPLATE_DIR \
       -- timeout "${PIPELINE_ROW_TIMEOUT_S:-5400}" bash -c '. "$ROWSFILE"; cd "$RUN" && "row_$ROW"' 2>"$O/row.err" >"$O/row.out"
   rc=$?
   # Failed scopes can kill the row shell before it emits any verdict. Keep the
@@ -128,17 +155,22 @@ run_row() {  # ROW: one row in its own scratch world and scope; its lines go to 
 }
 
 run_tip() {
-  local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 rowsfile t0 tmp
+  local tip=$1 set=$ARTIFACT_ROOT/$1 J=$JOURNEY_ROOT/$1 src leanenv=0 keep=0 rowsfile t0 tmp
   pipeline_verify_set "$set"
   # a re-run keeps the earlier run's evidence beside it (TIP.run-<time>), never deletes it first
   [ -e "$J" ] && mv "$J" "$J.run-$(date -u +%Y%m%dT%H%M%SZ)"
   mkdir -p "$J/rows"; t0=$(date +%s)
   labels=$(for l in next green main; do [ "$(readlink "$ARTIFACT_ROOT/$l" 2>/dev/null)" = "$tip" ] && printf '%s ' "$l"; done)
   if [ -f "$ARTIFACT_ROOT/.leanenv/$tip/.pipeline-leanenv-complete" ]; then src=$ARTIFACT_ROOT/.leanenv/$tip; leanenv=1
+  elif [ -f "$JOURNEY_ROOT/.trees/$tip.dispatch" ] && [ -d "$JOURNEY_ROOT/.trees/$tip" ]; then
+    # The service's own extract of the verified source.tar, at a FIXED path: the box's sudoers rules
+    # name journeys/.trees/*/ (m6grain's install-user-world), never a scratch path (cv 01a14736-3181).
+    # Read-only and kept: it is the dispatch record's tree.
+    src=$JOURNEY_ROOT/.trees/$tip; keep=1
   else tmp=$(mktemp -d "$scratch_base/pjs.XXXXXX"); tar -xf "$set/source.tar" -C "$tmp"; src=$tmp; fi
   if [ -n "$source_override" ]; then
     [ -d "$source_override" ] || pipeline_die "no source override: $source_override"
-    [ "$leanenv" = 1 ] || rm -rf "$src"
+    [ "$leanenv" = 1 ] || [ "$keep" = 1 ] || rm -rf "$src"
     src=$source_override; leanenv=0
   fi
   # SELF-CHECK: this runner must be the tree's own (header). A tree without a runner predates the
@@ -149,7 +181,7 @@ run_tip() {
   done
   if [ -n "$bad" ]; then
     pipeline_log "REFUSED tip $tip: this runner ($here) is not the tree's own; differs:$bad. Run $src/scripts/pipeline/journey-runner (the set's tree), never an installed copy" | tee "$J/REFUSED" >&2
-    if [ "$leanenv" != 1 ] && [ -z "$source_override" ]; then rm -rf "$src"; fi
+    if [ "$leanenv" != 1 ] && [ "$keep" != 1 ] && [ -z "$source_override" ]; then rm -rf "$src"; fi
     return 3
   fi
   rowsfile=$src/scripts/pipeline/journey-rows; [ -f "$rowsfile" ] || rowsfile=$here/journey-rows
@@ -173,12 +205,13 @@ run_tip() {
   done
   wait
   for row in "${JOURNEY_ROWS[@]}"; do cat "$J/rows/$row/result.tsv" >>"$J/results.tsv"; done
-  if [ "$leanenv" != 1 ] && [ -z "$source_override" ]; then rm -rf "$src"; fi
+  if [ "$leanenv" != 1 ] && [ "$keep" != 1 ] && [ -z "$source_override" ]; then rm -rf "$src"; fi
   local wall=$(( $(date +%s) - t0 ))
   { printf 'tip %s  labels: %s\njourney wall %s s on %s (%s CPUs), finished %s; set built %s\n\n' "$tip" "${labels% }" \
       "$wall" "$(hostname)" "$(nproc)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sed -n 's/.*finished=\([^ ]*\).*/\1/p' "$set/PROVENANCE" 2>/dev/null)"
     { printf 'ROW\tSTATUS\tWALL_S\tOWNER\tDETAIL\n'; cat "$J/results.tsv"; } | tabalign; } >"$J/table.txt"
   bash "$here/journey-red-lines" "$JOURNEY_ROOT" "$tip" "${labels% }" >"$J/red.txt"
+  rm -rf "$J/world-templates"                 # the tip's world templates: test keys and Stores, not evidence
   echo "$wall" >"$J/WALL_S"; date -u +%Y-%m-%dT%H:%M:%SZ >"$J/DONE"
   pipeline_log "DONE $tip in ${wall}s: $(awk -F'\t' '{c[$2]++} END {for (k in c) printf "%s=%d ", k, c[k]}' "$J/results.tsv")"
   # lean envs: drop those already run and no longer labelled, but keep the newest run one (the

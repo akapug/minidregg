@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/wekan/wekan.git",
+  "release": "v12.68",
+  "tagObject": "5a1abdb133a27fc3b1c21db55f0792e9d3f1d813",
+  "commit": "8561f49ed91ec7c36456806508d59d8f52089520",
+  "publishedAt": "2026-10-29T05:23:44Z",
+  "version": "12.68~2026-10-29",
+  "appVersion": 1268,
+  "sourceArchiveSha256": "94f77ae1239bd31a2e248802ef6847447f862e2ea6028690917d54461f4408c5",
+  "upstreamSpkSha256": "8c8c4b8212bc7bc36d370370d6a86bc0147697152d65bdcd5101ae8fb7a32043",
+  "sandstormTool": "sandstorm-308",
+  "sandstormToolSha256": "f1317754765b11f260a757724b28e92d5318d8b277f970c99662c01bd9291879",
+  "apiPath": "/",
+  "appId": "wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0",
+  "packageId": "8c2f7c710744bdc97012a21f37cebcd1",
+  "spkSha256": "8c2f7c710744bdc97012a21f37cebcd19447b2193d630067f207e72ceb23de18",
+  "declarationSha256": "770ff189279dd32e7c99710dd21aca34b2340fd0ab0f929a10bd6be6c1815277"
+}

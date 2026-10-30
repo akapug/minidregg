@@ -2,7 +2,28 @@
 current-management and package checks and adds full failed-recovery evidence.
 Native replay must also prove that the original claim belongs to its same
 chronological walk; this conditional layer exposes no receiving operation. -/
-import Kernel.ApplicationLifecycleRetryBeginV4Ingress
+module
+
+public import Kernel.ApplicationLifecycleRetryBeginV4Ingress
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryBeginV4Admission
 
@@ -74,15 +95,13 @@ def Accepted.intent {config : Config} {store : StoreIdentity} {head : Head store
     {ingress : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
     (accepted : Accepted config head ground ingress) : DataIntent rootBytes :=
   let legacy := accepted.base.intent
-  let ordinary := accepted.base.invocation.dataIntent accepted.base.shape
   { legacy with
-    exactCharge := fun dimension => match dimension with
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
-      | .storageBytes => ordinary.exactCharge .storageBytes + ingress.canonicalBytes.length +
-          (ApplicationLifecycleBegin.stableNullifier config.deployment.domain
-            config.profile.semantics ingress.begin.base.source).canonicalBytes.length
-      | other => legacy.exactCharge other
+      | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes
+          (event ingress)
+      | other => legacy.exactCharge other)).toCharge
     event := event ingress }
 
 theorem Accepted.intent_no_retry_consumption {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}

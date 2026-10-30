@@ -4,8 +4,27 @@ retained Chat Completions request and response. A valid report is a configured
 tariff quote over provider-asserted counts, not an invoice attestation or Mini
 admission verdict. Missing or ambiguous usage refuses construction.
 -/
-import Host.Json
-import Kernel.ProviderMetering
+module
+
+public import Host.Json
+public import Kernel.ProviderMetering
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ProviderUsage
 
@@ -238,7 +257,9 @@ private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage :=
             -- the next data event must be [DONE], as enforced above.
             usage := some (← usageOfJson (← field event "usage"))
         | none =>
-            let reason ← field choice "finish_reason"
+            -- Before the finish, an absent finish_reason reads as null
+            -- (Z.AI's coding-plan stream omits the key on its delta chunks).
+            let reason := (choice.getObjVal? "finish_reason").toOption.getD .null
             if reason != .null then
               let name ← reason.getStr?.mapError (fun _ => "finish_reason must be a string")
               if name.isEmpty then throw "empty finish_reason"
@@ -254,46 +275,89 @@ private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage :=
   | some observed => pure observed
   | none => throw "SSE terminal usage absent"
 
+/-- The one terminal usage record of a complete 200 reply, read from the retained
+bytes under the request's framing. Every refusal here is a fact about the reply's
+shape; on a metered route it is NOT a refusal of the settle (below) but the reason
+the settle is quoted at the hold. -/
+def readUsage (tariff : Tariff) (streaming : Bool) (response : List UInt8)
+    (contentType : String) : Result Usage := do
+  let text ← textOfBytes "response" response 8388608
+  let contentType ← mediaType contentType
+  if streaming then
+    if contentType != "text/event-stream" then
+      throw "stream response content type differs"
+    parseSseResponse tariff text
+  else
+    if contentType != "application/json" then
+      throw "JSON response content type differs"
+    parseJsonResponse tariff text
+
+/-- A quote with the reason its basis is not reported usage, when there is one. -/
+structure Quoted where
+  quote : Quote
+  leg : Leg
+  status : Nat
+  detail : Option String
+
+/-- The basis of a metered call's quote, by leg and reply (`Kernel.ProviderMetering.Basis`):
+reported usage on a complete 200 whose record reads; a refused reply on any other
+complete status; otherwise the undecided leg, with the parser's reason when a complete
+200 could not be read. Total: no leg is left without a basis. -/
+def meteredBasis (tariff : Tariff) (streaming : Bool) (leg : Leg) (response : List UInt8)
+    (contentType : String) (status : Nat) : Basis × Option String :=
+  match leg with
+  | .complete =>
+      if status = 200 then
+        match readUsage tariff streaming response contentType with
+        | .ok usage => (.reported usage, none)
+        | .error reason => (.undecided .truncated, some reason)
+      else (.refusedReply status, none)
+  | leg => (.undecided leg, none)
+
 /-- This function consumes retained exact bytes, not worker-supplied counts.
-A user-route call is quoted its per-operation fee whatever the response says:
-the friend's own key paid the provider, so no count is read. A metered route
-needs a complete 200 response with one terminal usage record. The caller must
-separately pin the quote's reserve to the signed provider hold and submit the
-generated operation through ordinary Mini admission, where the purse's route
-law checks the charge against the route recorded at reserve. -/
-def quoteResponse (tariff : Tariff) (route : Route) (request response : List UInt8)
-    (contentType : String) (status reserve : Nat) : Result Quote := do
+A user-route call is quoted its per-operation fee whatever the reply: the friend's
+own key paid the provider, so no count is read. A metered route is quoted by the leg
+and the reply (`meteredBasis`): the tariff charge on reported usage, the route fee on
+a refused reply, the hold on an undecided leg
+(`ProviderMetering.failed_leg_settle_decided`). The only refusals left are the
+controller's own request bytes failing the tariff's framing and a quote above the hold
+(impossible for a lawful reserve). The caller must separately pin the quote's reserve
+to the signed provider hold and submit the generated operation through ordinary Mini
+admission, where the purse's route law checks the charge against the route recorded
+at reserve. -/
+def quoteResponse (tariff : Tariff) (route : Route) (leg : Leg) (request response : List UInt8)
+    (contentType : String) (status reserve : Nat) : Result Quoted := do
   let streaming ← parseRequest tariff request
-  let usage ← if route = .user then pure none else do
-    unless status = 200 do throw "provider HTTP status is not 200"
-    let text ← textOfBytes "response" response 8388608
-    let contentType ← mediaType contentType
-    if streaming then
-      if contentType != "text/event-stream" then
-        throw "stream response content type differs"
-      some <$> parseSseResponse tariff text
-    else
-      if contentType != "application/json" then
-        throw "JSON response content type differs"
-      some <$> parseJsonResponse tariff text
-  match prepare tariff route usage request response reserve with
-  | some quote => pure quote
+  let (basis, detail) : Basis × Option String := if route = .user then (.perOperation, none)
+    else meteredBasis tariff streaming leg response contentType status
+  match prepare tariff route basis request response reserve with
+  | some quote => pure ⟨quote, leg, status, detail⟩
   | none => throw "reported usage quote exceeds the held allowance or tariff bound"
 
 /-- Bounded typed projection. The request/response files remain the exact
 evidence; digest equality is a collision-resistance assumption, not a proof of
 provider truth. -/
-def reportJson (providerResourceId : Nat) (quote : Quote) : Json :=
+def reportJson (providerResourceId : Nat) (quoted : Quoted) : Json :=
+  let quote := quoted.quote
   let usageFields := match quote.usage with
     | none => []
     | some usage => [
         ("promptTokens", toJson (toString usage.promptTokens)),
         ("completionTokens", toJson (toString usage.completionTokens)),
         ("totalTokens", toJson (toString usage.totalTokens))]
+  let detailFields := match quoted.detail with
+    | none => []
+    | some reason => [("detail", toJson reason)]
   .mkObj ([
     ("type", toJson "minidregg-provider-metering-v2"),
-    ("status", toJson (if quote.route = .user then "quoted-per-operation"
-      else "quoted-reported-usage")),
+    ("status", toJson (match quote.basis with
+      | .perOperation => "quoted-per-operation"
+      | .reported _ => "quoted-reported-usage"
+      | .refusedReply _ => "quoted-refused-reply"
+      | .undecided _ => "quoted-undecided-at-hold")),
+    ("basis", toJson quote.basis.name),
+    ("leg", toJson quoted.leg.name),
+    ("httpStatus", toJson (toString quoted.status)),
     ("providerResourceId", toJson (toString providerResourceId)),
     ("route", toJson quote.route.name),
     ("model", toJson quote.tariff.model),
@@ -308,9 +372,12 @@ def reportJson (providerResourceId : Nat) (quote : Quote) : Json :=
     ("charge", toJson (toString quote.amount)),
     ("operation", .mkObj [("type", toJson "settle"),
       ("charge", toJson (toString quote.amount)), ("route", toJson quote.route.name)]),
-    ("claim", toJson (if quote.route = .user then
-      "per-operation fee under operator tariff; the provider bill is the key owner's"
-      else "provider-reported usage under operator tariff; not invoice-verified"))])
+    ("claim", toJson (match quote.basis with
+      | .perOperation => "per-operation fee under operator tariff; the provider bill is the key owner's"
+      | .reported _ => "provider-reported usage under operator tariff; not invoice-verified"
+      | .refusedReply _ => "complete non-200 reply: the route's declared per-operation fee; the provider bills nothing for a refused call"
+      | .undecided _ => "no usage record could be read for this leg: the whole hold, the maximum the provider may have billed"))]
+    ++ detailFields)
 
 private def splitPairBounded (payload : List UInt8) (maximum : Nat) :
     Result (List UInt8 × List UInt8) := do
@@ -332,17 +399,19 @@ def quotePayload (services : List (Nat × Tariff))
     (payload : List UInt8) : Result Json := do
   let (metadataBytes, remainder) ← splitPairBounded payload 4096
   let (request, response) ← splitPairBounded remainder 1048576
-  if response.isEmpty || response.length > 8388608 then
+  if response.length > 8388608 then
     throw "provider metering response exceeds byte bound"
   let metadataText ← textOfBytes "metadata" metadataBytes 4096
   let metadata ← Minidregg.Host.Json.parse metadataText
   let obj ← metadata.getObj?.mapError (fun _ => "metadata must be an object")
-  let expected := ["version", "providerResourceId", "route", "status", "contentType", "reserve"]
+  let expected := ["version", "providerResourceId", "route", "leg", "status", "contentType", "reserve"]
   let actual := obj.foldl (init := []) (fun names key _ => key :: names)
   unless actual.length = expected.length && actual.all expected.contains do
-    throw "provider metering metadata differs from the v3 schema"
-  unless (← stringField metadata "version") == "3" do
+    throw "provider metering metadata differs from the v4 schema"
+  unless (← stringField metadata "version") == "4" do
     throw "provider metering metadata version differs"
+  let some leg := Leg.ofName? (← stringField metadata "leg")
+    | throw "provider metering leg must be complete, timeout, truncated or lost"
   let providerResourceId ← canonicalNat metadata "providerResourceId"
   let some (_, tariff) := services.find? (fun service => service.1 == providerResourceId)
     | throw "provider metering selector is not configured"
@@ -351,7 +420,33 @@ def quotePayload (services : List (Nat × Tariff))
   let status ← canonicalNat metadata "status"
   let contentType ← stringField metadata "contentType"
   let reserve ← canonicalNat metadata "reserve"
-  let quote ← quoteResponse tariff route request response contentType status reserve
-  pure (reportJson providerResourceId quote)
+  -- A leg without a complete reply carries no status and no content type, and may
+  -- carry no response bytes at all (or the partial bytes the gateway retained).
+  if leg != .complete then
+    unless status = 0 && contentType.isEmpty do
+      throw "a non-complete provider leg carries no HTTP status or content type"
+  let quoted ← quoteResponse tariff route leg request response contentType status reserve
+  pure (reportJson providerResourceId quoted)
+
+/-- One pinned provider service as the deployment config spells it
+(`providerServices[]`): the purse resource and its per-route tariff. The
+serving Host and the local consent provider parse it with `checkedServices`,
+so the two can never read different pins from one file. -/
+structure ServiceSettings where
+  providerResourceId : Nat
+  tariff : Json
+  deriving FromJson, ToJson
+
+/-- Bounded unique service table: one to eight entries, positive distinct
+resource ids, each tariff the per-route v2 schema. -/
+def checkedServices (services : List ServiceSettings) : Result (List (Nat × Tariff)) := do
+  unless 0 < services.length && services.length ≤ 8 do
+    throw "providerServices requires one to eight entries"
+  let ids := services.map (·.providerResourceId)
+  unless ids.all (fun id => decide (0 < id)) && decide ids.Nodup do
+    throw "providerServices resource IDs must be positive and unique"
+  services.mapM fun service => do
+    let tariff ← parseTariff service.tariff.compress
+    pure (service.providerResourceId, tariff)
 
 end Minidregg.Host.ProviderUsage

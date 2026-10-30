@@ -17,7 +17,7 @@ immutable exact-55d3868 292-module prefix. The overlay imported committed
 used `DurableReceiverIO` source `6f13945c`/OLean `2fbf2652` and
 `ApplicationLifecycleClaimV3Receiver` source `6bbcfc92`/OLean `e4bdd75a`.
 All six Host modules were compiled serially with `LEAN_NUM_THREADS=2 lake env
-lean Host/NAME.lean -o .lake/build/lib/lean/Host/NAME.olean`, each exit 0.
+lean Host/<Name>.lean -o .lake/build/lib/lean/Host/NAME.olean`, each exit 0.
 Five final logs have no diagnostics; Json has pre-existing axiom/linter output
 and no errors. `host-v3-Main-final.log` is the final Main source gate; the
 earlier `host-v3-Main.log` is a superseded diagnostic.

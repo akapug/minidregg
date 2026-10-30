@@ -3,6 +3,9 @@
 
   lean-ask check FILE[:FROM_LINE]        re-elaborate FILE incrementally (language server) and print
                                          its errors/warnings (from FROM_LINE on, if given)
+                                         --stdin: FILE's text comes from stdin, not the tree (a lane that
+                                         edits on the Mac checks against a box's warm session:
+                                           ssh BOX lean-ask --tree T check F --stdin < F)
   lean-ask goals FILE:LINE[:COL]         proof state at LINE (default COL: end of the line's text)
   lean-ask eval 'CMDS' [ENV]             run Lean commands against a loaded environment, print messages
                                          and the goal at every `sorry`. ENV is one of
@@ -141,7 +144,8 @@ def make_current(tree, mods, log):
     if "out-of-date" not in out:
         raise Infra("lake could not resolve the imports:\n" + out[-3000:])
     log(f"imports out of date; building {' '.join(local)} in a build slot")
-    cmd = ("set -o pipefail; . %s/lib.sh; LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX_BUILD:-48G} "
+    # HOT-PATH 2d: every lean loads .lake/native/libmini_kernels_lean.so; build it first, loudly.
+    cmd = ("set -o pipefail; . %s/lib.sh; bash scripts/build-mini-kernels.sh && LEAN_NUM_THREADS=${LEAN_NUM_THREADS:-4} SWARM_MEM_MAX=${SWARM_MEM_MAX_BUILD:-48G} "
            "pipeline_build_slot %s -- swarm-build lake build %s" % (shlex.quote(HERE), " ".join(map(shlex.quote, local)), " ".join(map(shlex.quote, local))))
     r = subprocess.run(["bash", "-c", cmd], cwd=tree.root, capture_output=True, text=True)
     out = r.stdout + r.stderr
@@ -258,8 +262,8 @@ class LSP:
         self.request("textDocument/waitForDiagnostics", {"uri": uri, "version": d["version"]}, timeout)
         return uri, d, rebuilt
 
-    def check(self, path, from_line, reload, timeout):
-        uri, d, rebuilt = self.sync(path, reload, timeout)
+    def check(self, path, from_line, reload, timeout, text=None):
+        uri, d, rebuilt = self.sync(path, reload, timeout, text=text)
         with self.cv:
             _, ds = self.diags.get(uri, (None, []))
         out = []
@@ -419,7 +423,7 @@ class Daemon:
         reload, timeout = req.get("reload", False), req.get("timeout", 900)
         try:
             if op == "check":
-                res = self.get_lsp().check(req["file"], req.get("from_line"), reload, timeout)
+                res = self.get_lsp().check(req["file"], req.get("from_line"), reload, timeout, req.get("text"))
             elif op == "goals":
                 res = self.get_lsp().goals(req["file"], req["line"], req.get("col"), reload, timeout)
             elif op == "eval":
@@ -627,11 +631,11 @@ def main(argv):
         print(__doc__)
         return 0
     op, rest = argv[0], argv[1:]
-    opts = {"json": False, "reload": False, "timeout": 900, "tree": None}
+    opts = {"json": False, "reload": False, "stdin": False, "timeout": 900, "tree": None}
     pos, i = [], 0
     while i < len(rest):
         a = rest[i]
-        if a in ("--json", "--reload"):
+        if a in ("--json", "--reload", "--stdin"):
             opts[a[2:]] = True
         elif a in ("--tree", "--timeout", "--file", "--after", "--imports", "--env-pickle", "--pickle-to"):
             i += 1
@@ -648,6 +652,8 @@ def main(argv):
             die("usage: lean-ask check FILE[:FROM_LINE]")
         f, _, ln = pos[0].partition(":")
         req.update(file=absf(f), from_line=int(ln) if ln else None)
+        if opts["stdin"]:
+            req["text"] = sys.stdin.read()
     elif op == "goals":
         parts = pos[0].split(":") if len(pos) == 1 else []
         if len(parts) not in (2, 3):

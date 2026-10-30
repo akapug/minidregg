@@ -19,12 +19,33 @@ All its incidences may bind that one marker. Native implementation/transport
 and cryptographic custody assumptions remain explicit; the receipt is not a
 Lean proof of Ed25519 or physical commit.
 -/
-import Compiler.CredentialSignatureIO
-import Compiler.CredentialAuthorityDomain
-import Compiler.TypedAuthorizationRequestCodec
-import Compiler.ResourceBirthCodec
-import Compiler.PlanFootprintCodec
-import Theory.Receiving
+module
+
+public import Compiler.CredentialSignatureIO
+public import Compiler.CredentialAuthorityDomain
+public import Compiler.TypedAuthorizationRequestCodec
+public import Compiler.ResourceBirthCodec
+public import Compiler.PlanFootprintCodec
+public import Theory.Receiving
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialSignatureAdmission
 
@@ -46,18 +67,18 @@ def ed25519Algorithm : Nat := 1
 def signatureDomain : List UInt8 := "DREGG/AUTH/SIGNED-REQUEST".toUTF8.toList ++ [2]
 abbrev requestFrame := TypedAuthorizationRequestCodec.requestFrame
 
-/-- Canonical ingress uses the existing signed-envelope parser and encoding.
-The legacy stream remains useful inside a source-owned ordered bundle, whose
-whole-message decoder must likewise enforce exact re-encoding. Parsing a
-canonical envelope alone does not authenticate it or mint a receipt. -/
+/-- Canonical ingress uses the existing signed-envelope stream codec, which is
+canonical by construction: an accepted envelope has exactly one spelling, so no
+re-encoding is compared. Parsing a canonical envelope alone does not
+authenticate it or mint a receipt. -/
 def canonicalEnvelopeCodec : LawfulCodec CredentialSignedEnvelopeController.SignedEnvelope :=
-  ResourceBirthCodec.strictCodec CredentialSignedEnvelopeController.envelopeCodec
+  CredentialSignedEnvelopeController.envelopeStream.toLawful
 
 theorem canonicalEnvelopeCodec_accepted_bytes
     {bytes : List UInt8} {envelope : CredentialSignedEnvelopeController.SignedEnvelope}
     (accepted : canonicalEnvelopeCodec.decode bytes = some envelope) :
     canonicalEnvelopeCodec.encode envelope = bytes :=
-  ResourceBirthCodec.strictCodec_canonical CredentialSignedEnvelopeController.envelopeCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 /-- Signing uses the sole complete kind-indexed codec. No second projection of
 request fields exists in the native signature adapter. -/
@@ -277,16 +298,16 @@ def prepare (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest)
 /-- The constructor is module-private. There is no positive-result decoder,
 test receipt constructor, arbitrary verifier callback or pure mint function. The
 verdict is the configured verifier's, and the receipt keeps that config
-(`verifier`): the pinned native process, or -- only in a Lean fixture that evaluates
-a real admission -- a recorded run of that process
+(`verifier`): the linked native kernel, or -- only in a Lean fixture that evaluates
+a real admission -- a recorded run of that verifier
 (`CredentialSignatureIO.Transcript`), which `scripts/check-native-transcripts.sh`
-re-submits to it.  **Layer 2**: the verdict is the oracle's, a runtime fact; `private
+re-submits to the pinned binary.  **Layer 2**: the verdict is the oracle's, a runtime fact; `private
 mk` stops names but not `by constructor`, so the guarantee that only `verifyNative`
 and `ofReceiverClaim` mint a receipt is `TokenCensus` (no foreign mint, a planted
 forgery detected). -/
 structure CheckedSignature (snapshot : Snapshot) where
   private mk ::
-  /-- The oracle that answered the signature check: the pinned process, or (only
+  /-- The oracle that answered the signature check: the linked native kernel, or (only
   in a pure evaluation) a recorded run of it (`CredentialSignatureIO.Oracle`). -/
   source : CredentialSignatureIO.Source
   request : SomeRequest
@@ -297,6 +318,14 @@ structure CheckedSignature (snapshot : Snapshot) where
   admission : CredentialSignedEnvelopeController.Admission
   admitted : CredentialSignedEnvelopeController.finish prepared.controller (Except.ok true : Except CredentialSignatureIO.Error Bool) =
     .ok admission
+/-- The receipt's admission is the controller's finish of the preparation of exactly
+its envelope against the snapshot index. -/
+theorem CheckedSignature.admittedFrom {snapshot : Snapshot}
+    (receipt : CheckedSignature snapshot) :
+    prepare snapshot receipt.nullifier receipt.request receipt.envelopeBytes = .ok receipt.prepared ∧
+      CredentialSignedEnvelopeController.finish receipt.prepared.controller
+        (Except.ok true : Except CredentialSignatureIO.Error Bool) = .ok receipt.admission :=
+  ⟨receipt.preparedFrom, receipt.admitted⟩
 
 def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.Oracle m) (snapshot : Snapshot) (nullifier : Nat)
     {kind : ResourceKind} (request : Request kind) (envelopeBytes : List UInt8) :
@@ -321,34 +350,78 @@ def verifyNative {m : Type → Type} [Monad m] (config : CredentialSignatureIO.O
 A `Kernel.Receiving` family's signature claims are verified by the Receiver
 BEFORE its `prepare` runs (`Theory.Receiving.Receiver.admitVia`); `prepare`
 receives the accepted claims as `Theory.Receiving.Vouchers` of the Receiver's
-verifier.  `receiverVerify` is that verifier over a `CredentialSignatureIO.Oracle`
+verifier.  `receiverVerifier` is that verifier over a `CredentialSignatureIO.Oracle`
 -- the same closed family of oracles `verifyNative` takes, so at `IO` the
-verdict is the pinned process's (`Oracle.io_process`).  `ReceiverSignature` and
+verdict is the linked native kernel's (`Oracle.io_native`).  `ReceiverSignature` and
 `CheckedSignature.ofReceiverClaim` turn a voucher into a value a gate can hold;
 neither can be built without one. -/
 
-open Minidregg.Theory.Receiving (SigQuery Vouchers)
+open Minidregg.Theory.Receiving (SigQuery Vouchers Verifier)
 
-/-- **The Receiver's verifier over one oracle**: the oracle's verdict on the
-claim's exact key, message and signature, its error printed. -/
-def receiverVerify : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery →
-    m (Except String Bool)
-  | _, .live config, claim => do
-      let answer ← match claim.scheme with
-        | .ed25519 => CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature
-        | .sshsig nameSpace =>
-          CredentialSignatureIO.verifySshsig config claim.publicKey nameSpace claim.message claim.signature
-      match answer with
-      | .error reason => pure (.error s!"{repr reason}")
-      | .ok verdict => pure (.ok verdict)
-  | _, .recorded transcript, claim =>
-      (match claim.scheme with
-        | .sshsig _ => .error "a recorded transcript holds Ed25519 verdicts only"
-        | .ed25519 =>
-          match CredentialSignatureIO.recordedVerdict transcript claim.publicKey claim.message
-              claim.signature with
-          | .error reason => .error s!"{repr reason}"
-          | .ok verdict => .ok verdict : Except String Bool)
+/-- **The oracle ran and answered.**  The live half of `Verifier.Answered`: the linked native kernel
+answered `answer` on exactly `query`.  The constructor is private and its ONLY construction site is the
+live branch of `receiverVerifier` below, right after `CredentialSignatureIO.verify`/`verifySshsig`
+returned `.ok answer`; `TokenCensus` pins that no constant elsewhere mints one.  This is the one
+remaining layer-2 trust of the receiving pipeline: the kernel returned the verdict. -/
+structure Ran (config : CredentialSignatureIO.NativeConfig) (query : SigQuery) (answer : Bool) :
+    Prop where
+  private mk ::
+
+/-- What it means for an oracle to have answered `answer` on `query`: for the live kernel, `Ran`; for a
+recorded run, the Ed25519 transcript verdict. -/
+def oracleAnswered : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery → Bool → Prop
+  | _, .live config, query, answer => Ran config query answer
+  | _, .recorded transcript, query, answer =>
+      query.scheme = .ed25519 ∧
+        CredentialSignatureIO.recordedVerdict transcript query.publicKey query.message query.signature =
+          .ok answer
+
+/-- **The Receiver's verifier over one oracle** (the ONE verifier a Host receiver is indexed by): the
+oracle's verdict on the claim's exact key, message and signature, its error printed, returned with the
+fact `oracleAnswered` that the oracle gave it. -/
+def receiverVerifier : {m : Type → Type} → CredentialSignatureIO.Oracle m → Verifier m
+  | _, .live config =>
+      { Answered := fun query answer => Ran config query answer
+        ask := fun claim => do
+          let answer ← match claim.scheme with
+            | .ed25519 =>
+                CredentialSignatureIO.verify config claim.publicKey claim.message claim.signature
+            | .sshsig nameSpace =>
+                CredentialSignatureIO.verifySshsig config claim.publicKey nameSpace claim.message
+                  claim.signature
+          match answer with
+          | .error reason => pure (.error s!"{repr reason}")
+          | .ok verdict => pure (.ok ⟨verdict, Ran.mk⟩) }
+  | _, .recorded transcript =>
+      { Answered := fun query answer =>
+          query.scheme = .ed25519 ∧
+            CredentialSignatureIO.recordedVerdict transcript query.publicKey query.message
+              query.signature = .ok answer
+        ask := fun claim =>
+          match scheme : claim.scheme with
+          | .sshsig _ => pure (.error "a recorded transcript holds Ed25519 verdicts only")
+          | .ed25519 =>
+            match verdict : CredentialSignatureIO.recordedVerdict transcript claim.publicKey
+                claim.message claim.signature with
+            | .error reason => pure (.error s!"{repr reason}")
+            | .ok answer => pure (.ok ⟨answer, rfl, rfl⟩) }
+
+/-- **Live teeth, over the type**: a voucher set of the live verifier holds a query only with its `Ran`
+witness.  Since `Ran`'s constructor is private to this module and used once, a `Vouchers (receiverVerifier
+(.live config))` holding a query the kernel never answered `true` on is not a term of the type. -/
+theorem live_voucher_has_ran {config : CredentialSignatureIO.NativeConfig}
+    (vouchers : Vouchers (receiverVerifier (.live config))) {query : SigQuery}
+    (member : query ∈ vouchers.verified) : Ran config query true :=
+  vouchers.verifiedAnswered query member
+
+/-- And the recorded side: the transcript said `true` on Ed25519. -/
+theorem recorded_voucher_in_transcript {transcript : CredentialSignatureIO.Transcript}
+    (vouchers : Vouchers (receiverVerifier (.recorded transcript))) {query : SigQuery}
+    (member : query ∈ vouchers.verified) :
+    query.scheme = .ed25519 ∧
+      CredentialSignatureIO.recordedVerdict transcript query.publicKey query.message query.signature =
+        .ok true :=
+  vouchers.verifiedAnswered query member
 
 /-- **What a family's `prepare` receives from the Receiver**: the oracle that
 answered and the vouchers of the claims it accepted, typed by that oracle's
@@ -356,7 +429,7 @@ verifier. -/
 structure Received where
   {m : Type → Type}
   oracle : CredentialSignatureIO.Oracle m
-  vouchers : Vouchers (receiverVerify oracle)
+  vouchers : Vouchers (receiverVerifier oracle)
 
 /-- A signature the Receiver's verifier accepted before `prepare` ran: the
 exact claim, and the oracle that answered (`Source.receiver`).  The constructor
@@ -527,7 +600,7 @@ theorem checked_frame_exact (snapshot : Snapshot) (receipt : CheckedSignature sn
   exact congrArg CredentialSignedEnvelopeController.headerCodec.encode receipt.prepared.headerExact
 
 /-- Explicit IO-to-verifier refinement obligation for ACTUAL execution,
-including the pinned executable and exact process/filesystem byte transport.
+including the linked native kernel and its exact ByteArray ABI transport.
 `Returned` denotes that physical execution relation; a structurally available
 receipt alone is not its proof. No relation or instance is asserted here.
 The existing controller separately requires cryptographic refinement and
@@ -626,5 +699,23 @@ theorem checked_signer_live (snapshot : Snapshot) (receipt : CheckedSignature sn
 #guard_msgs (whitespace := lax) in #print axioms requestBytes_exact_projection
 /-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.requestBytes_separates_policyRevision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms requestBytes_separates_policyRevision
+
+/-! ## Poles of `NativeIORefinement`
+
+Execution that returns exactly what `verify` computes refines it; an execution
+reporting `ok true` where `verify` says `ok false` does not. -/
+
+theorem nativeIORefinement_exact :
+    NativeIORefinement ⟨⟨"verifier"⟩⟩ (fun _ k f s r => (Except.ok false) = r)
+      (fun _ _ _ => .ok false) :=
+  ⟨fun _ _ _ _ h => h⟩
+
+theorem nativeIORefinement_misreported_refused :
+    ¬ NativeIORefinement ⟨⟨"verifier"⟩⟩ (fun _ _ _ _ r => r = .ok true)
+      (fun _ _ _ => .ok false) := by
+  intro r
+  exact Bool.noConfusion (Except.ok.inj (r.exactResult [] [] [] (.ok true) rfl))
+
+#assert_axioms nativeIORefinement_exact nativeIORefinement_misreported_refused
 
 end Minidregg.Compiler.CredentialSignatureAdmission

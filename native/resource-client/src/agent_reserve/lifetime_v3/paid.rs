@@ -207,12 +207,12 @@ pub(crate) fn lifetime_paid_plan(reserve: &Path, grant: &Path, directory: &Path)
         &original.host,
         &original.operator_socket,
         &original.config,
-        78,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
         &request,
     )?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan = expect_reply(&frame, 78)?;
+    let plan = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?;
     create_private(&directory.join("plan.bin"), plan)?;
     let inspection = source_inspect(
         &original.host,
@@ -344,12 +344,12 @@ pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        78,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
         &pinned.request,
     )?;
     create_private(&directory.join("payer-current-plan.frame"), &current)?;
     sync_directory_ancestors(&directory)?;
-    if expect_reply(&current, 78)? != pinned.plan {
+    if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
         return Err("lifetime payer plan changed at current verified image".into());
     }
     let slots = retained
@@ -407,10 +407,12 @@ pub(crate) fn lifetime_paid_payer_sign(directory: &Path, approval_json: &Path) -
 }
 
 fn payer_slot_shape(slots: &[Value], signers: &[Value]) -> Result<()> {
-    if slots.len() != 3 || signers.len() != 3 {
-        return Err("lifetime payer requires exact target/observe/authority slots".into());
+    // The source payer command has one mutating target, so native admission
+    // requires target+authority and no foreign observation incidence.
+    if slots.len() != 2 || signers.len() != 2 {
+        return Err("lifetime payer requires exact target/authority slots".into());
     }
-    for ((slot, signer), role) in slots.iter().zip(signers).zip(["4", "8", "1"]) {
+    for ((slot, signer), role) in slots.iter().zip(signers).zip(["4", "1"]) {
         if field(slot, "role")? != role
             || field(slot, "index")? != "0"
             || field(signer, "role")? != role
@@ -464,12 +466,12 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        78,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
         &pinned.request,
     )?;
     create_private(&directory.join("seal-current-plan.frame"), &current)?;
     sync_directory_ancestors(&directory)?;
-    if expect_reply(&current, 78)? != pinned.plan {
+    if expect_reply(&current, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)? != pinned.plan {
         return Err("lifetime paid plan changed at current verified image".into());
     }
     let app_slots = retained
@@ -512,13 +514,13 @@ pub(crate) fn lifetime_paid_seal(directory: &Path, approval_json: &Path) -> Resu
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        79,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE,
         &payload,
     )?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
-    let ingress = expect_reply(&frame, 79)?;
+    let ingress = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     sync_retained_call(&directory, &directory.join("ingress.bin"))?;
     create_private(&directory.join("approval.json"), &approval_bytes)?;
@@ -624,7 +626,7 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
             &pinned.original.host,
             &pinned.original.operator_socket,
             &pinned.original.config,
-            76,
+            mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT,
             &ingress,
         )
         .map_err(|error| format!("lifetime paid op76 uncertain; use exact lookup: {error}"))
@@ -632,7 +634,7 @@ pub(crate) fn lifetime_paid_submit(directory: &Path) -> Result<()> {
     create_private(&directory.join("submit.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
-    let committed = expect_reply(&frame, 76)?;
+    let committed = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_SUBMIT)?;
     create_private(&directory.join("committed.bin"), committed)?;
     let inspection = source_inspect(
         &pinned.original.host,
@@ -686,13 +688,13 @@ pub(crate) fn lifetime_paid_lookup(directory: &Path) -> Result<()> {
         &pinned.original.host,
         &pinned.original.operator_socket,
         &pinned.original.config,
-        77,
+        mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP,
         &ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_paid_pin(&directory, &pinned)?;
-    let outcome_bytes = expect_reply(&frame, 77)?;
+    let outcome_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_LIFETIME_DISPATCH_LOOKUP)?;
     create_private(
         &directory.join(format!("{stem}.outcome.bin")),
         outcome_bytes,
@@ -729,24 +731,26 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn payer_only_approval_requires_three_ordered_source_incidence_slots() {
+    fn payer_only_approval_requires_two_ordered_source_incidence_slots() {
         let slot = |role: &str| {
             json!({"role":role,"index":"0",
             "keyId":"7007","keyEpoch":"1","publicKey":"ab",
             "keyPath":"/private/payer.key"})
         };
-        let slots = vec![slot("4"), slot("8"), slot("1")];
+        let slots = vec![slot("4"), slot("1")];
         assert!(payer_slot_shape(&slots, &slots).is_ok());
+        let extra_observation = vec![slot("4"), slot("8"), slot("1")];
+        assert!(payer_slot_shape(&extra_observation, &extra_observation).is_err());
         let mut swapped = slots.clone();
-        swapped.swap(1, 2);
+        swapped.swap(0, 1);
         assert!(payer_slot_shape(&swapped, &slots).is_err());
         let mut foreign = slots.clone();
-        foreign[2]["index"] = json!("1");
+        foreign[1]["index"] = json!("1");
         assert!(payer_slot_shape(&slots, &foreign).is_err());
         foreign = slots.clone();
-        foreign[2]["keyPath"] = json!("/private/other.key");
+        foreign[1]["keyPath"] = json!("/private/other.key");
         assert!(payer_slot_shape(&slots, &foreign).is_err());
-        assert!(payer_slot_shape(&slots[..2], &slots[..2]).is_err());
+        assert!(payer_slot_shape(&slots[..1], &slots[..1]).is_err());
     }
 
     #[test]

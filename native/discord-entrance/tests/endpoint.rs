@@ -11,7 +11,10 @@ use std::time::Duration;
 
 use ed25519_dalek::{Signer, SigningKey};
 use minidregg_discord_entrance::curl::Poster;
-use minidregg_discord_entrance::http::{client_request, read_request, write_response};
+#[path = "support/client.rs"]
+mod client;
+use client::client_request;
+use minidregg_discord_entrance::http::{read_request, write_response};
 use minidregg_discord_entrance::now_s;
 use minidregg_discord_entrance::server::{App, Config};
 use minidregg_discord_entrance::session::{Deployment, Sessions};
@@ -42,15 +45,25 @@ fn world(tag: &str) -> World {
     world_with(tag, false)
 }
 
-/// The split shape: the entrance runs each line through a root runner as the
-/// session's own account (here a stand-in script, invoked exactly as
-/// `sudo -n -- RUNNER NAME` would invoke it: NAME as the one argument, the line
-/// on stdin) and keeps its custody and log in its own state directory.
-const RUNNER: &str = r#"#!/bin/sh
-[ "$#" = 1 ] || { echo "runner takes NAME only, got $#" >&2; exit 64; }
-IFS= read -r line
-printf 'runner name=%s line=[%s] ssh_env=%s\n' "$1" "$line" "${SSH_ORIGINAL_COMMAND-unset}"
-"#;
+/// The split shape: the entrance runs each line through the root runner's socket as the
+/// session's own account (here a stand-in listener speaking the runner's protocol:
+/// `NAME\nLINE\n` in, `mini-session-run-v1 EXIT OUTLEN ERRLEN\n` and the streams out) and
+/// keeps its custody and log in its own state directory.
+fn stand_in_runner(socket: &Path) {
+    use std::io::{Read, Write};
+    let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+    std::thread::spawn(move || {
+        for s in listener.incoming() {
+            let mut s = s.unwrap();
+            let mut request = String::new();
+            s.read_to_string(&mut request).unwrap();
+            let mut lines = request.splitn(3, '\n');
+            let (name, line) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+            let out = format!("runner name={name} line=[{line}] ssh_env=unset\n");
+            let _ = s.write_all(format!("mini-session-run-v1 0 {} 0\n{out}", out.len()).as_bytes());
+        }
+    });
+}
 
 fn world_with(tag: &str, split: bool) -> World {
     let root = std::env::temp_dir().join(format!("discord-entrance-{tag}-{}", std::process::id()));
@@ -82,6 +95,10 @@ fn world_with(tag: &str, split: bool) -> World {
     let key = SigningKey::from_bytes(&[9u8; 32]);
     let p = |x: &str| PathBuf::from(format!("/fixed/{x}"));
     let cfg = Config {
+        mode: minidregg_discord_entrance::server::Mode::Http,
+        bot_token_file: None,
+        gateway_url: String::new(),
+        ca_file: PathBuf::from("/nonexistent"),
         listen: String::new(),
         application_id: APP.into(),
         public_key_hex: hex_encode(key.verifying_key().as_bytes()),
@@ -97,10 +114,9 @@ fn world_with(tag: &str, split: bool) -> World {
             socket: p("socket"),
             timeout: Duration::from_secs(20),
             runner: split.then(|| {
-                let runner = root.join("runner");
-                std::fs::write(&runner, RUNNER).unwrap();
-                std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o755)).unwrap();
-                vec![runner.into_os_string()]
+                let runner = root.join("runner.sock");
+                stand_in_runner(&runner);
+                runner
             }),
         },
         sessions: Sessions { dir: root.join("sessions"), sponsor: "ember".into(), sponsor_workspace: p("sponsor-ws") },
@@ -111,6 +127,9 @@ fn world_with(tag: &str, split: bool) -> World {
             std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
             state
         }),
+        door_links: split.then(|| root.join("entrance-state/door-links")),
+        door_url: Some("https://demo.example/join".into()),
+        retention: minidregg_discord_entrance::session::Retention { max_age_s: 7 * 86_400, max_records: 2000 },
     };
     let app = App::new(cfg.clone()).unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -147,6 +166,12 @@ fn command(id: &str, user: &str, name: &str, line: Option<&str>) -> Value {
     }
     json!({ "type": 2, "id": id, "application_id": APP, "token": format!("tok-{id}"),
             "member": { "user": { "id": user } }, "data": data })
+}
+
+fn feedback_command(id: &str, user: &str, text: &str) -> Value {
+    json!({ "type": 2, "id": id, "application_id": APP, "token": format!("tok-{id}"),
+            "member": { "user": { "id": user } },
+            "data": { "name": "feedback", "options": [{ "name": "text", "type": 3, "value": text }] } })
 }
 
 fn content(resp: &str) -> String {
@@ -232,6 +257,22 @@ fn a_rostered_line_runs_in_its_session_deferred_and_logged() {
     assert_eq!(mode, 0o600);
 }
 
+/// `/feedback text:` runs the member's own `feedback --via discord "TEXT"` line in the member's
+/// session (the same turn the shell and the web make), the text quoted whole so none of its words
+/// can be read as a flag of the verb; an empty text runs nothing.
+#[test]
+fn feedback_is_the_members_own_report_line() {
+    let w = world("feedback");
+    let c = deferred_then_patch(&w, "1", post(&w, &feedback_command("1", FRIEND, "--clause fake the button is gone"), false));
+    let home = w.sessions.join("friend");
+    assert!(c.contains("line=[feedback --via discord \"--clause fake the button is gone\"]"), "{c}");
+    assert!(c.contains(&format!("home={}", home.display())), "{c}");
+    wait_for_worker_release(&w, "1");
+    let (status, body) = post(&w, &feedback_command("2", FRIEND, "   "), false);
+    assert_eq!(status, 200);
+    assert!(content(&body).contains("usage: /feedback text:"), "{body}");
+}
+
 #[test]
 fn split_tenancy_lines_go_through_the_runner_and_nothing_is_written_in_the_sessions_tree() {
     let w = world_with("split", true);
@@ -252,7 +293,7 @@ fn refusals_before_any_line_runs() {
     let c = content(&post(&w, &command("10", STRANGER, "mini", Some("refs")), false).1);
     assert_eq!(
         c,
-        "```\nerror: Discord user 222 is not on this Mini's roster; nothing ran. Ember must add you: send ember this id.\n```"
+        "```\nerror: You have no Mini account linked to this Discord user yet; nothing ran. Get one at https://demo.example/join and its page gives you the line `/mini line:link CODE`.\n```"
     );
     let long = "x".repeat(1001);
     let c = content(&post(&w, &command("11", FRIEND, "mini", Some(&long)), false).1);
@@ -299,18 +340,48 @@ fn durable_restart_exact_binding_unknown_and_roster_revocation(){
     mini_sdk::store::atomic_json(&path,&rec).unwrap();
     let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("UNKNOWN"));
     std::fs::write(&w.cfg.roster,json!({"version":1,"users":{}}).to_string()).unwrap();
-    let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("not on this Mini's roster"));
+    let (resp,job)=restarted.handle(&signed(&w,&cmd),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("no Mini account linked"));
     assert_eq!(std::fs::read_to_string(w.sessions.join("friend/discord.log")).unwrap().lines().count(),1);
 }
 #[test]
-fn accepted_before_deferral_is_recoverable_and_status_is_actor_bound(){
+fn nothing_is_retained_before_the_deferral_is_written_and_status_is_actor_bound(){
+    // No fsync stands between Discord's request and the deferral: `handle` only takes the
+    // custody lease; the acceptance is retained after the deferral is on the wire. A request
+    // whose deferral was never written leaves nothing and ran nothing.
     let w=world("accepted");let app=App::new(w.cfg.clone()).unwrap();let cmd=command("80",FRIEND,"mini",Some("read shared"));
     let (_,job)=app.handle(&signed(&w,&cmd),now_s());assert!(job.is_some());drop(job);drop(app);
-    let app=App::new(w.cfg.clone()).unwrap();let (_,job)=app.handle(&signed(&w,&cmd),now_s());assert!(job.is_some());drop(job);
+    assert!(!w.sessions.join(".discord-custody/4242-80.json").exists());
+    let app=App::new(w.cfg.clone()).unwrap();
     let mut status=command("81",FRIEND,"mini-status",None);status["data"]["options"]=json!([{"name":"target","value":"80","type":3}]);
-    let (resp,job)=app.handle(&signed(&w,&status),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("has not started"));
+    let (resp,job)=app.handle(&signed(&w,&status),now_s());assert!(job.is_none());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("no retained interaction"));
+    // A completed line is visible to its own user and session only.
+    deferred_then_patch(&w,"82",post(&w,&command("82",FRIEND,"mini",Some("read shared")),false));
+    wait_for_worker_release(&w,"82");
+    status["data"]["options"]=json!([{"name":"target","value":"82","type":3}]);
+    let (resp,_)=app.handle(&signed(&w,&status),now_s());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("argc=6"));
     // A second rostered Discord user on the same hosted session still cannot inspect it.
     std::fs::write(&w.cfg.roster,json!({"version":1,"users":{FRIEND:"friend",STRANGER:"friend"}}).to_string()).unwrap();
     status["member"]["user"]["id"]=json!(STRANGER);
     let (resp,_)=app.handle(&signed(&w,&status),now_s());assert!(content(&String::from_utf8(resp.body).unwrap()).contains("no retained interaction"));
+}
+
+#[test]
+fn an_unrostered_link_line_queues_one_request_for_the_door_and_never_runs() {
+    let w = world_with("link", true);
+    let spool = w.cfg.door_links.clone().unwrap();
+    let c = content(&post(&w, &command("20", STRANGER, "mini", Some("link abcdefghijklmnop")), false).1);
+    assert!(c.starts_with("```\nlink request queued"), "{c}");
+    let files: Vec<_> = std::fs::read_dir(&spool).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(files.len(), 1);
+    let link = minidregg_discord_entrance::door::Link::parse(&std::fs::read(&files[0]).unwrap()).unwrap();
+    assert_eq!((link.user.as_str(), link.code.as_str(), link.interaction.as_str()), (STRANGER, "ABCDEFGHIJKLMNOP", "20"));
+    // The same interaction again is refused by the spool (create_new), not queued twice.
+    let c = content(&post(&w, &command("20", STRANGER, "mini", Some("link ABCDEFGHIJKLMNOP")), false).1);
+    assert!(c.contains("error:"), "{c}");
+    // A rostered user cannot relink; a malformed code is just an unrostered line.
+    let c = content(&post(&w, &command("21", FRIEND, "mini", Some("link ABCDEFGHIJKLMNOP")), false).1);
+    assert!(c.contains("already linked to session friend"), "{c}");
+    let c = content(&post(&w, &command("22", STRANGER, "mini", Some("link short")), false).1);
+    assert!(c.contains("no Mini account linked"), "{c}");
+    assert_eq!(std::fs::read_dir(&spool).unwrap().count(), 1);
 }

@@ -6,9 +6,30 @@ first-create claim atomically consumes the stable first-attempt marker. This
 lower module does not certify the original BEGIN's membership in Verified or
 the successful prior-create completion required for `continue`.
 -/
-import Kernel.ApplicationLifecycleClaimV3Ingress
-import Kernel.ApplicationLifecycleBeginV3Admission
-import Kernel.ApplicationLifecycleClaimCore
+module
+
+public import Kernel.ApplicationLifecycleClaimV3Ingress
+public import Kernel.ApplicationLifecycleBeginV3Admission
+public import Kernel.ApplicationLifecycleClaimCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimV3Core
 
@@ -99,6 +120,30 @@ theorem Conditional.original_record_exact {config : Config} {store : StoreIdenti
       DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent := by
   exact conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
 
+/-- The original record is the one verified under `head` at height
+`ingress.base.source.originalIndex + 1` and decodes to exactly the record of the
+re-admitted `ingress.originalBegin`; the ingress's original BEGIN is its claim's
+source BEGIN, the claim's current world root is `ground`'s, and the package cell the
+current claim observed holds `ingress.originalBegin`'s installed descriptor under
+`config`, and the retry/first-attempt markers are current at `ground`. -/
+theorem Conditional.original_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (ingress.base.source.originalIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent)) ∧
+      ingress.originalExact = true ∧
+      ingress.base.source.currentWorldRoot = ground.worldRoot ∧
+      ApplicationLifecycleBeginV3Admission.installedExact config.deployment ingress.originalBegin
+        conditional.current.packageRead.selected.observed.before = true ∧
+      markersCurrent ground ingress = true :=
+  ⟨⟨conditional.original.read.verified.record, conditional.original.read.verified.chain,
+      conditional.original.read.verified.root, conditional.original.read.verified.included,
+      conditional.original.read.decoded.trans (congrArg some (conditional.original.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord conditional.originalMatch)))⟩,
+    conditional.sourceExact, conditional.current.boundary, conditional.currentInstalled, conditional.markers⟩
+
 /-- The keys the historical (original) BEGIN reads on its prior state. -/
 def originalKeys (ingress : Ingress) : DurableView.Keys :=
   ApplicationLifecycleBeginV3Admission.keys ingress.originalBegin
@@ -152,12 +197,10 @@ def Conditional.intent {config : Config} {store : StoreIdentity} {head : Head st
   match ingress.createAttempt with
   | none => ordinary
   | some marker =>
+      -- One more nullifier of the same writes, guards and event: the World's
+      -- storage of the turn is the ordinary intent's (no marker term).
       { ordinary with
-        nullifiers := ordinary.nullifiers ++ [marker]
-        exactCharge := fun dimension => match dimension with
-          | .storageBytes => ordinary.exactCharge .storageBytes +
-              marker.canonicalBytes.length
-          | other => ordinary.exactCharge other }
+        nullifiers := ordinary.nullifiers ++ [marker] }
 
 theorem Conditional.intent_event {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : Ingress} (conditional : Conditional config head ground ingress) :

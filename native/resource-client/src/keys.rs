@@ -16,7 +16,7 @@
 //! whether the signing key is current before it seals, grants or lists. The
 //! namespace is the workspace's subject AND the public key of its signing key,
 //! so a workspace that only claims someone else's subject lands in its own
-//! directory (`credentials.rs`). `--pool true` is the operator's pool key (the
+//! directory (`mini_keys::credentials`). `--pool true` is the operator's pool key (the
 //! broker grants it to root only); the hosted shell never offers it. Values are
 //! never printed.
 //!
@@ -32,9 +32,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-#[path = "../../grain-runtime/src/credentials.rs"]
-#[allow(dead_code)] // shared with grain-runtime: its reserve-time lookups are used there
-mod credentials;
+use mini_keys::credentials;
 #[path = "key_service.rs"]
 mod service;
 
@@ -44,8 +42,6 @@ use mini_keys::client::{Broker, CLIENT_CONFIG};
 /// Set by the shell: true only for the one-verb form (`--line`), where stdin
 /// is not the shell's own input and `key set PROVIDER -` may read it.
 pub(crate) static STDIN_FREE: OnceLock<bool> = OnceLock::new();
-
-pub(crate) const SHELL_USAGE: &str = "key set PROVIDER -|@FILE | key grant PROVIDER RUNNER --per-call TOKENS --per-day CALLS --until HEIGHT [--model MODEL] | key revoke PROVIDER [RUNNER] | key ls | key providers | key choose PROVIDER MODEL RUNNER TASK";
 
 fn text(value: OsString, label: &str) -> Result<String> {
     value
@@ -93,7 +89,7 @@ fn read_secret(source: &str) -> Result<credentials::Secret> {
 fn owner_view(host: &Path, socket: &Path, config: &Path, owner: &Owner) -> Result<Value> {
     let payload =
         serde_json::to_vec(&json!({"subject":owner.subject,"publicKey":owner.public_key})).unwrap();
-    let reply = crate::session_invoke(host, socket, config, 144, &payload)?;
+    let reply = crate::session_invoke(host, socket, config, mini_sdk::host_operations::KEY_ROTATION_STATUS, &payload)?;
     let mut view: Value = match reply.split_first() {
         Some((144, body)) => {
             serde_json::from_slice(body).map_err(|_| "invalid native owner status")?
@@ -329,87 +325,51 @@ fn plain_file(value: &str) -> Result<()> {
 /// One shell line (`w[0] == "key"`) to one `mini key` call on this
 /// session's workspace. `@FILE` is confined to HOME/keys.
 pub(crate) fn shell_plan(workspace: &Path, home: &Path, w: &[String]) -> Result<Plan> {
-    let usage = || SHELL_USAGE.to_owned();
-    let sub = w.get(1).map(String::as_str).ok_or_else(usage)?;
+    // The grammar (shell_grammar::KEY) reads the words; what stays here is the custody rule: the
+    // provider key comes from stdin or a file in HOME/keys, never from the line.
+    let p = crate::shell_grammar::parse(&crate::shell_grammar::KEY, w)?;
+    let sub = p.leaf.path[1];
     let mut flags = vec![flag("action", sub), flag("dir", workspace)];
     match sub {
         "choose" => {
-            if w.len() != 6 {
-                return Err(usage());
-            }
-            for (name, value) in ["provider", "model", "runner", "task"].iter().zip(&w[2..]) {
-                flags.push(flag(name, value.clone()));
+            for (name, i) in ["provider", "model", "runner", "task"].iter().zip(0..) {
+                flags.push(flag(name, p.arg(i).to_owned()));
             }
         }
         "set" => {
-            if w.len() != 4 {
-                return Err(usage());
-            }
-            flags.push(flag("provider", w[2].clone()));
-            let source = if w[3] == "-" {
+            flags.push(flag("provider", p.arg(0).to_owned()));
+            let source = if p.arg(1) == "-" {
                 if STDIN_FREE.get() != Some(&true) {
                     return Err("key set PROVIDER - reads stdin; use the one-verb form: ssh mini@HOST 'key set PROVIDER -' < KEYFILE".into());
                 }
                 OsString::from("-")
-            } else if let Some(file) = w[3].strip_prefix('@') {
+            } else if let Some(file) = p.arg(1).strip_prefix('@') {
                 plain_file(file)?;
                 home.join("keys").join(file).into_os_string()
             } else {
-                return Err(
-                    "key set takes the key from - (stdin) or @FILE, never on the line".into(),
-                );
+                return Err("key set takes the key from - (stdin) or @FILE, never on the line".into());
             };
             flags.push(flag("secret", source));
         }
         "grant" => {
-            if !matches!(w.len(), 10 | 12) {
-                return Err(usage());
+            flags.push(flag("provider", p.arg(0).to_owned()));
+            flags.push(flag("runner", p.arg(1).to_owned()));
+            for (name, key) in [("--per-call", "per-call"), ("--per-day", "per-day"), ("--until", "until")] {
+                flags.push(flag(key, p.required(name).to_owned()));
             }
-            flags.push(flag("provider", w[2].clone()));
-            flags.push(flag("runner", w[3].clone()));
-            let mut seen = Vec::new();
-            for pair in w[4..].chunks(2) {
-                let name = match pair[0].as_str() {
-                    "--per-call" => "per-call",
-                    "--per-day" => "per-day",
-                    "--until" => "until",
-                    "--model" => "model",
-                    _ => return Err(usage()),
-                };
-                if seen.contains(&name) {
-                    return Err(usage());
-                }
-                seen.push(name);
-                flags.push(flag(name, pair[1].clone()));
-            }
-            if !["per-call", "per-day", "until"]
-                .iter()
-                .all(|name| seen.contains(name))
-            {
-                return Err(usage());
+            if let Some(Some(model)) = p.flag("--model") {
+                flags.push(flag("model", model.to_owned()));
             }
         }
         "revoke" => {
-            if !(3..=4).contains(&w.len()) {
-                return Err(usage());
-            }
-            flags.push(flag("provider", w[2].clone()));
-            if let Some(runner) = w.get(3) {
-                flags.push(flag("runner", runner.clone()));
+            flags.push(flag("provider", p.arg(0).to_owned()));
+            if let Some(runner) = p.opt(1) {
+                flags.push(flag("runner", runner.to_owned()));
             }
         }
-        "ls" | "providers" => {
-            if w.len() != 2 {
-                return Err(usage());
-            }
-        }
-        _ => return Err(usage()),
+        _ => {}
     }
-    Ok(Plan::Client {
-        command: "key".into(),
-        flags,
-        writes: vec![],
-    })
+    Ok(Plan::Client { command: "key".into(), flags, writes: vec![] })
 }
 
 #[cfg(test)]

@@ -13,8 +13,27 @@ file prints (value, octets consumed and rest; or the refusal word), and an accep
 re-encodes to exactly the consumed octets. It requires the coverage fn §3 promises per
 family and returns the counts, so a file with no vectors cannot read as a pass.
 -/
-import Lean.Data.Json
-import Compiler.FnWireGrammar
+module
+
+public import Lean.Data.Json
+public import Compiler.FnWireGrammar
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FnWire
 

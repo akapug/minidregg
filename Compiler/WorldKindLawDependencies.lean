@@ -2,8 +2,27 @@
 Current exports are resolved by the shared law resolver. This module supplies
 neither a predicate evaluator nor caller-selected parents.
 -/
-import Compiler.CanonicalCellRegistry
-import Pred.LawComposition
+module
+
+public import Compiler.CanonicalCellRegistry
+public import Pred.LawComposition
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.WorldKindLawDependencies
 

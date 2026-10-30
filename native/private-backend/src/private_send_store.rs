@@ -3,37 +3,17 @@
 //! Honest crash storage + confidential authenticated channel + actual external
 //! source authorization are premises; this file is not the native authority join.
 use crate::{
-    asks::{self, PhaseMessage},
+    asks,
     codec::{bad, bytes, Generation, Nat},
-    consensus_wire::Cursor,
+    consensus_wire::{get_phase, put_phase, Cursor},
     private_send::{Body, Message, PrivateSend, Send},
     reconstruction::Field,
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
-fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (t, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(t);
-    bytes(v, b)
-}
-fn get_phase(c: &mut Cursor) -> Result<PhaseMessage> {
-    let t = c.byte()?;
-    let v = c.bytes()?;
-    match t {
-        0 => Ok(PhaseMessage::Init(v)),
-        1 => Ok(PhaseMessage::Echo(v)),
-        2 => Ok(PhaseMessage::Ready(v)),
-        _ => Err(bad("private phase")),
-    }
-}
 pub fn encode_message(m: &Message) -> Vec<u8> {
     let mut b = b"DREGG.PRIVATE.SEND.WIRE\x01".to_vec();
     b.extend(m.context);
@@ -103,46 +83,10 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b)
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let mut digits = vec![];
-    loop {
-        let x = c.byte()?;
-        digits.push(x);
-        if x == 255 {
-            break;
-        }
-    }
-    let mut r = crate::codec::Reader::new(&digits)?;
-    let count = r.count()?;
-    r.finish()?;
-    if count > crate::codec::MAX / 50 {
-        return Err(bad("private outbox count"));
-    }
-    let mut ps = vec![];
-    for _ in 0..count {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("private outbox recipient"));
-        }
-        ps.push(Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        })
-    }
-    c.finish()?;
-    if outbox(&ps) != b {
-        return Err(bad("private outbox canonical"));
-    }
-    Ok(ps)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 50, "private", decode_message, encode_message)
 }
 #[derive(Clone)]
 pub struct DeliveryMachine {
@@ -163,7 +107,8 @@ impl Machine for DeliveryMachine {
                     ps.push(p)
                 }
                 c.finish()?;
-                self.state.dealer_with_coefficients(&m, &ps)?
+                self.state.commit_dealer(&m, &ps)?;
+                vec![]
             }
             1 => {
                 let receiver = c.u16()?;
@@ -175,6 +120,10 @@ impl Machine for DeliveryMachine {
                 let m = decode_message(&c.bytes()?)?;
                 c.finish()?;
                 self.state.receive(sender, m)?
+            }
+            3 => {
+                c.finish()?;
+                self.state.emit_dealer()?
             }
             _ => return Err(bad("private delivery event")),
         };
@@ -195,7 +144,7 @@ impl Store {
         length: usize,
     ) -> Result<Self> {
         let state = PrivateSend::new(me, dealer, n, f, g, length)?;
-        let mut identity = b"DREGG.PRIVATE.DELIVERY.PARTY.V1".to_vec();
+        let mut identity = b"DREGG.PRIVATE.DELIVERY.PARTY.V2".to_vec();
         g.put(&mut identity);
         identity.extend(me.to_le_bytes());
         identity.extend(dealer.to_le_bytes());
@@ -209,17 +158,37 @@ impl Store {
     pub fn state(&self) -> &PrivateSend {
         &self.journal.state().state
     }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
+    }
     fn apply(&mut self, event: &[u8]) -> Result<Vec<Send>> {
         let b = self.journal.append(event)?;
         parse_outbox(&b, self.state().n)
     }
+    /// The deal is two journalled steps: commit the plaintext and random
+    /// coefficients (nothing published), then emit. A tear of the emit record
+    /// re-derives the identical ciphertext and key shares; an exact retry
+    /// replays the retained outbox.
     pub fn dealer(&mut self, m: &[u8]) -> Result<Vec<Send>> {
-        let mut b = vec![0];
-        bytes(m, &mut b);
-        let mut coeff = vec![0u8; 2 * (self.state().f + 1) * 16];
-        File::open("/dev/urandom")?.read_exact(&mut coeff)?;
-        b.extend(coeff);
-        self.apply(&b)
+        match self.state().committed_deal() {
+            Some((old, _)) => {
+                if old != m {
+                    return Err(bad("private delivery changed dealer retry"));
+                }
+                if self.state().dealer_emitted() {
+                    return self.replay_outboxes();
+                }
+            }
+            None => {
+                let mut b = vec![0];
+                bytes(m, &mut b);
+                let mut coeff = vec![0u8; 2 * (self.state().f + 1) * 16];
+                crate::entropy::os_fill(&mut coeff)?;
+                b.extend(coeff);
+                self.apply(&b)?;
+            }
+        }
+        self.apply(&[3])
     }
     pub fn request_delivery(&mut self, r: u16) -> Result<Vec<Send>> {
         let mut b = vec![1];
@@ -280,6 +249,57 @@ mod tests {
         assert_eq!(s.replay_outboxes().unwrap(), original);
         assert!(s.dealer(&[62; 64]).is_err());
     }
+    fn cut_last_byte(p: &std::path::Path) {
+        let len = fs::metadata(p).unwrap().len();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_len(len - 1)
+            .unwrap();
+    }
+    #[test]
+    fn torn_emit_rederives_the_same_deal_never_a_redraw() {
+        let p = path();
+        let out = {
+            let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+            s.dealer(&[61; 64]).unwrap()
+        };
+        cut_last_byte(&p);
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(s.dealer(&[62; 64]).is_err());
+        assert_eq!(s.dealer(&[61; 64]).unwrap(), out);
+        assert_eq!(s.dealer(&[61; 64]).unwrap(), out);
+        drop(s);
+        let s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+        assert_eq!(s.replay_outboxes().unwrap(), out);
+    }
+    #[test]
+    fn torn_commit_published_nothing_so_a_fresh_deal_is_safe() {
+        let p = path();
+        let after_open = {
+            let s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+            let n = fs::metadata(&p).unwrap().len();
+            drop(s);
+            n
+        };
+        Store::open(&p, 0, 0, 4, 1, &g(), 64)
+            .unwrap()
+            .dealer(&[61; 64])
+            .unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_len(after_open + 5)
+            .unwrap();
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 64).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(!s.dealer(&[62; 64]).unwrap().is_empty());
+    }
     #[test]
     fn transfer_wire_roundtrip_and_trailing_rejection() {
         let m = Message {
@@ -293,5 +313,43 @@ mod tests {
         let mut b = encode_message(&m);
         b.push(0);
         assert!(decode_message(&b).is_err());
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: Body::Cipher(PinPhase::Echo(vec![1])) } },
+            Send { to: 3, message: Message { context: [7; 32], body: Body::Cipher(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

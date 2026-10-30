@@ -243,7 +243,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   -- index, before the unified index) is refused at open, by name.
   let olderLabel := "state-key/tagged-v4;schema-refs/v5;" ++ DurableCheckpointCodec.logTagLabel ++
     ";history/mmr-v1;spent/trie-v1;checkpoint/v3;commands/v2"
-  let olderFrame := DurableCheckpointCodec.seedFrameName ++ [2] ++ olderLabel.toUTF8.toList
+  let olderFrame := DurableCheckpointCodec.labelledFrame olderLabel
   let olderSeed := (Tower256ConcreteBackend.StreamCodec.product Tower256ConcreteBackend.bytesStream
     DurableReceiverCodec.seedStream).encode (olderFrame, seed)
   let hex := String.join (olderSeed.map fun b =>

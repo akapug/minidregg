@@ -3,8 +3,29 @@ Exact opaque descriptor commitments from an audited old grain issue.
 The stable outer wire is decoded; no old descriptor is decoded or re-encoded
 under the target registry. This preserves the issuer's original scope digests.
 -/
-import Compiler.CarriedApplicationProvenance
-import Compiler.GrainResourceBirthHostCodec
+module
+
+public import Compiler.CarriedApplicationProvenance
+public import Compiler.GrainResourceBirthHostCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CarriedDispatchProvenance
 
@@ -25,6 +46,14 @@ structure CarriedDispatchIssue (config : Config) (current : Durable) where
   wire : GrainResourceBirthHostCodec.SourceWire
   sourceCanonical : GrainResourceBirthHostCodec.sourceFrame ++
     GrainResourceBirthHostCodec.sourceWireStream.encode wire = raw.sourceBytes
+/-- The carried dispatch issue's record is in the current image, and its raw signed
+ingress is exactly the decode of that issue's grain ingress. -/
+theorem CarriedDispatchIssue.carried {config : Config} {current : Durable}
+    (selected : CarriedDispatchIssue config current) :
+    current.image.accepted[selected.issue.index]? = some selected.issue.record ∧
+      GrainResourceBirthPolicyController.ingressCodec.decode
+        selected.issue.ingress.grainIngress = some selected.raw :=
+  ⟨selected.issue.currentPresent, selected.rawExact⟩
 
 def CarriedDispatchIssue.originalSourceBytes {config : Config} {current : Durable}
     (selected : CarriedDispatchIssue config current) : List UInt8 :=
@@ -37,7 +66,7 @@ def fromIssue {config : Config} {current : Durable} (issue : CarriedIssue config
   match rawExact : GrainResourceBirthPolicyController.ingressCodec.decode issue.ingress.grainIngress with
   | none => throw "carried grain issue outer signed carrier differs"
   | some raw =>
-    if raw.sourceBytes.length > GrainResourceBirthPolicyController.maxSourceBytes then
+    if raw.sourceBytes.length > Kernel.Bounds.cellBytesMax then
       throw "carried grain issue source exceeds original bound"
     if raw.sourceBytes.take GrainResourceBirthHostCodec.sourceFrame.length !=
         GrainResourceBirthHostCodec.sourceFrame then

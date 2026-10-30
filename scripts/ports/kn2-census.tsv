@@ -46,7 +46,7 @@ LEFTOVER	Host/Main.lean	8688	G1	def run (arguments : List String) : IO UInt32 :=
 LEFTOVER	Assurance/HyperdocumentLinkFramedRecovery.lean	482	G3	noncomputable def staleCheckpointModel :	consumed := checkpoint.model.consumed
 LEFTOVER	Assurance/HyperdocumentLinkFramedRecovery.lean	484	G7	noncomputable def staleCheckpointModel :	history := checkpoint.model.history
 LEFTOVER	Assurance/HyperdocumentLinkFramedRecovery.lean	485	G2	noncomputable def staleCheckpointModel :	journal := checkpoint.model.journal
-LEFTOVER	Assurance/NativeAcceptedFixture.lean	143	G4	def loadAt (image : Image) : Option Durable :=	(DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart image.seed) image).toOption
+LEFTOVER	Fixtures/NativeAcceptedFixture.lean	157	G4	def loadAt (image : Image) : Option Durable :=	(DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart image.seed) image).toOption
 LEFTOVER	Assurance/HyperdocumentDurableInstallation.lean	154	G2	def install (plan : DurablePlan commit) (device : OperationDevice accepted)	(unrecorded : Snapshot.lookupRecorded plan.intent.transactionId
 LEFTOVER	Verify/NativeJointSourceFixture.lean	119	G5	def bootstrapFresh (config : NativeHost.Config) (canonicalImage : List UInt8) :	if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
 LEFTOVER	Verify/NativeJointSourceFixture.lean	151	G5	def initializeStores (root : System.FilePath) (helpers : Helpers)	require built.image.accepted.isEmpty "genesis unexpectedly contains accepted history"

@@ -8,6 +8,10 @@
 #   params.sh fill-source  SOURCE.json   a hand-written `mini bootstrap --source` file
 #                                        (.clockGenesisNow, .clockMaxStepSeconds: decimal strings),
 #                                        before `mini bootstrap`
+#   params.sh require-platform PARAMS.json   refuse (exit 2) a genesis that cannot host SPK grains:
+#                                        .grainPlatform with lifecycleManagement, grainBirthTariff and
+#                                        completionCustodianKey (null until init fills it), each named
+#                                        when absent (deploy/market/INSTALL.md §0)
 #
 # Fills the file IN PLACE, at genesis time. An UNFILLED value is absent or null (the shipped
 # genesis-params.example.json carries null for both): genesisNow becomes the current Unix second
@@ -18,17 +22,28 @@
 #   - a present value other than the one this call would write. A genesis time is chosen once:
 #     re-running on a filled file refuses unless GENESIS_NOW / MAX_STEP_SECONDS pin that value.
 set -eu
-usage() { sed -n '4,9p' "$0" >&2; exit 2; }
+usage() { sed -n '4,13p' "$0" >&2; exit 2; }
 die() { echo "params.sh: $*" >&2; exit 2; }
 [ "$#" -eq 2 ] || usage
 verb=$1 file=$2
+command -v jq >/dev/null || die "jq is required"
+[ -f "$file" ] && [ ! -L "$file" ] || die "not a regular file: $file"
+if [ "$verb" = require-platform ]; then
+  jq -e 'has("grainPlatform")' "$file" >/dev/null || die "grainPlatformRequired: $file has no .grainPlatform; a world without it cannot host SPK grains (INSTALL.md §0 genesis)"
+  for field in lifecycleManagement grainBirthTariff completionCustodianKey; do
+    jq -e --arg f "$field" '.grainPlatform | has($f)' "$file" >/dev/null || die "grainPlatformIncomplete: .grainPlatform.$field is absent"
+  done
+  here=$(cd "$(dirname "$0")" && pwd)
+  genesis=$here/genesis.sh; [ -f "$genesis" ] || genesis=$here/../../native/resource-client/genesis.sh
+  sh "$genesis" --check-platform "$file" || die "$file: the genesis template refuses the platform fields (see above)"
+  echo "params.sh: $file carries a grain platform (management subject $(jq -r .grainPlatform.lifecycleManagement.managementSubject "$file"), tariff base $(jq -r .grainPlatform.grainBirthTariff.base "$file") per birth $(jq -r .grainPlatform.grainBirthTariff.perBirth "$file"))"
+  exit 0
+fi
 case "$verb" in
   fill-genesis) paths='[["clock","genesisNow"],["clock","maxStepSeconds"]]' type=number ;;
   fill-source) paths='[["clockGenesisNow"],["clockMaxStepSeconds"]]' type=string ;;
   *) usage ;;
 esac
-command -v jq >/dev/null || die "jq is required"
-[ -f "$file" ] && [ ! -L "$file" ] || die "not a regular file: $file"
 now=${GENESIS_NOW:-$(date +%s)}
 step=${MAX_STEP_SECONDS:-300}
 for pair in "GENESIS_NOW=$now" "MAX_STEP_SECONDS=$step"; do

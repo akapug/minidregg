@@ -192,7 +192,7 @@ if [ -n "$OLD_MINI" ]; then
   step old-create-2 fail "$OLD_MINI" workspace --action create --dir "$ROOT/newcomer-old-client" \
     --name stale-old --storage declared --predicate "$ROOT/permit-all.json"
   OLD_REPLY="$ROOT/newcomer-old-client/sources/create-stale-old.current/reply.frame"
-  [ "$(od -An -tu1 -N1 "$OLD_REPLY" | tr -d ' ')" = 255 ]
+  [ "$(od -An -tu1 -N1 "$OLD_REPLY" | tr -d ' ')" = 253 ]
   [ ! -e "$ROOT/newcomer-old-client/attempts/create-stale-old" ]
 fi
 
@@ -203,7 +203,9 @@ cp "$STALE" "$ROOT/newcomer/sources/create-stale-crash.authoring/g0001/factory-o
 step stale-crash-create ok "$MINI" workspace --action create --dir "$ROOT/newcomer" \
   --name stale-crash --storage declared --predicate "$ROOT/permit-all.json"
 G="$ROOT/newcomer/sources/create-stale-crash.authoring"
-[ "$(od -An -tu1 -N1 "$G/g0001/reply.frame" | tr -d ' ')" = 255 ]
+# The receiver's refusal of the stale observation is decided before any append, so the Host answers it as
+# NO_RECORD (253), never the undecided envelope 255 (Host/RequestRefusal.lean `returnedMarker`, the L1 ruling).
+[ "$(od -An -tu1 -N1 "$G/g0001/reply.frame" | tr -d ' ')" = 253 ]
 [ "$(od -An -tu1 -N1 "$G/g0002/reply.frame" | tr -d ' ')" = 91 ]
 cmp -s "$STALE" "$G/g0001/factory-observation.bin"
 

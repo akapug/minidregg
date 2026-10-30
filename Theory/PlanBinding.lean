@@ -1,7 +1,7 @@
 /-
 # Theory.PlanBinding — a plan binds the values at the addresses it reads
 
-DATAMODEL §3.2 / §3.4 / §3.5 / §4.8.  A signed plan used to bind the whole root
+docs/DATAMODEL.md §3.2 / §3.4 / §3.5 / §4.8.  A signed plan used to bind the whole root
 of the cell it read.  Every admitted operation writes into the shared authority
 cell, so every admission moved that root and invalidated every other agent's
 pending plan (lane M8's contention finding).  This module states the binding
@@ -48,8 +48,27 @@ current store.
   the length-hash forgery that `verify` accepts is refused by admission against
   the held store.
 -/
-import Theory.CellState
-import Theory.AuthMap
+module
+
+public import Theory.CellState
+public import Theory.AuthMap
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.PlanBinding
 

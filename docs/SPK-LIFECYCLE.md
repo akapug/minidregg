@@ -1,167 +1,121 @@
-# SPK application lifecycle: failed first create, recovery, lawful repeat
+# SPK application lifecycle: START, failed-START recovery, the failed-create retry
 
-This is the story of app 8502 on the hbox r2 world (Store key `1fbc8d0353180211`)
-from its first START (generation 2) to the lawful repeat CREATE (generation 4),
-and the shape of the v4 failed-create retry that makes the repeat lawful.
+How a Sandstorm application grain is started under Mini's Lean receivers, what a
+failed first create leaves behind, and the v4 retry that makes a second create
+lawful afterwards. The retry is **wired and unit-tested at the source level**
+(Lean receivers in `Host/Main.lean`, Rust natives in `native/spk-host`); no run of
+it on any box is recorded in this repository.
 
-**Status, said plainly.** The v4 retry is source in this tree. What has run, and
-where, is in "Evidence" below. Nothing in this document was executed on the
-public node. The historical hbox deployment used a root SPK broker, which is a tenancy defect
-(see "Tenancy findings"). The cutover for the live r2 world is written out at
-the end and has **not** been executed; the root decides when.
+## Versions that exist
 
-## The app state machine (Kernel/ApplicationGrain.lean)
-
-| transition | generation | phase after |
+| version | Lean | on the live op 22 submit path |
 |---|---|---|
-| beginStart | +1 | 3 (starting) |
-| claimStart | same | 9 (claimed: the custodian may launch) |
-| completeStart | same | 4 (running) |
-| beginStop / claimStop / completeStop | +1 / same / same | 5 / 10 / 2 |
-| reconcileFailedStart | +1 | 2 (stopped) |
+| v1 | `Kernel/ApplicationLifecycle{Begin,Claim,Completion}*.lean` | no |
+| v2 | `Kernel/ApplicationLifecycle{BeginV2,ClaimV2,CompletionV2}*.lean`, `…V2Lookup.lean` | BEGIN and CLAIM no; the CompletionV2 frame is the live COMPLETION ("fresh completion requires canonical launch-bound v2 ingress", `Host/Main.lean` `applicationLifecycleCompletionSubmitSession`) |
+| v3 | `Kernel/ApplicationLifecycle{BeginV3,ClaimV3}*.lean`, `…V3Lookup.lean` | yes: fresh BEGIN "requires canonical launch-bound v3 ingress" (`Host/Main.lean` `applicationLifecycleBeginSubmitSession`; CLAIM likewise in `dispatchLifecycleClaimSubmitSession`) |
+| v4 retry | `Kernel/ApplicationLifecycleRetry{Begin,Claim,Completion}V4*.lean`, `…RetryV4Lookup.lean`, `Kernel/ApplicationFailedCreateRetryEvidence.lean` | yes: the same op 22/26/38 submit and 23/27/39 lookup try the v4 frame first (`Host/Main.lean`: `applicationLifecycleBeginSubmitSession`, `applicationLifecycleBeginLookupSession`, `applicationLifecycleClaimLookupSession`, `applicationLifecycleCompletionSubmitSession`, `applicationLifecycleCompletionLookupSession`, and for op 26 `dispatchLifecycleClaimSubmitSession` → `dispatchLifecycleRetryClaimV4SubmitSession`) |
 
-A START is three durable steps, each with its own receipt: BEGIN (the
-management subject's signed intent, event23 for v3), CLAIM (one-shot launch
-reservation, event24; the fresh-tip callback hands the committed projection to
-the physical custodian), COMPLETION (the custodian's signed physical report,
-event25). First creation is marked by two nullifiers: the BEGIN-time
-**firstAttempt** marker and the completion-time **created** marker. A v3 BEGIN
-for a create refuses once firstAttempt is consumed, whether or not a created
-marker exists. That is what makes "create" happen at most once under v3.
+The Rust side is `native/spk-host/src/lifecycle_v3_*.rs` (including the STOP
+lane) and `lifecycle_v4_retry{,_claim,_completion}_native.rs`; the resident
+service reads the retry lane's markers (`native/spk-host/src/resident_service.rs:44`,
+`:348`; `native/spk-host/src/grain.rs:879-917`). The product's "install an
+application" step uses v3 (`docs/DEMO-EXPERIENCE-2026-10-27.md`, step 7); the
+member's request cell is `Kernel/AppsRequest.lean`, and the lifecycle receivers
+are the custodian's side of it. The operation bytes are in
+`protocol/host-operations.json` (22/23, 26/27, 38/39 submit/lookup; 44/45, 50-53
+plan/assemble; 66-71 launch plan/assemble; 206-209 failed-START recovery).
+The retry adds **no opcode**: the same bytes dispatch on the frame that decodes.
 
-## What happened to 8502
+## The app state machine
 
-1. **g2, first create (07:07–07:14 EDT 10-03).** v3 BEGIN (op66/67/22) and
-   CLAIM (op68/69/26) were admitted; the store moved the app to generation 2,
-   phase 9. The resident unit `mini-spk-a8502-g2.service` (then `User=hbox`,
-   the pre-root-bootstrap design) exited `resident refused: Permission denied
-   (os error 13)` before launching anything. No completion exists. The app sat
-   claimed at phase 9 with firstAttempt consumed and no created marker: the
-   "install wedge" for START.
-2. **g3, governed failed-START recovery (11:50–12:54).** The failed-START
-   receiver (event66 family, opcodes 206 plan / 207 assemble / 208 submit /
-   209 lookup) admitted a signed report that the g2 incarnation is dead (same
-   InvocationID, no cgroup, MainPID 0) and moved the app to generation 3,
-   phase 2. Receipt: acceptedCount 78, confirmation `installed`
-   (`g2/failed-start-recovered-v1.json`, ingress SHA-256 `252bb442…`). The
-   recovery certifies a dead incarnation, never the absence of effects: the
-   volume g2 was given may hold partial state.
-3. **g4 under v3 is refused (14:25).** The resident's v3 BEGIN plan (op66) got
-   `launch BEGIN first-attempt or created marker refuses action`
-   (`g4/begin-attempt/op66-frame.bin`). Correct: v3 must not create twice. The
-   OnFailure supervisor then failed three times (`grain refused: No such file
-   or directory`) and hit its start limit. No shortcut was taken: no marker was
-   cleared and no created marker was faked.
+`Kernel/ApplicationGrain.lean:388-403` is the transition table (phase after:
+beginStart 3, claimStart 9, completeStart 4, beginStop 5, claimStop 10,
+completeStop 2, reconcileFailedStart 2; every `begin*` and
+`reconcileFailedStart` adds one to the generation, the rest keep it).
+
+A START is three durable steps, each with its own receipt: BEGIN (the management
+subject's signed intent), CLAIM (a one-shot launch reservation; the fresh-tip
+callback hands the committed projection to the physical custodian), COMPLETION
+(the custodian's signed physical report). First creation is marked by two
+nullifiers: the BEGIN-time **firstAttempt** marker and the completion-time
+**created** marker. A v3 BEGIN for a create refuses once either is consumed
+(`Kernel/ApplicationLifecycleBeginV3Admission.lean:78-89`, theorem
+`consumed_first_attempt_refuses_create` at `:95`; the authoring refusal text is
+`Host/ApplicationLifecycleLaunchBeginAuthoring.lean:242`). That is what makes
+"create" happen at most once under v3. A CLAIM that never completes (the
+physical launch failed before anything ran) leaves firstAttempt consumed and
+created not: a wedge for a v3 create.
+
+## Failed-START recovery
+
+The failed-START receiver (`Kernel/ApplicationFailedStartRecovery*.lean`, event66,
+opcodes 206 plan / 207 assemble / 208 submit / 209 lookup,
+`protocol/host-operations.json`) admits a signed report that the claimed
+incarnation is dead and moves the app to the next generation, stopped
+(`reconcileFailedStart`). It certifies a dead incarnation, never the absence of
+effects: the volume that incarnation was given may hold partial state.
 
 ## The v4 failed-create retry
 
-Three new events, each a strict superset of its v3 analog, plus a selector
-naming the recovery that licenses the repeat:
+Three events, each a strict superset of its v3 analog, plus a selector naming the
+recovery that licenses the repeat:
 
-- **Selector** (`Kernel/ApplicationFailedCreateRetryEvidence.lean`): the
-  accepted recovery's index and its full ingress. `retryToken selector` is a
-  codec-66 nullifier with its own frame, distinct from the recovery's own
-  marker, so one recovery licenses exactly one repeat.
-- **Retry BEGIN, event69** (`…RetryBeginV4Ingress/Admission`): a v3 BEGIN plus
-  the selector. The signed operation nonce is derived from the v3
-  authorization bytes *and* the selector, so a signature for one recovery
-  cannot be replayed against another. Admission re-runs every v3 check (current
-  management law, installed package, descriptor/action shape) and additionally
-  requires the BEGIN to repeat the original create exactly (same app, volume,
-  package root, create index, command digest, `priorCreate = none`) from the
-  recovered stopped state, with firstAttempt consumed, created **not**
-  consumed, the recovery marker consumed and the retry token **not** consumed.
-- **Retry CLAIM, event70** (`…RetryClaimV4Ingress/Core/Projection`): the
+- **Selector** (`Kernel/ApplicationFailedCreateRetryEvidence.lean`): the accepted
+  recovery's index and its full ingress. `retryToken selector` (`:49`) is a
+  nullifier distinct from the recovery's own marker, so one recovery licenses
+  exactly one repeat.
+- **Retry BEGIN, event69** (`Kernel/ApplicationLifecycleRetryBeginV4Admission.lean`,
+  `…Receiver.lean`): a v3 BEGIN plus the selector. The signed operation nonce
+  is derived from the v3 authorization bytes and the selector, so a signature for
+  one recovery cannot be replayed against another. Admission re-runs the v3
+  checks and additionally requires the BEGIN to repeat the original create
+  exactly from the recovered stopped state, with firstAttempt consumed, created
+  not consumed, the recovery marker consumed and the retry token not consumed.
+- **Retry CLAIM, event70** (`…RetryClaimV4{Ingress,Core,Projection}.lean`): the
   ordinary current-claim admission plus the full original v4 BEGIN. Its intent
-  consumes the retry token. It never clears the v3 firstAttempt marker. The
-  fresh-tip handoff is `RETRY-CREATE-CLAIM-COMMITTED/v4`.
-- **Retry COMPLETION, event72** (`…RetryCompletionV4*`): the custodian's
-  physical running report for the retry claim; installs the created marker.
+  consumes the retry token and never clears the v3 firstAttempt marker. The
+  fresh-tip handoff tag is `DREGG/APPLICATION/RETRY-CREATE-CLAIM-COMMITTED/v4`
+  (`Kernel/ApplicationLifecycleRetryClaimV4Projection.lean:34`).
+- **Retry COMPLETION, event72** (`…RetryCompletionV4*.lean`): the custodian's
+  physical running report for the retry claim; it installs the created marker.
 
-**Chronology, not structure, is the gate.** Each lower admission re-admits its
-predecessor at a structural prefix of the same Store, which is not enough on
-its own. `Kernel/NativeHostReplay.lean` keeps a `RetryHistory` minted only by
-the replay walk's after-step: `recoveries` (event66 records admitted in this
-walk), `beginsV4`, `claimsV4`. A retry BEGIN is admitted only if the recovery
-at its index is in `recoveries` with identical ingress and record bytes; a
-retry CLAIM only if its BEGIN is in `beginsV4`; a retry COMPLETION only if its
-claim is in `claimsV4`. The live receivers
-(`Kernel/ApplicationLifecycleRetry{Begin,Claim,Completion}V4Receiver.lean`)
-admit against the same `Verified` walk and require exact post-CAS readback.
+**Chronology, not structure, is the gate.** `Kernel/NativeHostReplay.lean` keeps
+a `RetryHistory` (`:866`: `recoveries`, `beginsV4`, `claimsV4`) minted only by
+the replay walk's after-step. A retry BEGIN is admitted only if the recovery at
+its index is in `recoveries` with identical ingress and record bytes
+(`admitBeginV4At`, `:2275`); a retry CLAIM only if its BEGIN is in `beginsV4`; a
+retry COMPLETION only if its claim is in `claimsV4` (`:2639-2647`). The live
+receivers require exact post-CAS readback.
 
-**Uncertainty.** As everywhere in Mini, an uncertain submit is never
-resubmitted. The only recovery is the exact-ingress lookup
-(`Kernel/ApplicationLifecycleRetryV4Lookup.lean`): op23 / op27 / op39 with the
-retained ingress bytes; the claim lookup also requires the retry token in the
-record.
+**A retried incarnation is a normal one afterwards.** A retry completion that
+created the volume enters the same `createdV3`/`runningV3` chronology as a v3
+completion (`createdV3After`, `runningV3After`; theorems
+`createdV3After_retry_completion` `:2991`, `runningV3After_retry_completion`
+`:3013`), so a STOP of the retried incarnation and a continue-START after it
+select it.
 
-**Wire.** No new opcodes. Ops 66/67, 68/69, 70/71 (plan/assemble), 22/23,
-26/27, 38/39 (submit/lookup) dispatch on the canonical frame that decodes, as
-op66 and op23 already did for v2/v3.
+**Uncertainty.** An uncertain submit is never resubmitted. The only recovery is
+the exact-ingress lookup (`Kernel/ApplicationLifecycleRetryV4Lookup.lean`;
+op 23 / 27 / 39 with the retained ingress bytes); the claim lookup also requires
+the retry token in the record.
 
-**Not yet covered (fails closed).** A retried incarnation is not entered into
-the replay's `createdV3`/`runningV3` lists, so a STOP of the retried g4 and a
-continue-START of g5 refuse until `RunningAt`/`CreatedAt` accept
-`CompletionAtV4`.
+## Checks that exist
 
-## Evidence
+- Rust unit tests named `retry_v4_*` in `native/spk-host/src/lifecycle_v4_retry*_native.rs`
+  and `grain.rs:1666` (the retry lane's markers read as their own lane).
+  Narrow run: `cargo nextest run --manifest-path native/spk-host/Cargo.toml -E 'test(retry_v4_)'`.
+- The retry modules are in the umbrella the Lean RSS table measured
+  (`scripts/pipeline/lean-module-rss.tsv`, e.g. `Kernel.ApplicationLifecycleRetryCompletionV4Receiver`).
 
-As of commit 87b6c9b5 the v4 retry is **authored only**: no module has been
-compiled, no test run, nothing executed on any world. The lane paused before
-the hbox build window opened. Observations of the live r2 world above were
-read-only (unit journals, attempt files); controls in the lane dir
-`evidence/control-r2-before.txt` and `evidence/control-r2-units-before.txt`.
+Not recorded anywhere in this repository: a journey that drives a real failed
+create through recovery and the retry.
 
-## Tenancy findings
+## Tenancy
 
-The W3 source replaces the root broker/bootstrap with an operator broker under
-`systemctl --user`. Its 0600 operator socket and state live beneath a Store-named
-world root. `StoreId`/`ResidentUnit` validate the only resident name constructor;
-missing ids and a constructor that loses its id refuse before unit installation.
-User slices also lead with the Store id. The older finding of id-less names was
-already superseded in source before W3; current work makes construction checked.
-
-Volume privilege is deliberately split: one root-installed, one-shot helper
-has seven typed verbs and a root-owned registry binding caller uid, Store,
-deployment, grain path, quota and disjoint subordinate uids. Cross-world volume
-paths refuse. Separate loop ext4, nosuid/nodev/noatime, quota, retained exact
-preimage checks and durable FIFREEZE/FITHAW custody remain. No root broker or
-root daemon is required. `newuidmap`/`newgidmap` establish distinct app identities;
-parser/reaper/app retain the capability, group, no_new_privs and seccomp floor.
-Read-only `volumes-status` enumerates root-owned registrations for checkpoint
-coverage; every running app still requires its complete settled pause.
-
-The native grain author emits resident config and runs the resident's own decoder
-before installing a unit; `prepare-resident-config.sh` delegates to that author.
-The v1 broker config/global socket refuse; re-emit v2 broker configs and native
-profiles for a fresh deployment. [Deployment and acceptance](../deploy/spk-host/USER-TENANCY.md)
-use one installer with explicit root setup/cleanup. On burst3-a, j475058235
-passed both scratch worlds under uid 1001: install, HTTP, stop/restart and second
-instances, disjoint units/sockets/subuids, config decoding and process floors.
-j477802845 planted an id-less constructor and received
-`unit-name-collision: rendered resident name lost store identity`; the helper
-plant received `volume-helper: cross-world-volume-path refused` for both a
-volume request and `volumes-status`. The final run also exercised unmount/remount,
-root volume enumeration and freeze/export. Scratch setup
-was removed with checked cleanup. Live r2 and public nodes remain untouched.
-
-## Cutover for the live r2 world (NOT executed; the root decides)
-
-1. Build from the integrated tree: native Host (`scripts/build-native-host.sh`),
-   `spk-host`, `mini`; run `cargo nextest ... -E 'test(retry_v4_)'`.
-2. Stage the binaries root-owned under
-   `/var/lib/mini-bigstep-hbox-r2/var/lib/mini/recovery/<new-dir>/`.
-3. Add drop-ins (next number after 91/92) pointing the r2 store at the new Host
-   and the broker template at the new `spk-host`; restart the store. The first
-   operation pays the full replay audit (~614 s on 78 records against a flat
-   600 s response deadline): warm the session with a read-only lookup first.
-4. Generation 4's directory already holds the refused v3 attempt
-   (`g4/begin-attempt/op66-frame.bin`, `lifecycle-begin-v3-active.json`), and
-   the resident's v3 freshness checks refuse to proceed in it. Deciding how a
-   host-refused, effect-free plan attempt is closed is part of the cutover; it
-   must not be done by deleting the attempt files.
-5. Reset the failed supervisor through the broker's `stop` verb and start
-   `mini-spk-a8502-g4.service`. Expected receipts: retry BEGIN acceptedCount
-   79, retry CLAIM 80, retry COMPLETION 81, app phase 4.
-6. Known gap after success: STOP of the retried g4 and continue-START of g5
-   refuse until the replay's running/created lists accept CompletionAtV4.
+Resident tenancy (operator broker under `systemctl --user`, the root-installed
+one-shot volume helper, bwrap-made user namespaces, store-id-checked unit names)
+is described where it is deployed from: `deploy/spk-host/USER-TENANCY.md` and
+`docs/SPK-RESIDENT-PRIVILEGE-BOUNDARY.md`. The native grain author emits the
+resident config and runs the resident's own decoder before a unit is installed;
+`scripts/spk-platform/prepare-resident-config.sh` delegates to
+`spk-host grain prepare-resident` (`native/spk-host/src/grain.rs:1596`).

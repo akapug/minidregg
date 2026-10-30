@@ -1,6 +1,8 @@
 //! Durable Linux per-operation systemd ExecStart gate for Mini grain workers.
 //! `run` is the unit MainPID: exec for legacy same-manager gates, or a pidfd
-//! supervisor for controller-incarnation-bound gates.
+//! supervisor for controller-incarnation-bound gates. `run --meter` always
+//! supervises and, when the worker exits, records the unit cgroup's CPU time
+//! in `STATE_DIR/UNIT.cpu` (`mini-grain-cpu-v1 USEC`), outside the sandbox.
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -10,16 +12,13 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const O_NOFOLLOW: i32 = 0o400000;
-const LOCK_EX: i32 = 2;
-const LOCK_UN: i32 = 8;
-unsafe extern "C" {
-    fn flock(fd: i32, operation: i32) -> i32;
-    fn geteuid() -> u32;
-}
+// Every OS constant and call comes from `libc` for the target being built: the hand-typed
+// O_NOFOLLOW (0o400000) was the x86-64 value, which is O_LARGEFILE on aarch64 (review 2026-10-26,
+// deploy 4.4). Built only through native/launch-gate (the candidate role launchGate).
+use libc::{geteuid, LOCK_EX, LOCK_UN, O_NOFOLLOW};
 
 fn lock(file: &File, operation: i32) -> Result<(), String> {
-    if unsafe { flock(file.as_raw_fd(), operation) } == 0 {
+    if unsafe { libc::flock(file.as_raw_fd(), operation) } == 0 {
         Ok(())
     } else {
         Err(format!("flock: {}", std::io::Error::last_os_error()))
@@ -222,10 +221,10 @@ impl Controller {
     fn open(&self) -> Result<File, String> {
         self.verify()?;
         let fd = unsafe {
-            syscall(
-                434,
-                self.pid as std::os::raw::c_long,
-                0 as std::os::raw::c_long,
+            libc::syscall(
+                libc::SYS_pidfd_open,
+                self.pid as libc::c_long,
+                0 as libc::c_long,
             )
         };
         if fd < 0 {
@@ -249,25 +248,13 @@ fn process_start(pid: u32) -> Result<String, String> {
         .map(str::to_owned)
         .ok_or("invalid process stat".into())
 }
-#[repr(C)]
-struct PollFd {
-    fd: i32,
-    events: i16,
-    revents: i16,
-}
-unsafe extern "C" {
-    fn syscall(number: std::os::raw::c_long, ...) -> std::os::raw::c_long;
-    fn poll(fds: *mut PollFd, count: usize, timeout: i32) -> i32;
-    fn prctl(option: i32, ...) -> i32;
-    fn getppid() -> i32;
-}
 fn ready(file: &File, timeout: i32) -> Result<bool, String> {
-    let mut p = PollFd {
+    let mut p = libc::pollfd {
         fd: file.as_raw_fd(),
-        events: 1,
+        events: libc::POLLIN,
         revents: 0,
     };
-    let n = unsafe { poll(&mut p, 1, timeout) };
+    let n = unsafe { libc::poll(&mut p, 1, timeout) };
     if n < 0 {
         let e = std::io::Error::last_os_error();
         if e.kind() == std::io::ErrorKind::Interrupted {
@@ -277,28 +264,30 @@ fn ready(file: &File, timeout: i32) -> Result<bool, String> {
     }
     Ok(p.revents != 0)
 }
-fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(), String> {
+fn supervise(controller: Option<File>, mut command: Command, mut gate: File) -> Result<(), String> {
     let monitor = std::process::id() as i32;
     unsafe {
         command.pre_exec(move || {
             // A monitor crash also kills bwrap, whose --die-with-parent and PID
             // namespace kill all sandbox descendants, including setsid children.
-            if prctl(
-                1,
-                9 as std::os::raw::c_ulong,
-                0 as std::os::raw::c_ulong,
-                0 as std::os::raw::c_ulong,
-                0 as std::os::raw::c_ulong,
+            if libc::prctl(
+                libc::PR_SET_PDEATHSIG,
+                libc::SIGKILL as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
             ) != 0
-                || getppid() != monitor
+                || libc::getppid() != monitor
             {
                 return Err(std::io::Error::other("worker monitor disappeared"));
             }
             Ok(())
         });
     }
-    if ready(&controller, 0)? {
-        return Err("controller exited before worker spawn".into());
+    if let Some(controller) = &controller {
+        if ready(controller, 0)? {
+            return Err("controller exited before worker spawn".into());
+        }
     }
     let mut child = command.spawn().map_err(|e| format!("worker spawn: {e}"))?;
     loop {
@@ -317,7 +306,11 @@ fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(
                 return Err(error.to_string());
             }
         }
-        match ready(&controller, 100) {
+        let Some(controller) = &controller else {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            continue;
+        };
+        match ready(controller, 100) {
             Ok(false) => {}
             result => {
                 // `started` already forbids replay. Kill before any potentially
@@ -335,6 +328,47 @@ fn supervise(controller: File, mut command: Command, mut gate: File) -> Result<(
     }
 }
 
+/// The CPU time of this process's own cgroup (the worker unit's): cgroup v2
+/// `cpu.stat` `usage_usec`, which counts every descendant, exited ones too.
+fn unit_cpu_usec() -> Result<u64, String> {
+    let cgroup = fs::read_to_string("/proc/self/cgroup").map_err(|e| format!("own cgroup: {e}"))?;
+    let path = cgroup
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .ok_or("no cgroup v2 membership")?;
+    if !path.starts_with('/') || path.contains("..") {
+        return Err("cgroup path refused".into());
+    }
+    let stat = fs::read_to_string(format!("/sys/fs/cgroup{path}/cpu.stat"))
+        .map_err(|e| format!("cpu.stat: {e}"))?;
+    stat.lines()
+        .find_map(|line| line.strip_prefix("usage_usec "))
+        .and_then(|n| n.trim().parse::<u64>().ok())
+        .ok_or("cpu.stat has no usage_usec".into())
+}
+
+/// Write `DIR/UNIT.cpu` once, atomically and privately.
+fn record_cpu(dir: &Path, unit: &str, usec: u64) -> Result<(), String> {
+    let gate = gate_path(dir, unit)?;
+    let path = gate.with_extension("cpu");
+    let temporary = gate.with_extension("cpu.tmp");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(O_NOFOLLOW)
+        .mode(0o600)
+        .open(&temporary)
+        .map_err(|e| format!("cpu record: {e}"))?;
+    file.write_all(format!("mini-grain-cpu-v1 {usec}\n").as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|e| format!("cpu record write: {e}"))?;
+    fs::hard_link(&temporary, &path).map_err(|e| format!("cpu record publish: {e}"))?;
+    fs::remove_file(&temporary).map_err(|e| format!("cpu record publish: {e}"))?;
+    File::open(dir)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("cpu record directory sync: {e}"))
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args_os().collect();
     if args.len() == 2 && args[1] == "--controller-manager-protocol" {
@@ -346,7 +380,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if args.len() < 4 {
-        return Err("usage: launch-gate init|fence|run STATE_DIR UNIT [-- ABS_COMMAND ...]".into());
+        return Err("usage: launch-gate init|fence|run STATE_DIR UNIT [--meter] [-- ABS_COMMAND ...]".into());
     }
     let mode = args[1].to_str().ok_or("mode must be UTF-8")?;
     let dir = Path::new(&args[2]);
@@ -403,8 +437,10 @@ fn run() -> Result<(), String> {
             lock(&file, LOCK_UN)?;
             println!("fenced {unit}");
         }
-        "run" if args.len() >= 6 && args[4] == "--" => {
-            let command = Path::new(&args[5]);
+        "run" if args.len() >= 6 && (args[4] == "--" || (args[4] == "--meter" && args.len() >= 7 && args[5] == "--")) => {
+            let meter = args[4] == "--meter";
+            let first = if meter { 6 } else { 5 };
+            let command = Path::new(&args[first]);
             if !command.is_absolute() {
                 return Err("worker command must be absolute".into());
             }
@@ -427,9 +463,21 @@ fn run() -> Result<(), String> {
             // then kills/audits that unique unit. If it races after unlock but
             // before exec, SIGKILL still prevents the exec.
             let mut command = Command::new(command);
-            command.args(&args[6..]);
+            command.args(&args[first + 1..]);
+            if meter {
+                // The record is written whatever the worker's end; a missing
+                // record is charged pessimistically by the controller.
+                let result = supervise(controller, command, file);
+                let recorded = unit_cpu_usec().and_then(|usec| record_cpu(dir, unit, usec));
+                return match (result, recorded) {
+                    (Ok(()), Ok(())) => Ok(()),
+                    (Err(e), Ok(())) => Err(e),
+                    (Ok(()), Err(r)) => Err(format!("worker ended; {r}")),
+                    (Err(e), Err(r)) => Err(format!("{e}; {r}")),
+                };
+            }
             if let Some(controller) = controller {
-                return supervise(controller, command, file);
+                return supervise(Some(controller), command, file);
             }
             let error = command.exec();
             return Err(format!("worker exec: {error}"));

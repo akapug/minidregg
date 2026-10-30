@@ -8,7 +8,8 @@ alias, including its generation. A replacement must be provisioned with matching
 inbox and account coordinates before any new provider work.
 
 Omitted or null `maxPrompts` runs continuously. An explicit value1..1000 limits
-qualified completed turns for a bounded assignment or fixture; restarting does
+completed turns (the source completion receiver's counter in resident.json) for a
+bounded assignment or fixture; restarting does
 not reset the count. There is no fixture-sized lifetime limit by default.
 `intervalSeconds` defaults30, within5..3600.
 
@@ -47,6 +48,15 @@ Current membership is revalidated before generation; revoked queued work receive
 a retained cancellation. Replaced assignments cannot reuse started requests.
 The existing pending prompt and source origin retain uncertain execution without
 another model call. This blocks only that resident/controller.
+
+A started request ends only from the controller's typed per-prompt outcome
+record (`stateDir/prompt-outcome-N.json`, `mini-prompt-outcome-v1`): `admitted`
+completes only with the native final-delivery receipt below; `refused` closes
+the request as `failed-after-admission` (a retained
+`request-ID-failed-after-admission.json` naming the record and its digest) and
+the next author advances; `undecided` keeps the request started and the driver
+reports the exact admin retry the record names. The frame's outcome label is
+never consulted, and a missing record is undecided, never refused.
 
 The queue completes only from the source completion plus native final-delivery
 receipt with the exact author and stable stream-cell/sequence reply proof. A lost

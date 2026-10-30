@@ -5,14 +5,18 @@
 //! moves named).  A page at a past height is `doc show --at H`: `render` itself.
 
 use super::html::escape;
+use super::text::one_line;
 use serde_json::Value;
 
 /// A line's payload as text (lossy); a payload that is not hex says so.
+/// Member-authored bytes never reach a terminal as control syntax: the same
+/// `one_line` boundary `doc show` applies (an OSC 52 clipboard write or a
+/// cursor sequence in a line shows as Control Pictures).
 fn payload_text(hex: &str) -> String {
-    let bytes = crate::decode_hex(hex).ok();
+    let bytes = mini_sdk::hex::decode(hex).ok();
     match bytes {
-        Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        None => format!("<payload {hex}>"),
+        Some(bytes) => one_line(&String::from_utf8_lossy(&bytes)),
+        None => one_line(&format!("<payload {hex}>")),
     }
 }
 
@@ -52,13 +56,13 @@ const NOT_COVERED: &str = "content not shown: your grant did not cover this docu
 pub fn diff_text(diff: &Value) -> String {
     let mut out = format!(
         "# changes from height {} to height {}\n",
-        diff["from"]["height"].as_str().unwrap_or("?"),
-        diff["to"]["height"].as_str().unwrap_or("?")
+        one_line(diff["from"]["height"].as_str().unwrap_or("?")),
+        one_line(diff["to"]["height"].as_str().unwrap_or("?"))
     );
     match diff["changes"].as_array() {
         Some(changes) if changes.is_empty() => out.push_str("(no change)\n"),
         Some(changes) => changes.iter().for_each(|change| {
-            out.push_str(&change_line(change));
+            out.push_str(&one_line(&change_line(change)));
             out.push('\n');
         }),
         None => out.push_str(&format!("({NOT_COVERED})\n")),
@@ -72,17 +76,18 @@ pub fn history_text(history: &Value) -> String {
     let rows = history["rows"].as_array().cloned().unwrap_or_default();
     let mut out = format!("# history: {} write(s)\n", rows.len());
     for row in &rows {
-        out.push_str(&format!(
-            "{}  subject {}  transaction {}\n",
+        out.push_str(&one_line(&format!(
+            "{}  subject {}  transaction {}",
             row["height"].as_str().unwrap_or("?"),
             row["subject"].as_str().unwrap_or("-"),
             row["transaction"].as_str().unwrap_or("?")
-        ));
+        )));
+        out.push('\n');
         match row["changes"].as_array() {
             Some(changes) if changes.is_empty() => out.push_str("    (no change)\n"),
             Some(changes) => changes.iter().for_each(|change| {
                 out.push_str("    ");
-                out.push_str(&change_line(change));
+                out.push_str(&one_line(&change_line(change)));
                 out.push('\n');
             }),
             None => out.push_str(&format!("    ({NOT_COVERED})\n")),
@@ -128,10 +133,10 @@ pub fn history_html(history: &Value, links: &dyn Fn(&str) -> String) -> String {
         out.push_str(&format!(
             "<tr data-row=\"{h}\" data-subject=\"{s}\" data-content=\"{c}\"><td>{h}{links}</td><td>{s}</td>\
              <td class=id>{t}</td><td>{changes}</td></tr>\n",
-            h = escape(height),
+            h = escape(&one_line(height)),
             links = links(height),
-            s = escape(row["subject"].as_str().unwrap_or("-")),
-            t = escape(row["transaction"].as_str().unwrap_or("?")),
+            s = escape(&one_line(row["subject"].as_str().unwrap_or("-"))),
+            t = escape(&one_line(row["transaction"].as_str().unwrap_or("?"))),
             c = !row["changes"].is_null(),
             changes = changes_html(&row["changes"]),
         ));
@@ -148,6 +153,38 @@ pub fn diff_html(diff: &Value) -> String {
         f = escape(diff["from"]["height"].as_str().unwrap_or("?")),
         t = escape(diff["to"]["height"].as_str().unwrap_or("?")),
     )
+}
+
+#[cfg(test)]
+mod render_terminal_tests {
+    use super::*;
+    use serde_json::json;
+
+    const ATTACK: &[u8] = b"\x1b]52;c;c2VjcmV0\x07\xc2\x9b2J\x08\r\nnext";
+
+    fn atom(bytes: &[u8]) -> Value {
+        json!({"kind":"atom","payload":crate::hex(bytes)})
+    }
+
+    /// A co-editor's line holding an OSC 52 clipboard write, C1 CSI, backspace
+    /// and a newline reaches `doc history` / `doc diff` (text and html) with no
+    /// control character in it.
+    #[test]
+    fn render_history_and_diff_escape_terminal_controls() {
+        let change = json!({"type":"changed","element":"1001","before":atom(b"ok"),"after":atom(ATTACK)});
+        let history = json!({"rows":[{"height":"9\u{1b}[2J","subject":"7\u{7}","transaction":"1",
+            "changes":[change.clone(), {"type":"added","element":"1002","after":atom(ATTACK)}]}]});
+        let diff = json!({"from":{"height":"8"},"to":{"height":"9"},"changes":[change]});
+        let text = [history_text(&history), diff_text(&diff)].concat();
+        let html = [history_html(&history, &|_| String::new()), diff_html(&diff)].concat();
+        for output in [&text, &html] {
+            assert!(output.chars().all(|c| c == '\n' || !c.is_control()), "{output:?}");
+            assert!(output.contains("␛]52;c;c2VjcmV0␇"), "{output:?}");
+        }
+        // One line per row header and per change: the payload's newline is a picture.
+        assert_eq!(history_text(&history).lines().count(), 4);
+        assert!(text.contains("␍␤next"));
+    }
 }
 
 #[test]

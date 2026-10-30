@@ -33,10 +33,14 @@ fn deadline(stream: &UnixStream, end: Instant) -> Result<(), String> {
     if left.is_zero() {
         return Err("mini-keys exchange timed out".into());
     }
-    stream
-        .set_read_timeout(Some(left))
-        .and_then(|_| stream.set_write_timeout(Some(left)))
-        .map_err(|_| "mini-keys socket unavailable".into())
+    match stream.set_read_timeout(Some(left)).and_then(|_| stream.set_write_timeout(Some(left))) {
+        Ok(()) => Ok(()),
+        // The BSDs (macOS) refuse SO_RCVTIMEO with EINVAL once the peer has shut
+        // the connection down; a read then cannot block (it returns the queued
+        // bytes or end of file), so no deadline is needed for it.
+        Err(e) if e.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+        Err(_) => Err("mini-keys socket unavailable".into()),
+    }
 }
 
 fn io(what: &str, error: &std::io::Error) -> String {

@@ -1,0 +1,10 @@
+{
+  "result": "PASS",
+  "provenance_sha256": "96c946416758d7eb8198674dbeef7579964a85953a78588abf5e4ddb4a66a74f",
+  "outputs": [
+    "roster-1.bin",
+    "roster-10.bin",
+    "roster-100.bin"
+  ],
+  "source_owned_encoder": true
+}

@@ -20,8 +20,28 @@ or network.  The final section exposes the required implementation-refinement
 premise as a proof-relevant simulation relation.  No `Bool = true` receipt is
 treated as evidence of physical atomicity.
 -/
-import Kernel.MultiCellHyperedge
-import Theory.ResourceCost
+module
+
+public import Kernel.MultiCellHyperedge
+public import Theory.ResourceCost
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableCommitProtocol
 
@@ -50,7 +70,11 @@ separate checked boundary in `Theory.ResourceCost`.
 `Event` is intentionally parametric.  For one cell the adapter below uses the
 existing private-constructor `AcceptedCellEffect.ReceiptEvent`; for a joint
 turn it can use the exact joint receipt binding or a richer existing history
-event.  The durable layer only appends the value it was given. -/
+event.  The durable layer only appends the value it was given.
+
+`credit` is what the install adds back to the meter after debiting `exactCharge`
+(`Snapshot.install`). It is zero for every family but the seed-meter refill
+(`Kernel.MeterRefillReceiver`, the M2 statements in `Kernel.PlatformCell`). -/
 structure Intent
     (TxId : Type u) (CellId : Type v) (Nullifier : Type w) (Event : Type x) where
   transactionId : TxId
@@ -58,6 +82,7 @@ structure Intent
   nullifiers : List Nullifier
   exactCharge : Charge
   event : Event
+  credit : Charge := 0
 
 namespace Intent
 
@@ -71,16 +96,18 @@ def sameCheck [DecidableEq (RootWrite CellId)] [DecidableEq Nullifier]
   decide (left.rootWrites = right.rootWrites) &&
     decide (left.nullifiers = right.nullifiers) &&
     Lane.allCheck (fun lane => decide (left.exactCharge lane = right.exactCharge lane)) &&
-    decide (left.event = right.event)
+    decide (left.event = right.event) &&
+    Lane.allCheck (fun lane => decide (left.credit lane = right.credit lane))
 
 /-- Exact payload equality for idempotent retry.  Transaction identifiers are
-looked up separately; changing any root, nullifier, charge lane, or event under
-the same identifier is a conflict. -/
+looked up separately; changing any root, nullifier, charge lane, event or credit
+lane under the same identifier is a conflict. -/
 def SamePayload (left right : Intent TxId CellId Nullifier Event) : Prop :=
   left.rootWrites = right.rootWrites /\
     left.nullifiers = right.nullifiers /\
     left.exactCharge = right.exactCharge /\
-    left.event = right.event
+    left.event = right.event /\
+    left.credit = right.credit
 
 @[simp] theorem sameCheck_eq_true_iff
     [DecidableEq (RootWrite CellId)] [DecidableEq Nullifier] [DecidableEq Event]
@@ -89,21 +116,25 @@ def SamePayload (left right : Intent TxId CellId Nullifier Event) : Prop :=
   simp only [sameCheck, Bool.and_eq_true, decide_eq_true_eq,
     Lane.allCheck_eq_true_iff, SamePayload]
   constructor
-  · rintro ⟨⟨⟨roots, nullifiers⟩, charge⟩, event⟩
-    refine ⟨roots, nullifiers, ?_, event⟩
-    funext lane
-    exact charge lane
-  · rintro ⟨roots, nullifiers, charge, event⟩
-    refine ⟨⟨⟨roots, nullifiers⟩, ?_⟩, event⟩
-    intro lane
-    exact congrFun charge lane
+  · rintro ⟨⟨⟨⟨roots, nullifiers⟩, charge⟩, event⟩, credit⟩
+    refine ⟨roots, nullifiers, ?_, event, ?_⟩
+    · funext lane
+      exact charge lane
+    · funext lane
+      exact credit lane
+  · rintro ⟨roots, nullifiers, charge, event, credit⟩
+    refine ⟨⟨⟨⟨roots, nullifiers⟩, ?_⟩, event⟩, ?_⟩
+    · intro lane
+      exact congrFun charge lane
+    · intro lane
+      exact congrFun credit lane
 
 @[simp] theorem sameCheck_self
     [DecidableEq (RootWrite CellId)] [DecidableEq Nullifier] [DecidableEq Event]
     (intent : Intent TxId CellId Nullifier Event) :
     intent.sameCheck intent = true := by
   rw [sameCheck_eq_true_iff]
-  exact ⟨rfl, rfl, rfl, rfl⟩
+  exact ⟨rfl, rfl, rfl, rfl, rfl⟩
 
 end Intent
 
@@ -118,6 +149,9 @@ structure Snapshot
   roots : CellId -> TypedAuthorization.Digest
   consumed : Nullifier -> Bool
   available : Charge
+  /-- Newest first, like the journal: one cons per install, a persistent
+  append (a `List` snoc copied the whole history, Θ(h) per record). The
+  chronological history is `history.reverse` (`install_history_chronological`). -/
   history : List Event
   journal : List (TxId × Intent TxId CellId Nullifier Event)
 
@@ -155,8 +189,8 @@ def install [DecidableEq CellId] [DecidableEq Nullifier]
     (lookupPost cellId intent.rootWrites).getD (before.roots cellId)
   consumed := fun nullifier =>
     if nullifier ∈ intent.nullifiers then true else before.consumed nullifier
-  available := fun lane => before.available lane - intent.exactCharge lane
-  history := before.history ++ [intent.event]
+  available := fun lane => before.available lane - intent.exactCharge lane + intent.credit lane
+  history := intent.event :: before.history
   journal := (intent.transactionId, intent) :: before.journal
 
 @[simp] theorem lookupRecorded_install
@@ -195,8 +229,17 @@ def install [DecidableEq CellId] [DecidableEq Nullifier]
     [DecidableEq CellId] [DecidableEq Nullifier]
     (before : Snapshot TxId CellId Nullifier Event)
     (intent : Intent TxId CellId Nullifier Event) :
-    (install before intent).history = before.history ++ [intent.event] :=
+    (install before intent).history = intent.event :: before.history :=
   rfl
+
+/-- The chronological history gains exactly the installed event at its end
+(the statement `install_history` made before history went newest first). -/
+theorem install_history_chronological
+    [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event) :
+    (install before intent).history.reverse = before.history.reverse ++ [intent.event] := by
+  simp [install]
 
 @[simp] theorem install_journal
     [DecidableEq CellId] [DecidableEq Nullifier]
@@ -206,18 +249,33 @@ def install [DecidableEq CellId] [DecidableEq Nullifier]
       (intent.transactionId, intent) :: before.journal :=
   rfl
 
-/-- Successful preflight funding makes the model debit exact in every lane. -/
+/-- Successful preflight funding makes the model debit exact and the credit exact in
+every lane (M2-a, `PlatformCell.install_conserves_with_credit`). -/
 theorem install_exact_debit
     [DecidableEq CellId] [DecidableEq Nullifier]
     (before : Snapshot TxId CellId Nullifier Event)
     (intent : Intent TxId CellId Nullifier Event)
     (funded : intent.exactCharge <= before.available) :
-    intent.exactCharge + (install before intent).available = before.available := by
+    intent.exactCharge + (install before intent).available = before.available + intent.credit := by
   funext lane
   change intent.exactCharge lane +
-    (before.available lane - intent.exactCharge lane) = before.available lane
-  rw [Nat.add_comm]
-  exact Nat.sub_add_cancel (funded lane)
+    (before.available lane - intent.exactCharge lane + intent.credit lane) =
+      before.available lane + intent.credit lane
+  have fits : intent.exactCharge lane ≤ before.available lane := funded lane
+  omega
+
+/-- An uncredited install debits exactly (every family but the refill). -/
+theorem install_exact_debit_uncredited
+    [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (funded : intent.exactCharge <= before.available) (uncredited : intent.credit = 0) :
+    intent.exactCharge + (install before intent).available = before.available := by
+  have exact := install_exact_debit before intent funded
+  rw [uncredited] at exact
+  funext lane
+  have := congrFun exact lane
+  simpa using this
 
 end Snapshot
 
@@ -922,6 +980,43 @@ theorem physical_step_no_partial_commit
   refine ⟨(execute schedule modelBefore intent).storeAfter modelBefore,
     simulated, ?_⟩
   exact execute_no_partial_commit schedule modelBefore intent
+
+/-! ## Poles of `ImplementationRefinement`
+
+The model itself, stepping by exact execution, refines; a physical state that
+stops representing anything after a step does not. -/
+
+namespace ImplementationRefinementPoles
+
+def snapshot : Snapshot Nat Nat Nat Nat :=
+  { roots := fun _ => ⟨0⟩, consumed := fun _ => false, available := fun _ => 0,
+    history := [], journal := [] }
+
+def intent : Intent Nat Nat Nat Nat :=
+  { transactionId := 0, rootWrites := [], nullifiers := [], exactCharge := fun _ => 0,
+    event := 0 }
+
+theorem exact :
+    ImplementationRefinement Nat Nat Nat Nat (Snapshot Nat Nat Nat Nat)
+      (fun before intent after =>
+        PLift (after = (execute .complete before intent).storeAfter before))
+      Eq := by
+  constructor
+  intro _ _ _ _ rep step
+  subst rep
+  exact ⟨.complete, step.down⟩
+
+theorem stuck_refused :
+    ¬ ImplementationRefinement Nat Nat Nat Nat Bool (fun _ _ _ => PUnit)
+      (fun b _ => b = false) := by
+  intro r
+  obtain ⟨_, h⟩ := r.simulates (physicalBefore := false) (physicalAfter := true)
+    (modelBefore := snapshot) (intent := intent) rfl PUnit.unit
+  exact Bool.noConfusion h
+
+#assert_axioms exact stuck_refused
+
+end ImplementationRefinementPoles
 
 end Minidregg.Kernel.DurableCommitProtocol
 

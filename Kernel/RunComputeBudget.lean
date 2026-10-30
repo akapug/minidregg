@@ -16,10 +16,29 @@ in CanonicalResourceKernel.Book. Transaction9 has an explicit compute-funding pa
 leg supplies exact consent; syntactic funding is not capability/signature authority.
 Unauthenticated dry-run requests cannot debit a caller-supplied subject.
 -/
-import Compiler.WorldExecutionContract
-import Kernel.ClockCell
-import Kernel.PayCell
-import Compiler.CanonicalResourcePageMaterializer
+module
+
+public import Compiler.WorldExecutionContract
+public import Kernel.ClockCell
+public import Kernel.PayCell
+public import Compiler.CanonicalResourcePageMaterializer
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.RunComputeBudget
 
@@ -233,6 +252,20 @@ structure Prepared (subject : SubjectId) (payPre : PayCell.Cell)
   quota : PreparedQuota subject payPre payRoot
   book : PreparedBook bookPre
   sameCharge : book.credits = quota.quoted.credits
+
+/-- The Book leg over `bookPre` burns exactly the credits the usage quota for `subject` quotes
+over `payPre` at `payRoot`: the burn of the retained funding is admitted on `bookPre`'s logical
+Book, the funding carries exactly the quoted credits, and the quota's usage-row patch for
+`subject` validates against `payPre` at `payRoot`. -/
+theorem Prepared.charged {subject : SubjectId} {payPre : PayCell.Cell} {payRoot : Digest}
+    {bookPre : BookCell} (prepared : Prepared subject payPre payRoot bookPre) :
+    (burnBatch prepared.book.funding).Admission
+        (CanonicalResourceKernel.logicalBook bookPre.logical) ∧
+      (prepared.book.funding.map Funding.credits).getD 0 = prepared.quota.quoted.credits ∧
+      ValidatedPatch PayCell.materializer payPre payRoot
+        (usagePatch subject prepared.quota.before prepared.quota.quoted.after) :=
+  ⟨prepared.book.accepted.admission, prepared.book.fundingExact.trans prepared.sameCharge,
+    prepared.quota.validated⟩
 
 /-- The tariff is read from the SAME pay pre-state as activation and usage. -/
 def prepare (subject : SubjectId) (clock : ClockCell.Clock)

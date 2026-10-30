@@ -110,7 +110,26 @@ which then takes no pipelined send (`notPipelinable`) and is retired by its deli
 **The turn** (`invoke`) commits every written object's state cell, its mail and
 the fee and escrow postings, as ONE intent, guarded on every object record,
 package cell and state cell it read, so a concurrent change refuses it. -/
-import Kernel.ObjectiveActivity
+module
+
+public import Kernel.ObjectiveActivity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveCall
 open Minidregg.Theory Minidregg.Compiler
@@ -325,6 +344,9 @@ structure Method (config : Config) (pin : Digest) (method : String) (view args :
   replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) = .ok lowering
   accepted : ObjectiveBendFrontEnd.Accepted lowering
   fuelWithin : accepted.packet.fuel ≤ config.typeFuel
+  /-- The length of the lowering's typed-core rendering, rendered once with the held front. -/
+  generated : Nat
+  generatedExact : generated = lowering.packet.compress.toUTF8.toList.length
   applied : AnnotatedTerm
   checked : Checked applied []
   planType : Ty
@@ -376,14 +398,14 @@ def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (
   match replayPackage config stored pin with
   | .error reason => .error (.kernel reason)
   | .ok definition =>
-  match lowered : ObjectiveBendPublication.lowerParsed definition.replayed.parsed definition.package.entryModule method with
+  -- the method's lowering and acceptance, held with the replay (`Fronts.front_eq`)
+  match definition.fronts.front method with
   | .error d => .error (.notCallable target method d.message)
-  | .ok lowering =>
+  | .ok front =>
+  let lowering := front.lowering
   have replayExact : ObjectiveBendPublication.replay (methodPackage definition.package method) = .ok lowering :=
-    (ObjectiveBendPublication.replay_select definition.replayed.parseExact method).trans lowered
-  match ObjectiveBendFrontEnd.accept lowering with
-  | .error d => .error (.notCallable target method d.message)
-  | .ok accepted =>
+    (ObjectiveBendPublication.replay_select definition.replayed.parseExact method).trans front.lowered
+  let accepted := front.accepted
   if fuelWithin : accepted.packet.fuel ≤ config.typeFuel then
     match callable accepted.typed.type with
     | .arrow _ _ viewType (.arrow _ _ argsType _) =>
@@ -402,8 +424,8 @@ def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (
         | .computation planType responseType resultType =>
           if callsOnly : labelsWithin applied.assumptions planType framePlans = true then
             if returnsOnly : labelsWithin applied.assumptions responseType frameResponses = true then
-              .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, applied, checked, planType,
-                responseType, resultType, typeExact, callsOnly, returnsOnly⟩
+              .ok ⟨definition, lowering, replayExact, accepted, fuelWithin, front.generatedCore, front.generatedExact,
+                applied, checked, planType, responseType, resultType, typeExact, callsOnly, returnsOnly⟩
             else .error (.notCallable target method "its response type is not within `returned | queued | acked`")
           else .error (.notCallable target method
             "its Plan type is not within `call | send | stop | cancel`: a method that awaits is not callable")
@@ -414,7 +436,12 @@ def methodOf (config : Config) (target : Nat) (stored : Stored) (pin : Digest) (
 /-- The typed-core bytes a method's lowering generated (drawn after the lowering). -/
 def Method.generatedCore {config : Config} {pin : Digest} {method : String} {view args : Data}
     (m : Method config pin method view args) : Nat :=
-  m.lowering.packet.compress.toUTF8.toList.length
+  m.generated
+
+/-- It is the length of the lowering's rendering. -/
+theorem Method.generatedCore_eq {config : Config} {pin : Digest} {method : String} {view args : Data}
+    (m : Method config pin method view args) :
+    m.generatedCore = m.lowering.packet.compress.toUTF8.toList.length := m.generatedExact
 
 /-- Draw a pair's front-end quote (its source bytes, the stored core its replay must generate);
 a pair whose quote does not decode draws nothing and is refused by `replayPackage` before any
@@ -524,7 +551,8 @@ theorem replayPackage_unquoted_refused {config : Config} {bytes : Bytes} {stored
     ∃ reason, replayPackage config stored pin = .error reason := by
   unfold frontEndQuote at unquoted
   rw [decoded] at unquoted
-  unfold replayPackage
+  rw [replayPackage_eq]
+  unfold replayPackageAt
   cases ha : ObjectiveBendSourceArtifact.decode stored.artifact with
   | none => split_ifs <;> exact ⟨_, rfl⟩
   | some artifact =>
@@ -1385,6 +1413,16 @@ structure Deliverable {rootBytes : Bytes → Digest} (config : Config) (snapshot
   /-- The message's postage pays the front end its delivery's root frame replays: the same draws,
   replayed on a fresh meter over the postage envelope (GPT-6 row E). -/
   postagePays : ((ObjectiveWorkAccount.Meter.start message.envelope).drawAll (meterAfter.since meter)).toBool = true
+theorem Deliverable.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {target : Nat} {message : Inbox.Message} {meter : ObjectiveWorkAccount.Meter}
+    (d : Deliverable config snapshot target message meter) :
+    readObject config snapshot ⟨target⟩ = .ok (some d.record) ∧
+      readState config snapshot ⟨target⟩ = .ok (some d.view) ∧ decodeDataBytes message.args = some d.args ∧
+      loadMethod config target (packageBytes config snapshot d.record.activePin) d.record.activePin
+        message.method (viewData d.view) d.args meter = .ok (d.method, d.meterAfter) ∧
+      labelsWithin d.method.applied.assumptions d.method.planType (deliveredPlans message) = true ∧
+      ((ObjectiveWorkAccount.Meter.start message.envelope).drawAll (d.meterAfter.since meter)).toBool = true :=
+  ⟨d.recordExact, d.viewExact, d.argsExact, d.methodExact, d.callsOnly, d.postagePays⟩
 
 /-- Decide `Deliverable`, refusing by name: `notAnObject`, `stateMissing` (an object with no
 declared state: its delivery could not enter it), `argumentType` (arguments that do not

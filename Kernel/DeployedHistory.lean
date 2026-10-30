@@ -1,9 +1,29 @@
-/- The deployed D2 storage unit is the encoding of newly written values.
+/- The deployed D2 storage unit is the encoding of newly written values, plus
+the canonical bytes of the event the turn retains.
 Transport frames, keys, old values, reads and frees are not value writes.
 The complete turn encoding separately binds every guard and effect. -/
-import Kernel.DeployedBridge
-import Kernel.WorldRoot
-import Compiler.DurableReceiverCodec
+module
+
+public import Kernel.DeployedBridge
+public import Kernel.WorldRoot
+public import Compiler.DurableReceiverCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeployedHistory
 
@@ -50,7 +70,9 @@ def encodeLeg (leg : Leg deployedR) : List UInt8 :=
   StreamCodec.nat.encode leg.cell ++ [CanonicalCellRegistry.Kind.tag leg.kind] ++
     (StreamCodec.list bytesStream).encode (leg.patch.map (encodeOp leg.kind))
 
-/-- All fields other than absence pins, each in a length-delimited slot. -/
+/-- All fields other than absence pins, each in a length-delimited slot; the
+last is the digest pins (`Turn.pins`, each a cell and its asserted digest), so
+the journal digest binds what the turn asserts about the pre-state. -/
 def turnFields (t : DTurn deployedR Digest) : List (List UInt8) :=
   [digestStream.encode t.txId,
    (StreamCodec.list bytesStream).encode (t.creates.map fun c =>
@@ -65,7 +87,9 @@ def turnFields (t : DTurn deployedR Digest) : List (List UInt8) :=
    StreamCodec.nat.encode t.keyEpoch,
    (StreamCodec.option digestStream).encode t.capability,
    StreamCodec.nat.encode t.notBefore,
-   (StreamCodec.option StreamCodec.nat).encode t.validUntil]
+   (StreamCodec.option StreamCodec.nat).encode t.validUntil,
+   (StreamCodec.list (StreamCodec.product StreamCodec.nat digestStream)).encode t.pins,
+   DurableReceiverCodec.chargeStream.encode t.credit]
 
 /-- Greenfield v2 turn shape: absence pins are in the digest preimage. -/
 def encodeTurn (t : DTurn deployedR Digest) : List UInt8 :=
@@ -77,9 +101,26 @@ theorem encodeTurn_absent {a b : DTurn deployedR Digest}
     (same : encodeTurn a = encodeTurn b) : a.absent = b.absent :=
   (Prod.mk.inj (StoreCodec.streamEncode_injective _ same)).1
 
-/-- The pinned deployed history: cSHAKE turn digest/log chain and written-value bytes. -/
+/-- The bytes a turn's event retains: the event's canonical bytes, archived
+with the turn (the admitted ingress they carry), charged like a written value. -/
+def eventBytes (event : StableEvent) : Nat := event.canonicalBytes.length
+
+/-- The pinned deployed history: cSHAKE turn digest/log chain, written-value
+bytes, retained-event bytes, and the per-cell root a pin is compared with
+(`DeployedBridge.cellRoot`). -/
 def history : History deployedR TransactionId StableEvent Digest :=
-  WorldRoot.cshakeHistory encodeTurn ⟨0⟩ legBytes imageBytes
+  WorldRoot.cshakeHistory encodeTurn ⟨0⟩ legBytes imageBytes eventBytes cellRoot
+
+/-- A pin is compared with the deployed per-cell root. -/
+@[simp] theorem history_cellDigest : history.cellDigest = cellRoot := rfl
+
+/-- **Pin coherence of the deployed bridge and history** at the deployed
+per-cell root: bytes that decode to a slot and do not retire are that slot's
+canonical encoding (`decodeCell_canonical`), so their root is the slot's
+`cellRoot`, which is what a pin is compared with.  No deployed use of
+`ofIntent_run`/`admit_of_accepted` carries coherence as a hypothesis. -/
+theorem deployed_pinCoherent : PinCoherent bridge history ResourceBirthCodec.rootBytes :=
+  fun _ _ h live => cellRoot_of_decode h live
 
 /-- A whole-blob allocation charges exactly its newly encoded payload. -/
 theorem objective_allocate_bytes (c : CellId) (payload : ObjectiveActivityCell.Payload) :
@@ -102,17 +143,17 @@ theorem read_bytes (c : CellId) (k : deployedR.Kind) (ns : (deployedR.layout k).
     (key : (deployedR.layout k).Key ns) (value : Option ((deployedR.layout k).Value ns)) :
     legBytes ⟨c, k, [.read ns key value]⟩ = 0 := rfl
 
-/-- The receiver's live post image has 40 bytes beyond the encoded payload:
-4 lifecycle + 4 registry + 29 protected frame + 2 version + 1 presence tag. -/
+/-- The receiver's live post image has 43 bytes beyond the encoded payload:
+4 lifecycle + 4 registry + 32 protected frame + 2 version + 1 presence tag. -/
 theorem objective_post_bytes (payload : ObjectiveActivityCell.Payload) :
     (encodeCell (some ⟨.objectiveActivity,
       ProtectedCell.stateOfOption ObjectiveActivityCell.spec (some payload)⟩)).length =
-      (ObjectiveActivityCell.payloadStream.encode payload).length + 40 := by
+      (ObjectiveActivityCell.payloadStream.encode payload).length + 43 := by
   change (List.append [68,82,2,1] (List.append [68,82,1,19]
     (ObjectiveActivityCell.spec.wireFrame ++
       (ProtectedCell.wirePayloadStream ObjectiveActivityCell.spec).encode
         (1, some payload)))).length = _
-  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL".toByteArray.toList.length = 29 := by decide +kernel
+  have frameLength : "DREGG/OBJECTIVE/ACTIVITY-CELL/v5".toByteArray.toList.length = 32 := by decide +kernel
   have versionLength : (StreamCodec.nat.encode 1).length = 2 := rfl
   simp [ProtectedCell.wirePayloadStream, StreamCodec.product, StreamCodec.option,
     ObjectiveActivityCell.spec, ObjectiveActivityCell.payloadStream, frameLength, versionLength,
@@ -159,6 +200,7 @@ theorem objective_free_below_retired (c : CellId) (old : ObjectiveActivityCell.P
 #assert_axioms objective_write_below_post objective_free_below_retired
 
 #assert_axioms encodeTurn_absent
+#assert_axioms deployed_pinCoherent
 #assert_axioms objective_allocate_bytes objective_write_bytes objective_free_bytes read_bytes
 #assert_axioms objective_post_bytes objective_allocate_below_post
 

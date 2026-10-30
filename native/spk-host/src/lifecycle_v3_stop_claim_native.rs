@@ -3,25 +3,72 @@
 //! This module does not fence or stop a unit. The physical path must join this
 //! sealed claim to the retained Running journal and volume witness, durably
 //! mark the attempt, and perform the checked manager action under that lock.
-#![allow(dead_code)] // The callable STOP supervisor is a later, separate cut.
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex};
 use crate::lifecycle_v3_stop_native::{ReceiptFields, StopTarget};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::fs::{self, DirBuilder, File};
-use std::io::{self, Read};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::fs::DirBuilder;
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 const COMMITTED_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
 const MAX_FRAME: usize = 12_102_760;
+const STOP_INSPECT_OPERATION: u8 = crate::host_operations::APPLICATION_STOP_INSPECT;
 const MAX_INSPECTION: u64 = 2 * 1024 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
+}
+
+fn inspection_request(plan: &[u8], committed: &[u8]) -> io::Result<Vec<u8>> {
+    let size = plan.len().checked_add(committed.len()).and_then(|n| n.checked_add(4))
+        .ok_or_else(|| invalid("STOP inspection request size overflow"))?;
+    if plan.is_empty() || committed.is_empty() || size >= MAX_FRAME {
+        return Err(invalid("STOP inspection request size refused"));
+    }
+    let mut request = Vec::with_capacity(size);
+    request.extend_from_slice(&(plan.len() as u32).to_le_bytes());
+    request.extend_from_slice(plan);
+    request.extend_from_slice(committed);
+    Ok(request)
+}
+
+fn inspection_reply(frame: &[u8]) -> io::Result<&[u8]> {
+    let payload = framed_payload("stop inspect", frame, STOP_INSPECT_OPERATION, b"")?;
+    if payload.len() as u64 > MAX_INSPECTION {
+        return Err(invalid("STOP current source inspection bound refused"));
+    }
+    let view: Value = serde_json::from_slice(payload)?;
+    if view.get("type").and_then(Value::as_str)
+        != Some("application-lifecycle-stop-claim-verified-v1")
+    {
+        return Err(invalid("STOP current source inspection type refused"));
+    }
+    Ok(payload)
+}
+
+/// Ask the exact pinned operator Host to join these retained inputs with its
+/// refreshed verifier-minted history. No detached JSON or cached authority is
+/// accepted. The request is read-only; callers still compare all returned source
+/// identities before the existing physical fence. No automatic retry is made.
+pub(crate) fn inspect_current(
+    operator: &PrivateOperator,
+    plan: &[u8],
+    committed: &[u8],
+    output: &Path,
+) -> io::Result<Vec<u8>> {
+    let request = inspection_request(plan, committed)?;
+    let frame = operator.invoke(STOP_INSPECT_OPERATION, &request)?;
+    let payload = inspection_reply(&frame)?;
+    // Retain the same exact inspection artifact as the cold CLI path did.
+    let parent = output.parent().ok_or_else(|| invalid("STOP inspection output parent absent"))?;
+    let name = output.file_name().and_then(|s| s.to_str())
+        .ok_or_else(|| invalid("STOP inspection output name refused"))?;
+    write_new(parent, name, payload)?;
+    Ok(payload.to_vec())
 }
 
 /// Exact native four-field receipt, with no independent authority to stop.
@@ -99,61 +146,14 @@ impl ExactReceipt {
 /// the exact retained STOP plan, original BEGIN, both receipts and claim.
 pub(crate) struct FreshStopClaim {
     target: StopTarget,
-    stop_plan: Vec<u8>,
-    original_begin: Vec<u8>,
-    claim_ingress: Vec<u8>,
-    committed_frame: Vec<u8>,
-    inspection: Vec<u8>,
-    begin_receipt: ExactReceipt,
-    claim_receipt: ExactReceipt,
 }
 
 impl FreshStopClaim {
     pub(crate) fn target(&self) -> &StopTarget {
         &self.target
     }
-    pub(crate) fn stop_plan(&self) -> &[u8] {
-        &self.stop_plan
-    }
-    pub(crate) fn original_begin(&self) -> &[u8] {
-        &self.original_begin
-    }
-    pub(crate) fn claim_ingress(&self) -> &[u8] {
-        &self.claim_ingress
-    }
-    pub(crate) fn committed_frame(&self) -> &[u8] {
-        &self.committed_frame
-    }
-    pub(crate) fn inspection(&self) -> &[u8] {
-        &self.inspection
-    }
-    pub(crate) fn begin_receipt(&self) -> &ExactReceipt {
-        &self.begin_receipt
-    }
-    pub(crate) fn claim_receipt(&self) -> &ExactReceipt {
-        &self.claim_receipt
-    }
 }
 
-fn read_inspection(path: &Path) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.len() == 0
-        || metadata.len() > MAX_INSPECTION
-    {
-        return Err(invalid("STOP source inspection identity or size refused"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(path)?
-        .take(MAX_INSPECTION + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("STOP source inspection changed during read"));
-    }
-    Ok(bytes)
-}
 
 fn committed_source_receipt(
     view: &Value,
@@ -258,11 +258,11 @@ pub(crate) fn submit_once(
         &serde_json::to_vec(&marker)?,
     )?;
 
-    let response = operator.invoke(26, claim_ingress)?;
+    let response = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, claim_ingress)?;
     write_new(attempt_dir, "op26-frame.bin", &response)?;
     // Only the pinned Host's fresh installed CAS-winner path emits this tag;
     // replay and op27 return a distinct receipt-only Outcome. Retain first.
-    let committed = framed_payload(&response, 26, COMMITTED_TAG)?.to_vec();
+    let committed = crate::lifecycle_v3_native::committed_payload(operator, attempt_dir, "op26-claim-submit", &response, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, "committed-v3.bin", &committed)?;
     let committed_json = operator.tool(
         "inspect",
@@ -274,24 +274,10 @@ pub(crate) fn submit_once(
     let claim_receipt =
         committed_source_receipt(&committed_view, &committed, claim_ingress, original_begin)?;
 
-    // This Host CLI reopens the current verified image. Its output cannot be
-    // substituted by a caller-supplied JSON file or a stale op27 lookup.
-    let _ = operator.pinned_config()?;
+    // The same pinned Host refreshes its retained verified history. Its output
+    // cannot be substituted by caller JSON or a stale op27 receipt lookup.
     let inspection_path = attempt_dir.join("stop-claim-current.json");
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&inspection_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned Mini Host STOP current inspection refused"));
-    }
-    let inspection = read_inspection(&inspection_path)?;
+    let inspection = inspect_current(operator, retained_stop_plan, &committed, &inspection_path)?;
     let target = StopTarget::from_verified_inspection(
         retained_stop_plan,
         &committed,
@@ -300,21 +286,99 @@ pub(crate) fn submit_once(
         begin_receipt.borrowed(),
         claim_receipt.borrowed(),
     )?;
-    Ok(FreshStopClaim {
-        target,
-        stop_plan: retained_stop_plan.to_vec(),
-        original_begin: original_begin.to_vec(),
-        claim_ingress: claim_ingress.to_vec(),
-        committed_frame: committed,
-        inspection,
-        begin_receipt,
-        claim_receipt,
-    })
+    Ok(FreshStopClaim { target })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_inspection_pair_preserves_both_exact_inputs_and_refuses_bounds() {
+        assert_eq!(inspection_request(b"plan", b"claim").unwrap(),
+            b"\x04\0\0\0planclaim");
+        assert!(inspection_request(b"", b"claim").is_err());
+        assert!(inspection_request(b"plan", b"").is_err());
+        assert!(inspection_request(&vec![0; MAX_FRAME - 5], b"x").is_err());
+    }
+
+    fn inspection_frame(operation: u8, payload: &[u8]) -> Vec<u8> {
+        let mut frame = ((payload.len() + 1) as u32).to_le_bytes().to_vec();
+        frame.push(operation);
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    #[test]
+    fn stop_inspection_reply_is_exact_bounded_and_not_a_refusal_or_old_lookup() {
+        let body = br#"{"type":"application-lifecycle-stop-claim-verified-v1","extra":{"kept":true}}"#;
+        assert_eq!(inspection_reply(&inspection_frame(STOP_INSPECT_OPERATION, body)).unwrap(), body);
+        for op in [26, 27, 154, 255] {
+            assert!(inspection_reply(&inspection_frame(op, body)).is_err());
+        }
+        assert!(inspection_reply(&inspection_frame(STOP_INSPECT_OPERATION, b"{}" )).is_err());
+        assert!(inspection_reply(&inspection_frame(STOP_INSPECT_OPERATION, b"not JSON")).is_err());
+        let mut extra = inspection_frame(STOP_INSPECT_OPERATION, body);
+        extra.push(0);
+        assert!(inspection_reply(&extra).is_err());
+        let large = vec![b' '; MAX_INSPECTION as usize + 1];
+        assert!(inspection_reply(&inspection_frame(STOP_INSPECT_OPERATION, &large)).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stop_inspection_uses_pinned_operator_socket_and_retains_exact_reply() {
+        use std::io::{Read, Write};
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("mini-stop-inspection-{}-{unique}", std::process::id()));
+        DirBuilder::new().mode(0o700).create(&root).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let host = root.join("host");
+        std::fs::copy("/usr/bin/true", &host).unwrap();
+        std::fs::set_permissions(&host, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config = root.join("config.json");
+        std::fs::write(&config, b"{}").unwrap();
+        let socket = root.join("operator.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let host_sha = Sha256::digest(std::fs::read(&host).unwrap());
+        let operator = PrivateOperator {
+            host, config: config.clone(), socket,
+            host_sha256: hex(&host_sha),
+            config_sha256: hex(&Sha256::digest(b"{}")),
+        };
+        let body = br#"{"type":"application-lifecycle-stop-claim-verified-v1","sourceReceipt":"preserved"}"#;
+        let serving = std::thread::spawn(move || {
+            let (mut peer, _) = listener.accept().unwrap();
+            peer.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut prefix = [0; 4];
+            peer.read_exact(&mut prefix).unwrap();
+            let mut frame = vec![0; u32::from_le_bytes(prefix) as usize];
+            peer.read_exact(&mut frame).unwrap();
+            assert_eq!(frame[0], 2); // protected Host/config binding envelope
+            assert_eq!(&frame[1..5], &2u32.to_le_bytes());
+            assert_eq!(&frame[5..7], b"{}");
+            assert_eq!(&frame[7..39], host_sha.as_slice());
+            assert_eq!(frame[39], STOP_INSPECT_OPERATION);
+            assert_eq!(&frame[40..], inspection_request(b"plan", b"claim").unwrap());
+            peer.write_all(&inspection_frame(STOP_INSPECT_OPERATION, body)).unwrap();
+        });
+        let output = root.join("current.json");
+        assert_eq!(inspect_current(&operator, b"plan", b"claim", &output).unwrap(), body);
+        serving.join().unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), body);
+        std::fs::write(config, b"{\"different\":true}").unwrap();
+        assert!(inspect_current(&operator, b"plan", b"claim", &root.join("drift.json")).is_err());
+        assert!(!root.join("drift.json").exists());
+    }
 
     #[test]
     fn receipt_fields_require_canonical_positive_count() {
@@ -346,12 +410,12 @@ mod tests {
     #[test]
     fn historical_outcome_cannot_be_fresh_callback() {
         let mut reply = Vec::new();
-        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v5:replayed";
+        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v7:replayed";
         reply.extend_from_slice(&(payload.len() as u32 + 1).to_le_bytes());
         reply.push(26);
         reply.extend_from_slice(payload);
-        assert!(framed_payload(&reply, 26, COMMITTED_TAG).is_err());
+        assert!(framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
         reply[4] = 27;
-        assert!(framed_payload(&reply, 26, COMMITTED_TAG).is_err());
+        assert!(framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
     }
 }

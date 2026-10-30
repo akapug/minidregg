@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/j17.sh — P-CREDIT (PLACE §2.10, J17): a week in the place.
+# journey.d/j17.sh — P-CREDIT (docs/PLACE.md §2.10, J17): a week in the place.
 #
 # On this journey's live Store (after J5). Friends are enrolled, provisioned
 # and `init`ed exactly as J12/K10C do; every friend line is typed into that
@@ -264,7 +264,10 @@ operator week1 "lab's till ledger (op 180, read by the founder)" \
   "$MINI" credit --action ledger --dir "$WS/alice" --account lab-till
 checkp week1 "the till's renew ledger holds B's 100 at one height" \
   jq -e --arg b "$B" '.entries | length == 1 and .[0].subject == $b and .[0].amount == "100"' "$OUT"
-H1=$(jq -r '.entries[0].height' "$OUT"); TX1=$(jq -r '.entries[0].transactionId' "$OUT")
+H1=$(jq -r '.entries[0].height // empty' "$OUT"); TX1=$(jq -r '.entries[0].transactionId // empty' "$OUT")
+check week1 "the ledger names the height and transaction B's 100 landed at" "present" \
+  "$([ -n "$H1" ] && [ -n "$TX1" ] && echo present || echo missing)"
+H1=${H1:-0}
 concierge week1 lab "issues B's first week"
 cp "$PASS" "$SD/pass-week1.json"
 check week1 "the concierge delegated member to B with notAfter = h + $PERIOD" "issued $B $((H1 + PERIOD))" \
@@ -328,7 +331,10 @@ checkp expiry "room status: B's window ENDED" grep -q "my window: ENDED at heigh
 ok week2 bob "pay lab week"
 operator week2 "lab's till ledger above the first payment" \
   "$MINI" credit --action ledger --dir "$WS/alice" --account lab-till --since "$H1"
-H2=$(jq -r '.entries[0].height' "$OUT")
+H2=$(jq -r '.entries[0].height // empty' "$OUT")
+check week2 "the ledger names the height B's second 100 landed at" "present" \
+  "$([ -n "$H2" ] && echo present || echo missing)"
+H2=${H2:-0}
 concierge week2 lab "re-issues B's week"
 check week2 "the concierge re-issued B's window from the new payment: notAfter = h2 + $PERIOD" "issued $B $((H2 + PERIOD))" \
   "$(jq -r '.decisions[0] | "\(.decision) \(.subject) \(.notAfter)"' "$PASS" 2>/dev/null)"

@@ -2,22 +2,23 @@
 # check-prover-glue.sh -- the Lean-emitted prover glue is exactly what its Lean
 # source emits now.
 #
-# Three modules write Rust when they elaborate (`#eval ….run`, paths relative
+# Four modules write Rust when they elaborate (`#eval ….run`, paths relative
 # to the working directory):
 #   Compiler/MinidreggV1NativeGlue.lean      -> prover/generated/semantic_artifact_v1.rs
 #   Compiler/EvmStage0NativeDeployment.lean  -> prover/generated/evm_stage0_add_aux.rs
 #   Compiler/ArithmeticNativeDeployment.lean -> prover/src/semantic_artifact_arithmetic.rs
+#   Kernel/Bounds.lean                       -> native/resource-client/src/bounds.rs (the static limits)
 # They re-emit only when lake rebuilds them, so a codec-version move upstream
 # left the committed copies stale until some unrelated build rewrote them as
-# "drift". This gate re-elaborates the three modules in a TEMPORARY working
+# "drift". This gate re-elaborates the four modules in a TEMPORARY working
 # directory (the tree is never written) and compares byte-for-byte with the
 # tracked copies. Exit 1 on any difference or on an emitter that wrote nothing.
 set -euo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 export PATH=$HOME/.elan/bin:$PATH
-modules=(Compiler/MinidreggV1NativeGlue Compiler/EvmStage0NativeDeployment Compiler/ArithmeticNativeDeployment)
-files=(prover/generated/semantic_artifact_v1.rs prover/generated/evm_stage0_add_aux.rs prover/src/semantic_artifact_arithmetic.rs)
+modules=(Compiler/MinidreggV1NativeGlue Compiler/EvmStage0NativeDeployment Compiler/ArithmeticNativeDeployment Kernel/Bounds)
+files=(prover/generated/semantic_artifact_v1.rs prover/generated/evm_stage0_add_aux.rs prover/src/semantic_artifact_arithmetic.rs native/resource-client/src/bounds.rs)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/prover-glue.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/prover/generated" "$tmp/prover/src" "$tmp/before"
@@ -31,9 +32,10 @@ done
 # lake may rebuild them here, which is what the build does anyway).
 # Build imported libraries, leaving emitter elaboration to the scratch cwd.
 mapfile -t dependencies < <(python3 - "${modules[@]}" <<'PYDEPS'
-import re, sys
-print("\n".join(sorted({m for p in sys.argv[1:] for m in
-    re.findall(r"^import\s+(\S+)", open(p + ".lean").read(), re.M)})))
+import sys
+sys.path.insert(0, "scripts")
+from lean_imports import file_imports
+print("\n".join(sorted({m for p in sys.argv[1:] for m in file_imports(p + ".lean")})))
 PYDEPS
 )
 lake build "${dependencies[@]}" >/dev/null

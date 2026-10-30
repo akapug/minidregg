@@ -115,7 +115,15 @@ def grant(target, cap, kind="object"):
     return {"kind": kind, "target": str(target), "capability": str(cap)}
 
 
-def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-broker.sock", result_path=None, init_path=None):
+def broker_endpoint(grains):
+    """The Store's broker socket as spk-host's broker_endpoint::resolve fixes it: <grains>/runtime-<store>/broker.sock,
+    the Store id being the grains root's own name. There is no other endpoint and no default."""
+    grains = Path(grains)
+    require(re.fullmatch("[0-9a-f]{16}", grains.name) is not None, "grains root is not named by its Store id")
+    return grains / f"runtime-{grains.name}" / "broker.sock"
+
+
+def discover_profile(root, config, grains, artifacts, broker=None, result_path=None, init_path=None):
     """Consume the retained native/profile result, without deriving Store identity."""
     result_path = result_path or root / "evidence/profile-result.json"
     result = load(result_path)
@@ -140,7 +148,9 @@ def discover_profile(root, config, grains, artifacts, broker="/run/mini-spk-brok
     for role, path_field, hash_field in [("host","miniHost","miniHostSha256"),("spkHost","spkHost","spkHostSha256")]:
         require(profile.get(path_field) == artifacts[role]["path"] and profile.get(hash_field) == artifacts[role]["sha256"],
                 "profile differs from pinned candidate artifacts")
-    require(all(value.get("brokerSocket","/run/mini-spk-broker.sock") == broker
+    broker = str(broker_endpoint(grains)) if broker is None else broker
+    require(broker == str(broker_endpoint(grains)), "fixture broker endpoint is not the Store's runtime socket")
+    require(all(value.get("brokerSocket") == broker
                 for value in [result,initialized,profile]), "retained native broker endpoint differs from fixture pin")
     return state, profile_path, profile
 
@@ -227,7 +237,7 @@ class Fixture:
         self.m = self.f["artifacts"]
         for a in self.m.values():
             require(sha(a["path"]) == a["sha256"], "candidate artifact changed")
-        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket","/run/mini-spk-broker.sock"),
+        self.state, self.profile, _ = discover_profile(self.root,self.config,absolute(self.f["grainsRoot"]),self.m,self.f.get("brokerSocket"),
             absolute(attached["profileResult"]) if attached else None,
             absolute(attached["initStoreResult"]) if attached else None)
         require(str(self.state) == self.f["state"] and str(self.profile) == self.f["profilePath"],
@@ -373,21 +383,22 @@ class Fixture:
         require(o.get("type") == "confirmed" and o.get("confirmation") == "installed", "session birth not confirmed")
         d.update(sessionSource=str(author / "source.json"), sessionReceipt=str(attempt / "outcome.json"))
 
-    def delegate(self, target, parent, child, holder):
-        c = self.query(self.owner, target, parent, "capability")
+    def delegate(self, target, parent, child, holder, by=None):
+        by = by or self.owner  # the subject that holds `parent`; a ticket's owner capability is its issuer's
+        c = self.query(by, target, parent, "capability")
         head = self.fresh("cap-head.json")
         self.run([self.m["host"]["path"], self.config, "inspect", "view-object-capability", c["dir"] / "view.bin", head])
         p = load(head)["head"]
-        q = self.query(self.owner, target, parent)
+        q = self.query(by, target, parent)
         new = copy.deepcopy(p)
         new.update(id=str(child), parent=p["id"], holder={"type": "subject", "subject": str(holder)},
                    targets=[str(target)], verbs=["observe"], ancestors=sorted(set(p["ancestors"] + [p["id"]])))
-        return self.submit({"subject": self.owner, "nonce": self.n(), "purpose": {"type": "prepare", "draft": {
+        return self.submit({"subject": by, "nonce": self.n(), "purpose": {"type": "prepare", "draft": {
             "type": "delegate-source", "command": {"kind": "object", "domain": q["challenge"]["domain"],
-                "semantics": q["challenge"]["semantics"], "subject": self.owner, "nonce": self.n(),
+                "semantics": q["challenge"]["semantics"], "subject": by, "nonce": self.n(),
                 "expectedTargetRoot": q["view"]["cell"]["root"], "parentId": p["id"], "target": str(target),
                 "child": new}}},
-                "grants": [grant(target,parent)]}, self.owner)
+                "grants": [grant(target,parent)]}, by)
 
     def approve(self, plan, header, base, out):
         signers = []
@@ -401,6 +412,11 @@ class Fixture:
                 "publicKey": absolute(self.keys[str(subject)]["publicKeyPath"]).read_bytes().hex(),
                 "headerSha256": hashlib.sha256(bytes.fromhex(slot[header])).hexdigest(), "keyPath": str(key)})
         save(out, dict(base, signers=signers))
+
+    def issue_cap(self):
+        """The capability a share ticket cites: the child the owner delegated the manager at the
+        share-delegation step when there is one, else the app owner capability (manager-owned apps)."""
+        return self.f.get("shareDelegation", {}).get("capability", self.appcap)
 
     def issue(self, d, reserve=True, observe=True):
         kind = d.get("sessionKind", "web")
@@ -421,7 +437,7 @@ class Fixture:
                     "kind": kind, "subject": d["subject"], "origin": {"type": "human"},
                     "sessionCapability": d["cap"], "appObserveCapability": d["appObserve"],
                     "ticketObserveCapability": d["ticketObserve"]}, "ceiling": ceiling, "issueNonce": self.n(), "notAfter": "1000000000"},
-                "issuer": self.owner, "appDelegateCapability": self.appcap,
+                "issuer": self.creator, "appDelegateCapability": self.issue_cap(),
                 "ticketOwnerCapability": d["ticketOwner"], "ticketControlCapability": d["ticketControl"]}
         req = {"spec": spec, "payer": self.creator, "funding": [], "sourceCapabilities": [self.accountcap],
                "tool": self.tool, "parent": self.parent}
@@ -431,19 +447,20 @@ class Fixture:
         inspected = load(preview / "request-inspected.json")
         base = {"type": "minidregg-grain-share-issue-approval-v1", "requestSha256": sha(preview / "request.bin"),
                 "canonicalSpec": inspected["canonicalSpec"], "issuer": spec["issuer"],
-                "participantSubject": d["subject"], "appDelegateCapability": self.appcap, "ticketResource": d["ticket"]}
+                "participantSubject": d["subject"], "appDelegateCapability": self.issue_cap(), "ticketResource": d["ticket"]}
         base.update({k: inspected[k] for k in ["payer","funding","sourceCapabilities","tool","parent"]})
         self.approve(preview / "plan-inspected.json", "header", base, approval)
         self.mini("grain-share-issue-prepare", "--request", request, "--approval", approval, "--dir", issue, operator=True)
         # The exact attempt is named before its one submission, so an
         # interrupted issue is recovered by lookup of this directory only.
+        d["issueRequest"] = str(request)
         d["issueAttempt"] = str(issue)
         self.write_state()
         self.run([self.m["mini"]["path"], "grain-share-issue-submit", "--socket", self.osock, "--attempt", issue])
         confirmed_issue_receipt(issue)
         d["issue"] = str(issue)
         if observe:
-            self.delegate(d["ticket"], d["ticketOwner"], d["ticketObserve"], d["subject"])
+            self.delegate(d["ticket"], d["ticketOwner"], d["ticketObserve"], d["subject"], by=self.creator)
 
     def enroll(self, d):
         schema = load(self.pkg / "schema-inspection.json")
@@ -565,12 +582,12 @@ class Fixture:
         d = self.f["delegates"]["a"]
         if action == "revokeA":
             require(not d.get("revoked",False), "A already revoked; refusing duplicate mutation")
-            q = self.query(self.owner,d["ticket"],d["ticketOwner"])
-            artifact = self.submit({"subject":self.owner,"nonce":self.n(),"purpose":{"type":"prepare","draft":{
-                "type":"revoke-source","command":{"kind":"object","subject":self.owner,"nonce":self.n(),"target":d["ticket"],
+            q = self.query(self.creator,d["ticket"],d["ticketOwner"])
+            artifact = self.submit({"subject":self.creator,"nonce":self.n(),"purpose":{"type":"prepare","draft":{
+                "type":"revoke-source","command":{"kind":"object","subject":self.creator,"nonce":self.n(),"target":d["ticket"],
                   "victimKind":"object","capability":d["ticketObserve"],"controlCapability":d["ticketControl"],
                   "expectedTargetRoot":q["view"]["cell"]["root"],"expectedAuthorityRoot":q["challenge"]["authorityRoot"]}}},
-                "grants":[grant(d["ticket"],d["ticketOwner"])]},self.owner)
+                "grants":[grant(d["ticket"],d["ticketOwner"])]},self.creator)
             self.query(d["subject"],d["ticket"],d["ticketObserve"],denied=True)
             b = self.f["delegates"]["b"]
             self.query(b["subject"],b["ticket"],b["ticketObserve"])
@@ -655,14 +672,14 @@ def prepare(path):
     lease = int(c.get("leaseSeconds",120))
     require(lease > 0, "positive lease required")
     grains = absolute(c["grainsRoot"])
-    broker = str(absolute(c.get("brokerSocket","/run/mini-spk-broker.sock")))
-    require(broker in ("/run/mini-spk-broker.sock",str(grains/"broker.sock")), "isolated broker must belong to grains root")
+    broker = str(broker_endpoint(grains))
+    require(str(absolute(c.get("brokerSocket",broker))) == broker, "isolated broker must be the Store runtime socket")
     root.mkdir(mode=0o700)
     (root/"hooks").mkdir(mode=0o700)
     save(root/"input.json",c)
     save(root/"manifest.json",m)
     save(root/"source-inputs.json",{str(HERE/name):sha(HERE/name) for name in ["grain-journey.sh","grain-store.sh","ws-continuity-fixture.py","ws-continuity-regressions.py","ws-continuity-supervision.py"]})
-    env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),BROKER_SOCKET="" if broker == "/run/mini-spk-broker.sock" else broker,SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
+    env = dict(os.environ, BIN=str(bindir),GRAIN_HOST=m["host"],GRAINS_ROOT=str(grains),BROKER_SOCKET=broker,SPK=str(spk),GRAIN_A=prefix,KIND_A="web",ROLE_BASIS_A='{"type":"allAccess"}')
     def phases(*names):
         p = root/("phase-"+"-".join(names))
         rc,_,_=logged_run([str(HERE/"grain-journey.sh"),"phase",str(root),*names],p,env=env,timeout=7200)

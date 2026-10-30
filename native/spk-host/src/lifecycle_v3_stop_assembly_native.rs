@@ -1,5 +1,4 @@
 //! Current-image STOP claim plan and detached assembly, before fresh op26.
-#![allow(dead_code)] // Awaiting the callable STOP supervisor cut.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -73,15 +72,6 @@ impl FixedStopClaimSigners {
 pub(crate) struct AssembledStopClaim {
     begin: AcceptedStopBegin,
     ingress: Vec<u8>,
-}
-
-impl AssembledStopClaim {
-    pub(crate) fn ingress(&self) -> &[u8] {
-        &self.ingress
-    }
-    pub(crate) fn begin(&self) -> &AcceptedStopBegin {
-        &self.begin
-    }
 }
 
 struct ClaimPlanEvidence<'a> {
@@ -181,9 +171,9 @@ pub(crate) fn assemble_once(
     let marker = serde_json::to_vec(&marker)?;
     write_new(attempt_dir, "op68-requested.json", &marker)?;
     write_new(parent, "lifecycle-stop-claim-assembly-active.json", &marker)?;
-    let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 68, PLAN_TAG)?.to_vec();
+    let plan = framed_payload("launch claim plan", &reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, PLAN_TAG)?.to_vec();
     let plan_path = write_new(attempt_dir, "plan.bin", &plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -221,9 +211,9 @@ pub(crate) fn assemble_once(
     pair.extend_from_slice(&plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op69-requested.bin", &pair)?;
-    let reply = operator.invoke(69, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op69-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 69, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch claim assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "claim-v3.bin", &ingress)?;
     Ok(AssembledStopClaim { begin, ingress })
 }

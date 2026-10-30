@@ -98,7 +98,7 @@ pub(super) fn decode_hex(value: &str) -> Result<Vec<u8>> {
 
 fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "agent reserve Host refused op{operation}; frame retained"
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
@@ -161,6 +161,7 @@ fn pinned(directory: &Path) -> Result<Pin> {
     let host = PathBuf::from(field(&pin, "host")?);
     let config = PathBuf::from(field(&pin, "config")?);
     let operator_socket = PathBuf::from(field(&pin, "operatorSocket")?);
+    crate::operator_peer::restore(&operator_socket, &pin)?;
     let public_socket = PathBuf::from(field(&pin, "publicSocket")?);
     if [
         host.as_path(),
@@ -260,10 +261,10 @@ pub(super) fn plan(
     {
         return Err("Host inspected a different canonical agent reserve request".into());
     }
-    let frame = session_invoke(&host, &operator_socket, &config, 58, &request)?;
+    let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::AGENT_RESERVE_PLAN, &request)?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan_bytes = expect_reply(&frame, 58)?;
+    let plan_bytes = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_PLAN)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan_bytes)?;
     let inspection = source_inspect(
@@ -287,6 +288,7 @@ pub(super) fn plan(
             "config":utf8_path(&directory.join("config.json"))?,
             "configSha256":digest(&config_bytes),
             "operatorSocket":utf8_path(&operator_socket)?,
+            "operatorPeerUid":crate::operator_peer::selected(&operator_socket)?,
             "publicSocket":utf8_path(&public_socket)?,
             "requestSha256":digest(&request),"planSha256":digest(plan_bytes)}),
     )?;
@@ -491,7 +493,7 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     }
     // Unsigned retained plans also require current native reconstruction;
     // an old operator frame or its local inspection is not signing consent.
-    crate::client_consent::operator_plan(&pin.host, &pin.config, 58, &pin.request, &pin.plan)?;
+    crate::client_consent::operator_plan(&pin.host, &pin.config, mini_sdk::host_operations::AGENT_RESERVE_PLAN, &pin.request, &pin.plan)?;
     let slots = inspected
         .get("slots")
         .and_then(Value::as_array)
@@ -533,11 +535,11 @@ pub(super) fn seal(directory: &Path, approval_json: &Path) -> Result<()> {
     let mut pair = plan_length.to_le_bytes().to_vec();
     pair.extend_from_slice(&pin.plan);
     pair.extend_from_slice(&signatures_bytes);
-    let frame = session_invoke(&pin.host, &pin.operator_socket, &pin.config, 59, &pair)?;
+    let frame = session_invoke(&pin.host, &pin.operator_socket, &pin.config, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE, &pair)?;
     create_private(&directory.join("assembly.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pin)?;
-    let call = expect_reply(&frame, 59)?;
+    let call = expect_reply(&frame, mini_sdk::host_operations::AGENT_RESERVE_ASSEMBLE)?;
     create_private(&directory.join("call.bin"), call)?;
     sync_retained_call(&directory, &directory.join("call.bin"))?;
     retain_json(
@@ -595,12 +597,12 @@ pub(super) fn submit(directory: &Path) -> Result<()> {
         &json!({"type":"minidregg-agent-reserve-submit-attempt-v1",
             "callSha256":digest(&call),"publicSocket":utf8_path(&pin.public_socket)?}),
     )?;
-    let frame = session_invoke(&pin.host, &pin.public_socket, &pin.config, 2, &call)
+    let frame = session_invoke(&pin.host, &pin.public_socket, &pin.config, mini_sdk::host_operations::SUBMIT, &call)
         .map_err(|error| format!("agent reserve op2 uncertain; use exact lookup: {error}"))?;
     create_private(&directory.join("submit.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pin)?;
-    let result = outcome(&directory, "submit", &frame, 2, &pin)?;
+    let result = outcome(&directory, "submit", &frame, mini_sdk::host_operations::SUBMIT, &pin)?;
     same_pin(&directory, &pin)?;
     let receipt = exact_receipt(&result)?;
     retain_json(&directory.join("receipt.json"), &receipt)?;
@@ -636,11 +638,11 @@ pub(super) fn lookup(directory: &Path) -> Result<()> {
         &json!({"type":"minidregg-agent-reserve-lookup-v1",
             "callSha256":digest(&call),"publicSocket":utf8_path(&pin.public_socket)?}),
     )?;
-    let frame = session_invoke(&pin.host, &pin.public_socket, &pin.config, 3, &call)?;
+    let frame = session_invoke(&pin.host, &pin.public_socket, &pin.config, mini_sdk::host_operations::LOOKUP, &call)?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pin)?;
-    let result = outcome(&directory, &stem, &frame, 3, &pin)?;
+    let result = outcome(&directory, &stem, &frame, mini_sdk::host_operations::LOOKUP, &pin)?;
     same_pin(&directory, &pin)?;
     let receipt = exact_receipt(&result)?;
     if result.get("confirmation").and_then(Value::as_str) != Some("replayed") {

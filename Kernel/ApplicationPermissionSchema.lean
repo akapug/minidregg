@@ -11,7 +11,26 @@ tree has no executable reader of that field. Role assignment uses
 shell/imports/sandstorm-permissions/permissions.js:48-100; missing role bits
 are false. A Mini-governed ticket/share ceiling is a separate authority input.
 -/
-import Kernel.ApplicationGrainSessionEnrollment
+module
+
+public import Kernel.ApplicationGrainSessionEnrollment
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationPermissionSchema
 open Minidregg.Compiler
@@ -77,18 +96,8 @@ def schemaStream : StreamCodec Schema :=
 private def schemaFrame : List UInt8 :=
   "DREGG/APPLICATION/PERMISSION-SCHEMA/v1".toUTF8.toList
 
-private def rawSchemaCodec : LawfulCodec Schema where
-  encode s := schemaFrame ++ schemaStream.encode s
-  decode bytes := if bytes.take schemaFrame.length = schemaFrame then
-    schemaStream.toLawful.decode (bytes.drop schemaFrame.length) else none
-  decode_encode := by
-    intro s
-    have decoded := schemaStream.toLawful.decode_encode s
-    change schemaStream.toLawful.decode (schemaStream.encode s) = some s at decoded
-    simp [decoded]
-
 def schemaCodec : LawfulCodec Schema :=
-  ResourceBirthCodec.strictCodec rawSchemaCodec
+  (StreamCodec.framed schemaFrame schemaStream).toLawful
 
 def Schema.root (s : Schema) : Digest :=
   (Sp800185Cshake256.hash
@@ -107,7 +116,7 @@ theorem schema_bytes_injective : Function.Injective schemaCodec.encode := by
 theorem decoded_canonical {bytes : List UInt8} {s : Schema}
     (decoded : schemaCodec.decode bytes = some s) :
     schemaCodec.encode s = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawSchemaCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 private def asciiLetter (c : UInt8) : Bool :=
   (65 ≤ c.toNat && c.toNat ≤ 90) || (97 ≤ c.toNat && c.toNat ≤ 122)
@@ -115,14 +124,29 @@ private def asciiLetter (c : UInt8) : Bool :=
 private def asciiDigit (c : UInt8) : Bool :=
   48 ≤ c.toNat && c.toNat ≤ 57
 
-/-- Sandstorm PermissionDef names are identifiers: ASCII alphanumeric, first
-byte a letter. Empty and duplicate names cannot be mapped to stable IDs. -/
+/-- A PermissionDef name: first byte an ASCII letter, then ASCII letters, digits, `_`,
+`-` or `.`. Empty and duplicate names cannot be mapped to stable IDs. Sandstorm checks no
+charset at all. A name is compared here only as bytes, and it never reaches a parser or a
+filesystem path. Its one textual use is the app's own `X-Sandstorm-Permissions` header, a
+comma-separated list, so commas, spaces and control bytes stay out. -/
 def Permission.validName (name : List UInt8) : Bool :=
   match name with
   | [] => false
   | first :: rest => asciiLetter first &&
-      rest.all (fun c => asciiLetter c || asciiDigit c) &&
+      rest.all (fun c => asciiLetter c || asciiDigit c || c == 95 || c == 45 || c == 46) &&
       decide (name.length ≤ 256)
+
+/-- Admitted: the names real packages use with separators. Refused: a comma (it would
+split the permissions header), a space, a leading digit, the empty name. -/
+theorem validName_examples :
+    Permission.validName "view_stats".toUTF8.toList = true ∧
+    Permission.validName "edit-board".toUTF8.toList = true ∧
+    Permission.validName "a.b".toUTF8.toList = true ∧
+    Permission.validName "read,write".toUTF8.toList = false ∧
+    Permission.validName "read write".toUTF8.toList = false ∧
+    Permission.validName "1read".toUTF8.toList = false ∧
+    Permission.validName [] = false := by
+  decide +kernel
 
 /-- Explicit bounds avoid silently truncating a wire role ID or mask. Short
 historical masks are allowed, but masks longer than current definitions are

@@ -2,8 +2,28 @@
 native content/durable-append constructor registry; return storage is appended without dropping original
 ordered application effects or physical reads. Current authority/funding belong
 to the native gate; this token cannot accept a caller-authored Plan. -/
-import Compiler.ObjectiveBendResultAdapter
-import Compiler.ObjectiveBendNativePlanData
+module
+
+public import Compiler.ObjectiveBendResultAdapter
+public import Compiler.ObjectiveBendNativePlanData
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendGenericResult
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization
 open ObjectiveBendTypes ObjectiveBendTyping ObjectiveBendDemandMachine ObjectiveBendDemandData
@@ -68,6 +88,23 @@ structure Prepared (deployment : CanonicalCellRegistry.Deployment)
   planExact : plan = ⟨effects,[slot],reads⟩
   nativeExact : BendWorldPlan.matchesCommand plan command = true
   returnsStored : plan.returns.all (storesReturn command) = true
+/-- The prepared plan is the checked term's actual run, its result slot, the
+augmented effects and the command-matching plan built from them. -/
+theorem Prepared.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {profile : ObjectiveBendResultAdapter.Profile} {command : Command} {source : AnnotatedTerm}
+    {limits : Limits} {budget : Budget} {capacity : ObjectiveBendDemandCapacity.Profile}
+    (prepared : Prepared deployment loaded profile command source limits budget capacity) :
+    executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term =
+        .ok prepared.execution ∧
+      prepared.execution.extraction.result.value =
+        .record [("plan", prepared.planData), ("result", prepared.resultData)] ∧
+      prepared.slot = returnSlot profile prepared.resultType prepared.bytes ∧
+      augment profile command prepared.slot prepared.native.effects = some prepared.augmented ∧
+      prepared.plan = ⟨prepared.effects, [prepared.slot], prepared.reads⟩ ∧
+      BendWorldPlan.matchesCommand prepared.plan command = true :=
+  ⟨prepared.runExact, prepared.dataShape, prepared.slotExact, prepared.augmentationExact,
+    prepared.planExact, prepared.nativeExact⟩
 
 def prepareChecked (deployment : CanonicalCellRegistry.Deployment)
     (loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry)

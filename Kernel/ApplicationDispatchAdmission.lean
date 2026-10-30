@@ -3,13 +3,36 @@ Current-image selectors for special application dispatch. These helpers do not
 admit a request by themselves: the receiver must check signed observations,
 the DRC invocation, accepted historical share issuance, and one durable CAS.
 -/
-import Kernel.ApplicationDispatchAdmissionIngress
-import Kernel.ApplicationDispatchManifest
-import Kernel.ApplicationDispatchWitness
-import Kernel.ApplicationDispatchAuthority
-import Kernel.ApplicationShareIssueSource
-import Kernel.ResourceObservationAdmission
-import Kernel.PhysicalResourceReadGuard
+module
+
+public import Effects.Revival.HostedDav
+public import Effects.Revival.HostedConversation
+public import Kernel.ApplicationDispatchAdmissionIngress
+public import Kernel.ApplicationDispatchManifest
+public import Kernel.ApplicationDispatchWitness
+public import Kernel.ApplicationDispatchAuthority
+public import Kernel.ApplicationShareIssueSource
+public import Kernel.ResourceObservationAdmission
+public import Kernel.PhysicalResourceReadGuard
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAdmission
 
@@ -117,7 +140,7 @@ def ordinaryHeaderName (name : List UInt8) : Bool :=
     "if-match", "if-none-match", "x-requested-with", "x-csrftoken",
     "x-csrf-token", "oc-total-length", "oc-chunk-size", "x-oc-mtime",
     "oc-fileid", "oc-chunked", "oc-checksum", "oc-chunk-offset",
-    "oc-lazyops"] : List String).any (fun allowed => name == allowed.toUTF8.toList)
+    "oc-lazyops", "content-encoding"] : List String).any (fun allowed => name == allowed.toUTF8.toList)
 
 def cleanTransportText (bytes : List UInt8) : Bool :=
   (String.fromUTF8? bytes.toByteArray).isSome &&
@@ -141,9 +164,36 @@ streamed-open method. -/
 def streamed (request : ApplicationDispatchCodec.Request) : Bool :=
   request.method == streamedOpenMethod
 
+/-- The WebDAV and CalDAV calls a WebSession serves beyond the plain exchanges
+(`web-session.capnp` `propfind` @7, `proppatch` @8, `mkcol` @9, `copy` @10, `move` @11,
+`lock` @12, `unlock` @13, `report` @15, `options` @16). `acl` @14 is absent: no
+admitted app uses it, and an absent method is refused before any record. Each is an
+ordinary exchange: one request, one response, one Mini write. -/
+def davMethod (method : List UInt8) : Bool :=
+  (["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT",
+    "OPTIONS"] : List String).any (fun allowed => method == allowed.toUTF8.toList)
+
+/-- The request headers a DAV call carries as its typed parameters: `depth` (propfind's
+`depth`, copy's and lock's `shallow`), `destination` (copy and move), `overwrite`
+(`noOverwrite`) and `lock-token` (unlock). They are signed like ordinary headers and admitted
+only on a DAV method: on every other request they are refused. -/
+def davHeaderName (name : List UInt8) : Bool :=
+  (["depth", "destination", "overwrite", "lock-token"] : List String).any
+    (fun allowed => name == allowed.toUTF8.toList)
+
+/-- DAV calls whose WebSession method has no content parameter. -/
+def davBodyless (method : List UInt8) : Bool :=
+  (["COPY", "MOVE", "UNLOCK", "OPTIONS"] : List String).any
+    (fun allowed => method == allowed.toUTF8.toList)
+
+/-- DAV calls whose content is `xmlContent :Text`: the body must be UTF-8 text without NUL. -/
+def davTextBody (method : List UInt8) : Bool :=
+  (["PROPFIND", "PROPPATCH", "LOCK"] : List String).any
+    (fun allowed => method == allowed.toUTF8.toList)
+
 def exchangeMethod (method : List UInt8) : Bool :=
   (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] : List String).any
-    (fun allowed => method == allowed.toUTF8.toList)
+    (fun allowed => method == allowed.toUTF8.toList) || davMethod method || method == Effects.Revival.HostedConversation.method
 
 /-- The exact signed request is a bounded WebSession candidate. The received
 `generated` tag is never trusted: every incoming header must be ordinary,
@@ -158,8 +208,12 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
     if request.method == "GET".toUTF8.toList ||
         request.method == "HEAD".toUTF8.toList ||
         request.method == "DELETE".toUTF8.toList ||
-        streamed request then
+        streamed request || davBodyless request.method then
       request.body.isEmpty
+    else if request.method == Effects.Revival.HostedConversation.method then
+      Effects.Revival.HostedConversation.descriptorSafe request.body
+    else if davTextBody request.method then
+      (String.fromUTF8? request.body.toByteArray).isSome && !request.body.contains 0
     else true
   methodAllowed && bodyAllowed &&
     decide (request.path.length + request.query.length ≤ 8192) &&
@@ -172,7 +226,9 @@ def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Req
     request.headers.all (fun header =>
       !header.generated &&
       (ordinaryHeaderName header.name ||
-        (streamed request && header.name == webSocketProtocolHeader)) &&
+        (streamed request && header.name == webSocketProtocolHeader) ||
+        (davMethod request.method &&
+          Effects.Revival.HostedDav.headerAllowed request.method header.name header.value)) &&
       decide (header.name.length ≤ 128) &&
       decide (header.value.length ≤ 8192) &&
       cleanTransportText header.value)
@@ -202,6 +258,91 @@ theorem getMethod_exchange : exchangeMethod getMethod = true := by
   decide +kernel
 
 theorem getMethod_not_streamed : (getMethod == streamedOpenMethod) = false := by
+  decide +kernel
+
+theorem davMethod_streamedOpen : davMethod streamedOpenMethod = false := by
+  decide +kernel
+
+theorem davMethod_get : davMethod getMethod = false := by
+  decide +kernel
+
+/-! ### The DAV calls: admitted exactly as `requestSafeFor` says, with poles
+
+Statement: a DAV method is an ordinary exchange (`exchangeMethod`), its typed parameters
+travel as the four DAV headers and nowhere else, a parameter-only call carries no body, and
+an `xmlContent` call carries UTF-8 text. The theorems below are the general facts; the
+`#guard`-style examples after them are the satisfiable witnesses and the poles (each a
+concrete request, decided by the kernel). -/
+
+/-- Opening DAV changes nothing for a non-DAV request carrying no DAV header: the admission is
+the same Boolean with the DAV disjuncts erased. -/
+theorem dav_header_needs_dav_method (open_ : Bool) (request : ApplicationDispatchCodec.Request)
+    (hdav : davMethod request.method = false)
+    (header : ApplicationDispatchCodec.Header) (mem : header ∈ request.headers)
+    (hname : ordinaryHeaderName header.name = false)
+    (hproto : streamed request = false ∨ header.name ≠ webSocketProtocolHeader) :
+    requestSafeFor open_ request = false := by
+  simp only [requestSafeFor, hdav, Bool.false_and, Bool.or_false]
+  rw [Bool.eq_false_iff]
+  intro safe
+  simp only [Bool.and_eq_true, List.all_eq_true] at safe
+  have h := (safe.2 header mem).1.1.1.2
+  rcases hproto with hs | hn
+  · simp [hname, hs] at h
+  · simp [hname, hn] at h
+
+/-- A DAV call without a content parameter (COPY, MOVE, UNLOCK, OPTIONS) carries no body. -/
+theorem dav_bodyless_body_empty (open_ : Bool) (request : ApplicationDispatchCodec.Request)
+    (safe : requestSafeFor open_ request = true) (h : davBodyless request.method = true) :
+    request.body = [] := by
+  simp [requestSafeFor, h] at safe
+  tauto
+
+/-- The DAV parameter headers are never ordinary headers: off a DAV method each is refused. -/
+theorem davHeaderNames_not_ordinary :
+    (["depth", "destination", "overwrite", "lock-token"] : List String).all
+      (fun name => !ordinaryHeaderName name.toUTF8.toList &&
+        name.toUTF8.toList != webSocketProtocolHeader) = true := by
+  decide +kernel
+
+/-- Every DAV method is an exchange and none is a streamed open. -/
+theorem davMethods_exchange :
+    (["PROPFIND", "PROPPATCH", "MKCOL", "COPY", "MOVE", "LOCK", "UNLOCK", "REPORT",
+      "OPTIONS"] : List String).all
+      (fun m => exchangeMethod m.toUTF8.toList && m.toUTF8.toList != streamedOpenMethod) = true := by
+  decide +kernel
+
+/-- A request fixture: a method, a path, headers and a body. -/
+def davFixture (method : String) (headers : List (String × String)) (body : String) :
+    ApplicationDispatchCodec.Request :=
+  { operationId := 1, method := method.toUTF8.toList, path := "dav/notes".toUTF8.toList,
+    query := [], body := body.toUTF8.toList,
+    headers := headers.map fun (n, v) =>
+      { name := n.toUTF8.toList, value := v.toUTF8.toList, generated := false } }
+
+/-- Satisfiable: a PROPFIND with `depth: 1` and an XML body is admitted, on a human route and
+on an agent route alike. -/
+theorem dav_propfind_admitted :
+    requestSafeFor false (davFixture "PROPFIND" [("depth", "1"), ("content-type", "application/xml")]
+      "<?xml version=\"1.0\"?><propfind xmlns=\"DAV:\"><allprop/></propfind>") = true := by
+  decide +kernel
+
+/-- Satisfiable: MKCOL, a MOVE with its destination and overwrite, a REPORT with a body. -/
+theorem dav_write_calls_admitted :
+    requestSafeFor false (davFixture "MKCOL" [] "") = true ∧
+    requestSafeFor false (davFixture "MOVE"
+      [("destination", "https://g.example/dav/old"), ("overwrite", "F")] "") = true ∧
+    requestSafeFor true (davFixture "REPORT" [("depth", "1")] "<calendar-query/>") = true := by
+  decide +kernel
+
+/-- Poles: a GET with a DAV header, a COPY with a body, an ACL, and a PROPFIND whose body is
+not UTF-8 are each refused. -/
+theorem dav_poles :
+    requestSafeFor true (davFixture "GET" [("depth", "1")] "") = false ∧
+    requestSafeFor true (davFixture "COPY" [("destination", "https://g.example/x")] "body") = false ∧
+    requestSafeFor true (davFixture "ACL" [] "<acl/>") = false ∧
+    requestSafeFor true
+      { davFixture "PROPFIND" [("depth", "0")] "" with body := [0xff, 0xfe] } = false := by
   decide +kernel
 
 /-- Pole: a route that may not open a stream refuses every streamed open. -/
@@ -249,7 +390,7 @@ theorem streamed_open_shape_is_get_shape (request : ApplicationDispatchCodec.Req
     simp [getMethod]
   rw [Bool.eq_iff_iff]
   simp only [requestSafe, requestSafeFor, hget, h, hm, getMethod_exchange, hGetBody,
-    streamedOpenMethod_not_exchange]
+    streamedOpenMethod_not_exchange, davMethod_streamedOpen, davMethod_get]
   simp only [Bool.or_true, Bool.true_or, Bool.and_true, Bool.true_and,
     Bool.false_and, Bool.or_false, ↓reduceIte]
   simp only [Bool.and_eq_true, List.all_eq_true]
@@ -263,6 +404,13 @@ theorem streamed_open_shape_is_get_shape (request : ApplicationDispatchCodec.Req
 #assert_axioms requestSafe_refuses_streamed
 #assert_axioms dispatchRequestSafe_agent_refuses_streamed
 #assert_axioms requestSafeFor_exchange
+#assert_axioms dav_header_needs_dav_method
+#assert_axioms dav_bodyless_body_empty
+#assert_axioms davHeaderNames_not_ordinary
+#assert_axioms davMethods_exchange
+#assert_axioms dav_propfind_admitted
+#assert_axioms dav_write_calls_admitted
+#assert_axioms dav_poles
 #assert_axioms streamed_open_body_empty
 #assert_axioms streamed_open_shape_is_get_shape
 
@@ -300,7 +448,7 @@ theorem observedPhysicalRoot_current {deployment : Deployment}
 selected issue/ticket coordinates, without including their own envelopes. -/
 def observationContext (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
     List UInt8 :=
-  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v1".toUTF8.toList ++
+  "DREGG/APPLICATION/DISPATCH-OBSERVATION/v7".toUTF8.toList ++
     ((StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
@@ -355,6 +503,26 @@ theorem CheckedRead.signedInnerRoot {F : Type} [Field F] [DecidableEq F]
       resource capability root envelope) :
     root = read.selected.observed.before.payload.root :=
   ResourceObservationAdmission.preparation_actual_root read.selected
+/-- The checked read quotes the signed root, is the ground's current cell at the
+resource, and is not written by the prepared invocation. -/
+theorem CheckedRead.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {ground : Ground deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {selection : Selection}
+    {prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
+      (command ingress.dispatch selection ingress.parent)}
+    {resource : Nat} {capability : CapabilityId} {root : Digest}
+    {envelope : List UInt8}
+    (read : CheckedRead deployment profile ambient ground ingress selection prepared
+      resource capability root envelope) :
+    root = read.selected.observed.before.payload.root ∧
+      ResourceBirthCodec.physicalRoot (.live read.selected.observed.before) =
+        ground.view.model.roots ⟨resource⟩ ∧
+      (observationGuard resource
+          (ResourceBirthCodec.physicalRoot (.live read.selected.observed.before))).cellId ∉
+        (DeclaredResourceController.writes prepared).map DataWrite.cellId :=
+  ⟨read.signedInnerRoot, read.current, read.readonly⟩
 
 def checkRead {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
@@ -425,16 +593,18 @@ theorem current_app_policy_excludes_v1 (package snapshot : Nat)
 
 /-- Current app/package source laws are matched exactly. The standard family
 binds share issuance to its management subject. The explicit managed family
-retains the member owner as issuer and derives the separate lifecycle manager
-from current law. Issuer delegation lineage is independently checked below;
-arbitrary app-revised laws are not treated as these source families. -/
-def linkedCurrentPolicies {F : Type} [Field F]
+names a member owner and a separate lifecycle manager in the app law; the
+ticket's issuer is either of them, and the other is derived from current law.
+Issuer delegation lineage is independently checked below; arbitrary
+app-revised laws are not treated as these source families. Each clause is
+named so a refusal can say which one failed. -/
+def linkedCurrentPolicyClauses {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (ground : Ground deployment)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (spec : Spec) (selection : Selection)
     (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
-      (command ingress.dispatch selection ingress.parent)) : Bool :=
+      (command ingress.dispatch selection ingress.parent)) : List (String × Bool) :=
   let auth := ground.authority.logical
   let directory := ground.directory
   let policyAt := fun target => do
@@ -458,16 +628,45 @@ def linkedCurrentPolicies {F : Type} [Field F]
   -- the participant manages its own session. Expecting the older no-manager
   -- law refused every dispatch for a currently born session.
   let sessionManagement := Minidregg.Pred.Pred.eq "request/subject" participant.value
-  decide (spec.issuer = ingress.appManagementSubject) &&
-  ((policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
-    policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management)) ||
+  [("issuer-is-app-management-subject", decide (spec.issuer = ingress.appManagementSubject)),
+   -- The ticket's issuer is either the app's sole management subject (the
+   -- unmanaged law), the member owner of a managed app (its manager derived
+   -- from the law), or the manager of a managed app (its owner derived from
+   -- the law). The app delegation lineage is checked separately.
+   ("app-and-package-law",
+    (policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
+      policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management)) ||
     ApplicationGrain.managedPoliciesMatchOwner app manifest ingress.appSnapshotManifest
-      ingress.appManagementSubject.value (policyAt app) (policyAt manifest)) &&
-  policyAt session == some (ApplicationGrainSession.policy descriptor kind
-    participant sessionManagement) &&
-  policyAt descriptor == some (ApplicationGrainSession.descriptorPolicy session kind
-    participant sessionManagement) &&
-  policyAt spec.ticket.resource == some (ticketPolicy spec.issuer)
+      ingress.appManagementSubject.value (policyAt app) (policyAt manifest) ||
+    ApplicationGrain.managedPoliciesMatch app manifest ingress.appSnapshotManifest
+      ingress.appManagementSubject.value (policyAt app) (policyAt manifest)),
+   ("session-law", policyAt session == some (ApplicationGrainSession.policy descriptor kind
+      participant sessionManagement)),
+   ("descriptor-law", policyAt descriptor == some (ApplicationGrainSession.descriptorPolicy session kind
+      participant sessionManagement)),
+   ("ticket-law", policyAt spec.ticket.resource == some (ticketPolicy spec.issuer))]
+
+/-- All named clauses hold. -/
+def linkedCurrentPolicies {F : Type} [Field F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (ground : Ground deployment)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (selection : Selection)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
+      (command ingress.dispatch selection ingress.parent)) : Bool :=
+  (linkedCurrentPolicyClauses deployment profile ambient ground ingress spec selection
+    prepared).all (·.2)
+
+/-- The first failing clause's name, for a refusal that names what it refused. -/
+def firstFailedLinkageClause {F : Type} [Field F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (ground : Ground deployment)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (selection : Selection)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
+      (command ingress.dispatch selection ingress.parent)) : Option String :=
+  ((linkedCurrentPolicyClauses deployment profile ambient ground ingress spec selection
+    prepared).find? (fun c => !c.2)).map (·.1)
 
 /-- Issuance authenticated the issuer once. At each dispatch, the same
 selected app-delegation capability must still be present with valid stored
@@ -563,6 +762,25 @@ structure CheckedCurrentForSourceBytes {F : Type} [Field F] [DecidableEq F]
   issuerCurrent : issuerLineageCurrentFromSourceBytes deployment profile ambient ground ingress spec
     selection originalSourceBytes prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared ingress.dispatch.signed
+/-- The current checks bind the ingress to the deployment profile, its signed command,
+the live installed ticket of the spec, and the issuer lineage from the source bytes. -/
+theorem CheckedCurrentForSourceBytes.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {ground : Ground deployment}
+    {ingress : ApplicationDispatchAdmissionIngress.Ingress}
+    {spec : Spec} {originalSourceBytes : List UInt8}
+    (checked : CheckedCurrentForSourceBytes deployment profile ambient ground ingress spec
+      originalSourceBytes) :
+    (ingress.dispatch.domain = deployment.domain ∧
+        ingress.dispatch.semantics = profile.semantics) ∧
+      matchesCommand ingress.dispatch checked.selection ingress.parent checked.signedCommand = true ∧
+      installedTicket deployment.domain spec.ticket.resource
+        checked.ticketRead.selected.observed.before = some checked.ticket ∧
+      checked.ticket.liveAt ambient.height = true ∧
+      issuerLineageCurrentFromSourceBytes deployment profile ambient ground ingress spec
+        checked.selection originalSourceBytes checked.prepared = true :=
+  ⟨checked.profileExact, checked.commandExact, checked.ticketExact, checked.ticketLive,
+    checked.issuerCurrent⟩
 
 /-- The original API remains definitionally the same admission over its own
 canonical descriptor commitment. Carried users require separate provenance. -/

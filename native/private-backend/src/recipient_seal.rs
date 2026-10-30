@@ -4,8 +4,12 @@
 //! Decryption proves confidentiality/integrity binding, NOT native source authority.
 use crate::{
     authenticated_ingress::{CommitteeParty, Envelope},
-    codec::{bad, bytes, Nat, Reader},
+    codec::{bad, bytes, Nat},
     crypto_transit,
+};
+use chacha20poly1305::{
+    aead::{Aead, Payload},
+    KeyInit, XChaCha20Poly1305, XNonce,
 };
 use sha2::{Digest, Sha512};
 use std::{
@@ -105,10 +109,10 @@ impl DraftPublic {
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
         let recipient = RecipientSpec {
-            algorithm: cursor_nat(&mut c)?,
-            key_epoch: cursor_nat(&mut c)?,
+            algorithm: c.nat()?,
+            key_epoch: c.nat()?,
             key_id: c.bytes()?,
-            plaintext_bound: usize::try_from(cursor_nat(&mut c)?.value()?)
+            plaintext_bound: usize::try_from(c.nat()?.value()?)
                 .map_err(|_| bad("draft padding bound"))?,
         };
         let semantic_commitment = c.take(64)?.try_into().unwrap();
@@ -208,10 +212,10 @@ impl SealedIngress {
         let mut c = crate::consensus_wire::Cursor::new(&b[FRAME.len()..])?;
         let party = CommitteeParty::decode(&c.bytes()?)?;
         let sequence = c.u64()?;
-        let algorithm = cursor_nat(&mut c)?;
-        let key_epoch = cursor_nat(&mut c)?;
+        let algorithm = c.nat()?;
+        let key_epoch = c.nat()?;
         let key_id = c.bytes()?;
-        let plaintext_bound = cursor_nat(&mut c)?.value()? as usize;
+        let plaintext_bound = c.nat()?.value()? as usize;
         let semantic_commitment = c.take(64)?.try_into().unwrap();
         let hybrid_ciphertext = c.take(crypto_transit::HYBRID_CIPHERTEXT_BYTES)?.try_into().unwrap();
         let nonce = c.take(24)?.try_into().unwrap();
@@ -342,20 +346,6 @@ impl DecryptedEnvelope {
         self.inner
     }
 }
-fn cursor_nat(c: &mut crate::consensus_wire::Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
-}
 /// Endpoint-local private message commitment. Its nonce is sampled before the
 /// native INNER credential is signed; public commitment is hiding, not merely a
 /// deterministic body hash. No Debug/Clone; durable seal storage freezes it.
@@ -376,7 +366,7 @@ impl HidingDraft {
     ) -> Result<Self> {
         recipient.validate()?;
         let mut hiding_nonce = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut hiding_nonce)?;
+        crate::entropy::os_fill(&mut hiding_nonce)?;
         Self::from_retained(party, sequence, message, recipient, hiding_nonce)
     }
     pub(crate) fn from_retained(
@@ -482,29 +472,84 @@ impl HidingDraft {
 /// Endpoint-owned persistent recipient keys. Honest crash/private disk is the
 /// premise; a key record is not member enrollment or source authority. Old keys
 /// are retained for old admitted work; rotation never silently selects latest.
+///
+/// Seeds are wrapped at rest: the journal holds only XChaCha20-Poly1305 of the
+/// seed under a custody wrap key kept in its own 0600 file beside the journal
+/// (`<journal>.wrapkey`), so a copy of the journal alone (backup, snapshot,
+/// crash dump of the file) carries no seed. The wrap key itself is the one
+/// secret at rest; an operator who keeps it on separate media gains the rest.
+///
+/// The CURRENT epoch is the epoch of the member's current recipient record
+/// (`Compiler.CurrentRecipientRecord.Claim.epoch`, checked by the Host's
+/// current-recipient verifier). Custody records it by `adopt_current`; a
+/// capsule never names the epoch it opens under.
+const WRAP_LABEL: &[u8] = b"DREGG.PRIVATE.RECIPIENT.KEY.WRAP\x01";
+const EVENT_KEY: u8 = 1;
+const EVENT_CURRENT: u8 = 2;
 #[derive(Clone)]
 struct KeyState {
-    keys: std::collections::BTreeMap<Nat, (Vec<u8>, Vec<u8>)>,
+    keys: std::collections::BTreeMap<Nat, (zeroize::Zeroizing<Vec<u8>>, Vec<u8>)>,
+    current: Option<Nat>,
     capacity: usize,
+    wal_id: Vec<u8>,
+    wrap: zeroize::Zeroizing<[u8; 32]>,
+}
+fn wrap_aad(wal_id: &[u8], epoch: &Nat, public: &[u8]) -> Vec<u8> {
+    let mut a = WRAP_LABEL.to_vec();
+    bytes(wal_id, &mut a);
+    epoch.put(&mut a);
+    bytes(public, &mut a);
+    a
 }
 impl crate::transition_journal::Machine for KeyState {
     fn apply(&mut self, event: &[u8]) -> Result<Vec<u8>> {
         let mut c = crate::consensus_wire::Cursor::new(event)?;
-        let epoch = cursor_nat(&mut c)?;
-        let secret = c.bytes()?;
-        let public = c.bytes()?;
-        c.finish()?;
-        if self.keys.contains_key(&epoch) || self.keys.len() >= self.capacity {
-            return Err(bad("recipient key epoch reuse/capacity"));
+        match c.byte()? {
+            EVENT_KEY => {
+                let epoch = c.nat()?;
+                let nonce: [u8; 24] = c.take(24)?.try_into().unwrap();
+                let wrapped = c.bytes()?;
+                let public = c.bytes()?;
+                c.finish()?;
+                if self.keys.contains_key(&epoch) || self.keys.len() >= self.capacity {
+                    return Err(bad("recipient key epoch reuse/capacity"));
+                }
+                let aad = wrap_aad(&self.wal_id, &epoch, &public);
+                let secret = zeroize::Zeroizing::new(
+                    XChaCha20Poly1305::new((&*self.wrap).into())
+                        .decrypt(
+                            XNonce::from_slice(&nonce),
+                            Payload { msg: &wrapped, aad: &aad },
+                        )
+                        .map_err(|_| bad("recipient seed unwrap refused (wrap key missing or wrong)"))?,
+                );
+                crypto_transit::validate_keypair(&secret, &public)
+                    .map_err(|_| bad("recipient retained generated key pair mismatch"))?;
+                self.keys.insert(epoch, (secret, public.clone()));
+                Ok(public)
+            }
+            EVENT_CURRENT => {
+                let epoch = c.nat()?;
+                c.finish()?;
+                if !self.keys.contains_key(&epoch) {
+                    return Err(bad("recipient current epoch is not a retained epoch"));
+                }
+                if self.current.as_ref().is_some_and(|cur| &epoch < cur) {
+                    return Err(bad("recipient current epoch may not move backward"));
+                }
+                self.current = Some(epoch.clone());
+                let mut out = vec![];
+                epoch.put(&mut out);
+                Ok(out)
+            }
+            _ => Err(bad("recipient key event tag")),
         }
-        crypto_transit::validate_keypair(&secret, &public)
-            .map_err(|_| bad("recipient retained generated key pair mismatch"))?;
-        self.keys.insert(epoch, (secret, public.clone()));
-        Ok(public)
     }
 }
 pub struct RecipientKeyCustody {
     journal: crate::transition_journal::Journal<KeyState>,
+    wrap: zeroize::Zeroizing<[u8; 32]>,
+    wal_id: Vec<u8>,
 }
 pub struct KeyRecord {
     epoch: Nat,
@@ -528,27 +573,69 @@ impl KeyRecord {
         Ok(spec)
     }
 }
+/// Load the custody wrap key, creating it (temp + fsync + rename) when this is
+/// a brand-new custody. An existing journal with a missing wrap key is refused
+/// by the journal replay (the seeds cannot be unwrapped), never regenerated.
+fn load_or_create_wrap(path: &std::path::Path) -> Result<zeroize::Zeroizing<[u8; 32]>> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let wrap_path = path.with_extension("wrapkey");
+    if let Ok(mut f) = File::open(&wrap_path) {
+        let mut k = zeroize::Zeroizing::new([0u8; 32]);
+        f.read_exact(&mut *k).map_err(|_| bad("recipient wrap key shape"))?;
+        let mut extra = [0u8; 1];
+        if f.read(&mut extra)? != 0 {
+            return Err(bad("recipient wrap key shape"));
+        }
+        return Ok(k);
+    }
+    if std::fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false) {
+        // A populated journal whose wrap key is gone: refuse, do not mint a new one.
+        return Err(bad("recipient wrap key missing for an existing key journal"));
+    }
+    let mut k = zeroize::Zeroizing::new([0u8; 32]);
+    crate::entropy::os_fill(&mut *k)?;
+    let tmp = path.with_extension("wrapkey.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    f.write_all(&*k)?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, &wrap_path)?;
+    File::open(wrap_path.parent().ok_or_else(|| bad("wrap key parent"))?)?.sync_all()?;
+    Ok(k)
+}
 impl RecipientKeyCustody {
     pub fn open(path: &std::path::Path, endpoint_identity: &[u8], capacity: usize) -> Result<Self> {
         if capacity == 0 || capacity > 65536 || endpoint_identity.is_empty() {
             return Err(bad("recipient key custody public bound/identity"));
         }
-        let mut id = b"DREGG.PRIVATE.RECIPIENT.KEY.WAL\x02".to_vec();
+        let mut id = b"DREGG.PRIVATE.RECIPIENT.KEY.WAL\x03".to_vec();
         bytes(endpoint_identity, &mut id);
         Nat::new(capacity as u64).put(&mut id);
+        let wrap = load_or_create_wrap(path)?;
         Ok(Self {
             journal: crate::transition_journal::Journal::open(
                 path,
                 &id,
                 KeyState {
                     keys: std::collections::BTreeMap::new(),
+                    current: None,
                     capacity,
+                    wal_id: id.clone(),
+                    wrap: wrap.clone(),
                 },
             )?,
+            wrap,
+            wal_id: id,
         })
     }
     /// Generate on the designated endpoint, fsync/read back before publishing
     /// the public enrollment candidate. The source must separately admit it.
+    /// Generation does not make the epoch current: that is `adopt_current`.
     pub fn generate_epoch(&mut self, epoch: Nat) -> Result<KeyRecord> {
         if let Some((_, public_key)) = self.journal.state().keys.get(&epoch) {
             return Ok(KeyRecord {
@@ -561,30 +648,87 @@ impl RecipientKeyCustody {
         }
         let key =
             crypto_transit::generate_keypair().map_err(|_| bad("recipient key generation"))?;
-        let mut event = vec![];
+        let mut nonce = [0u8; 24];
+        crate::entropy::os_fill(&mut nonce)?;
+        let aad = wrap_aad(&self.wal_id, &epoch, &key.public);
+        let wrapped = XChaCha20Poly1305::new((&*self.wrap).into())
+            .encrypt(XNonce::from_slice(&nonce), Payload { msg: &key.secret, aad: &aad })
+            .map_err(|_| bad("recipient seed wrap"))?;
+        let mut event = vec![EVENT_KEY];
         epoch.put(&mut event);
-        bytes(&key.secret, &mut event);
+        event.extend(nonce);
+        bytes(&wrapped, &mut event);
         bytes(&key.public, &mut event);
         let public_key = self.journal.append(&event)?;
         Ok(KeyRecord { epoch, public_key })
     }
-    /// Exact retained epoch and enrollment key binding, never a latest-key fallback.
-    pub fn open_capsule(
+    /// Adopt the epoch of a Host-verified current recipient record. This is the
+    /// only way to set the current epoch and `VerifiedCurrentRecipient` has no
+    /// other constructor than the exact readback parse. The epoch must be a
+    /// retained epoch and may not move backward; the record's 32-byte X25519
+    /// encryption key must equal the X25519 half of custody's hybrid public key
+    /// at that epoch (the record is Suite1 and cannot name the 1184-byte ML-KEM
+    /// half; that half is bound by the capsule's key digest, see `open_current`).
+    /// Idempotent.
+    pub fn adopt_current(&mut self, record: &crate::current_recipient::VerifiedCurrentRecipient) -> Result<()> {
+        let epoch = record.epoch();
+        let (_, public) = self
+            .journal
+            .state()
+            .keys
+            .get(epoch)
+            .ok_or_else(|| bad("recipient current epoch is not a retained epoch"))?;
+        if public.len() != crate::hybrid_kem::PUBLIC_LEN || public[..32] != record.encryption_key()[..] {
+            return Err(bad("current recipient record encryption key differs from custody's X25519 key at that epoch"));
+        }
+        if self.journal.state().current.as_ref() == Some(epoch) {
+            return Ok(());
+        }
+        let mut event = vec![EVENT_CURRENT];
+        epoch.put(&mut event);
+        self.journal.append(&event)?;
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn journal_secret_for_test(&self, epoch: &Nat) -> Vec<u8> {
+        self.journal.state().keys[epoch].0.to_vec()
+    }
+    pub fn current_epoch(&self) -> Option<&Nat> {
+        self.journal.state().current.as_ref()
+    }
+    /// Open a capsule under custody's CURRENT epoch only. The capsule's own
+    /// epoch claim is checked against it and refused by name when stale or
+    /// future; the expected spec is built from custody, never from the capsule.
+    pub fn open_current(
         &self,
         capsule: &SealedIngress,
         party: &CommitteeParty,
         sequence: u64,
-        expected: &RecipientSpec,
     ) -> Result<DecryptedEnvelope> {
-        let (secret, public) = self
-            .journal
-            .state()
-            .keys
-            .get(&expected.key_epoch)
-            .ok_or_else(|| bad("recipient retained epoch missing"))?;
-        if recipient_key_id(public) != expected.key_id {
-            return Err(bad("recipient current/retained key enrollment mismatch"));
+        let state = self.journal.state();
+        let current = state
+            .current
+            .as_ref()
+            .ok_or_else(|| bad("recipient current epoch not adopted"))?;
+        if &capsule.recipient.key_epoch < current {
+            return Err(bad("sealed capsule names a stale recipient key epoch"));
         }
-        capsule.open(secret, public, party, sequence, expected)
+        if &capsule.recipient.key_epoch > current {
+            return Err(bad("sealed capsule names a future recipient key epoch"));
+        }
+        let (secret, public) = state
+            .keys
+            .get(current)
+            .ok_or_else(|| bad("recipient retained epoch missing"))?;
+        if capsule.recipient.key_id != recipient_key_id(public) {
+            return Err(bad("sealed capsule key digest differs from the current recipient key bytes"));
+        }
+        let expected = RecipientSpec {
+            algorithm: Nat::new(ALGORITHM_HYBRID),
+            key_epoch: current.clone(),
+            key_id: recipient_key_id(public),
+            plaintext_bound: capsule.recipient.plaintext_bound,
+        };
+        capsule.open(secret, public, party, sequence, &expected)
     }
 }

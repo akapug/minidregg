@@ -6,6 +6,7 @@ IO signature or an authorized historical issuance from a serialized origin.
 Actual issuance is the mandatory accepted delegation mode's obligation.
 -/
 import Theory.CredentialLineageAdmission
+import Theory.AxiomPin
 
 namespace Minidregg.Assurance.CredentialDelegationLineageWitness
 
@@ -198,5 +199,15 @@ theorem mixed_lineage_does_not_imply_root_admission :
   have holder := admitted.holder
   change alice = bob at holder
   cases holder
+
+/-- Refuting pole of `LineageValid` (`explicit_transfer_valid` is the satisfying
+one): a capability that names a parent, stored with no parent link, is not a
+valid root. -/
+theorem orphan_child_not_lineageValid : ¬ LineageValid noParents ⟨child, []⟩ := by
+  intro h
+  cases h with
+  | root _ parentNone _ => simp [child] at parentNone
+
+#assert_axioms orphan_child_not_lineageValid
 
 end Minidregg.Assurance.CredentialDelegationLineageWitness

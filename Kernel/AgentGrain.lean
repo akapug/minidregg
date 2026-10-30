@@ -10,9 +10,29 @@ arbitrary caller-authored initial allowance. The one funded increase is the
 in the same turn, so one micro-unit is one credit. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
-import Kernel.DeclaredFields
-import Kernel.ResourceTransaction
-import Pred.Core
+module
+
+public import Kernel.DeclaredFields
+public import Kernel.ResourceTransaction
+public import Pred.Core
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.AgentGrain
 open Minidregg.Theory.TypedAuthorization
@@ -132,7 +152,7 @@ receiver projects `request/*`, `target/policyId`, `command/bytes/*`,
 `resource/*` and `joint/target/*`). -/
 def refillSlot : String := "authority/operation/purse-refill"
 
-/-- The `refill` edge (PAY §2.7). Only the remaining allowance grows, by a
+/-- The `refill` edge (docs/PAY.md §2.7). Only the remaining allowance grows, by a
 positive amount; generation, status and the (zero) reservation are unchanged;
 the task is paused or attached without an outstanding reservation (0, 1, 2).
 It is a separate branch of `policy`, not of `transitionPolicy`: every
@@ -443,7 +463,7 @@ theorem hard_reserved_settlement_general (g r h charge : Int)
   simpa [interrupt] using
     interrupted_reserved_settlement_general g r h charge hg hr hh hc0 hch
 
-/-! ## The refill edge (PAY §2.7, lane P6) -/
+/-! ## The refill edge (docs/PAY.md §2.7, lane P6) -/
 
 /-- The refill branch as the purse-refill receiver evaluates it: the slot it
 alone projects, then the task's exact four-coordinate projection. -/
@@ -544,5 +564,138 @@ theorem policy_mutation_nonincrease_without_refill (management : Pred)
   · rw [eval_all] at holds
     have v := (List.all_eq_true.mp holds) (.memberOf "request/verb" [4,5]) (by simp)
     simp [eval, evalWith, mutation] at v
+
+/-! ## Any holder of a delegated grant may make the birth witness (ruling Option A)
+
+A shared parent task (the workroom's metered parent, 7901 on the demo) is touched by every
+composite grain birth under it: the birth carries the parent as a joint exact-state witness,
+the no-op `witnessCaveat` at the parent's pinned generation. The named-worker form of a task's
+law (`Host.SourceAgreementJson.grainPolicy`) names the subjects that may make that touch; a member installing
+an app holds a grant on the parent (delegated by the operator) but is not named, so its birth
+was refused by the parent's law (L13, 2026-10-27). Ruled Option A: the delegated grant IS the
+authority, so the holder form names no subject. A law cannot see grants: the generic receiver
+admits a request only under capability evidence for its verb on the target
+(`capabilityEvidenceChecked`), so a subject holding no grant on the parent never reaches the
+law; what the law adds is that a non-owner holder may make the witness touch and nothing
+else. -/
+
+/-- What a grain task's law lets a non-owner do: the named workers' witness, or any holder's. -/
+inductive GrainWitness where
+  | workers (subjects : List Nat) (generation : Int)
+  | holders (generation : Int)
+  deriving DecidableEq, Repr
+
+/-- The holder form: the owner's managed law, and for any other subject observation, the
+refill edge, or the witness no-op at `generation`. Delegation of the parent is the
+owner's (fourth audit pass, ruled): a holder cannot re-delegate its grant and spread the
+witness authority, so verb 3 is the owner's alone. -/
+def holderPolicy (owner : Nat) (generation : Int) : Pred :=
+  .all [policy (.eq "request/subject" (Int.ofNat owner)), .any [
+    .eq "request/subject" (Int.ofNat owner),
+    .memberOf "request/verb" [1],
+    refillPolicy,
+    witnessCaveat generation]]
+
+/-- The refill alternative needs the slot only the purse-refill receiver projects. -/
+theorem refillPolicy_needs_slot (old new : Minidregg.Pred.State) (noRefill : new.get refillSlot ≠ some 1) :
+    evalWith failClosed refillPolicy old new = false := by
+  simp [refillPolicy, Pred.all, PredList.ofList, evalWith, evalWithAll, noRefill]
+
+/-- **A non-owner holder can make the witness touch and nothing else.** A mutation by any
+subject other than the owner, outside the refill edge, is admitted only if it is the witness
+no-op at the pinned generation. -/
+theorem holderPolicy_nonowner_only_witness (owner caller : Nat) (generation : Int)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 2)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get refillSlot ≠ some 1)
+    (admitted : eval (holderPolicy owner generation) old new = true) :
+    eval (witnessCaveat generation) old new = true := by
+  simp [holderPolicy, eval_all, eval_any, eval, evalWith, requestSubject, verb,
+    Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill] at admitted
+  exact admitted.2
+
+/-- Teeth: a non-owner holder presenting a stale generation is refused. -/
+theorem holderPolicy_stale_refused (owner caller : Nat) (generation actual : Int)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 2)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get refillSlot ≠ some 1)
+    (before : new.get "resource/field/0/before" = some actual)
+    (stale : actual ≠ generation) :
+    eval (holderPolicy owner generation) old new = false := by
+  cases admitted : eval (holderPolicy owner generation) old new
+  · rfl
+  · have witness := holderPolicy_nonowner_only_witness owner caller generation old new verb
+      requestSubject notOwner noRefill admitted
+    simp [witnessCaveat, eval_all, eval, evalWith, before, stale] at witness
+
+/-- Teeth: a non-owner holder cannot install a policy or revoke (verbs 4 and 5). -/
+theorem holderPolicy_nonowner_management_refused (owner caller : Nat) (generation : Int)
+    (old new : Minidregg.Pred.State) (management : Int) (isManagement : management = 4 ∨ management = 5)
+    (verb : new.get "request/verb" = some management)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get refillSlot ≠ some 1) :
+    eval (holderPolicy owner generation) old new = false := by
+  rcases isManagement with rfl | rfl <;>
+    simp [holderPolicy, policy, witnessCaveat, eval_all, eval_any, eval, evalWith,
+      requestSubject, verb, Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+
+/-- Teeth of the ruling: a non-owner holder cannot delegate the parent (verb 3). -/
+theorem holderPolicy_nonowner_delegate_refused (owner caller : Nat) (generation : Int)
+    (old new : Minidregg.Pred.State)
+    (verb : new.get "request/verb" = some 3)
+    (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
+    (notOwner : caller ≠ owner)
+    (noRefill : new.get refillSlot ≠ some 1) :
+    eval (holderPolicy owner generation) old new = false := by
+  simp [holderPolicy, policy, witnessCaveat, eval_all, eval_any, eval, evalWith,
+    requestSubject, verb, Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
+
+/-- A witness touch of a parent task in status 3 (reserved, hard) at generation 1. -/
+def witnessTouchState (caller : Nat) : Minidregg.Pred.State :=
+  ⟨[("request/verb", 2), ("request/subject", Int.ofNat caller),
+    ("resource/field/0/before", 1), ("resource/field/0/after", 1), ("resource/field/0/delta", 0),
+    ("resource/field/1/before", 3), ("resource/field/1/after", 3), ("resource/field/1/delta", 0),
+    ("resource/field/2/before", 500), ("resource/field/2/after", 500), ("resource/field/2/delta", 0),
+    ("resource/field/3/before", 10), ("resource/field/3/after", 10), ("resource/field/3/delta", 0),
+    ("resource/pair/2/3/delta", 0)]⟩
+
+/-- Satisfiable: a member (subject 99), neither the owner (7) nor a named worker, makes the
+witness touch of the parent under the holder form. -/
+theorem holderPolicy_member_witness_admitted :
+    eval (holderPolicy 7 1) (witnessTouchState 99) (witnessTouchState 99) = true := by
+  decide +kernel
+
+/-- The same task settled (status 3 to 1, the held 10 released). -/
+def settlementState (caller : Nat) : Minidregg.Pred.State :=
+  ⟨(witnessTouchState caller).slots.map fun slot =>
+    if slot.1 = "resource/field/1/after" then (slot.1, 1)
+    else if slot.1 = "resource/field/1/delta" then (slot.1, -2)
+    else if slot.1 = "resource/field/3/after" then (slot.1, 0)
+    else if slot.1 = "resource/field/3/delta" then (slot.1, -10)
+    else if slot.1 = "resource/pair/2/3/delta" then (slot.1, -10) else slot⟩
+
+/-- Teeth: a member's mutation that moves the task (a settlement, 3 to 1) is refused under
+the holder form, though the owner's own settlement is admitted. -/
+theorem holderPolicy_member_settlement_refused :
+    eval (holderPolicy 7 1) (settlementState 99) (settlementState 99) = false := by
+  decide +kernel
+
+theorem holderPolicy_owner_settlement_admitted :
+    eval (holderPolicy 7 1) (settlementState 7) (settlementState 7) = true := by
+  decide +kernel
+
+#assert_axioms refillPolicy_needs_slot
+#assert_axioms holderPolicy_nonowner_only_witness
+#assert_axioms holderPolicy_stale_refused
+#assert_axioms holderPolicy_nonowner_management_refused
+#assert_axioms holderPolicy_nonowner_delegate_refused
+#assert_axioms holderPolicy_member_witness_admitted
+#assert_axioms holderPolicy_member_settlement_refused
+#assert_axioms holderPolicy_owner_settlement_admitted
 
 end Minidregg.Kernel.AgentGrain

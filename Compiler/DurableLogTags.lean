@@ -14,8 +14,27 @@ type so the decided poles below run on small concrete values; `verifyTags` is
 it at `entryTag key` over `chainPrefixes`, the chain values the open path
 already computes for the checkpoint check (no second chain pass).
 -/
-import Compiler.DurableHistory
-import Theory.AssertAxioms
+module
+
+public import Compiler.DurableHistory
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableLogTags
 
@@ -138,6 +157,32 @@ theorem chainPrefixes_getElem? (start : Digest) :
   | record :: records, i + 1, within => by
       have rest := chainPrefixes_getElem? (chainStep start record) records i (by simpa using within)
       simpa [chainPrefixes, chainAfter, List.scanl_cons] using rest
+
+theorem chainPrefixes_length (start : Digest) (records : List IntentRecord) :
+    (chainPrefixes start records).length = records.length + 1 := by
+  simp [chainPrefixes]
+
+/-- The prefixes of a cut log are the cut prefixes. -/
+theorem chainPrefixes_take (start : Digest) (records : List IntentRecord) (height : Nat)
+    (within : height ≤ records.length) :
+    chainPrefixes start (records.take height) = (chainPrefixes start records).take (height + 1) := by
+  apply List.ext_getElem?
+  intro i
+  rw [List.getElem?_take]
+  by_cases below : i ≤ height
+  · rw [chainPrefixes_getElem? start (records.take height) i
+        (by rw [List.length_take, Nat.min_eq_left within]; exact below),
+      if_pos (Nat.lt_succ_of_le below), chainPrefixes_getElem? start records i (by omega),
+      List.take_take, Nat.min_eq_left below]
+  · rw [if_neg (by omega), List.getElem?_eq_none]
+    rw [chainPrefixes_length, List.length_take, Nat.min_eq_left within]
+    omega
+
+/-- One more record appends its chain value. -/
+theorem chainPrefixes_snoc (start : Digest) (records : List IntentRecord) (record : IntentRecord) :
+    chainPrefixes start (records ++ [record]) =
+      chainPrefixes start records ++ [chainStep (chainAfter start records) record] := by
+  simp [chainPrefixes, chainAfter, List.scanl_append]
 
 /-- The chain prefixes over STORED record bytes (`chainStepStored`). -/
 def chainPrefixesStored (start : Digest) (stored : List (List UInt8)) : List Digest :=

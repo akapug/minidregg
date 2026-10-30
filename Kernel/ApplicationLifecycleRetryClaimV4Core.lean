@@ -2,8 +2,29 @@
 recovery are reselected at their exact prefixes; legacy first-attempt and
 created-volume markers remain unchanged. Native replay supplies both same-walk
 provenance obligations before receiving this conditional intent. -/
-import Kernel.ApplicationLifecycleRetryClaimV4Ingress
-import Kernel.ApplicationLifecycleRetryBeginV4Admission
+module
+
+public import Kernel.ApplicationLifecycleRetryClaimV4Ingress
+public import Kernel.ApplicationLifecycleRetryBeginV4Admission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryClaimV4Core
 
@@ -32,6 +53,40 @@ structure Conditional (config : Config) {store : StoreIdentity} (head : Head sto
     ingress.originalBegin.begin current.packageRead.selected.observed.before = true
   markers : ApplicationFailedCreateRetryEvidence.markersCurrent config ground
     ingress.originalBegin.retry = true
+
+theorem Conditional.original_record_exact {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (conditional : Conditional config head ground ingress) :
+    conditional.original.record =
+      DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent :=
+  conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
+
+/-- The original record is the one verified under `head` at height
+`ingress.base.source.originalIndex + 1` and decodes to exactly the record of the
+re-admitted retry BEGIN `ingress.originalBegin`; the ingress is original-exact, the
+claim's current world root is `ground`'s, the package cell the current claim observed
+holds the retry BEGIN's installed descriptor under `config`, and the retry markers are
+current at `ground`. -/
+theorem Conditional.original_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}
+    (conditional : Conditional config head ground ingress) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (ingress.base.source.originalIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent)) ∧
+      ingress.originalExact = true ∧
+      ingress.base.source.currentWorldRoot = ground.worldRoot ∧
+      ApplicationLifecycleBeginV3Admission.installedExact config.deployment
+        ingress.originalBegin.begin conditional.current.packageRead.selected.observed.before = true ∧
+      ApplicationFailedCreateRetryEvidence.markersCurrent config ground
+        ingress.originalBegin.retry = true :=
+  ⟨⟨conditional.original.read.verified.record, conditional.original.read.verified.chain,
+      conditional.original.read.verified.root, conditional.original.read.verified.included,
+      conditional.original.read.decoded.trans (congrArg some (conditional.original.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord conditional.originalMatch)))⟩,
+    conditional.exact, conditional.current.boundary, conditional.installed, conditional.markers⟩
 
 /-- Every key the current part of a retry claim reads: the claim's and the retry markers'. -/
 def keys (ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress) : DurableView.Keys :=
@@ -90,11 +145,10 @@ def Conditional.intent {config : Config} {store : StoreIdentity} {head : Head st
   let ordinary := ApplicationLifecycleClaimCore.intentFromCurrent conditional.current
     (event ingress) ingress.canonicalBytes.length
   let marker := ingress.retryToken
+  -- The retry token is one more nullifier of the same writes, guards and event:
+  -- the World's storage of the turn is the ordinary intent's (no marker term).
   { ordinary with
-    nullifiers := ordinary.nullifiers ++ [marker]
-    exactCharge := fun dimension => match dimension with
-      | .storageBytes => ordinary.exactCharge .storageBytes + marker.canonicalBytes.length
-      | other => ordinary.exactCharge other }
+    nullifiers := ordinary.nullifiers ++ [marker] }
 
 theorem Conditional.intent_consumes_retry {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationLifecycleRetryClaimV4Ingress.Ingress}

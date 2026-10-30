@@ -1,5 +1,5 @@
 /-
-`lake env lean --run scripts/SealedMarketTemplate.lean > deploy/shell/templates/market/sealed/law.market`
+`lake env lean --run scripts/SealedMarketTemplate.lean > native/resource-client/templates/market/sealed/law.market`
 
 The sealed-market template is the Host's own rendering (`LawLeaf.renderClause`, the text a refusal
 and `law show` print) of `Kernel.SealedMarket.law` at sentinel parameters, each sentinel replaced by

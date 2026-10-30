@@ -14,8 +14,8 @@ const SUBMIT_MARKER: &str = "minidregg-agent-lifetime-reserve-submit-attempt-v1"
 const LOOKUP_MARKER: &str = "minidregg-agent-lifetime-reserve-lookup-v1";
 const REQUEST_TYPE: &str = "application-agent-lifetime-author-request-v3";
 const PLAN_TYPE: &str = "application-agent-lifetime-reserve-plan-v3";
-const PLAN_OPERATION: u8 = 80;
-const ASSEMBLE_OPERATION: u8 = 81;
+const PLAN_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_PLAN;
+const ASSEMBLE_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_RESERVE_ASSEMBLE;
 
 // These names are the source-owned Host author/inspection routes. The exact
 // native image and these strings are pinned together by `plan`.
@@ -41,6 +41,7 @@ fn pin(directory: &Path) -> Result<Pin> {
     let host = PathBuf::from(field(&value, "host")?);
     let config = PathBuf::from(field(&value, "config")?);
     let operator_socket = PathBuf::from(field(&value, "operatorSocket")?);
+    crate::operator_peer::restore(&operator_socket, &value)?;
     let public_socket = PathBuf::from(field(&value, "publicSocket")?);
     if [
         host.as_path(),
@@ -168,6 +169,7 @@ pub(crate) fn lifetime_plan(
             "config":utf8_path(&directory.join("config.json"))?,
             "configSha256":digest(&config_bytes),
             "operatorSocket":utf8_path(&operator_socket)?,
+            "operatorPeerUid":crate::operator_peer::selected(&operator_socket)?,
             "publicSocket":utf8_path(&public_socket)?,
             "requestSha256":digest(&request), "planSha256":digest(plan_bytes),
         }),
@@ -343,7 +345,7 @@ pub(crate) fn lifetime_submit(directory: &Path) -> Result<()> {
             &pinned.host,
             &pinned.public_socket,
             &pinned.config,
-            2,
+            mini_sdk::host_operations::SUBMIT,
             &call,
         )
         .map_err(|error| format!("lifetime reserve op2 uncertain; use exact lookup: {error}"))
@@ -351,7 +353,7 @@ pub(crate) fn lifetime_submit(directory: &Path) -> Result<()> {
     create_private(&directory.join("submit.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
-    let result = outcome(&directory, "submit", &frame, 2, &pinned)?;
+    let result = outcome(&directory, "submit", &frame, mini_sdk::host_operations::SUBMIT, &pinned)?;
     same_pin(&directory, &pinned)?;
     let receipt = exact_receipt(&result)?;
     retain_json(&directory.join("receipt.json"), &receipt)?;
@@ -405,14 +407,14 @@ pub(crate) fn lifetime_lookup(directory: &Path) -> Result<()> {
             &pinned.host,
             &pinned.public_socket,
             &pinned.config,
-            3,
+            mini_sdk::host_operations::LOOKUP,
             &call,
         )
     })?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     sync_directory_ancestors(&directory)?;
     same_pin(&directory, &pinned)?;
-    let result = outcome(&directory, &stem, &frame, 3, &pinned)?;
+    let result = outcome(&directory, &stem, &frame, mini_sdk::host_operations::LOOKUP, &pinned)?;
     same_pin(&directory, &pinned)?;
     let receipt = exact_receipt(&result)?;
     if result.get("confirmation").and_then(Value::as_str) != Some("replayed") {

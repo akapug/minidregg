@@ -2,8 +2,6 @@
 excluded from the default qualification gate. Executable roots are listed
 separately in protocol/lean-build-surfaces.json to avoid main collisions. -/
 import Assurance.BendArithmeticQualification
-import Assurance.BoundedNockChecks
-import Assurance.BoundedNockNetworkChecks
 import Assurance.BoundedNockRefinement
 import Assurance.ObjectiveBendCommittedSource
 import Assurance.ObjectiveBendProofSource
@@ -14,9 +12,7 @@ import Assurance.ObjectiveZkLiteralInstance
 import Assurance.ObjectiveZkRefinementAudit
 import Assurance.ObjectiveZkStepTariff
 import Assurance.ObjectiveZkTraceDisclosure
-import Assurance.ObliviousNetworkChecks
 import Assurance.ResourceMoneyOperationDomainAudit
-import Assurance.ResourceMoneyReceiverAudit
 import Compiler.BendCommitmentFrame
 import Compiler.BendCommitmentFrameChecks
 import Compiler.BendCommittedNetwork
@@ -28,7 +24,6 @@ import Compiler.BendCommittedUnroll
 import Compiler.BendProofBytes
 import Compiler.BendProofCshake
 import Compiler.BendProofCshakeBounded
-import Compiler.BendProofCshakeBoundedChecks
 import Compiler.BendProofCshakeChecks
 import Compiler.BendProofKeccak
 import Compiler.BendProofKeccakChecks
@@ -65,9 +60,7 @@ import Compiler.ObliviousBuilderSemantics
 import Compiler.ObliviousCompositeSemantics
 import Compiler.ObliviousConstantSemantics
 import Compiler.ObliviousEmbedFast
-import Compiler.ObliviousGate
 import Compiler.ObliviousMuxSemantics
-import Compiler.ObliviousNetwork
 import Compiler.ObliviousUnroll
 import Compiler.ObliviousUnrollChecks
 import Compiler.ObliviousUnrollSemantics
@@ -83,19 +76,22 @@ import Compiler.PortableHomeTransferFrame
 import Compiler.PortableHomeWorkerContext
 import Compiler.PortableJointCustodyIO
 import Compiler.PortableParticipantPinIO
-import Compiler.PrivateAllocationReceipt
-import Compiler.PrivateBackendBoundary
-import Compiler.PrivateCircuitAllocation
 import Compiler.PrivateCircuitAllocationFast
 import Compiler.QualificationReport
 import Compiler.RoomKeyReleaseCodec
+import Effects.Revival.HostedConversationProofs
+import Effects.Revival.HostedConversationStatements
+import Effects.Revival.HostedDavProofs
+import Effects.Revival.HostedDavStatements
 import Host.BendProofWitness
+import Host.ClientConsentSettingsScenario
 import Host.CurrentRecipientVerifier
 import Host.NativeReserveBirthConsent
 import Host.PortableContinuationInspection
 import Host.RoomKeyReleaseAuthor
 import Host.SourceAgreementBirth
 import Kernel.AgreementEvidenceRegime
+import Kernel.DefaultLaw
 import Kernel.GenericSimplexReconfig
 import Kernel.JointProtectedGateProofs
 import Kernel.JointReservationFunding
@@ -103,6 +99,7 @@ import Kernel.JointSimplexBinding
 import Kernel.NativeCurrentMemberKey
 import Kernel.NativeCurrentMemberKeyIO
 import Kernel.NativeCurrentSigningKey
+import Kernel.ObjectiveActivityEffect
 import Kernel.PortableContinuationManifest
 import Kernel.PortableHomeTransfer
 import Kernel.PortableHomeTransferAdmission

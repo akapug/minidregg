@@ -5,8 +5,27 @@ parse and compare the complete ordered command bytes; this helper only forms
 and inspects the canonical Mini commitment. Duplicate JSON keys are refused
 by Host.Json.parse before this module is called.
 -/
-import Kernel.ApplicationSpkLaunchDescriptor
-import Lean.Data.Json
+module
+
+public import Kernel.ApplicationSpkLaunchDescriptor
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationSpkLaunchDescriptorAuthoring
 

@@ -1,0 +1,60 @@
+# /etc/systemd/system/mini-apps-worker@.service — the app market's operator custodian for store %i
+# (docs/APP-MARKET-2026-10-27.md §4), a SYSTEM unit running as mini-core (a user manager cannot
+# setgroups, so SupplementaryGroups would fail 216/GROUP). The uid-bearing lines (Requires/After=
+# user@UID.service, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS) are a drop-in INSTALL.md §4 writes.
+# mini-spk-broker@ is a user unit of mini-core and cannot be ordered against here; the worker
+# answers `undecided` when it is down. It drives `spk-host grain` and `mini` for admitted install requests, serves the
+# members' socket (/run/mini-apps/worker.sock, 0660 mini-core:mini-sessions, peers named by
+# SO_PEERCRED) and the edge connector (/var/lib/mini-apps/edge.sock, 0660 mini-core:mini-edge). It
+# holds no member key. SupplementaryGroups gives this process, never the account, the two groups it
+# sets on its sockets.
+[Unit]
+Description=Mini app market worker for store %i
+After=network.target
+
+[Service]
+Type=exec
+User=mini-core
+Group=mini-core
+ExecStart=/var/lib/mini/candidate/current/bin/mini apps-worker --state /var/lib/mini-apps --world /var/lib/mini-spk-worlds/%i/apps-world.json --member-socket /run/mini-apps/worker.sock --edge-socket /var/lib/mini-apps/edge.sock --member-group mini-sessions --edge-group mini-edge
+Restart=on-failure
+RestartSec=5
+UMask=0077
+SupplementaryGroups=mini-edge mini-sessions
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+# No network: the worker speaks Unix sockets only (the broker, the Host sockets, its own two).
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+# @privileged includes @chown; the worker chgrps its own sockets to mini-sessions / mini-edge. A later allow re-adds it.
+SystemCallFilter=@chown
+SystemCallErrorNumber=EPERM
+# Its own state; the world's grain state (spk-host grain writes install/route/lifecycle artifacts
+# under the store's host state root); the market's wanted/ flags; the member and edge sockets.
+ReadWritePaths=/var/lib/mini-apps /var/lib/mini-spk-worlds/%i /var/lib/mini-market/wanted /run/mini-apps
+# /run/user stays visible: spk-host grain status/start/stop reach mini-core's user manager (XDG_RUNTIME_DIR from the drop-in).
+InaccessiblePaths=-/run/dbus -/etc/mini/credentials.key -/var/lib/mini-keys -/var/lib/mini/sessions -/var/lib/mini/credentials -/var/lib/mini-backups -/var/lib/mini-door-process -/var/lib/mini-discord
+MemoryMax=512M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

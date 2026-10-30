@@ -5,47 +5,18 @@
 
 use crate::agent_api_wire::Request;
 use crate::dispatch_author::{private_signing_key, SignerPin};
-use ed25519_dalek::{Signature, Signer, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io;
+use crate::canonical::{decimal, hex};
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err(invalid("noncanonical source hex"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| invalid("source hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| invalid("source hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| invalid("noncanonical source hex"))
 }
 
 fn field<'a>(object: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -333,7 +304,13 @@ impl AgentCustody {
                 .ok_or_else(|| invalid("payer signature not hex"))?;
             let signature = Signature::from_slice(&unhex(signature)?)
                 .map_err(|_| invalid("payer signature width"))?;
-            key.verify(&header, &signature)
+            // A small-order key verifies a signature made without any secret (identity key, R = identity,
+            // S = 0 approves every header), and plain `verify` accepts it: refuse such a pin by name, then
+            // verify strictly (which also refuses a small-order R).
+            if key.is_weak() {
+                return Err(invalid("weak payer public key"));
+            }
+            key.verify_strict(&header, &signature)
                 .map_err(|_| invalid("payer signature does not approve header"))?;
         }
         Ok(())
@@ -375,5 +352,34 @@ mod tests {
         assert!(custody
             .verify_payer_slots(&inspection, &[0xaa], &signatures)
             .is_err());
+    }
+
+    #[test]
+    fn weak_payer_key_forgery_is_refused_by_name() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        let mut forged = [0u8; 64];
+        forged[0] = 1; // R = identity, S = 0
+        let custody: AgentCustody = serde_json::from_value(json!({
+            "protocol":"mini-spk-agent-dispatch-custody-v2", "app":"6100", "appGeneration":"2",
+            "session":"6209","sessionGeneration":"3","subject":"8","ticketResource":"6408",
+            "parentTask":"6500","parentGeneration":"4","purseTask":"6600","purseGeneration":"5",
+            "issueIndex":"1","packageManifest":"6101","snapshotManifest":"6102",
+            "sessionObserve":"11","manifestObserve":"12","enrollmentObserve":"13",
+            "parentCapability":"14","parentObserve":"15","purseCapability":"16",
+            "purseObserve":"17","payerSubject":"8","reserveAmount":"20","maximumCharge":"10",
+            "appSigners":[],"payerPins":[{"role":"8","index":"0","keyId":"18",
+                "keyEpoch":"1","publicKeyHex":hex(&identity)}]
+        }))
+        .unwrap();
+        let inspection = json!({"type":"application-agent-paid-dispatch-plan-v2",
+            "canonicalPlanHex":"aa","compactSelectorRequestHex":"bb","canonicalHttpHex":"cc",
+            "fixedSelectors":custody.fixed_selectors(),
+            "payerSlots":[{"role":"8","index":"0","headerHex":hex(b"any header at all"),
+                "signing":{"decoded":true,"keyId":"18","keyEpoch":"1","algorithm":"1"}}]});
+        let error = custody
+            .verify_payer_slots(&inspection, &[0xaa], &json!([hex(&forged)]))
+            .expect_err("a signature under a weak payer key must not approve a header");
+        assert!(error.to_string().contains("weak payer public key"), "{error}");
     }
 }

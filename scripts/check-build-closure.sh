@@ -27,7 +27,7 @@ def imports(path):
     return file_imports(path)
 exe_roots = re.findall(r'^\[\[lean_exe\]\]\s*\nname\s*=\s*"[^"]+"\s*\nroot\s*=\s*"([^"]+)"',
                        open("lakefile.toml").read(), re.M)
-surfaces = json.load(open("protocol/lean-build-surfaces.json"))
+surfaces = json.loads(subprocess.check_output([sys.executable, "scripts/lean-build-surfaces.py", "json"]))
 seen, stack = set(), libs + exe_roots + surfaces["programRoots"]
 while stack:
     m = stack.pop()

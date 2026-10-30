@@ -5,8 +5,27 @@ distinct from a signed read: it asks the current content resource law for
 source receiver must verify the native envelope/current capability and record
 one durable publication event before any fn POST claims source authorization.
 -/
-import Kernel.FnSelectiveReleaseIngress
-import Kernel.ContentResource
+module
+
+public import Kernel.FnSelectiveReleaseIngress
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseSourcePublication
 
@@ -35,8 +54,7 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 def specCodec : LawfulCodec Spec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-SPEC/v1".toUTF8.toList specStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-SPEC/v1".toUTF8.toList specStream
 
 def sourceBytes (spec : Spec) : List UInt8 :=
   specCodec.encode spec
@@ -53,9 +71,8 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-INGRESS/v1".toUTF8.toList
-      ingressStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-SOURCE-INGRESS/v1".toUTF8.toList
+      ingressStream
 
 def keyBytes (spec : Spec) : List UInt8 :=
   (StreamCodec.product digestStream

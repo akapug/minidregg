@@ -35,7 +35,7 @@ pub(crate) fn submit(host: &Path, config: &Path, request: &Path, intent_nonce: &
     let quote: Value = serde_json::from_slice(&fs::read(&quote_json).map_err(|e| e.to_string())?)
         .map_err(|e| format!("objective quote: {e}"))?;
     let field = |name: &str| -> Result<Vec<u8>> {
-        decode_hex(quote.get(name).and_then(Value::as_str).ok_or_else(|| format!("quote has no {name}"))?)
+        mini_sdk::hex::decode(quote.get(name).and_then(Value::as_str).ok_or_else(|| format!("quote has no {name}"))?).map_err(|e| e.0)
     };
     let intent_bin = directory.join("prepare-intent.bin");
     write_new(&intent_bin, &field("intent")?)?;

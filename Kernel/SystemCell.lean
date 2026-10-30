@@ -18,7 +18,7 @@ domain (`physicalId`), holding one value:
   no receiver changes it.
 
 **The system law** (`law`) is Mina's backpressure moved off the market onto the
-node's own checkpoint chain (COMPUTE.md §5.2, §6):
+node's own checkpoint chain (docs/COMPUTE.md §5.2, §6):
 
     leSlotsOff head/height certified/height L
 
@@ -31,8 +31,27 @@ post value is exactly `certifyNext` of the current head and chain
 
 Wire: the store codec with layout name `DREGG/SYSTEM/v1`.
 -/
-import Compiler.StoreCodec
-import Pred.Core
+module
+
+public import Compiler.StoreCodec
+public import Pred.Core
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SystemCell
 
@@ -139,7 +158,8 @@ def systemStream : StreamCodec System :=
     (fun (height, digest, bound) => ⟨height, digest, bound⟩)
     (by intro system; cases system; rfl)
 
-def namespaceStream : StreamCodec Namespace where
+/-- The namespace tag's list codec; `namespaceStream` is it on the cursor. -/
+def namespaceListStream : StreamCodec Namespace where
   encode
     | .system => [0]
   decodePrefix
@@ -147,13 +167,16 @@ def namespaceStream : StreamCodec Namespace where
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space; rfl
 
+def namespaceStream : StreamCodec Namespace :=
+  withTagCursor namespaceListStream rfl (by unfold namespaceListStream; one_octet_tag)
+
 def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .system => unitStream
 
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .system => systemStream
 
-def wireName : String := "DREGG/SYSTEM/v1"
+def wireName : String := "DREGG/SYSTEM/v5"
 
 def wire : Wire layout where
   name := wireName
@@ -165,7 +188,7 @@ def wire : Wire layout where
   keyCodecId
     | .system => "unit"
   valueCodecId
-    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v1"
+    | .system => "DREGG/SYSTEM/CERTIFIED-HEIGHT-DIGEST-TAIL-BOUND/v5"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 

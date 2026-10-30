@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # pick.sh COMMIT... : cherry-pick onto HEAD (committer ember arlynx, unsigned). Conflicts only in
-# GENERATED files (protocol/lean-build-surfaces.json, scripts/gates/host-closure.pin, ResearchWip.lean)
+# GENERATED files (scripts/gates/host-closure.max, ResearchWip.lean)
 # take HEAD's copy (regenerate once at the end of the batch with regen-pins.sh); conflicts in umbrella
 # import files (Kernel.lean Theory.lean Compiler.lean Host.lean Assurance.lean ObjectiveProofs.lean ...)
 # go through union-imports.py. Anything else stops with the conflicted paths listed.
 set -u
 export GIT_COMMITTER_NAME="ember arlynx" GIT_COMMITTER_EMAIL=cmrx64@gmail.com
 H=$(cd "$(dirname "$0")" && pwd)
-gen='^(protocol/lean-build-surfaces\.json|scripts/gates/host-closure\.pin|ResearchWip\.lean)$'
+gen='^(scripts/gates/host-closure\.max|ResearchWip\.lean)$'
 for c in "$@"; do
   git cat-file -e "$c^{commit}" 2>/dev/null || { echo "STOP at $c: no such commit here (fetch it first)"; exit 1; }
   if git -c commit.gpgsign=false cherry-pick "$c" >/dev/null 2>&1; then echo "picked $c -> $(git rev-parse --short HEAD)"; continue; fi

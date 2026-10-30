@@ -4,8 +4,29 @@ at its exact original prefix; the v4 twin of ApplicationLifecycleCreatedHistory.
 permit: Replay must match the full record to its own chronological admitted
 certificate before a later continue BEGIN or claim can consume it.
 -/
-import Kernel.ApplicationLifecycleRetryCompletionV4Core
-import Kernel.NativeHistorySelection
+module
+
+public import Kernel.ApplicationLifecycleRetryCompletionV4Core
+public import Kernel.NativeHistorySelection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4CreatedHistory
 
@@ -45,6 +66,18 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   receiptTransaction : selected.record.transactionId = receipt.transactionId
   receiptEvent : selected.record.event.eventId = receipt.eventId
   receiptBoundary : after.opened.served.worldRoot = receipt.worldRoot
+theorem Candidate.sound {config : Config} {store : StoreIdentity} {head : Head store}
+    {binding : ApplicationLifecycleLaunchBinding.Binding}
+    (candidate : Candidate config head binding) :
+    binding.priorCreate = some (candidate.receipt, candidate.custody) ∧
+    candidate.selected.record =
+      DurableReceiver.IntentRecord.ofIntent
+        (ApplicationLifecycleRetryCompletionV4Core.intent candidate.accepted) ∧
+    candidate.selected.record.transactionId = candidate.receipt.transactionId ∧
+    candidate.ingress.source.app = binding.app ∧
+    candidate.ingress.source.originalBegin.volume = binding.volume :=
+  ⟨candidate.priorExact, candidate.recordExact, candidate.receiptTransaction,
+    candidate.appExact, candidate.volumeExact⟩
 
 /-- Creation may have used an older package version. The reusable certificate
 joins app identity, the permanent volume ID, exact signed custody and original

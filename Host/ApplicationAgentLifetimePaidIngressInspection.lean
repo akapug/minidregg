@@ -4,9 +4,13 @@ ingress. Signatures are recovered only from canonical source envelopes and
 reassembled through the original Lean authoring codec. This does not verify
 signatures, recheck current law, admit event26, or mint a physical permit.
 -/
-import Host.ApplicationAgentLifetimeDispatchPaidInspection
-import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationAgentLifetimeDispatchPaidInspection
+public import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationAgentLifetimePaidIngressInspection
 
@@ -36,8 +40,7 @@ private def envelopeSignature
     (slot : SigningSlot) (bytes : List UInt8) : Except String (List UInt8) := do
   let some envelope := CredentialSignedEnvelopeController.envelopeCodec.decode bytes
     | throw "noncanonical lifetime paid signature envelope"
-  unless CredentialSignedEnvelopeController.envelopeCodec.encode envelope == bytes &&
-      CredentialSignedEnvelopeController.headerCodec.encode envelope.header == slot.header &&
+  unless CredentialSignedEnvelopeController.headerCodec.encode envelope.header == slot.header &&
       envelope.signature.length == 64 do
     throw "lifetime paid signature envelope differs from source plan slot"
   pure envelope.signature
@@ -60,12 +63,8 @@ from another plan. It says nothing about signature validity or live admission. -
 def inspect (planBytes ingressBytes : List UInt8) : Except String Json := do
   let some plan := paidPlanCodec.decode planBytes
     | throw "noncanonical lifetime paid plan"
-  unless paidPlanCodec.encode plan == planBytes do
-    throw "lifetime paid plan bytes are not canonical"
   let some ingress := ApplicationAgentLifetimeDispatchIngress.codec.decode ingressBytes
     | throw "noncanonical lifetime paid ingress"
-  unless ApplicationAgentLifetimeDispatchIngress.codec.encode ingress == ingressBytes do
-    throw "lifetime paid ingress bytes are not canonical"
   let dispatch := ingress.dispatch.dispatch
   let appEnvelopes := invocationEnvelopes dispatch.signed ++
     [dispatch.appObservationEnvelope, dispatch.manifestObservationEnvelope,

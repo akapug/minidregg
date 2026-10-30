@@ -4,8 +4,29 @@ the current DRC, policy, package observation, and physical-guard checks on one
 image; this layer additionally requires a full descriptor preimage and its
 source-derived prospective Manifest. V1 remains a historical replay grammar.
 -/
-import Kernel.ApplicationLifecycleBeginV2Ingress
-import Kernel.ApplicationLifecycleBeginReceiver
+module
+
+public import Kernel.ApplicationLifecycleBeginV2Ingress
+public import Kernel.ApplicationLifecycleBeginReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginV2Admission
 
@@ -77,7 +98,7 @@ def admitNative {F : Type} [Field F] [DecidableEq F]
 
 /-- Preserve the admitted writes, guards and nullifiers. Only the new full
 canonical event and the source-byte-dependent charge replace the v1 wrapper;
-ordinary DRC post-write bytes and the stable BEGIN nullifier are unchanged. -/
+the storage lane is the World's storage of these writes and the new event. -/
 def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}
     {profile : CanonicalRuntimeProfile.Profile F}
@@ -87,16 +108,13 @@ def Accepted.intent {F : Type} [Field F] [DecidableEq F]
     (accepted : Accepted deployment profile ambient ground ingress) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let legacy := accepted.base.intent
-  let ordinary := accepted.base.invocation.dataIntent accepted.base.shape
   { legacy with
-    exactCharge := fun dimension => match dimension with
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
       | .turnBytes => ingress.canonicalBytes.length
       | .witnessBytes => ingress.canonicalBytes.length
-      | .storageBytes => ordinary.exactCharge .storageBytes +
-          ingress.canonicalBytes.length +
-          (ApplicationLifecycleBegin.stableNullifier deployment.domain
-            profile.semantics ingress.base.source).canonicalBytes.length
-      | other => legacy.exactCharge other
+      | .storageBytes => DeployedCharge.storageCharge ground.view legacy.writes
+          (event ingress)
+      | other => legacy.exactCharge other)).toCharge
     event := event ingress }
 
 theorem Accepted.intent_event {F : Type} [Field F] [DecidableEq F]

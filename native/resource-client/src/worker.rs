@@ -1,4 +1,6 @@
-//! Authenticated NNTP GROUP is only a wake hint. Host/Main owns every decision.
+//! The NNTP POST half: one exact article to the co-located fn node over STARTTLS
+//! with a pinned certificate and AUTHINFO, its reply classified, and the one
+//! repost rule. Host/Main owns every Mini decision.
 use super::*;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
@@ -7,10 +9,8 @@ use rustls::{
     ClientConfig, ClientConnection, DigitallySignedStruct, RootCertStore, SignatureScheme,
     StreamOwned,
 };
-use sha2::{Digest, Sha256};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 use x509_parser::extensions::GeneralName;
 use x509_parser::prelude::{FromDer, X509Certificate};
@@ -87,28 +87,8 @@ impl ServerCertVerifier for ExactPinnedVerifier {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct GroupHint {
-    count: u64,
-    first: u64,
-    last: u64,
-}
-
-struct WakeConfig {
-    port: u16,
-    cert: PathBuf,
-    cert_pem: Vec<u8>,
-    username: String,
-    password_file: PathBuf,
-    group: String,
-    interval: Duration,
-    max_pages: u32,
-    scope_sha256: String,
-}
-
 pub(super) struct FnPostConfig {
     pub(super) port: u16,
-    pub(super) cert: PathBuf,
     pub(super) cert_pem: Vec<u8>,
     pub(super) username: String,
     pub(super) password_file: PathBuf,
@@ -170,7 +150,6 @@ pub(super) fn post_config(path: &Path) -> Result<FnPostConfig> {
     }
     Ok(FnPostConfig {
         port,
-        cert,
         cert_pem,
         username,
         password_file,
@@ -183,110 +162,6 @@ fn property<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .and_then(Value::as_str)
         .ok_or_else(|| format!("wake config lacks {key}"))
 }
-
-fn wake_config(path: &Path, host_config: &Path, route: ConsumerRoute) -> Result<WakeConfig> {
-    let meta =
-        fs::symlink_metadata(path).map_err(|e| format!("cannot inspect wake config: {e}"))?;
-    if !mini_sdk::private::file_ok(&meta) {
-        return Err("wake config must be an owner-private regular file".into());
-    }
-    let bytes = fs::read(path).map_err(|e| format!("cannot read wake config: {e}"))?;
-    if bytes.len() > 16_384 {
-        return Err("wake config exceeds 16 KiB".into());
-    }
-    let value: Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("invalid wake config: {e}"))?;
-    if property(&value, "type")?
-        != if route.reply {
-            "minidregg-a-reply-consumer-wake-v1"
-        } else {
-            "minidregg-b-consumer-wake-v1"
-        }
-    {
-        return Err("unsupported wake config type".into());
-    }
-    let port = value
-        .get("port")
-        .and_then(Value::as_u64)
-        .ok_or("wake config lacks port")?;
-    let port = u16::try_from(port).map_err(|_| "wake port exceeds u16")?;
-    if port == 0 {
-        return Err("wake port must be nonzero".into());
-    }
-    let cert = PathBuf::from(property(&value, "certificatePath")?);
-    let password_file = PathBuf::from(property(&value, "passwordFile")?);
-    if !cert.is_absolute() || !password_file.is_absolute() {
-        return Err("wake custody paths must be absolute".into());
-    }
-    let cert_pem = fs::read(&cert).map_err(|e| format!("cannot read pinned certificate: {e}"))?;
-    if cert_pem.is_empty() || cert_pem.len() > 65_536 {
-        return Err("pinned certificate must be 1..65536 bytes".into());
-    }
-    let username = property(&value, "username")?.to_owned();
-    if username.is_empty()
-        || username.len() > 128
-        || !username.bytes().all(|b| b.is_ascii_graphic() && b != b' ')
-    {
-        return Err("invalid NNTP auth principal".into());
-    }
-    let group = property(&value, "group")?.to_owned();
-    if group.is_empty()
-        || group.len() > 128
-        || !group
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
-    {
-        return Err("invalid NNTP group token".into());
-    }
-    let interval = value
-        .get("intervalSeconds")
-        .and_then(Value::as_u64)
-        .unwrap_or(10);
-    if !(1..=3600).contains(&interval) {
-        return Err("intervalSeconds must be 1..3600".into());
-    }
-    let max_pages = value.get("maxPages").and_then(Value::as_u64).unwrap_or(16);
-    if !(1..=16).contains(&max_pages) {
-        return Err("maxPages must be 1..16".into());
-    }
-    let host_json: Value = serde_json::from_slice(
-        &fs::read(host_config).map_err(|e| format!("cannot read Host config: {e}"))?,
-    )
-    .map_err(|e| format!("invalid Host config: {e}"))?;
-    let scope_path = host_json
-        .pointer(if route.reply {
-            "/fnReplyCatalog/scopePath"
-        } else {
-            "/fnPoll/scopePath"
-        })
-        .and_then(Value::as_str)
-        .ok_or("Host config lacks selected consumer scopePath")?;
-    let scope_bytes = fs::read(scope_path).map_err(|e| format!("cannot read fn scope pin: {e}"))?;
-    if scope_bytes.len() > 65_536 {
-        return Err("fn scope pin exceeds 64 KiB".into());
-    }
-    let scope: Value =
-        serde_json::from_slice(&scope_bytes).map_err(|e| format!("invalid fn scope pin: {e}"))?;
-    let query_hex = scope
-        .get("query")
-        .and_then(Value::as_str)
-        .ok_or("fn scope pin lacks query")?;
-    if decode_hex(query_hex)? != group.as_bytes() {
-        return Err("wake GROUP differs from operator-pinned fn scope query".into());
-    }
-    Ok(WakeConfig {
-        port,
-        cert,
-        cert_pem,
-        username,
-        password_file,
-        group,
-        interval: Duration::from_secs(interval),
-        max_pages: max_pages as u32,
-        scope_sha256: hex(&Sha256::digest(&scope_bytes)),
-    })
-}
-
 
 fn read_password(path: &Path) -> Result<Vec<u8>> {
     let meta =
@@ -326,27 +201,6 @@ fn line<R: Read>(
         }
     }
     Err("NNTP response line exceeds 4096 bytes".into())
-}
-
-fn parse_group(line: &[u8], group: &str) -> Result<GroupHint> {
-    let text = std::str::from_utf8(line).map_err(|_| "NNTP GROUP response is not UTF-8")?;
-    let fields: Vec<&str> = text.trim_end_matches("\r\n").split(' ').collect();
-    if fields.len() != 5 || fields[0] != "211" || fields[4] != group {
-        return Err("NNTP GROUP did not return exact 211 count/first/last/group".into());
-    }
-    let parse = |s: &str| -> Result<u64> {
-        if !mini_sdk::decimal::is_canonical(s)
-        {
-            return Err("NNTP GROUP has noncanonical decimal".into());
-        }
-        s.parse::<u64>()
-            .map_err(|_| "NNTP GROUP decimal overflow".into())
-    };
-    Ok(GroupHint {
-        count: parse(fields[1])?,
-        first: parse(fields[2])?,
-        last: parse(fields[3])?,
-    })
 }
 
 struct FnAccess<'a> {
@@ -401,10 +255,13 @@ fn protected_auth(
             .add(cert)
             .map_err(|e| format!("invalid pinned certificate: {e}"))?;
     }
-    let signatures = WebPkiServerVerifier::builder(Arc::new(roots))
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let signatures = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
         .build()
         .map_err(|e| format!("cannot create fn TLS signature verifier: {e}"))?;
-    let tls_config = ClientConfig::builder()
+    let tls_config = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| format!("cannot create fn TLS config: {e}"))?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(ExactPinnedVerifier {
             expected_der,
@@ -441,27 +298,6 @@ fn protected_auth(
         return Err("fn NNTP refused authentication".into());
     }
     Ok(tls)
-}
-
-fn group_hint(config: &WakeConfig) -> Result<GroupHint> {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    let mut tls = protected_auth(
-        FnAccess {
-            port: config.port,
-            cert_pem: &config.cert_pem,
-            username: &config.username,
-            password_file: &config.password_file,
-        },
-        deadline,
-    )?;
-    let mut response = [0u8; 4096];
-    tls.write_all(b"GROUP ")
-        .and_then(|_| tls.write_all(config.group.as_bytes()))
-        .and_then(|_| tls.write_all(b"\r\n"))
-        .and_then(|_| tls.flush())
-        .map_err(|e| format!("cannot send NNTP GROUP: {e}"))?;
-    let status = tls_line(&mut tls, &mut response, deadline)?;
-    parse_group(status, &config.group)
 }
 
 fn encoded_post_body(carrier: &[u8]) -> Result<Vec<u8>> {
@@ -512,6 +348,50 @@ fn classify_post_reply(line: String) -> FnPostOutcome {
         }
         _ if line.starts_with("441 ") => FnPostOutcome::Refused(line),
         _ => FnPostOutcome::TransportUncertain(format!("unrecognized fn POST final reply: {line}")),
+    }
+}
+
+/// The custody status word and fn's exact line for one POST outcome, as a
+/// publisher retains it.
+pub(super) fn post_status(outcome: FnPostOutcome) -> (&'static str, String) {
+    match outcome {
+        FnPostOutcome::Accepted(line) => ("accepted", line),
+        FnPostOutcome::AlreadyStored(line) => ("already-stored", line),
+        FnPostOutcome::Conflict(line) => ("conflict", line),
+        FnPostOutcome::ExplicitUncertain(line) => ("explicit-uncertain", line),
+        FnPostOutcome::Refused(line) => ("refused", line),
+        FnPostOutcome::TransportUncertain(line) => ("transport-uncertain", line),
+    }
+}
+
+/// Whether a retained status word and line prove fn stored the exact article:
+/// fn's own 240, or its Message-ID dedupe reporting the same article stored.
+pub(super) fn post_stored(status: Option<&str>, detail: Option<&str>) -> bool {
+    matches!(
+        (status, detail),
+        (Some("accepted"), Some("240 article received OK"))
+            | (Some("already-stored"), Some("441 posting failed; this article is already stored here"))
+    )
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) enum PostAction {
+    First,
+    Accepted,
+    Hold,
+}
+
+/// The one NNTP repost rule. A durable attempt marker precedes every POST;
+/// once it exists the article is never POSTed again by the client. Only a
+/// retained result that proves the exact article stored finishes; any other
+/// state (no result, uncertain, refused, conflict) holds for the operator,
+/// with the exact article retained. A result without a marker is corrupt.
+pub(super) fn post_action(attempt: bool, stored: Option<bool>) -> Result<PostAction> {
+    match (attempt, stored) {
+        (false, None) => Ok(PostAction::First),
+        (true, Some(true)) => Ok(PostAction::Accepted),
+        (true, None | Some(false)) => Ok(PostAction::Hold),
+        (false, Some(_)) => Err("fn POST result lacks preceding attempt marker".into()),
     }
 }
 
@@ -617,217 +497,39 @@ fn tls_line<'a>(
     Err("protected NNTP response exceeds 4096 bytes".into())
 }
 
-fn wake_pin(state_dir: &Path, source: &Path, cfg: &WakeConfig, route: ConsumerRoute) -> Result<()> {
-    let value = json!({"type":if route.reply {"minidregg-a-reply-consumer-wake-pin-v1"}
-        else {"minidregg-b-consumer-wake-pin-v1"},
-        "sourcePath":utf8_path(&absolute(source)?)?, "port":cfg.port,
-        "certificatePath":utf8_path(&cfg.cert)?, "certificateSha256":hex(&Sha256::digest(&cfg.cert_pem)),
-        "username":cfg.username, "passwordFile":utf8_path(&cfg.password_file)?,
-        "group":cfg.group, "scopeSha256":cfg.scope_sha256,
-        "intervalSeconds":cfg.interval.as_secs(), "maxPages":cfg.max_pages});
-    let path = state_dir.join("wake-pin.json");
-    if path.exists() {
-        let previous: Value = serde_json::from_slice(&fs::read(&path).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("invalid wake pin: {e}"))?;
-        if previous != value {
-            return Err("wake endpoint or credential pin changed".into());
-        }
-    } else {
-        write_json_new(&path, &value)?;
-        sync_directory_ancestors(state_dir)?;
-    }
-    Ok(())
-}
-
-fn remember(state_dir: &Path, hint: &GroupHint) -> Result<()> {
-    let mut bytes = serde_json::to_vec_pretty(&json!({"type":"fn-group-hint-v1", "count":hint.count,
-        "first":hint.first, "last":hint.last}))
-    .map_err(|error| format!("cannot render the group hint: {error}"))?;
-    bytes.push(b'\n');
-    crate::fsio::replace_public(&state_dir.join("group-hint.json"), &bytes)
-        .map_err(|e| format!("cannot save group hint: {e}"))?;
-    sync_directory_ancestors(state_dir)
-}
-
-fn remembered(state_dir: &Path) -> Result<Option<GroupHint>> {
-    let path = state_dir.join("group-hint.json");
-    if !path.exists() {
-        return Ok(None);
-    }
-    let value: Value = serde_json::from_slice(
-        &fs::read(&path).map_err(|e| format!("cannot read group hint: {e}"))?,
-    )
-    .map_err(|e| format!("invalid group hint: {e}"))?;
-    if value.get("type").and_then(Value::as_str) != Some("fn-group-hint-v1") {
-        return Err("unsupported retained group hint".into());
-    }
-    let field = |key| {
-        value
-            .get(key)
-            .and_then(Value::as_u64)
-            .ok_or_else(|| format!("retained group hint lacks {key}"))
-    };
-    Ok(Some(GroupHint {
-        count: field("count")?,
-        first: field("first")?,
-        last: field("last")?,
-    }))
-}
-
-fn needs_another_round(stop: drain::Stop, before: &GroupHint, after: &GroupHint) -> bool {
-    matches!(stop, drain::Stop::Publication | drain::Stop::PageCap) || before != after
-}
-
-pub(super) fn run(
-    host: &Path,
-    config: &Path,
-    socket: &Path,
-    key: &Path,
-    state_dir: &Path,
-    worker_config: &Path,
-) -> Result<()> {
-    run_route(
-        host,
-        config,
-        socket,
-        key,
-        state_dir,
-        worker_config,
-        B_CONSUMER,
-    )
-}
-
-pub(super) fn run_reply(
-    host: &Path,
-    config: &Path,
-    socket: &Path,
-    key: &Path,
-    state_dir: &Path,
-    worker_config: &Path,
-) -> Result<()> {
-    run_route(
-        host,
-        config,
-        socket,
-        key,
-        state_dir,
-        worker_config,
-        A_REPLY_CONSUMER,
-    )
-}
-
-fn run_route(
-    host: &Path,
-    config: &Path,
-    socket: &Path,
-    key: &Path,
-    state_dir: &Path,
-    worker_config: &Path,
-    route: ConsumerRoute,
-) -> Result<()> {
-    QUIET_WORKER.store(true, std::sync::atomic::Ordering::Relaxed);
-    let cfg = wake_config(worker_config, config, route)?;
-    crate::fsio::ensure_private_dir_durable(state_dir)?;
-    crate::fsio::ensure_private_dir_durable(socket.parent().ok_or("socket lacks parent")?)?;
-    let _global = transport::service_lock(
-        &socket
-            .parent()
-            .ok_or("socket lacks parent")?
-            .join("consumer-worker.lock"),
-    )?;
-    let _state = transport::service_lock(&state_dir.join("worker.lock"))?;
-    drain::pin_route(state_dir, host, config, socket, key, route)?;
-    wake_pin(state_dir, worker_config, &cfg, route)?;
-    let mut remembered = remembered(state_dir)?;
-    let mut needs_drain = remembered.is_none() || state_dir.join("pending").exists();
-    loop {
-        if !needs_drain {
-            thread::sleep(cfg.interval);
-            match group_hint(&cfg) {
-                Ok(hint) if remembered.as_ref() == Some(&hint) => continue,
-                Ok(_) => needs_drain = true,
-                Err(error) => {
-                    eprintln!("mini consumer GROUP hint unavailable: {error}");
-                    continue;
-                }
-            }
-        }
-        let mut rounds = 0;
-        while needs_drain && rounds < 64 {
-            let before = group_hint(&cfg)?;
-            let stop = drain::run_locked_route(
-                host,
-                config,
-                socket,
-                key,
-                state_dir,
-                cfg.max_pages,
-                route,
-            )?;
-            rounds += 1;
-            match stop {
-                drain::Stop::Publication | drain::Stop::PageCap => continue,
-                drain::Stop::Idle | drain::Stop::ShortPage => {
-                    let after = group_hint(&cfg)?;
-                    if needs_another_round(stop, &before, &after) {
-                        continue;
-                    }
-                    remember(state_dir, &after)?;
-                    remembered = Some(after);
-                    needs_drain = false;
-                }
-            }
-        }
-        if needs_drain {
-            thread::sleep(cfg.interval);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_catalog_wake_requires_reply_type_and_matching_scope_query() {
-        let root = std::env::temp_dir().join(format!(
-            "mini-a-wake-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        crate::fsio::ensure_private_dir_durable(&root).unwrap();
-        let cert = root.join("cert.pem");
-        let password = root.join("password");
-        let scope = root.join("scope.json");
-        let host = root.join("host.json");
-        let wake = root.join("wake.json");
-        fs::write(&cert, b"test certificate").unwrap();
-        fs::write(&password, b"test password").unwrap();
-        fs::write(&scope, br#"{"query":"666e2e74657374"}"#).unwrap();
-        fs::write(
-            &host,
-            json!({"fnReplyCatalog":{"scopePath":scope}}).to_string(),
-        )
-        .unwrap();
-        let mut settings = json!({
-            "type":"minidregg-a-reply-consumer-wake-v1", "port":11942,
-            "certificatePath":cert, "passwordFile":password,
-            "username":"observer", "group":"fn.test", "maxPages":16
-        });
-        create_private(&wake, settings.to_string().as_bytes()).unwrap();
-        assert_eq!(
-            wake_config(&wake, &host, A_REPLY_CONSUMER).unwrap().group,
-            "fn.test"
-        );
-        assert!(wake_config(&wake, &host, B_CONSUMER).is_err());
-        settings["group"] = json!("fn.other");
-        fs::write(&wake, settings.to_string()).unwrap();
-        assert!(wake_config(&wake, &host, A_REPLY_CONSUMER).is_err());
-        fs::remove_dir_all(root).unwrap();
+    fn fn_post_repost_rule_never_reposts_after_a_marker() {
+        assert_eq!(post_action(false, None).unwrap(), PostAction::First);
+        assert_eq!(post_action(true, None).unwrap(), PostAction::Hold);
+        assert_eq!(post_action(true, Some(false)).unwrap(), PostAction::Hold);
+        assert_eq!(post_action(true, Some(true)).unwrap(), PostAction::Accepted);
+        assert!(post_action(false, Some(true)).is_err());
+        // Every outcome a lost or unclear reply can produce holds; only fn's
+        // 240 or its exact dedupe line finishes.
+        for line in [
+            "441 posting failed; the outcome is uncertain, do not repost",
+            "441 posting failed; a different article with this Message-ID is stored here",
+            "441 something else",
+            "999 surprise",
+        ] {
+            let (status, detail) = post_status(classify_post_reply(line.to_owned()));
+            assert!(!post_stored(Some(status), Some(&detail)), "{line}");
+        }
+        for line in [
+            "240 article received OK",
+            "441 posting failed; this article is already stored here",
+        ] {
+            let (status, detail) = post_status(classify_post_reply(line.to_owned()));
+            assert!(post_stored(Some(status), Some(&detail)), "{line}");
+        }
+        let (status, detail) = post_status(FnPostOutcome::TransportUncertain("lost".into()));
+        assert!(!post_stored(Some(status), Some(&detail)));
     }
+
     #[test]
     fn exact_carrier_post_dot_stuffs_without_changing_article_lines() {
         assert_eq!(
@@ -867,42 +569,4 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn group_hint_requires_exact_bounded_canonical_211_line() {
-        assert_eq!(
-            parse_group(b"211 2 1 2 fn.test\r\n", "fn.test").unwrap(),
-            GroupHint {
-                count: 2,
-                first: 1,
-                last: 2
-            }
-        );
-        for line in [
-            b"411 no group\r\n".as_slice(),
-            b"211 02 1 2 fn.test\r\n",
-            b"211 2 1 2 other\r\n",
-            b"211 2 1 2 fn.test extra\r\n",
-        ] {
-            assert!(parse_group(line, "fn.test").is_err());
-        }
-    }
-
-    #[test]
-    fn ack_only_journal_changes_do_not_rewake_group_scheduler() {
-        let none = GroupHint {
-            count: 0,
-            first: 0,
-            last: 0,
-        };
-        let two = GroupHint {
-            count: 2,
-            first: 1,
-            last: 2,
-        };
-        assert!(!needs_another_round(drain::Stop::ShortPage, &none, &none));
-        assert!(!needs_another_round(drain::Stop::Idle, &none, &none));
-        assert!(needs_another_round(drain::Stop::ShortPage, &none, &two));
-        assert!(needs_another_round(drain::Stop::Publication, &two, &two));
-        assert!(needs_another_round(drain::Stop::PageCap, &two, &two));
-    }
 }

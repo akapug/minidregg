@@ -10,8 +10,27 @@ The separate checked START admission must obtain an exact completed-create
 certificate from verified history for `continue`, and absence of an earlier
 first-attempt claim for `create`. This pure shape alone is not a launch permit.
 -/
-import Kernel.ApplicationSpkLaunchDescriptor
-import Compiler.NativeHostCodec
+module
+
+public import Kernel.ApplicationSpkLaunchDescriptor
+public import Compiler.NativeHostCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleLaunchBinding
 
@@ -58,7 +77,7 @@ inductive Choice where
   deriving DecidableEq, Repr
 
 def choiceStream : StreamCodec Choice :=
-  StreamCodec.xmap StreamCodec.nat
+  StreamCodec.retract StreamCodec.nat
     (fun choice => match choice with
       | .create index => index + 1
       | .continue => 0)

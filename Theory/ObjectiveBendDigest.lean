@@ -190,26 +190,30 @@ theorem digest_lt (a b : Nat) : digest a b < 2 ^ 256 := by
   simpa [digest, digestWith, h256] using h
 
 /-- **Binds or collides.** Two operand pairs with one digest under `H` are the same pair, or `H`
-has a collision. -/
+collides on exactly their two preimages. -/
 theorem binds_or_collides (H : Hash) {a b a' b' : Nat} (ha : Admissible a) (ha' : Admissible a')
-    (h : digestWith H a b = digestWith H a' b') : (a = a' ∧ b = b') ∨ Collision H := by
+    (h : digestWith H a b = digestWith H a' b') :
+    (a = a' ∧ b = b') ∨ CollisionAmong H (fun x => x = preimage a b ∨ x = preimage a' b') := by
   by_cases hp : preimage a b = preimage a' b'
   · exact .inl (preimage_injective ha ha' hp)
-  · exact .inr ⟨preimage a b, preimage a' b', hp, h⟩
+  · exact .inr ⟨preimage a b, preimage a' b', .inl rfl, .inr rfl, hp, h⟩
 
 /-- **The sealed-ballot shape.** `digest(digest(voter, vote), salt)` determines voter, vote and
 salt, or cSHAKE256 (at this customization) has a collision. The inner digest is below `2^256`, so
-the outer opening is always in the domain; the voter needs to be. -/
+the outer opening is always in the domain; the voter needs to be. The collision, if any, is
+among the four preimages the two openings hash. -/
 theorem sealed_binds_or_collides {v x s v' x' s' : Nat} (hv : v < 2 ^ 256) (hv' : v' < 2 ^ 256)
     (h : digest (digest v x) s = digest (digest v' x') s') :
-    (v = v' ∧ x = x' ∧ s = s') ∨ Collision deployed := by
+    (v = v' ∧ x = x' ∧ s = s') ∨
+      CollisionAmong deployed (fun p => p = preimage (digest v x) s ∨ p = preimage (digest v' x') s' ∨
+        p = preimage v x ∨ p = preimage v' x') := by
   rcases binds_or_collides deployed (admissible_of_lt (digest_lt v x))
       (admissible_of_lt (digest_lt v' x')) h with ⟨hin, hs⟩ | hcol
   · rcases binds_or_collides deployed (admissible_of_lt hv) (admissible_of_lt hv') hin with
       ⟨hvv, hxx⟩ | hcol
     · exact .inl ⟨hvv, hxx, hs⟩
-    · exact .inr hcol
-  · exact .inr hcol
+    · exact .inr (hcol.mono fun p hp => by rcases hp with hp | hp <;> simp [hp])
+  · exact .inr (hcol.mono fun p hp => by rcases hp with hp | hp <;> simp [hp])
 
 /-! ## §4. The refutable pole: a length hash -/
 
@@ -262,7 +266,7 @@ theorem hiding_at_equality_is_a_collision (H : Hash) (h : Hiding H (· = ·)) : 
   have a1 : Admissible 1 := admissible_of_lt (by decide)
   rcases binds_or_collides H a0 a1 (congrFun (h 0 1) 0) with ⟨h01, -⟩ | hcol
   · exact absurd h01 (by decide)
-  · exact hcol
+  · exact hcol.global
 
 /-! ## §6. Cost: Keccak-f[1600] permutations per digest
 

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# /usr/local/lib/mini/mini-session-run — ON THE BOX, split tenancy. Replaces dregg-infra's
+# sudo-invoked runner (deploy/door/infra/INSTALL.md). Started by systemd once per connection
+# to /run/mini-session-run.sock (mini-session-run.socket, Accept=yes): the connection is this
+# script's stdin and stdout. The socket is root:mini-discord 0660 and the group has no other
+# member, so the Discord entrance is the only caller; it needs no setuid program and keeps
+# NoNewPrivileges=yes.
+#
+# Protocol (minidregg native/discord-entrance src/session.rs):
+#   in   NAME\nLINE\n
+#   out  mini-session-run-v1 EXIT OUTLEN ERRLEN\n, then OUTLEN bytes of stdout, then ERRLEN of stderr
+# A refusal is EXIT 77 with the reason on the stderr stream.
+#
+# As root, it:
+#   - requires split tenancy and that group mini-discord has no member but the entrance account;
+#   - requires NAME to be a value of the root-owned Discord roster, and mini-s-NAME to exist in
+#     group mini-hosted with its own 0700 home: a compromised entrance cannot reach a member
+#     who is not on the Discord roster, nor any other account;
+#   - reads ONE bounded line with no control character, and hands it to the same forced command
+#     the ssh login runs, as mini-s-NAME, with a fixed environment, the box's own paths and a
+#     fixed timeout.
+set -uo pipefail
+unset MINI_ROOT
+. /usr/local/lib/mini/infra/lib.sh
+LIMIT=1048576
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+answer() {  # EXIT, with $work/out and $work/err
+  head -c "$LIMIT" "$work/out" >"$work/out.b" 2>/dev/null || : >"$work/out.b"
+  head -c "$LIMIT" "$work/err" >"$work/err.b" 2>/dev/null || : >"$work/err.b"
+  printf 'mini-session-run-v1 %d %d %d\n' "$1" "$(stat -c %s "$work/out.b")" "$(stat -c %s "$work/err.b")"
+  cat "$work/out.b" "$work/err.b"
+}
+: >"$work/out"
+refuse() { printf 'refused: mini-session-run: %s\n' "$*" >"$work/err"; echo "mini-session-run: REFUSED — $*" >&2; answer 77; exit 0; }
+[ "$(id -u)" = 0 ] || refuse "must run as root (mini-session-run@.service)"
+[ "$TENANCY" = split ] || refuse "only under split tenancy"
+members=$(getent group "$DISCORD" | cut -d: -f4)
+[ -z "$members" ] || refuse "group $DISCORD has members ($members); only the entrance may open the runner socket"
+IFS= read -r -t 10 name || refuse "no NAME"
+IFS= read -r -t 10 line || refuse "no line"
+[[ $name =~ ^[a-z][a-z0-9-]{0,31}$ ]] || refuse "NAME is not a session name"
+account=mini-s-$name
+roster=$ETC/discord-roster.json
+[ -f "$roster" ] && [ ! -L "$roster" ] && [ "$(stat -c %u "$roster")" = 0 ] \
+  && [ $(( 0$(stat -c %a "$roster") & 022 )) = 0 ] || refuse "the Discord roster must be a root-owned file no one else writes"
+jq -e --arg n "$name" '.version == 1 and (.users | type == "object") and ([.users[]] | index($n) != null)' "$roster" >/dev/null 2>&1 \
+  || refuse "$name is not a session on the Discord roster"
+id -u "$account" >/dev/null 2>&1 || refuse "no account $account (render-authorized-keys.sh makes hosted accounts)"
+id -nG "$account" | tr ' ' '\n' | grep -qx "$HOSTED_GROUP" || refuse "$account is not in $HOSTED_GROUP"
+home=$S/$name
+[ -d "$home" ] && [ ! -L "$home" ] && [ "$(stat -c %U:%a "$home")" = "$account:700" ] || refuse "$home must be $account's 0700 home"
+[ "${#line}" -le 4000 ] || refuse "the line exceeds 4000 characters"
+[[ $line != *[[:cntrl:]]* ]] || refuse "the line contains a control character"
+timeout --kill-after=5 120 \
+  setpriv --reuid="$account" --regid="$TENANT_GROUP" --init-groups --reset-env -- \
+  env -i PATH=/usr/bin:/bin LANG=C.UTF-8 SSH_ORIGINAL_COMMAND="$line" \
+  "$LIB/mini-shell-ssh" "$C/bin/mini" "$C/bin/minidregg-host" "$NODE/deployment/pinned-config.json" \
+  "$NODE/public/mini.sock" "$home/workspace" "$home" </dev/null >"$work/out" 2>"$work/err"
+answer $?

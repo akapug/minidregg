@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MINIDREGG_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -12,6 +13,8 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 . "$REPO/native/resource-client/journey.d/lib/genesis-params.sh"
 resolve_params_sh "$REPO" || exit 2
+. "$REPO/native/resource-client/journey.d/lib/wire.sh"
+CONTENT_VERSION=$(content_command_version "$REPO")
 MINI=${MINI:-"$HERE/target/debug/mini"}
 STORE_BINARY=${STORE_BINARY:-"$REPO/native/hyperdocument-link-sqlite-store/target/debug/minidregg-link-sqlite-store"}
 SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier/target/debug/minidregg-credential-signature-verifier"}
@@ -51,88 +54,10 @@ challenge_field() {
   >"$EVIDENCE/public-key.txt"
 PUBLIC_KEY=$(od -An -tx1 -v "$EVIDENCE/alice.pub" | tr -d ' \n')
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{
-  "domain": 8501,
-  "federation": 9,
-  "factoryId": 10,
-  "resourceBookId": 11,
-  "authorityCellId": 12,
-  "issuer": 5,
-  "ownerBudget": 100000,
-  "lifetime": 10000,
-  "tariffBase": 3,
-  "tariffPerBirth": 2,
-  "tariffPerGrant": 1,
-  "tariffPerInitialPayloadByte": 0,
-  "collector": 99,
-  "asset": 0,
-  "genesisHeight": 10,
-  "expectedSeed": 0,
-  "storageBinary": "$STORE_BINARY",
-  "storageRoot": "$EVIDENCE/store",
-  "signatureBinary": "$SIGNATURE_BINARY"
-}
-EOF
-
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(jq -er '.semantics' "$EVIDENCE/operator-profile.json")
-
-cat >"$EVIDENCE/genesis.json" <<EOF
-{
-  "domain": "8501",
-  "factoryId": "10",
-  "resourceBookId": "11",
-  "authorityCellId": "12",
-  "federation": "9",
-  "tariffBase": "3",
-  "tariffPerBirth": "2",
-  "tariffPerGrant": "1",
-  "tariffPerInitialPayloadByte": "0",
-  "collector": "99",
-  "asset": "0",
-  "expectedSemantics": "$SEMANTICS",
-  "issuerEpoch": "2",
-  "genesisHeight": "10",
-  "factoryPredicate": {"type": "all", "predicates": []},
-  "enrollments": [{
-    "key": {
-      "keyId": "7007",
-      "keyEpoch": "2",
-      "algorithm": "1",
-      "subject": "7",
-      "publicKey": "$PUBLIC_KEY",
-      "activeFrom": "0",
-      "activeUntil": "1000000",
-      "nextKeyDigest": null
-    },
-    "accountId": "7",
-    "spendCapabilityId": "41",
-    "controlCapabilityId": "51",
-    "factoryObserveCapabilityId": "54",
-    "initialBalance": "100",
-    "accountPredicate": {"type": "all", "predicates": []}
-  }],
-  "factoryControllerSubject": "7",
-  "factoryControllerCapability": "53",
-  "clockTickers": [],
-  "tailBound":"256",
-  "meterAllowance": {
-    "incidences": "10000000",
-    "turnBytes": "10000000",
-    "memoryTouches": "10000000",
-    "witnessBytes": "10000000",
-    "proofWork": "10000000",
-    "storageBytes": "10000000",
-    "networkBytes": "10000000",
-    "sideEffectCount": "10000000",
-    "feeDebit": "10000000",
-    "leaseByteBlocks": "10000000"
-  }
-}
-EOF
-
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+# The genesis through the one template (scenario-genesis.sh): only what this world differs by.
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$HERE/scenario-genesis.sh" "$EVIDENCE" "$PUBLIC_KEY" 'del(.grainPlatform) | .sponsor.initialBalance = 100'
+SEMANTICS=$(jq -er '.semantics' "$EVIDENCE/profile.json")
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" \
   >"$EVIDENCE/bootstrap.stdout"
@@ -219,7 +144,7 @@ cat >"$EVIDENCE/content-intent.json" <<EOF
           "target": "600",
           "capability": "61",
           "observeCapability": null,
-          "schemaVersion": "1",
+          "schemaVersion": "$CONTENT_VERSION",
           "expectedTargetRoot": "$TARGET_ROOT",
           "payload": {
             "type": "content",
@@ -249,6 +174,8 @@ fi
 exec "$REAL_HOST" "$@"
 EOF
 chmod 755 "$EVIDENCE/drop-first-submit.sh"
+# mini finds the consent provider beside --host: the wrapper needs the real one beside it.
+install -m 0755 "$(dirname -- "$HOST")/minidregg-client-consent" "$EVIDENCE/minidregg-client-consent"
 
 if "$MINI" submit --host "$EVIDENCE/drop-first-submit.sh" --config "$CONFIG" \
   --intent "$EVIDENCE/content-intent.json" --key "$EVIDENCE/alice.key" \
@@ -261,12 +188,12 @@ test -f "$EVIDENCE/content-attempt/call.bin"
 test ! -e "$EVIDENCE/content-attempt/outcome.bin"
 test ! -e "$EVIDENCE/content-attempt/outcome.json"
 
-CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/content-attempt" --mode submit \
   >"$EVIDENCE/retry-submit.stdout"
 "$MINI" retry --attempt "$EVIDENCE/content-attempt" --mode lookup \
   >"$EVIDENCE/retry-lookup.stdout"
-CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
+CALL_HASH_AFTER=$(sha256 "$EVIDENCE/content-attempt/call.bin" | awk '{print $1}')
 test "$CALL_HASH_BEFORE" = "$CALL_HASH_AFTER"
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0001.json" >/dev/null
@@ -334,7 +261,7 @@ cat >"$EVIDENCE/joint-intent.json" <<EOF
             "target": "600",
             "capability": "61",
             "observeCapability": "61",
-            "schemaVersion": "1",
+            "schemaVersion": "$CONTENT_VERSION",
             "expectedTargetRoot": "$CONTENT_ROOT",
             "payload": {
               "type": "content",
@@ -399,10 +326,10 @@ JOINT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" wo
 test "$JOINT_BEFORE_RETRY_HEIGHT" = "13"
 test "$JOINT_BEFORE_RETRY_BOUNDARY" = "$JOINT_RECEIPT_BOUNDARY"
 
-JOINT_CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
+JOINT_CALL_HASH_BEFORE=$(sha256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
 "$MINI" retry --attempt "$EVIDENCE/joint-attempt" --mode submit \
   >"$EVIDENCE/joint-retry-submit.stdout"
-JOINT_CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
+JOINT_CALL_HASH_AFTER=$(sha256 "$EVIDENCE/joint-attempt/call.bin" | awk '{print $1}')
 test "$JOINT_CALL_HASH_BEFORE" = "$JOINT_CALL_HASH_AFTER"
 jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "3"' \
   "$EVIDENCE/joint-attempt/retry-0001.json" >/dev/null
@@ -423,7 +350,13 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-content-final.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-content-final" >"$EVIDENCE/query-content-final.stdout"
-jq -e '[.cell.entries[].type] | sort == ["atom", "document", "element"]' \
+# The element tree (Kernel/ContentResource): document order is the tree's walk, so the created
+# atom is placed as an atom element under the document's root container.
+jq -e '([.cell.entries[].type] | sort == ["atom", "document", "element", "element"]) and
+  ([.cell.entries[] | select(.type == "element" and .id == "1001" and .parent == null and
+     .body == {type: "container", children: ["7001"]})] | length == 1) and
+  ([.cell.entries[] | select(.type == "element" and .id == "7001" and .parent == "1001" and
+     .body == {type: "atom", atom: "7001"})] | length == 1)' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
 jq -e '[.cell.entries[] | select(.type == "atom" and .id == "7001" and .payload == "68656c6c6f")] | length == 1' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null

@@ -1,4 +1,4 @@
-//! Hermes in a room (PLACE §2.7, §2.10, §5 row 7): `summon ROOM as ROLE
+//! Hermes in a room (docs/PLACE.md §2.7, §2.10, §5 item 7): `summon ROOM as ROLE
 //! --budget N`, `ask ROOM TEXT`, `dismiss ROOM`.
 //!
 //! Hermes is a participant like any friend: an enrolled subject `H` that holds
@@ -41,21 +41,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The role templates, compiled in (the files are the roles).
-const LIBRARIAN_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/grants.json");
-const LIBRARIAN_PROGRAM: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/program.md");
-const LIBRARIAN_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/librarian/budget.json");
-const RUNNER_GRANTS: &str = include_str!("../../../deploy/shell/templates/hermes/runner/grants.json");
-const RUNNER_BUDGET: &str = include_str!("../../../deploy/shell/templates/hermes/runner/budget.json");
+const LIBRARIAN_GRANTS: &str = include_str!("../templates/hermes/librarian/grants.json");
+const LIBRARIAN_PROGRAM: &str = include_str!("../templates/hermes/librarian/program.md");
+const LIBRARIAN_BUDGET: &str = include_str!("../templates/hermes/librarian/budget.json");
+const RUNNER_GRANTS: &str = include_str!("../templates/hermes/runner/grants.json");
+const RUNNER_BUDGET: &str = include_str!("../templates/hermes/runner/budget.json");
 
 /// Legacy operator record, used only when no resident registry is advertised.
 /// Current selection is scoped to the actual source room cell.
 pub(crate) const NODE_FILE: &str = "hermes/node.json";
 
 pub(crate) const VERBS: &[crate::shell::Verb] = &[
-    crate::shell::Verb { name: "summon", usage: "summon ROOM as librarian|runner [--budget N] [--every N] [--program @FILE] [--hermes SUBJECT] [--i-know]", operation: "founder: the till (if none), Hermes's budget account funded N from mine, Hermes on the roster (chat invite), the role's documents and grants, the program document ROOM-hermes-ROLE, the room's hermes fields, the hand-off in HOME/outbox/H" },
-    crate::shell::Verb { name: "ask", usage: "ask [ROOM] TEXT", operation: "say --to HERMES in the room (Hermes is the room cell's `hermes` field, a signed read)" },
-    crate::shell::Verb { name: "hermes", usage: "hermes status [ROOM] | hermes cancel N [ROOM]", operation: "status: a signed read of the room's streams; each of my requests to Hermes with Hermes's latest typed status for it | cancel: append {\"type\":\"withdraw\"} replying to my request #N, addressed to Hermes (it cancels the request only while it is still queued)" },
-    crate::shell::Verb { name: "dismiss", usage: "dismiss ROOM", operation: "founder: revoke the room grant and the role's delegations to Hermes, zero the room's hermes fields, ask Hermes to return the unspent budget (HOME/outbox/H/dismiss-ROOM.json)" },
+    crate::shell::Verb { name: "summon", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    crate::shell::Verb { name: "ask", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    crate::shell::Verb { name: "hermes", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    crate::shell::Verb { name: "dismiss", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 #[derive(Debug, PartialEq, Clone)]
@@ -77,95 +77,58 @@ pub(crate) enum Line {
 
 /// Map `summon`/`ask`/`dismiss` lines; `None` for any other verb.
 pub(crate) fn plan(verb: &str, rest: &str) -> Option<Result<Line, String>> {
-    let usage = |name: &str| VERBS.iter().find(|v| v.name == name).map(|v| v.usage).unwrap_or("").to_owned();
+    use crate::shell_grammar::{parse_line, ASK, DISMISS, HERMES, SUMMON};
+    // `rest` is the line after the verb with its leading whitespace (chat::split): the raw line.
+    let line = format!("{verb}{rest}");
+    let line = line.as_str();
     Some(match verb {
-        "summon" => parse_summon(rest).map_err(|e| if e.is_empty() { usage("summon") } else { e }),
-        "ask" => {
-            let (first, after) = match chat::split(rest) {
-                Some(pair) => pair,
-                None => return Some(Err(usage("ask"))),
+        "summon" => parse_line(&SUMMON, line).and_then(|p| {
+            chat::ref_name(p.arg(0), "room name")?;
+            let program = match p.flag("--program").flatten() {
+                Some(v) => {
+                    let file = v.strip_prefix('@').ok_or("--program takes @FILE (a plain name in HOME/requests)")?;
+                    if file.is_empty() || file.contains('/') || file.starts_with('.') {
+                        return Err("--program takes @FILE (a plain name in HOME/requests)".into());
+                    }
+                    Some(file.to_owned())
+                }
+                None => None,
             };
-            // `ask ROOM TEXT` when the first word is a room this session
-            // holds; otherwise the whole line is the text, in the current room.
-            Ok(if crate::chat::ref_name(first, "room").is_ok() && !chat::free_text(after).is_empty() {
+            Ok(Line::Summon {
+                room: p.arg(0).to_owned(),
+                role: p.arg(2).to_owned(),
+                budget: p.flag("--budget").flatten().map(str::to_owned),
+                every: p.flag("--every").flatten().map(str::to_owned),
+                program,
+                hermes: p.flag("--hermes").flatten().map(str::to_owned),
+                i_know: p.has("--i-know"),
+            })
+        }),
+        "ask" => parse_line(&ASK, line).map(|_| {
+            // `ask ROOM TEXT` when the first word is a room this session holds; otherwise the
+            // whole line is the text, in the current room.
+            let (first, after) = chat::split(rest).unwrap_or(("", ""));
+            if crate::chat::ref_name(first, "room").is_ok() && !chat::free_text(after).is_empty() {
                 Line::Ask { room: Some(first.to_owned()), text: chat::free_text(after) }
             } else {
                 Line::Ask { room: None, text: chat::free_text(rest) }
-            })
-        }
-        "hermes" => {
-            let words: Vec<&str> = rest.split_whitespace().collect();
-            let room = |name: Option<&&str>| -> Result<Option<String>, String> {
-                name.map(|n| chat::ref_name(n, "room name").map(|()| (*n).to_owned())).transpose()
+            }
+        }),
+        "hermes" => parse_line(&HERMES, line).and_then(|p| {
+            let room = |name: Option<&str>| -> Result<Option<String>, String> {
+                name.map(|n| chat::ref_name(n, "room name").map(|()| n.to_owned())).transpose()
             };
-            match words.as_slice() {
-                ["status", rest @ ..] if rest.len() <= 1 => room(rest.first()).map(|room| Line::Status { room }),
-                ["cancel", n, rest @ ..] if rest.len() <= 1 => match n.parse::<u64>() {
-                    Ok(number) if number > 0 => room(rest.first()).map(|room| Line::Cancel { room, number }),
-                    _ => Err(usage("hermes")),
+            match p.leaf.path {
+                ["hermes", "status"] => room(p.opt(0)).map(|room| Line::Status { room }),
+                _ => match p.arg(0).parse::<u64>() {
+                    Ok(number) if number > 0 => room(p.opt(1)).map(|room| Line::Cancel { room, number }),
+                    _ => Err(crate::shell_grammar::usage(&HERMES)),
                 },
-                _ => Err(usage("hermes")),
             }
-        }
-        "dismiss" => {
-            let words: Vec<&str> = rest.split_whitespace().collect();
-            match words.as_slice() {
-                [room] => chat::ref_name(room, "room name").map(|()| Line::Dismiss { room: (*room).to_owned() }),
-                _ => Err(usage("dismiss")),
-            }
-        }
+        }),
+        "dismiss" => parse_line(&DISMISS, line).and_then(|p| chat::ref_name(p.arg(0), "room name").map(|()| Line::Dismiss { room: p.arg(0).to_owned() })),
         _ => return None,
     })
-}
-
-fn parse_summon(rest: &str) -> Result<Line, String> {
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let (room, role, options) = match words.as_slice() {
-        [room, "as", role, options @ ..] => (*room, *role, options),
-        _ => return Err(String::new()),
-    };
-    chat::ref_name(room, "room name")?;
-    if !matches!(role, "librarian" | "gm" | "runner") {
-        return Err("the roles are librarian, gm and runner".into());
-    }
-    let (mut budget, mut every, mut program, mut hermes, mut i_know) = (None, None, None, None, false);
-    let mut i = 0;
-    while i < options.len() {
-        let value = || options.get(i + 1).map(|v| (*v).to_owned()).ok_or_else(|| format!("{} needs a value", options[i]));
-        match options[i] {
-            "--budget" => {
-                let v = value()?;
-                chat::decimal(&v, "--budget")?;
-                budget = Some(v);
-                i += 1;
-            }
-            "--every" => {
-                let v = value()?;
-                chat::decimal(&v, "--every")?;
-                every = Some(v);
-                i += 1;
-            }
-            "--hermes" => {
-                let v = value()?;
-                chat::decimal(&v, "--hermes")?;
-                hermes = Some(v);
-                i += 1;
-            }
-            "--program" => {
-                let v = value()?;
-                let file = v.strip_prefix('@').ok_or("--program takes @FILE (a plain name in HOME/requests)")?;
-                if file.is_empty() || file.contains('/') || file.starts_with('.') {
-                    return Err("--program takes @FILE (a plain name in HOME/requests)".into());
-                }
-                program = Some(file.to_owned());
-                i += 1;
-            }
-            "--i-know" => i_know = true,
-            _ => return Err(String::new()),
-        }
-        i += 1;
-    }
-    Ok(Line::Summon { room: room.to_owned(), role: role.to_owned(), budget, every, program, hermes, i_know })
 }
 
 pub(crate) fn run(session: &Session, line: Line) -> Result<(), Done> {
@@ -338,7 +301,7 @@ pub(crate) fn role(name: &str) -> Result<Role, String> {
         "librarian" => (LIBRARIAN_GRANTS, LIBRARIAN_BUDGET),
         "runner" => (RUNNER_GRANTS, RUNNER_BUDGET),
         "gm" => {
-            return Err("summon as gm: the gm role writes a story's state and scene documents, which the story verbs (P-STORY) and MUD-GM own; its template is deploy/shell/templates/hermes/gm, marked for MUD-GM".into())
+            return Err("summon as gm: the gm role writes a story's state and scene documents, which the story verbs (P-STORY) and MUD-GM own; there is no gm template until MUD-GM writes one".into())
         }
         _ => return Err(format!("no role {name}")),
     };
@@ -503,8 +466,8 @@ fn select_registration(
         chat::decimal(member(record, k)?, k)?;
     }
     let enc = member(record, "encryptionKey")?;
-    if enc.len() != 64 || !enc.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("registered Hermes encryptionKey must be 64 hex digits".into());
+    if !mini_sdk::hex::is_canonical_len(enc, 32) {
+        return Err("registered Hermes encryptionKey must be 64 lowercase hex digits".into());
     }
     let record = (**record).clone();
     Ok(record)
@@ -544,7 +507,7 @@ fn law_of(text: &str) -> Result<Value, Done> {
 /// ROOM` when absent, else installed over its current law by its owner.
 fn ensure_doc(session: &Session, room: &str, name: &str, law: &Value) -> Result<&'static str, Done> {
     if chat::reference(session, name).is_err() {
-        chat::create_cell(session, name, "content", law, Some(room), None)?;
+        chat::create_document(session, name, law, Some(room))?;
         return Ok("born");
     }
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"install-policy","name":name,"predicate":law});
@@ -580,6 +543,18 @@ fn summon(
     let chat_room = chat::load_room(session, room).map_err(err)?;
     let record = chat::get_json(&session.home.join("chat").join("rooms").join(format!("{room}.json"))).unwrap_or_default();
     if record.get("founder").and_then(Value::as_str) != Some(me.as_str()) {
+        // A shared room (the house's lobby): its founder summoned Hermes once and
+        // every member asks it there. A member's summon is answered from the
+        // room's signed hermes field; it funds and grants nothing.
+        let root = session.workspace.clone();
+        let ws = workspace::load(&root).map_err(err)?;
+        let present = quietly(|| crate::credit::room(&root, &ws, room)).ok()
+            .and_then(|tariff| tariff.fields.get("hermes").filter(|h| h.as_str() != "0").cloned());
+        if let Some(hermes) = present {
+            println!("{room}: Hermes ({hermes}) is already this room's resident, summoned by its founder and paid from the room's budget; \
+                      it answers every member here. Ask it: `ask {room} QUESTION`; its replies land in the room for everyone (`tail {room}`)");
+            return Ok(());
+        }
         return Err(usage(format!(
             "only the founder of {room} summons Hermes: its grants, its documents' laws and the room's hermes fields are the founder's"
         )));
@@ -701,7 +676,7 @@ fn summon(
     );
     if !done(&state, "program") {
         if chat::reference(session, &program_name).is_err() {
-            chat::create_cell(session, &program_name, "content", &law_of(&fill(&role.program_law, &values))?, Some(room), None)?;
+            chat::create_document(session, &program_name, &law_of(&fill(&role.program_law, &values))?, Some(room))?;
         }
         append_doc(session, &program_name, program_text.trim_end())?;
         state["steps"]["program"] = json!(target(session, &program_name)?);

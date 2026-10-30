@@ -33,11 +33,38 @@ private_file() {
 }
 sha() { sha256sum "$1" | cut -d ' ' -f 1; }
 
-[ "$#" -eq 7 ] || {
-  echo "usage: $0 QUALIFIED_HOST CONFIG.json GRANT_ATTEMPT LOOKUP_OUTCOME.json OPERATOR_PINS.json NEW_OUTPUT_DIR EXPECTED_HOST_SHA256" >&2
+# --served uses the already running owner-private Host; the socket still pins
+# the exact qualified image and complete config. No new authority cache exists.
+SERVED_MINI= SERVED_SOCKET= SERVED_MINI_SHA=
+if [ "${1:-}" = --served ]; then
+  [ "$#" -ge 4 ] || fail "--served needs MINI OPERATOR_SOCKET MINI_SHA256"
+  SERVED_MINI=$2 SERVED_SOCKET=$3 SERVED_MINI_SHA=$4
+  shift 4
+fi
+CUSTODY_ONLY=false
+if [ "${1:-}" = --custody-only ]; then CUSTODY_ONLY=true; shift; fi
+{ [ "$#" -eq 7 ] || [ "$#" -eq 9 ]; } || {
+  echo "usage: $0 [--served MINI OPERATOR_SOCKET MINI_SHA256] [--custody-only] QUALIFIED_HOST CONFIG.json GRANT_ATTEMPT LOOKUP_OUTCOME.json OPERATOR_PINS.json NEW_OUTPUT_DIR EXPECTED_HOST_SHA256 [ALLOCATION.json ROUTE]" >&2
   exit 2
 }
 HOST=$1 CONFIG=$2 GRANT=$3 LOOKUP=$4 PINS=$5 OUTPUT=$6 HOST_SHA=$7
+EXPECTED=null
+if [ "$#" -eq 9 ]; then
+  ALLOCATION=$8 ROUTE=$9
+  private_file "$ALLOCATION" 65536
+  EXPECTED=$(jq -ce --arg route "$ROUTE" '
+    select(.protocol == "mini-spk-integrated-allocation-v1" and
+      .status == "reserved-coordinates-only") |
+    . as $allocation | [.agents[] | select(.route == $route)] |
+    if length != 1 then error("exact agent allocation absent") else .[0] end |
+    {app:$allocation.app,packageManifest:$allocation.packageManifest,
+     snapshotManifest:$allocation.snapshotManifest,session:.session,
+     ticketResource:.ticket,grantResource:.persistentGrant,
+     subject:.controller.subject,parentTask:.controller.task,
+     purseResource:.dispatch.task,payerSubject:.dispatch.subject} |
+    select(all(.[]; type == "string" and test("^[1-9][0-9]*$")))
+  ' "$ALLOCATION") || fail "explicit allocation invalid"
+fi
 for path in "$HOST" "$CONFIG" "$GRANT" "$LOOKUP" "$PINS" "$OUTPUT"; do absolute "$path"; done
 case "$LOOKUP" in "$GRANT"/lookup-[0-9][0-9][0-9][0-9].outcome.json) ;; *) fail "lookup must belong to exact grant attempt" ;; esac
 LOOKUP_STEM=${LOOKUP%.outcome.json}
@@ -59,6 +86,13 @@ private_file "$GRANT/seal.json" 4096
 private_file "$GRANT/submit-marker.json" 4096
 printf '%s' "$HOST_SHA" | grep -Eq '^[0-9a-f]{64}$' || fail "Host SHA pin refused"
 [ "$(sha "$HOST")" = "$HOST_SHA" ] || fail "qualified Host image differs"
+if [ -n "$SERVED_MINI" ]; then
+  absolute "$SERVED_MINI"; absolute "$SERVED_SOCKET"
+  protected_chain "${SERVED_MINI%/*}"
+  [ -f "$SERVED_MINI" ] && [ -x "$SERVED_MINI" ] && [ ! -L "$SERVED_MINI" ] || fail "served client unavailable"
+  printf '%s' "$SERVED_MINI_SHA" | grep -Eq '^[0-9a-f]{64}$' || fail "served client SHA pin refused"
+  [ "$(sha "$SERVED_MINI")" = "$SERVED_MINI_SHA" ] || fail "served client image differs"
+fi
 CONFIG_SHA=$(sha "$CONFIG")
 CALL_SHA=$(sha "$GRANT/call.bin")
 jq -e --arg configSha "$CONFIG_SHA" \
@@ -87,30 +121,42 @@ jq -e --slurpfile receipt "$GRANT/receipt.json" '
   {transactionId,eventId,acceptedCount,worldRoot} ==
     ($receipt[0] | {transactionId,eventId,acceptedCount,worldRoot})
   ' "$LOOKUP" >/dev/null || fail "exact event27 lookup receipt differs"
-jq -e '
+jq -e --argjson expected "$EXPECTED" --argjson custodyOnly "$CUSTODY_ONLY" '
   def decimal: type == "string" and test("^(0|[1-9][0-9]*)$");
-  (keys | sort) == (["appSigners","controllerRouteName","enrollmentObserveCapability",
+  # A pin set names either a v3 signed API prefix or a v4 hosted web route (an app
+  # without an api interface is reached through its member WebSession at an https origin).
+  def base: ["appSigners","controllerRouteName","enrollmentObserveCapability",
     "grantSigner","hostUid","hostUnit","manifestObserveCapability","maximumCharge",
     "packageManifest","parentCapability","parentObserve","payerPins","payerSubject",
     "purseCapability","purseObserve","purseResource","reserveAmount",
-    "sessionObserveCapability","signedApiPath","snapshotManifest","socketPath"] | sort) and
-  .signedApiPath == "/repo.git/" and
+    "sessionObserveCapability","snapshotManifest","socketPath"];
+  ((keys | sort) == ((base + ["signedApiPath"]) | sort) or
+   ((keys | sort) == ((base + ["route"]) | sort) and $expected != null)) and
+  (if has("route") then
+     (.route | type == "object" and (keys | sort) == ["kind","origin"] and .kind == "web" and
+       (.origin | type == "string" and test("^https://[a-z0-9]([a-z0-9.:-]*[a-z0-9])?$") and length <= 260))
+   elif $expected == null then .signedApiPath == "/repo.git/"
+   else (.signedApiPath | type == "string" and startswith("/") and endswith("/") and
+     (contains("?") or contains("#") or contains("..") or contains("%") | not)) end) and
   (.controllerRouteName | type == "string" and test("^[A-Za-z0-9-]+-app$")) and
   (.hostUid | type == "number" and . > 0 and floor == .) and
-  (.hostUnit | type == "string" and length > 0 and length <= 256) and
+  (if $custodyOnly then .hostUnit == null
+   else (.hostUnit | type == "string" and length > 0 and length <= 256) end) and
   (.socketPath | type == "string" and startswith("/")) and
   (.appSigners | type == "array" and length > 0 and length <= 64) and
   (.grantSigner | type == "object") and
-  (.payerPins | type == "array" and length == 3) and
+  (.payerPins | type == "array" and length == 2 and
+    map({role,index}) == [{role:"4",index:"0"},{role:"1",index:"0"}]) and
   ([.packageManifest,.snapshotManifest,.sessionObserveCapability,
     .manifestObserveCapability,.enrollmentObserveCapability,.parentCapability,
     .parentObserve,.purseCapability,.purseObserve,.purseResource,
     .payerSubject,.reserveAmount,.maximumCharge] | all(.[]; decimal)) and
-  .packageManifest == "8402" and .snapshotManifest == "8403" and
-  ((.controllerRouteName == "workroom-app" and .purseResource == "7940" and
-    .payerSubject == "10") or
-   (.controllerRouteName == "coding-app" and .purseResource == "7941" and
-    .payerSubject == "20"))
+  (if $expected == null then
+    .packageManifest == "8402" and .snapshotManifest == "8403" and
+    ((.controllerRouteName == "workroom-app" and .purseResource == "7940" and .payerSubject == "10") or
+     (.controllerRouteName == "coding-app" and .purseResource == "7941" and .payerSubject == "20"))
+   else .packageManifest == $expected.packageManifest and .snapshotManifest == $expected.snapshotManifest and
+     .purseResource == $expected.purseResource and .payerSubject == $expected.payerSubject end)
   ' "$PINS" >/dev/null || fail "operator route/key pin shape refused"
 
 mkdir -m 700 "$OUTPUT"
@@ -121,13 +167,20 @@ mkdir -m 700 "$OUTPUT"
   >"$OUTPUT/lookup.stdout" 2>"$OUTPUT/lookup.stderr" || fail "retained lookup outcome refused"
 jq -e --slurpfile original "$LOOKUP" '. == $original[0]' \
   "$OUTPUT/reinspected-lookup.json" >/dev/null || fail "retained lookup outcome changed"
-# This new source route performs lookupCurrent against the pinned CONFIG Store
+# Both source routes inspect the same verifier-selected original in the pinned CONFIG Store
 # and returns only verifier-selected event27, never a caller-authored plan.
-"$HOST" "$CONFIG" inspect-accepted-agent-lifetime-grant \
-  "$GRANT/call.bin" "$OUTPUT/accepted-grant.json" \
-  >"$OUTPUT/host.stdout" 2>"$OUTPUT/host.stderr" || fail "source grant inspection refused; output retained"
+if [ -n "$SERVED_MINI" ]; then
+  "$SERVED_MINI" agent-lifetime-grant-inspect --host "$HOST" --config "$CONFIG" \
+    --operator-socket "$SERVED_SOCKET" --ingress "$GRANT/call.bin" \
+    --output "$OUTPUT/accepted-grant.json" \
+    >"$OUTPUT/host.stdout" 2>"$OUTPUT/host.stderr" || fail "served source grant inspection refused; output retained"
+else
+  "$HOST" "$CONFIG" inspect-accepted-agent-lifetime-grant \
+    "$GRANT/call.bin" "$OUTPUT/accepted-grant.json" \
+    >"$OUTPUT/host.stdout" 2>"$OUTPUT/host.stderr" || fail "source grant inspection refused; output retained"
+fi
 chmod 600 "$OUTPUT"/*
-jq -e --slurpfile receipt "$GRANT/receipt.json" '
+jq -e --argjson expected "$EXPECTED" --slurpfile receipt "$GRANT/receipt.json" '
   def decimal: type == "string" and test("^(0|[1-9][0-9]*)$");
   .type == "application-agent-lifetime-grant-accepted-v1" and
   (.canonicalIngressHex | type == "string" and length > 0 and length % 2 == 0 and
@@ -142,11 +195,13 @@ jq -e --slurpfile receipt "$GRANT/receipt.json" '
   ([.originalEvent22Receipt,.grantIssueReceipt] |
     all(.[]; (keys | sort) == (["transactionId","eventId","acceptedCount","worldRoot"] | sort) and
       ([.transactionId,.eventId,.acceptedCount,.worldRoot] | all(.[]; decimal)))) and
-  .app == "8401" and
-  ((.session == "8420" and .ticketResource == "8520" and .grantResource == "8530" and
-    .subject == "10" and .parentTask == "7920") or
-   (.session == "8422" and .ticketResource == "8521" and .grantResource == "8531" and
-    .subject == "20" and .parentTask == "7921"))
+  (if $expected == null then .app == "8401" and
+    ((.session == "8420" and .ticketResource == "8520" and .grantResource == "8530" and
+      .subject == "10" and .parentTask == "7920") or
+     (.session == "8422" and .ticketResource == "8521" and .grantResource == "8531" and
+      .subject == "20" and .parentTask == "7921"))
+   else {app,session,ticketResource,grantResource,subject,parentTask} ==
+     ($expected | {app,session,ticketResource,grantResource,subject,parentTask}) end)
   ' "$OUTPUT/accepted-grant.json" >/dev/null || fail "source accepted grant projection differs from retained event27"
 # Decode the source-projected canonical ingress to a protected file and compare
 # bytes. A full ingress can exceed Linux's per-argument MAX_ARG_STRLEN.
@@ -155,19 +210,20 @@ jq -er .canonicalIngressHex "$OUTPUT/accepted-grant.json" |
 chmod 600 "$OUTPUT/source-grant-ingress.bin"
 cmp -s "$GRANT/call.bin" "$OUTPUT/source-grant-ingress.bin" ||
   fail "source-selected ingress differs from retained sealed call"
-jq -e --slurpfile pins "$PINS" '
-  ($pins[0].controllerRouteName == "workroom-app" and
+jq -e --argjson expected "$EXPECTED" --slurpfile pins "$PINS" '
+  if $expected != null then true else ($pins[0].controllerRouteName == "workroom-app" and
     .session == "8420" and .ticketResource == "8520" and
     .grantResource == "8530" and .parentTask == "7920" and .subject == "10") or
   ($pins[0].controllerRouteName == "coding-app" and
     .session == "8422" and .ticketResource == "8521" and
-    .grantResource == "8531" and .parentTask == "7921" and .subject == "20")
+    .grantResource == "8531" and .parentTask == "7921" and .subject == "20") end
   ' "$OUTPUT/accepted-grant.json" >/dev/null || fail "operator route differs from source-selected grant"
 jq -er .originalDescriptorHex "$OUTPUT/accepted-grant.json" |
   xxd -r -p >"$OUTPUT/original-descriptor.bin"
 chmod 600 "$OUTPUT/original-descriptor.bin"
 DESCRIPTOR_SHA=$(sha "$OUTPUT/original-descriptor.bin")
 
+if [ "$CUSTODY_ONLY" = false ]; then
 jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
   --arg grantAttempt "$GRANT" --arg descriptorSha "$DESCRIPTOR_SHA" '
   $a[0] as $a | $p[0] as $p |
@@ -176,7 +232,6 @@ jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
    ticketResource:$a.ticketResource,participantSubject:$a.subject,
    parentTask:$a.parentTask,originalParentGeneration:$a.originalGeneration,
    originalDescriptorSha256:$descriptorSha,purseResource:$p.purseResource,
-   signedApiPath:$p.signedApiPath,
    dispatchSelectors:{issueIndex:$a.originalEvent22Index,
      packageManifest:$p.packageManifest,snapshotManifest:$p.snapshotManifest,
      sessionObserve:$p.sessionObserveCapability,
@@ -186,11 +241,13 @@ jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
    grantObserveCapability:$a.grantObserveCapability,grantAttemptDir:$grantAttempt,
    grantDigest:$a.grantDigest,grantInitializedRoot:$a.grantInitializedRoot,
    originalIssueReceipt:$a.originalEvent22Receipt,grantIssueReceipt:$a.grantIssueReceipt}
+  + (if $p | has("route") then {route:$p.route} else {signedApiPath:$p.signedApiPath} end)
   ' >"$OUTPUT/controller-route-v3.json"
+fi
 jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
   --arg descriptorSha "$DESCRIPTOR_SHA" '
   $a[0] as $a | $p[0] as $p |
-  {protocol:"mini-spk-agent-lifetime-custody-v3",
+  {protocol:(if $p | has("route") then "mini-spk-agent-lifetime-custody-v4" else "mini-spk-agent-lifetime-custody-v3" end),
    lineage:{appResource:$a.app,sessionResource:$a.session,participantSubject:$a.subject,
      ticketResource:$a.ticketResource,originalParentTask:$a.parentTask,
      originalParentGeneration:$a.originalGeneration,
@@ -210,6 +267,7 @@ jq -n --slurpfile a "$OUTPUT/accepted-grant.json" --slurpfile p "$PINS" \
    grantObserveCapability:$a.grantObserveCapability,payerSubject:$p.payerSubject,
    reserveAmount:$p.reserveAmount,maximumCharge:$p.maximumCharge,
    appSigners:$p.appSigners,grantSigner:$p.grantSigner,payerPins:$p.payerPins}
+  + (if $p | has("route") then {route:$p.route} else {} end)
   ' >"$OUTPUT/resident-custody-v3.json"
 chmod 600 "$OUTPUT"/*.json
 [ "$(sha "$HOST")" = "$HOST_SHA" ] &&
@@ -217,14 +275,15 @@ chmod 600 "$OUTPUT"/*.json
   [ "$(sha "$CONFIG")" = "$CONFIG_SHA" ] &&
   [ "$(sha "$GRANT/call.bin")" = "$CALL_SHA" ] ||
   fail "Host, config or grant changed during source inspection"
-sha256sum "$HOST" "$ORIGINAL_HOST" "$CONFIG" "$GRANT/pin.json" \
+set -- "$HOST" "$ORIGINAL_HOST" "$CONFIG" "$GRANT/pin.json" \
   "$GRANT/seal.json" "$GRANT/submit-marker.json" \
   "$GRANT/call.bin" "$GRANT/receipt.json" \
   "$LOOKUP" "$LOOKUP_STEM.marker.json" "$LOOKUP_STEM.outcome.bin" \
   "$OUTPUT/reinspected-lookup.json" "$PINS" "$OUTPUT/accepted-grant.json" \
   "$OUTPUT/source-grant-ingress.bin" \
   "$OUTPUT/original-descriptor.bin" \
-  "$OUTPUT/controller-route-v3.json" "$OUTPUT/resident-custody-v3.json" \
-  >"$OUTPUT/SHA256SUMS"
+  "$OUTPUT/resident-custody-v3.json"
+if [ "$CUSTODY_ONLY" = false ]; then set -- "$@" "$OUTPUT/controller-route-v3.json"; fi
+sha256sum "$@" >"$OUTPUT/SHA256SUMS"
 chmod 600 "$OUTPUT/SHA256SUMS"
 echo "source-bound lifetime route prepared at $OUTPUT; no API or app started"

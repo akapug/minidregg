@@ -24,7 +24,6 @@ private def decodeRecords : Block → Option (List IntentRecord)
   | [] => some []
   | bytes :: rest => do
       let record ← DurableCheckpointCodec.recordFrame.decode bytes
-      if DurableCheckpointCodec.recordFrame.encode record != bytes then none else
       let tail ← decodeRecords rest
       some (record :: tail)
 
@@ -63,7 +62,7 @@ def validate (config : NativeHost.Config) (origin : Opened config) (expected : C
       if seedIdentity seed != config.expectedSeed then return .rejected "pinned source seed mismatch"
       let some records := decodeRecords (sourceRecords block)
         | return .rejected "noncanonical source record in proposed prefix"
-      let image : Image := ⟨seed,records⟩
+      let image : Image := Image.ofAccepted seed records
       match built : DurableReceiverIO.loadImage ResourceBirthCodec.rootBytes (config.logStart seed) image with
       | .error detail => return .rejected detail
       | .ok target =>

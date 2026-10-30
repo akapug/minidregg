@@ -3,7 +3,6 @@
 //! Rust supplies exact signed bytes and decoded bridge roles. Mini owns the
 //! canonical schema, fixed web/API mapping and package root; the returned
 //! bytes are compared to the physical parse before any BEGIN plan uses them.
-#![allow(dead_code)] // Joined INSTALL/START resident caller follows native link.
 
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::materialize::{signed_schema_source, InstalledPackage};
@@ -13,6 +12,7 @@ use std::fs::DirBuilder;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
+use crate::canonical::{decimal, hex};
 
 /// The only pure source-authoring formats the physical SPK descriptor path
 /// may request. This does not expose Mini submit, lookup or admission.
@@ -53,27 +53,11 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(out, "{byte:02x}").expect("writing to String");
-    }
-    out
-}
-
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
     value
         .get(name)
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("source SPK descriptor field absent"))
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(crate) struct SourceDescriptor {
@@ -104,14 +88,13 @@ pub(crate) fn author_signed_package<T: SourceTool>(
         .as_deref()
         .ok_or_else(|| invalid("signed bridge config absent"))?;
     let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
-    if bridge.save_identity_caps
-        || bridge.expect_app_hooks
-        || bridge
-            .api_path
-            .as_deref()
-            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
+    // saveIdentityCaps and expectAppHooks are served; an unchecked apiPath is not.
+    if bridge
+        .api_path
+        .as_deref()
+        .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
     {
-        return Err(invalid("signed bridge outside resident Mini mapping"));
+        return Err(invalid("signed bridge outside resident Mini mapping: apiPath"));
     }
     let schema_source = signed_schema_source(&bridge, package.manifest.app_version);
     let schema_input = write_new(

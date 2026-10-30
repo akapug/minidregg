@@ -131,13 +131,13 @@ structure FramedFields where
   fields : List (List UInt8)
   deriving DecidableEq, Repr
 
-abbrev FramedFieldsWire := Nat × (UInt8 × List (List UInt8))
+abbrev FramedFieldsWire := UInt8 × List (List UInt8)
 
 def FramedFields.toWire (framed : FramedFields) : FramedFieldsWire :=
-  (wireVersion, framed.kind, framed.fields)
+  (framed.kind, framed.fields)
 
 def FramedFields.ofWire (wire : FramedFieldsWire) : FramedFields :=
-  ⟨wire.2.1, wire.2.2⟩
+  ⟨wire.1, wire.2⟩
 
 @[simp] theorem FramedFields.ofWire_toWire (framed : FramedFields) :
     FramedFields.ofWire framed.toWire = framed := by
@@ -146,13 +146,14 @@ def FramedFields.ofWire (wire : FramedFieldsWire) : FramedFields :=
 
 /-- The framing grammar is composed only from the shared compact streaming
 codec nucleus: base-255 naturals, bytes, length-delimited lists, and products.
-No terminal-specific serializer or parser exists beside it. -/
+No terminal-specific serializer or parser exists beside it. The version is a
+CHECKED frame (the base-255 natural `wireVersion`): any other version is
+refused by the stream decoder itself. -/
 def framedFieldsStream : StreamCodec FramedFields :=
-  StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.byte
-        (StreamCodec.list bytesStream)))
-    FramedFields.toWire FramedFields.ofWire FramedFields.ofWire_toWire
+  StreamCodec.framed (StreamCodec.nat.encode wireVersion)
+    (StreamCodec.xmap
+      (StreamCodec.product StreamCodec.byte (StreamCodec.list bytesStream))
+      FramedFields.toWire FramedFields.ofWire FramedFields.ofWire_toWire)
 
 def rawFramedFieldsCodec : LawfulCodec FramedFields :=
   framedFieldsStream.toLawful

@@ -1,5 +1,6 @@
 //! One-shot privileged volume boundary. Only a root-installed registry selects
 //! paths, identities and quotas; caller-supplied paths must match it exactly.
+use crate::io_context::IoContext;
 use crate::broker::{decimal, store_key, volume_name};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,9 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use sha2::{Digest, Sha256};
 use minidregg_compatible_upgrade_custody as custody;
+use crate::canonical::hex64 as hex;
 const REGISTRY: &str = "/etc/mini-spk-volumes";
 fn refuse(message: &str) -> io::Error { io::Error::new(io::ErrorKind::PermissionDenied, message) }
-fn hex(value: &str) -> bool { value.len()==64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all="camelCase", deny_unknown_fields)]
 pub(crate) struct Registry {
@@ -33,7 +34,7 @@ impl Registry {
         if !store_key(store) { return Err(refuse("volume-helper: store id refused")); }
         let path=Path::new(REGISTRY).join(format!("{store}.json"));
         custody::root_ancestors(&path)?;
-        let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(&path)?;
+        let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(&path).ctx("open", &path)?;
         let meta=file.metadata()?;
         if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.mode()&0o7777!=0o644 || meta.len()>65536 {
             return Err(refuse("volume-helper: root registry custody refused"));
@@ -47,7 +48,7 @@ impl Registry {
             || result.grains_root!=Path::new("/var/lib/mini-spk-worlds").join(store)
         { return Err(refuse("volume-helper: registry shape refused")); }
         custody::root_ancestors(&result.grains_root)?;
-        let root=fs::symlink_metadata(&result.grains_root)?;
+        let root=fs::symlink_metadata(&result.grains_root).ctx("inspect", &result.grains_root)?;
         if !root.is_dir() || root.uid()!=0 || root.mode()&0o7777!=0o755 {
             return Err(refuse("volume-helper: world root custody refused"));
         }
@@ -129,7 +130,7 @@ fn authenticate_root(registry: &Registry) -> io::Result<u32> {
 }
 fn verb_lock(registry: &Registry, read_only: bool) -> io::Result<File> {
     let path=registry.grains_root.join("volume-custody/verbs.lock");
-    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(path)?;
+    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(&path).ctx("open", &path)?;
     let meta=file.metadata()?;
     if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.permissions().mode()&0o7777!=0o600 { return Err(refuse("volume-helper: verb lock custody refused")); }
     if unsafe{libc::flock(file.as_raw_fd(),(if read_only {libc::LOCK_SH}else{libc::LOCK_EX})|libc::LOCK_NB)}!=0 {
@@ -168,16 +169,16 @@ fn paused(registry: &Registry, request: &Request) -> io::Result<bool> {
 }
 fn root_volume_status(registry: &Registry) -> io::Result<Vec<VolumeStatus>> {
     let dir=registry.grains_root.join("volumes");
-    let meta=fs::symlink_metadata(&dir)?;
+    let meta=fs::symlink_metadata(&dir).ctx("inspect", &dir)?;
     if !meta.is_dir() || meta.uid()!=0 || meta.mode()&0o7777!=0o700 { return Err(refuse("volume-helper: volume registry directory custody refused")); }
     let mut volumes=Vec::new();
-    for entry in fs::read_dir(&dir)? {
+    for entry in fs::read_dir(&dir).ctx("list", &dir)? {
         let entry=entry?;
         let name=entry.file_name().into_string().map_err(|_|refuse("volume-helper: registration name encoding"))?;
         let Some(name)=name.strip_suffix(".conf") else {continue};
         let (store,grain)=name.split_once('-').ok_or_else(||refuse("volume-helper: registration name refused"))?;
         if store!=registry.store || !decimal(grain) {return Err(refuse("volume-helper: cross-world-volume-path refused"))}
-        let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(entry.path())?;
+        let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(entry.path()).ctx("open", &(entry.path()))?;
         let meta=f.metadata()?;
         if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.mode()&0o7777!=0o600 || meta.len()>4096 {return Err(refuse("volume-helper: registration custody refused"))}
         let mut text=String::new();f.take(4097).read_to_string(&mut text)?;
@@ -224,7 +225,7 @@ fn script(registry: &Registry, request: &Request, action: &str, import: Option<&
 }
 fn registration(registry: &Registry, request: &Request) -> io::Result<()> {
     let path=registry.grains_root.join("volumes").join(format!("{}.conf",volume_name(&request.store,&request.grain)));
-    let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(path)?;
+    let f=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW|libc::O_CLOEXEC).open(&path).ctx("open", &path)?;
     let m=f.metadata()?;
     if !m.is_file() || m.uid()!=0 || m.nlink()!=1 || m.mode()&0o7777!=0o600 || m.len()>4096 { return Err(refuse("volume-helper: registration custody refused")); }
     let mut text=String::new();f.take(4097).read_to_string(&mut text)?;
@@ -238,7 +239,7 @@ fn mount_registered(registry: &Registry, request: &Request) -> io::Result<()> {
     let probe=Command::new("/usr/bin/findmnt").args(["-n","-M"]).arg(&request.volume_path).env_clear().output()?;
     if !probe.status.success() {
         let image=registry.grains_root.join("volumes").join(format!("{}.ext4",volume_name(&request.store,&request.grain)));
-        let meta=fs::symlink_metadata(&image)?;
+        let meta=fs::symlink_metadata(&image).ctx("inspect", &image)?;
         if !meta.is_file() || meta.uid()!=0 || meta.nlink()!=1 || meta.mode()&0o7777!=0o600 || meta.len()!=request.size_mib*1024*1024 { return Err(refuse("volume-helper: backing image custody refused")); }
         run("/usr/bin/mount",&["-t","ext4","-o","loop,nosuid,nodev,noatime",image.to_str().ok_or_else(||refuse("image encoding"))?,request.volume_path.to_str().ok_or_else(||refuse("volume encoding"))?])?;
     }
@@ -273,13 +274,13 @@ pub fn execute(bytes: &[u8]) -> io::Result<Value> {
                 let mut source=crate::broker::volume_import(root,&request.store,sha,caller)?;
                 if source.metadata()?.len()!=request.size_mib*1024*1024 { return Err(refuse("volume-helper: import size refused")); }
                 let target=root.join("volumes").join(format!(".import-{name}"));
-                let mut out=OpenOptions::new().write(true).create_new(true).mode(0o600).open(&target)?;
+                let mut out=OpenOptions::new().write(true).create_new(true).mode(0o600).open(&target).ctx("open", &target)?;
                 io::copy(&mut source,&mut out)?;out.sync_all()?;
-                let mut input=File::open(&target)?;
+                let mut input=File::open(&target).ctx("open", &target)?;
                 let mut hash=Sha256::new();
                 let mut buffer=[0u8;65536];
                 loop { let n=input.read(&mut buffer)?;if n==0 {break} hash.update(&buffer[..n]); }
-                if format!("{:x}",hash.finalize())!=*sha { fs::remove_file(&target)?;return Err(refuse("volume-helper: exact import digest differs")); }
+                if format!("{:x}",hash.finalize())!=*sha { fs::remove_file(&target).ctx("remove", &target)?;return Err(refuse("volume-helper: exact import digest differs")); }
                 Some(target)
             } else { None };
             script(&registry,&request,if import.is_some(){"create-from"}else{"create"},import.as_deref())?;
@@ -308,10 +309,10 @@ pub fn execute(bytes: &[u8]) -> io::Result<Value> {
             if mounted.status.success() { return Err(refuse("volume-helper: destroy requires unmounted volume")); }
             let image=root.join("volumes").join(format!("{name}.ext4"));
             if !run("/usr/sbin/losetup",&["-j",image.to_str().ok_or_else(||refuse("image encoding"))?])?.is_empty() { return Err(refuse("volume-helper: destroy refuses attached loop")); }
-            fs::remove_file(image)?;
-            fs::remove_file(root.join("volumes").join(format!("{name}.conf")))?;
-            fs::remove_file(root.join("attest").join(format!("{name}.witness")))?;
-            fs::remove_dir(&request.volume_path)?;
+            fs::remove_file(&image).ctx("remove", &image)?;
+            { let conf = root.join("volumes").join(format!("{name}.conf")); fs::remove_file(&conf).ctx("remove", &conf)?; }
+            { let witness = root.join("attest").join(format!("{name}.witness")); fs::remove_file(&witness).ctx("remove", &witness)?; }
+            fs::remove_dir(&request.volume_path).ctx("remove", &request.volume_path)?;
         }
     }
     Ok(json!({"store":request.store,"grain":request.grain,"verb":request.verb,"volumePath":request.volume_path}))

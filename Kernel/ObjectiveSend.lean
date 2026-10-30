@@ -54,7 +54,26 @@ The turn is ONE intent: the inboxes and slots it read and writes (each a lawful
 queue step of what it held), the decided slot, the delivered call tree's state
 writes, and the Book, guarded on every object it read, spending the message's
 claim (`messageClaim`): a message is delivered once. -/
-import Kernel.ObjectiveCall
+module
+
+public import Kernel.ObjectiveCall
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveSend
 open Minidregg.Theory Minidregg.Compiler
@@ -338,6 +357,18 @@ structure MessageDelivery {rootBytes : Bytes → Digest} (config : Config) (snap
   posts : List Post
   postsExact : posts = outcome.posts config snapshot ++ mail.posts ++
     [replyPost config snapshot slot decided, posted.write config snapshot]
+theorem MessageDelivery.sound {rootBytes : Bytes → Digest} {config : Config} {snapshot : Snapshot rootBytes}
+    {height : Nat} {request : MessageRequest} (delivered : MessageDelivery config snapshot height request) :
+    readInbox snapshot (inboxCell config.domain snapshot request.sender request.target) = some (some delivered.inbox) ∧
+      (delivered.inbox.sender = request.sender ∧ delivered.inbox.target = request.target) ∧
+      delivered.inbox.pop = some (delivered.message, delivered.remaining) ∧ delivered.message.id = request.message ∧
+      readSlot config snapshot delivered.message.id = some delivered.slot ∧
+      delivered.slot.activity = inboxCell config.domain snapshot request.sender request.target ∧
+      runMessage config snapshot height request.target delivered.message = delivered.run ∧
+      AnswerSlot.decideDelivery delivered.slot delivered.message.id delivered.message.sender height
+        delivered.outcome.decision = .ok delivered.decided :=
+  ⟨delivered.readExact, delivered.ends, delivered.popped, delivered.named, delivered.slotExact,
+    delivered.activityExact, delivered.runExact, delivered.decidedExact⟩
 
 /-- **An unwatched slot's delivery retires it; a watched one's writes the decision.** -/
 theorem replyPost_spec {rootBytes : Bytes → Digest} (config : Config) (snapshot : Snapshot rootBytes)
@@ -458,6 +489,8 @@ def debited : Operation → Option AccountId
   | .burn source _ _ => some source
   | .lease _ holder _ _ _ _ _ => some holder
   | .mint _ _ _ => none
+  | .setFloor _ _ _ => none
+  | .sweep holder _ _ _ _ _ => some holder
 
 theorem creditTransfers_debit (config : Config) (source : AccountId) (credits : List (AccountId × Nat)) :
     ∀ op ∈ creditTransfers config source credits, debited op = some source := by

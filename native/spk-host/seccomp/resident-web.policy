@@ -28,9 +28,11 @@ default ENOSYS
 
 # --- process memory and threads ---
 allow brk mmap munmap mremap mprotect madvise msync mincore mlock mlock2 munlock mlockall munlockall
-allow get_mempolicy set_mempolicy mbind membarrier rseq
+allow membarrier rseq
 allow set_tid_address set_robust_list get_robust_list futex futex_waitv
-allow arch_prctl prctl
+allow arch_prctl
+# PR_SET_SECCOMP = 22: a filter is installed only by bubblewrap, before exec.
+allow-arg prctl 0 notin 22 else EPERM
 allow exit exit_group
 allow execve execveat fork vfork wait4 waitid
 # Threads and children only in the existing namespaces. The mask is CLONE_NEWNS|NEWCGROUP|
@@ -52,7 +54,9 @@ allow ioprio_get ioprio_set pkey_alloc pkey_free pkey_mprotect
 allow uname sysinfo umask times
 # 0 = PER_LINUX, 0xffffffff = query. Refuses ADDR_NO_RANDOMIZE and friends.
 allow-arg personality 0 in 0 0xffffffff else EPERM
-allow seccomp
+# The sandbox's one filter is bubblewrap's; the app may not attach BPF of its own
+# (Sandstorm's supervisor refuses seccomp(2) for the same kernel-surface reason).
+deny EPERM seccomp
 
 # --- signals and timers ---
 allow rt_sigaction rt_sigprocmask rt_sigreturn rt_sigpending rt_sigtimedwait rt_sigqueueinfo
@@ -76,10 +80,9 @@ allow truncate ftruncate fallocate fadvise64 readahead
 allow utime utimes utimensat futimesat
 allow getxattr lgetxattr fgetxattr listxattr llistxattr flistxattr
 allow setxattr lsetxattr fsetxattr removexattr lremovexattr fremovexattr
-allow sendfile copy_file_range splice tee vmsplice memfd_create
+allow sendfile copy_file_range splice tee memfd_create
 allow inotify_init inotify_init1 inotify_add_watch inotify_rm_watch
 allow poll ppoll select pselect6 epoll_create epoll_create1 epoll_ctl epoll_wait epoll_pwait epoll_pwait2
-allow io_setup io_destroy io_submit io_cancel io_getevents
 allow getrandom
 # TIOCSTI (0x5412) and TIOCLINUX (0x541c) inject input into a terminal. The kernel reads
 # the request as 32 bits, so a high-word variant is refused too.
@@ -108,3 +111,9 @@ deny EPERM init_module finit_module delete_module kexec_load kexec_file_load reb
 deny EPERM swapon swapoff acct quotactl quotactl_fd syslog vhangup
 deny EPERM settimeofday clock_settime clock_adjtime adjtimex sethostname setdomainname
 deny EPERM iopl ioperm modify_ldt uselib memfd_secret migrate_pages move_pages
+# Refused as Sandstorm's supervisor refuses them: legacy AIO, vmsplice and the NUMA
+# memory-policy calls. ENOSYS, so libaio, splice users and allocators take their
+# ordinary fallback paths.
+deny ENOSYS io_setup io_destroy io_submit io_cancel io_getevents
+deny ENOSYS vmsplice
+deny ENOSYS get_mempolicy set_mempolicy mbind

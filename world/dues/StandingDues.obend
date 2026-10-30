@@ -17,10 +17,9 @@ edition ObjectiveBend 1
 # replay_rejected, behind_schedule_rejected) and Deos/PrepaidLease.lean (meter and
 # draw fused in one write), and of the starbridge-apps/subscription idea of a
 # standing grant. Layers, as in world/bounty: (1) pure transitions over an Account;
-# (2) the same lifecycle as an Activity that yields one Plan per step. The Plans are
-# proposals: a transfer is lowered by the kernel (a seat held by the payer, or the
-# lease escrow), never by this program. Preview evidence only; no native receipt
-# exists for this package.
+# (2) the same lifecycle as an Activity on the activity kernel: one Plan per step, the
+# kernel's own (`await`, `transfer`); a payment is performed by the kernel from the
+# activity's purse (the birth deposit) at the yield, never by this program.
 
 record Terms:
   payer: Nat
@@ -216,21 +215,75 @@ def movedAtMostOnce(t: Transition, before: Account) -> Bool:
 def lawPreserved(t: Transition, before: Account) -> Bool:
   duesLaw(accountOf(t)) && accountOf(t).k <= before.k + 1n && movedAtMostOnce(t, before)
 
-# ---- (2) the lifecycle as an Activity ----------------------------------------
+# ---- (2) the lifecycle as an Activity on the kernel (Kernel/ObjectiveActivity) ----
+# One input value (`Opening`); the response is the kernel's `resumed {outcome, view}`; the
+# Plans are the kernel's own: `await {write, on, patience}` for the next event (one decider, the
+# keeper, answers with a typed `Event`), and `transfer {to, amount, write}` for a payment, which
+# the kernel performs FROM THE ACTIVITY'S PURSE at the yield (the birth deposit funds it) and
+# answers `settled` or `refused`. The declared state is the object's ledger (`paid`): a performed
+# payment adds its amount there in the same turn; a refused one writes nothing and the period stays
+# owed. Every unfolding past a yield costs one admitted turn.
 
-record Waiting:
-  phase: String
-  period: Nat
-  due: Nat
+record Opening:
+  terms: Terms
+  deposit: Nat
+  keeper: Nat
+  fresh: Bool
+
+record Ledger:
+  paid: Nat
+
+sum EditNat:
+  keep: {}
+  set: Nat
+  add: Nat
+
+record Write:
+  paid: EditNat
+
+record Ask:
+  decider: Nat
+
+record At:
+  at: Nat
+
+sum Source:
+  reply: Ask
+  height: At
+
+record Await:
+  write: Write
+  on: Source
+  patience: Nat
+
+record Pay:
+  to: Nat
+  amount: Nat
+  write: Write
 
 sum Plan:
-  await: Waiting
-  pay: Transfer
+  await: Await
+  transfer: Pay
 
-sum Response:
-  event: Event
+sum Outcome:
+  reply: Event
   settled: {}
   refused: {}
+  unknown: {}
+  timedOut: {}
+  broken: {}
+  upgraded: {}
+
+record View:
+  version: Nat
+  state: Ledger
+
+record Step:
+  outcome: Outcome
+  view: View
+
+sum Response:
+  resumed: Step
 
 record Receipt:
   phase: String
@@ -241,213 +294,49 @@ record Receipt:
 def receiptOf(a: Account) -> Receipt:
   {phase: phaseName(a), k: a.k, paid: a.paid, refunded: a.refunded}
 
-def waitingOf(a: Account) -> Waiting:
-  {phase: phaseName(a), period: a.k, due: cursorAt(a.terms, a.k)}
+def keepLedger() -> Write:
+  {paid: EditNat.keep()}
 
-# Every unfolding of `serve` past a yield costs one admitted turn. The result is the
-# receipt of the finished account.
-def serve(a: Account) -> Activity<Plan, Response, Receipt>:
-  if finished(a) then receiptOf(a) else await(a)
+# The first yield creates the ledger when the object has none (`fresh`); otherwise it keeps it.
+def firstWrite(o: Opening) -> Write:
+  if o.fresh then {paid: EditNat.set(0n)} else keepLedger()
 
-def await(a: Account) -> Activity<Plan, Response, Receipt>:
-  match perform(Plan.await(waitingOf(a))):
-    case event(e): step(a, react(a, e))
-    case settled(_): serve(a)
-    case refused(_): serve(a)
+def serve(o: Opening, a: Account) -> Activity<Plan, Response, Receipt>:
+  if finished(a) then receiptOf(a) else await(o, a, keepLedger())
 
-def step(a: Account, t: Transition) -> Activity<Plan, Response, Receipt>:
+# Wait for the keeper's next event. An await that is not answered (unknown, timed out, broken)
+# waits again; the account is unchanged.
+def await(o: Opening, a: Account, w: Write) -> Activity<Plan, Response, Receipt>:
+  match perform(Plan.await({write: w, on: Source.reply({decider: o.keeper}), patience: 64n})):
+    case resumed(s):
+      match s.outcome:
+        case reply(e): step(o, a, react(a, e))
+        case settled(_): serve(o, a)
+        case refused(_): serve(o, a)
+        case unknown(_): serve(o, a)
+        case timedOut(_): serve(o, a)
+        case broken(_): serve(o, a)
+        case upgraded(_): serve(o, a)
+
+def step(o: Opening, a: Account, t: Transition) -> Activity<Plan, Response, Receipt>:
   match t:
-    case refused(unchanged): serve(unchanged)
-    case moved(next): serve(next)
-    case paid(s): transfer(a, s)
+    case refused(unchanged): serve(o, unchanged)
+    case moved(next): serve(o, next)
+    case paid(s): transfer(o, a, s)
 
-# The transfer is a Plan: the kernel moves it whole or refuses, and a refused
-# transfer leaves the account where it was (the period is still owed).
-def transfer(a: Account, s: Settled) -> Activity<Plan, Response, Receipt>:
-  match perform(Plan.pay(s.transfer)):
-    case settled(_): serve(s.next)
-    case refused(_): serve(a)
-    case event(_): serve(a)
+# The payment is a kernel transfer from the purse: performed whole (`settled`, the ledger adds what
+# the room was paid) or refused (nothing moves, nothing is written: the period is still owed).
+def transfer(o: Opening, a: Account, s: Settled) -> Activity<Plan, Response, Receipt>:
+  match perform(Plan.transfer({to: s.transfer.to, amount: s.transfer.amount, write: {paid: EditNat.add(s.next.paid - a.paid)}})):
+    case resumed(st):
+      match st.outcome:
+        case settled(_): serve(o, s.next)
+        case refused(_): serve(o, a)
+        case reply(_): serve(o, a)
+        case unknown(_): serve(o, a)
+        case timedOut(_): serve(o, a)
+        case broken(_): serve(o, a)
+        case upgraded(_): serve(o, a)
 
-def dues(t: Terms, deposit: Nat) -> Activity<Plan, Response, Receipt>:
-  serve(open(t, deposit))
-
-# ---- the named scenario ------------------------------------------------------
-# Payer 1 owes room 2 an amount of 10 every 10 heights from height 100, for 4
-# periods (due at 100, 110, 120, 130), with a notice window of 3 heights. The lease
-# variant has the same terms and a deposit of 25: two draws, then it cannot cover.
-
-def terms() -> Terms:
-  {payer: 1n, room: 2n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: false}
-
-def leaseTerms() -> Terms:
-  {payer: 1n, room: 2n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: true}
-
-def fresh() -> Account:
-  open(terms(), 0n)
-
-def leased() -> Account:
-  open(leaseTerms(), 25n)
-
-def discharged(a: Account, period: Nat, now: Nat) -> Account:
-  accountOf(react(a, Event.discharge({period: period, now: now})))
-
-def tryDischarge(a: Account, period: Nat, now: Nat) -> Transition:
-  react(a, Event.discharge({period: period, now: now}))
-
-def tryCancel(a: Account, actor: Nat, now: Nat) -> Transition:
-  react(a, Event.cancel({actor: actor, now: now}))
-
-def afterThree() -> Account:
-  discharged(discharged(discharged(fresh(), 0n, 125n), 1n, 125n), 2n, 125n)
-
-def afterFour() -> Account:
-  discharged(discharged(discharged(discharged(fresh(), 0n, 100n), 1n, 110n), 2n, 120n), 3n, 130n)
-
-def isPhase(a: Account, name: String) -> Bool:
-  phaseName(a) == name
-
-# On time: period 0 at its due height pays one amount, from the payer to the room.
-def onTimePays() -> Bool:
-  transferAmount(tryDischarge(fresh(), 0n, 100n)) == 10n && discharged(fresh(), 0n, 100n).k == 1n
-
-def paymentFromPayer() -> Nat:
-  transferFrom(tryDischarge(fresh(), 0n, 100n))
-
-def paymentToRoom() -> Nat:
-  transferTo(tryDischarge(fresh(), 0n, 100n))
-
-def fullTermCompletes() -> Bool:
-  isPhase(afterFour(), "complete") && afterFour().paid == 40n && afterFour().k == 4n
-
-def fullTermPaid() -> Nat:
-  afterFour().paid
-
-# Never early.
-def earlyRefused() -> Bool:
-  wasRefused(tryDischarge(fresh(), 0n, 99n)) && negated(wasRefused(tryDischarge(fresh(), 0n, 100n)))
-
-def negated(b: Bool) -> Bool:
-  if b then false else true
-
-# Double trigger: period 0 once. A replay names a period behind the cursor.
-def doubleTriggerRefused() -> Bool:
-  wasRefused(tryDischarge(discharged(fresh(), 0n, 100n), 0n, 100n)) && discharged(discharged(fresh(), 0n, 100n), 0n, 105n).k == 1n
-
-# A skip names a period ahead of the cursor.
-def skipRefused() -> Bool:
-  wasRefused(tryDischarge(fresh(), 1n, 150n)) && wasRefused(tryDischarge(discharged(fresh(), 0n, 100n), 2n, 150n))
-
-# Catching up: at 125 periods 0, 1 and 2 are due; three discharges pay three times,
-# and a fourth naming period 3 is refused (it falls due at 130).
-def behindAtCatchUp() -> Nat:
-  behindBy(fresh(), 125n)
-
-def catchUpPaidAmount() -> Nat:
-  afterThree().paid
-
-def catchUpStopsAtDue() -> Bool:
-  wasRefused(tryDischarge(afterThree(), 3n, 125n)) && behindBy(afterThree(), 125n) == 0n && afterThree().k == 3n
-
-def behindAfterTerm() -> Nat:
-  behindBy(afterFour(), 500n)
-
-# A completed term takes no further period.
-def afterTermRefused() -> Bool:
-  wasRefused(tryDischarge(afterFour(), 4n, 500n)) && wasRefused(tryDischarge(afterFour(), 0n, 500n))
-
-# Cancellation: the payer alone, at a period boundary window; never mid-period.
-def cancelAtBoundary() -> Bool:
-  isPhase(accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 110n)), "cancelled") && isPhase(accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 112n)), "cancelled")
-
-def cancelMidPeriodRefused() -> Bool:
-  wasRefused(tryCancel(discharged(fresh(), 0n, 100n), 1n, 105n)) && wasRefused(tryCancel(discharged(fresh(), 0n, 100n), 1n, 109n))
-
-def cancelByStrangerRefused() -> Bool:
-  wasRefused(tryCancel(discharged(fresh(), 0n, 100n), 2n, 110n)) && wasRefused(tryCancel(discharged(fresh(), 0n, 100n), 9n, 110n))
-
-def cancelPastWindowRefused() -> Bool:
-  wasRefused(tryCancel(discharged(fresh(), 0n, 100n), 1n, 113n)) && wasRefused(tryCancel(fresh(), 1n, 99n))
-
-def cancelWhileBehindRefused() -> Bool:
-  wasRefused(tryCancel(fresh(), 1n, 125n)) && wasRefused(tryCancel(discharged(fresh(), 0n, 100n), 1n, 120n))
-
-def cancelledTakesNoMore() -> Bool:
-  wasRefused(tryDischarge(accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 110n)), 1n, 110n))
-
-def cancelledPaidOnce() -> Nat:
-  accountOf(tryCancel(discharged(fresh(), 0n, 100n), 1n, 110n)).paid
-
-# Prepaid lease: each discharge draws from the deposit and the law conserves value.
-def leaseDraws() -> Bool:
-  leased().prepaid == 25n && discharged(leased(), 0n, 100n).prepaid == 15n && discharged(leased(), 0n, 100n).paid == 10n && transferAmount(tryDischarge(leased(), 0n, 100n)) == 10n
-
-def leaseTwice() -> Account:
-  discharged(discharged(leased(), 0n, 100n), 1n, 110n)
-
-def leaseShortRefused() -> Bool:
-  wasRefused(tryDischarge(leaseTwice(), 2n, 120n)) && leaseTwice().prepaid == 5n
-
-def lapseWhenShort() -> Bool:
-  isPhase(accountOf(react(leaseTwice(), Event.lapse({now: 120n}))), "lapsed")
-
-# Not before the period is due, and not while the deposit still covers it.
-def lapseEarlyRefused() -> Bool:
-  wasRefused(react(leaseTwice(), Event.lapse({now: 119n}))) && wasRefused(react(leased(), Event.lapse({now: 100n}))) && wasRefused(react(fresh(), Event.lapse({now: 500n})))
-
-def lapsedAccount() -> Account:
-  accountOf(react(leaseTwice(), Event.lapse({now: 120n})))
-
-def settleRefunds() -> Nat:
-  transferAmount(react(lapsedAccount(), Event.settle({now: 121n})))
-
-def settleRefundsPayer() -> Nat:
-  transferTo(react(lapsedAccount(), Event.settle({now: 121n})))
-
-def settledOnce() -> Bool:
-  let after = accountOf(react(lapsedAccount(), Event.settle({now: 121n})))
-  wasRefused(react(after, Event.settle({now: 122n}))) && after.prepaid == 0n && after.refunded == 5n && duesLaw(after)
-
-def settleWhileRunningRefused() -> Bool:
-  wasRefused(react(leased(), Event.settle({now: 100n})))
-
-def topUpOnlyByPayer() -> Bool:
-  wasRefused(react(leaseTwice(), Event.topUp({actor: 2n, amount: 5n}))) && wasRefused(react(leaseTwice(), Event.topUp({actor: 9n, amount: 5n}))) && negated(wasRefused(react(leaseTwice(), Event.topUp({actor: 1n, amount: 5n}))))
-
-# A top-up lets the lease cover the next period.
-def topUpThenDraw() -> Bool:
-  let topped = accountOf(react(leaseTwice(), Event.topUp({actor: 1n, amount: 5n})))
-  topped.deposited == 30n && negated(wasRefused(tryDischarge(topped, 2n, 120n))) && duesLaw(discharged(topped, 2n, 120n))
-
-def payAsYouGoTakesNoTopUp() -> Bool:
-  wasRefused(react(fresh(), Event.topUp({actor: 1n, amount: 5n})))
-
-# Invalid terms never run.
-def voidTerms() -> Bool:
-  isPhase(open({payer: 1n, room: 2n, amount: 0n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: false}, 0n), "void") && isPhase(open({payer: 1n, room: 1n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 3n, lease: false}, 0n), "void") && isPhase(open({payer: 1n, room: 2n, amount: 10n, period: 10n, start: 100n, periods: 4n, window: 11n, lease: false}, 0n), "void")
-
-# The dues law over every event kind, from every shape of account.
-def lawFrom(a: Account) -> Bool:
-  duesLaw(a) && lawPreserved(tryDischarge(a, a.k, 125n), a) && lawPreserved(tryDischarge(a, a.k, 500n), a) && lawPreserved(tryDischarge(a, 0n, 100n), a) && lawPreserved(tryCancel(a, 1n, 110n), a) && lawPreserved(react(a, Event.topUp({actor: 1n, amount: 5n})), a) && lawPreserved(react(a, Event.lapse({now: 500n})), a) && lawPreserved(react(a, Event.settle({now: 500n})), a)
-
-# One row per account shape: each is a separate run under the preview's tick budget.
-def lawHoldsFresh() -> Bool:
-  lawFrom(fresh())
-
-def lawHoldsAfterThree() -> Bool:
-  lawFrom(afterThree())
-
-def lawHoldsAfterFour() -> Bool:
-  lawFrom(afterFour())
-
-def lawHoldsLeased() -> Bool:
-  lawFrom(leased())
-
-def lawHoldsLeaseTwice() -> Bool:
-  lawFrom(leaseTwice())
-
-def lawHoldsLapsed() -> Bool:
-  lawFrom(lapsedAccount())
-
-def lawHoldsSettled() -> Bool:
-  lawFrom(accountOf(react(lapsedAccount(), Event.settle({now: 121n}))))
+def dues(o: Opening) -> Activity<Plan, Response, Receipt>:
+  if finished(open(o.terms, o.deposit)) then receiptOf(open(o.terms, o.deposit)) else await(o, open(o.terms, o.deposit), firstWrite(o))

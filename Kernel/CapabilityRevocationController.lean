@@ -7,11 +7,32 @@ The source derives a single revocation/nullifier patch from one complete old
 authority snapshot; neither a signature alone nor resource ownership bypasses
 the policy. Descendant admission consults this same canonical revocation plane.
 -/
-import Kernel.DeclaredResourceController
-import Theory.CredentialAuthorityEffects
-import Compiler.ResourceTargetAdmission
-import Compiler.ResourceAuthorityProjection
-import Compiler.ServedBasis
+module
+
+public import Kernel.DeclaredResourceController
+public import Theory.CredentialAuthorityEffects
+public import Compiler.ResourceTargetAdmission
+public import Compiler.ResourceAuthorityProjection
+public import Compiler.ServedBasis
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CapabilityRevocationController
 
@@ -83,24 +104,30 @@ def packedCommandStream : StreamCodec PackedCommand where
     intro command suffix
     cases command with
     | mk kind command => simp [List.append_assoc, StreamCodec.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases kindOk : ResourceBirthCodec.resourceKindStream.decodePrefix bytes with
+    | none => simp [kindOk] at decoded
+    | some pair =>
+      obtain ⟨kind, remainder⟩ := pair
+      cases commandOk : (commandStream kind).decodePrefix remainder with
+      | none => simp [kindOk, commandOk] at decoded
+      | some pair =>
+        obtain ⟨command, rest⟩ := pair
+        simp only [kindOk, commandOk, bind, Option.bind, pure, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show ResourceBirthCodec.resourceKindStream.encode kind ++ (commandStream kind).encode command ++ rest = bytes
+        rw [List.append_assoc, (commandStream kind).encode_decodePrefix _ _ _ commandOk,
+          ResourceBirthCodec.resourceKindStream.encode_decodePrefix _ _ _ kindOk]
 
 def commandFrame : List UInt8 := "DREGG/CAPABILITY/REVOKE".toUTF8.toList ++ [1]
 
-def rawCommandCodec : LawfulCodec PackedCommand where
-  encode command := commandFrame ++ packedCommandStream.encode command
-  decode bytes := if bytes.take commandFrame.length = commandFrame then
-    packedCommandStream.toLawful.decode (bytes.drop commandFrame.length) else none
-  decode_encode := by
-    intro command
-    have decoded := packedCommandStream.toLawful.decode_encode command
-    change packedCommandStream.toLawful.decode (packedCommandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec PackedCommand := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec PackedCommand := (StreamCodec.framed commandFrame packedCommandStream).toLawful
 
 theorem command_decode_canonical {bytes : List UInt8} {command : PackedCommand}
     (decoded : commandCodec.decode bytes = some command) : commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- Same caller/resource/nonce is one operation even if its victim, authority,
 root or signature changes. The retained exact ingress rejects such substitution. -/
@@ -125,7 +152,7 @@ def declarationStream : StreamCodec RevokeDeclaration :=
     (by intro declaration; cases declaration; rfl)
 
 def declarationCodec : LawfulCodec RevokeDeclaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def commandBytes {kind : ResourceKind} (domain semantics : Digest) (command : Command kind) : List UInt8 :=
   (StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
@@ -411,6 +438,11 @@ structure Accepted [DecidableEq F]
   private mk ::
   receipt : CredentialSignatureAdmission.CheckedSignature ground.authority
   envelopeExact : receipt.envelopeBytes = envelope
+  /-- The receipt is for exactly this revocation: its request is the revocation's
+  complete request and its nullifier the operation marker. -/
+  bound : CredentialSignatureAdmission.verifySignature ground.authority
+    (operationMarker ground.authority.domain profile.semantics command)
+    (request ground.authority profile.semantics ambient command) receipt = true
   semantic : prepared.SemanticAccepted
 
 def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient ground command)
@@ -442,9 +474,13 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
     if same : receipt.envelopeBytes = envelope then
-      match authorize prepared receipt with
-      | .error reason => return .error reason
-      | .ok accepted => return .ok ⟨receipt, same, accepted⟩
+      if bound : CredentialSignatureAdmission.verifySignature ground.authority
+          (operationMarker ground.authority.domain profile.semantics command)
+          (request ground.authority profile.semantics ambient command) receipt = true then
+        match authorize prepared receipt with
+        | .error reason => return .error reason
+        | .ok accepted => return .ok ⟨receipt, same, bound, accepted⟩
+      else return .error .capabilityRejected
     else return .error .capabilityRejected
 
 /-- Revocation is not merely logged: the actual accepted post participates in
@@ -539,6 +575,34 @@ theorem Accepted.current_policy_evaluated [DecidableEq F]
   ComposedPolicyAdmission.authorized_effective_law (policyConfig prepared)
     (request ground.authority profile.semantics ambient command)
     accepted.semantic.authorization
+
+/-- **The revocation an envelope authorizes.** The checked signature is over exactly
+`envelope`, it is for this revocation's complete request (built from `ground`'s authority,
+`profile`'s semantics, `ambient` and `command`) under its operation marker, and the current
+resource law loaded for `prepared` evaluates true on the step's old and source-computed
+post authority view. -/
+theorem Accepted.envelope_authorizes [DecidableEq F]
+    {prepared : Prepared deployment profile ambient ground command} {envelope : List UInt8}
+    (accepted : Accepted prepared envelope) :
+    accepted.receipt.envelopeBytes = envelope ∧
+    accepted.receipt.request = ⟨.program, request ground.authority profile.semantics ambient command⟩ ∧
+    accepted.receipt.nullifier = operationMarker ground.authority.domain profile.semantics command ∧
+    ∃ graph : PolicyComponentResolution.LoadedGraph
+        (policyConfig prepared).snapshot (policyConfig prepared).store
+        (policyConfig prepared).profile.semantics (policyConfig prepared).target
+        (policyConfig prepared).additional,
+      PolicyComponentResolution.loadTarget (policyConfig prepared).snapshot
+        (policyConfig prepared).store (policyConfig prepared).profile.semantics
+        (policyConfig prepared).target (policyConfig prepared).resolutionBudget
+        (policyConfig prepared).additional = .ok graph ∧
+      Minidregg.Pred.eval (ResolvedLawCompilation.predicate graph.resolved)
+        (step prepared).oldState (step prepared).newState = true :=
+  have exact := CredentialSignatureAdmission.verified_request_exact ground.authority
+    (operationMarker ground.authority.domain profile.semantics command)
+    (request ground.authority profile.semantics ambient command) accepted.receipt accepted.bound
+  ⟨accepted.envelopeExact, exact.1, exact.2, accepted.current_policy_evaluated⟩
+
+#assert_axioms Accepted.envelope_authorizes
 
 /-- info: 'Minidregg.Kernel.CapabilityRevocationController.Accepted.revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.revoked

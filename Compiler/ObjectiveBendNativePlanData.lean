@@ -3,8 +3,13 @@ No effect evaluator lives here. Native current laws, execution, atomic physical
 writes and funding remain the actual receiving transaction's obligations.
 Current constructor registry: ordered content createDocument/createAtom and
 room-stream append. Other constructors are unsupported, never scalar-coerced. -/
-import Compiler.ObjectiveBendResultAdapter
-import Compiler.ObjectiveBendPlanAdapter
+module
+
+public import Compiler.ObjectiveBendResultAdapter
+public import Compiler.ObjectiveBendPlanAdapter
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendNativePlanData
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.ObjectiveBendDemandData
@@ -115,6 +120,17 @@ structure BoundEffect (deployment : CanonicalCellRegistry.Deployment)
   payloadExact : command.targets[index].payload = source.payload
   pre : TargetCell command.targets[index]
   selected : selectTarget deployment command.targets[index] read.packed = some pre
+/-- The bound effect sits at the command's target for its resource, quotes that
+target's root and payload, and its pre cell is selected from the bound read. -/
+theorem BoundEffect.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {command : Command} {source : Effect}
+    (bound : BoundEffect deployment loaded command source) :
+    indexOf command source.ref.resourceID = some bound.index ∧
+      command.targets[bound.index].expectedTargetRoot = source.ref.root ∧
+      command.targets[bound.index].payload = source.payload ∧
+      selectTarget deployment command.targets[bound.index] bound.read.packed = some bound.pre :=
+  ⟨bound.indexExact, bound.rootExact, bound.payloadExact, bound.selected⟩
 
 def BoundEffect.native {deployment : CanonicalCellRegistry.Deployment}
     {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}

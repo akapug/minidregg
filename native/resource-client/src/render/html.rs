@@ -3,9 +3,17 @@
 //! escaped; a link carries the reader's name for its target in `data-target`
 //! and no URL, since routes are the web face's.
 
-use super::{Annotation, Body, Deco, Rendered, RenderedLine};
+use super::{Annotation, Body, Deco, Rendered, RenderedLine, SharedName};
 use serde_json::Value;
 
+/// THE escaper for every stranger-supplied string the web face renders, in text and in quoted
+/// attribute values alike (there is no other in this crate; `web::escape` is this function).
+/// Beyond the five HTML metacharacters it makes visible what a reader cannot see and a stranger
+/// can use: C0/C1 controls (as their control pictures / `\u{..}`), the bidirectional embedding,
+/// override and isolate controls (U+202A..U+202E, U+2066..U+2069: "Trojan Source" reordering of a
+/// name, a line or a command), and the invisible separators U+200B, U+2060, U+FEFF (a name that
+/// looks like another). ZWJ/ZWNJ and the LRM/RLM marks stay: scripts and emoji need them, and
+/// they cannot reorder text. Newline, carriage return and tab stay (`<pre>` keeps lines; HTML reads CR as space).
 pub fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -15,10 +23,33 @@ pub fn escape(text: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&#39;"),
+            '\n' | '\r' | '\t' => out.push(c),
+            '\u{7f}' => out.push('\u{2421}'),
+            c if (c as u32) < 0x20 => out.push(char::from_u32(0x2400 + c as u32).unwrap_or('\u{fffd}')),
+            '\u{80}'..='\u{9f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200b}' | '\u{2060}' | '\u{feff}' => {
+                out.push_str(&format!("[U+{:04X}]", c as u32))
+            }
             _ => out.push(c),
         }
     }
     out
+}
+
+/// A URL for an `href`, `src` or `action` attribute built from data (an origin a worker reported,
+/// a link a page carries): a same-origin path (`/…`, never `//…` or `/\…`) or an absolute
+/// `https://`/`http://` URL, escaped; anything else (`javascript:`, `data:`, `vbscript:`, a
+/// relative path, a scheme hidden behind controls or whitespace) becomes `#refused-url`, so no
+/// stranger-chosen scheme ever reaches a browser's URL parser from this face.
+pub fn url(text: &str) -> String {
+    let same_origin = text.starts_with('/') && !text.starts_with("//") && !text.starts_with("/\\");
+    let lower = text.to_ascii_lowercase();
+    let absolute = (lower.starts_with("https://") || lower.starts_with("http://")) && text.len() > "https://".len();
+    let clean = !text.chars().any(|c| c.is_control() || c.is_whitespace() || c == '\\');
+    if (same_origin || absolute) && clean {
+        escape(text)
+    } else {
+        "#refused-url".to_owned()
+    }
 }
 
 fn decorate(body: &str, decos: &[Deco]) -> String {
@@ -137,13 +168,20 @@ pub fn document(rendered: &Rendered, title: &str) -> String {
     )];
     if !rendered.shared_names.is_empty() {
         out.push("<section class=\"shared-names\"><h2>Shared names</h2><dl>".to_owned());
-        for binding in &rendered.shared_names {
-            out.push(format!(
-                "<dt>{}</dt><dd>{}:{}</dd>",
-                escape(&binding.name),
-                escape(&binding.kind),
-                escape(&binding.target)
-            ));
+        for name in &rendered.shared_names {
+            out.push(match name {
+                SharedName::Bound(binding) => format!(
+                    "<dt>{}</dt><dd>{}:{}</dd>",
+                    escape(&binding.name),
+                    escape(&binding.kind),
+                    escape(&binding.target)
+                ),
+                SharedName::Invalid { link, reason } => format!(
+                    "<dt class=\"invalid\" data-invalid-name=\"{0}\">invalid link {0}</dt><dd>{1}</dd>",
+                    escape(link),
+                    escape(reason)
+                ),
+            });
         }
         out.push("</dl></section>".to_owned());
     }

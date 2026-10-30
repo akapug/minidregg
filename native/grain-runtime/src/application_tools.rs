@@ -102,11 +102,44 @@ pub(super) struct SessionFamily {
     /// A named, retained application bundle is selected at execution. No
     /// caller-provided raw app ID is accepted by the public tool.
     pub application_family: String,
+    /// Operator-selected owner of the session and descriptor. Omission keeps
+    /// the historical tool owner; only the tool or controller is supported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub participant_subject: Option<String>,
     pub kind: String,
     pub profile: BirthProfile,
     pub namespace: SessionNamespace,
     pub max_births: u16,
     pub max_result_bytes: usize,
+}
+
+/// This selects existing custody, never a caller-supplied subject or grant.
+/// Lean's session birth mints both objects and their grants to this participant;
+/// the separately signed creator remains the delegated tool.
+pub(super) fn session_participant<'a>(
+    family: &'a SessionFamily,
+    tool_subject: &'a str,
+    controller_subject: &str,
+) -> Result<&'a str> {
+    let participant = family.participant_subject.as_deref().unwrap_or(tool_subject);
+    crate::decimal(participant, "session participantSubject")?;
+    if participant != tool_subject && participant != controller_subject {
+        return Err("session participantSubject must be the configured tool or controller".into());
+    }
+    Ok(participant)
+}
+
+pub(super) fn session_read_signer(
+    family: &SessionFamily,
+    tool_subject: &str,
+    controller_subject: &str,
+) -> Result<resource_tools::ResourceReadSigner> {
+    let participant = session_participant(family, tool_subject, controller_subject)?;
+    Ok(if participant == tool_subject {
+        resource_tools::ResourceReadSigner::Tool
+    } else {
+        resource_tools::ResourceReadSigner::Controller
+    })
 }
 
 #[derive(Clone)]
@@ -564,6 +597,7 @@ pub(super) fn plan_session_birth(
     family: &SessionFamily,
     tool: &ToolTask,
     parent_task: &str,
+    controller_subject: &str,
     app_target: &str,
     index: BirthIndex,
     tool_view: &Value,
@@ -573,6 +607,7 @@ pub(super) fn plan_session_birth(
     if ordinal >= family.max_births {
         return Err("session family ordinal is exhausted".into());
     }
+    let participant = session_participant(family, &tool.subject, controller_subject)?;
     crate::decimal(app_target, "verified application target")?;
     let n = &family.namespace;
     let ids = n
@@ -595,7 +630,7 @@ pub(super) fn plan_session_birth(
     let mut body = birth_body(&family.profile, tool, nonce, height);
     body["session"] = json!({
         "app":app_target,"session":ids[0],"descriptor":ids[1],
-        "participant":tool.subject,"kind":family.kind,
+        "participant":participant,"kind":family.kind,
         "sessionOwnerCapability":caps[0],"sessionControlCapability":caps[1],
         "descriptorOwnerCapability":caps[2],"descriptorControlCapability":caps[3]
     });
@@ -674,6 +709,7 @@ mod tests {
         SessionFamily {
             name: "office-web".into(),
             application_family: "office".into(),
+            participant_subject: None,
             kind: "web".into(),
             profile: profile(),
             max_births: 2,
@@ -691,6 +727,26 @@ mod tests {
 
     fn check(applications: &[ApplicationFamily], sessions: &[SessionFamily]) -> Result<()> {
         validate_families(applications, sessions, &[], &[], &[], &[], (&["1"], &["2"]))
+    }
+
+    #[test]
+    fn session_participant_selects_only_pinned_custody_and_preserves_legacy_configuration() {
+        let mut family = session();
+        let legacy = serde_json::to_value(&family).unwrap();
+        assert!(legacy.get("participantSubject").is_none());
+        let decoded: SessionFamily = serde_json::from_value(legacy).unwrap();
+        assert_eq!(session_participant(&decoded, "3", "9").unwrap(), "3");
+        assert_eq!(session_read_signer(&decoded, "3", "9").unwrap(),
+            resource_tools::ResourceReadSigner::Tool);
+        family.participant_subject = Some("9".into());
+        assert_eq!(session_participant(&family, "3", "9").unwrap(), "9");
+        assert_eq!(session_read_signer(&family, "3", "9").unwrap(),
+            resource_tools::ResourceReadSigner::Controller);
+        for invalid in ["99", "09", "", "controller"] {
+            family.participant_subject = Some(invalid.into());
+            assert!(session_participant(&family, "3", "9").is_err());
+            assert!(session_read_signer(&family, "3", "9").is_err());
+        }
     }
 
     #[test]
@@ -765,6 +821,8 @@ mod tests {
             registered_shared_applications: vec![],
             allowed_application_api_routes: vec![],
             allowed_application_lifetime_routes: vec![],
+            application_services: vec![],
+            typed_applications: vec![],
             agent_api_host_sha256: None,
             lifetime_api_host_sha256: None,
             current_birth_host_sha256: None,
@@ -786,6 +844,7 @@ mod tests {
             &session(),
             &tool,
             "2",
+            "9",
             "101",
             BirthIndex {
                 nonce: 78,
@@ -796,6 +855,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(session_members.len(), 2);
+        assert_eq!(session_source["applicationSessionGrainBirth"]["applicationSessionBirth"]
+            ["session"]["participant"], "3");
+        let mut controller_family = session();
+        controller_family.participant_subject = Some("9".into());
+        let (controller_source, controller_members) = plan_session_birth(
+            &controller_family, &tool, "2", "9", "101",
+            BirthIndex { nonce: 78, ordinal: 1 }, &view, &view,
+        ).unwrap();
+        assert_eq!(controller_members, session_members);
+        let body = &controller_source["applicationSessionGrainBirth"]["applicationSessionBirth"];
+        assert_eq!(body["creator"], "3");
+        assert_eq!(body["session"]["participant"], "9");
+        assert_eq!(body["session"]["sessionOwnerCapability"], "1601");
+        assert_eq!(controller_source["grants"], session_source["grants"]);
+        controller_family.participant_subject = Some("99".into());
+        assert!(plan_session_birth(&controller_family, &tool, "2", "9", "101",
+            BirthIndex { nonce: 78, ordinal: 1 }, &view, &view).is_err());
         assert_eq!(
             session_source["applicationSessionGrainBirth"]["applicationSessionBirth"]["session"]
                 ["app"],

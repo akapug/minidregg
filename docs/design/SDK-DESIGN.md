@@ -42,7 +42,7 @@ nucleus; `@[export] minidregg_intent_encode`), and the SDK carries ONE client-si
 `golden/lean-intents.json`, which Lean's own entry points emit
 (`Kernel/Contracts/IntentVectors.lean`), and, with the `lean-codec` feature, against Lean's
 exported code itself: `native/mini-sdk/lean-codec/build.sh` links `libminidregg-intents.so`
-(`Kernel.Contracts.Intents` and its closure) and `tests/lean_codec.rs` dlopens it and compares
+(`Kernel.Contracts.Intents` and its closure) and `native/mini-sdk/tests/lean_codec.rs` dlopens it and compares
 `minidregg_intent_encode` / `minidregg_intent_id_preimage` with the encoder on every golden row.
 The TypeScript SDK has no encoder: it reaches the Rust
 core through wasm. (Earlier, the SDK owned a `MINI/SDK/INTENT/v1` encoding with a copy in each
@@ -130,7 +130,7 @@ native-messaging host (§8). The SDK builds and signs; the Host executes.
 
 Each move deletes a copy; no move keeps both. (1) Attempt custody: `retained_attempt_outcome`,
 `accepted_outcome` and the per-family status machines in `app_document.rs`, `job.rs`,
-`selected_exchange.rs`, `publisher.rs`, Discord `custody.rs`, the Hermes step ledger, the
+`selected_exchange.rs`, Discord `custody.rs`, the Hermes step ledger, the
 provider spool (scout D: 40 files). (2) The plan/seal/submit/lookup sequence (`submit_once`,
 `retry`) and its 30 per-family re-spellings. (3) The consent frame client (`client_consent.rs`
 `invoke/round_trip/pair/headers`) — after W1.2 lands the Objective half, `resource-client`

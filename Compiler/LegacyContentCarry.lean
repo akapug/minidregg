@@ -3,9 +3,28 @@ meanings are frozen below, not decoded by the target's ElementBody/Mark codec.
 Text/record attribution remains unchanged. New tree positions preserve the old
 native client's numeric atom order; unsupported old reference/mark authority
 is retained as explicitly legacy metadata, never invented target permission. -/
-import Compiler.LegacyStoreCarry
-import Compiler.NativeHostCodec
-import Kernel.ContentResource
+module
+
+public import Compiler.LegacyStoreCarry
+public import Compiler.NativeHostCodec
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.LegacyContentCarry
 
@@ -93,10 +112,11 @@ def elementBodyStream : StreamCodec ElementBody where
     | 2 => do
         let (reference, suffix) ← embedRefStream.decodePrefix afterTag
         some (.embed reference, suffix)
-    | _ => do
+    | 3 => do
         let (schema, afterSchema) ← digestStream.decodePrefix afterTag
         let (payload, suffix) ← bytesStream.decodePrefix afterSchema
         some (.opaque schema payload, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value <;>
@@ -106,6 +126,7 @@ def elementBodyStream : StreamCodec ElementBody where
         (StreamCodec.list (identifierStream .v1 .run)).decodePrefix_encode,
         embedRefStream.decodePrefix_encode, digestStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def elementRecordStream : StreamCodec ElementRecord :=
   StreamCodec.xmap
@@ -172,9 +193,10 @@ def atomKindStream : StreamCodec AtomKind where
     let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
     match tag with
     | 0 => some (.text, afterTag)
-    | _ => do
+    | 1 => do
         let (schema, suffix) ← digestStream.decodePrefix afterTag
         some (.inlineObject schema, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value with
@@ -182,6 +204,7 @@ def atomKindStream : StreamCodec AtomKind where
     | inlineObject schema =>
         simp [atomKindTag, atomKindPayload, List.append_assoc,
           StreamCodec.nat.decodePrefix_encode, digestStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def atomRecordStream : StreamCodec AtomRecord :=
   StreamCodec.xmap

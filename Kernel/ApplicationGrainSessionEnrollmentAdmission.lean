@@ -4,9 +4,13 @@ session/descriptor mutation remains an ordinary DRC admission. The app,
 manifest and issued ticket are separately observed with current signed reads;
 their physical roots become guards of one distinct event28 intent.
 -/
-import Kernel.ApplicationGrainSessionEnrollmentConstruction
-import Kernel.PhysicalResourceReadGuard
-import Kernel.NativeHostServed
+module
+
+public import Kernel.ApplicationGrainSessionEnrollmentConstruction
+public import Kernel.PhysicalResourceReadGuard
+public import Kernel.NativeHostServed
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentAdmission
 
@@ -127,13 +131,11 @@ def admitAt (config : Config) (opened : Opened config)
   let some (domain, semantics, signed) :=
       DeclaredResourceController.decodeSignedBytes ingress.signedBytes
     | return .error "noncanonical signed enrollment command"
-  if domain != config.deployment.domain || semantics != config.profile.semantics ||
-      DeclaredResourceController.signedBytes domain semantics signed != ingress.signedBytes then
+  if domain != config.deployment.domain || semantics != config.profile.semantics then
     return .error "enrollment domain or signed command differs"
   let some command := DeclaredResourceController.commandCodec.decode signed.commandBytes
     | return .error "noncanonical enrollment command"
-  if command != current.command ||
-      DeclaredResourceController.commandCodec.encode command != signed.commandBytes then
+  if command != current.command then
     return .error "signed enrollment command differs from source"
   match ← DeclaredResourceController.prepareAuthenticated config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ config.signature

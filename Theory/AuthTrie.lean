@@ -13,14 +13,35 @@ list, and an opening is one sibling per branch walked (about `log₂ n`).
 * `climb` — the climb of a claimed terminal along the key's bits; `verify`.
 * `climb_sound` / `verify_sound` — a verifying opening for `k` either reports
   exactly the entries under its prefix (so the answer is `lookup`), or exhibits
-  a collision of the node digest (`Collision`: two different node inputs, one
-  digest). No premise about the opening or the Store's rows.
+  a collision of the node digest among the nodes that verification hashed
+  (`CollisionAmong`, over `TreeNode` of the canonical tree and `ClimbNode` of the
+  opening; the global `Collision` is true at any finite digest,
+  `Theory.CollisionFloor`). No premise about the opening or the Store's rows.
 * NOT proved here (cv task, see the KN2 index range): completeness of the honest
   opening, and the incremental insert's root equation. A wrong incremental root
   is caught by `store audit` (it rebuilds every stored node version); reads rely
   only on `verify_sound`.
 -/
-import Theory.AssertAxioms
+module
+
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.AuthTrie
 
@@ -77,8 +98,58 @@ def climb : List Bool → List D → D → D
       else dig (.branch (climb bits siblings below) s)
   | _, _, below => below
 
-/-- Two different node inputs with one digest. -/
+/-- Two different node inputs with one digest. Over an infinite input type and a
+finite digest type this holds by pigeonhole (`collision_of_finite_digest`), so a
+theorem ending in `∨ Collision dig` says nothing at a fixed-width digest: the
+soundness theorems below end in `CollisionAmong`, over the finitely many node
+inputs the verification actually hashed. -/
 def Collision : Prop := ∃ a b : NodeIn K V D, a ≠ b ∧ dig a = dig b
+
+/-- A collision between two node inputs that both satisfy `S`. -/
+def CollisionAmong (S : NodeIn K V D → Prop) : Prop :=
+  ∃ a b, S a ∧ S b ∧ a ≠ b ∧ dig a = dig b
+
+theorem CollisionAmong.mono {S T : NodeIn K V D → Prop} (sub : ∀ x, S x → T x)
+    (c : CollisionAmong dig S) : CollisionAmong dig T := by
+  obtain ⟨a, b, ha, hb, ne, eq⟩ := c
+  exact ⟨a, b, sub a ha, sub b hb, ne, eq⟩
+
+/-- The scoped collision forgets to the global one (never the converse). -/
+theorem CollisionAmong.global {S : NodeIn K V D → Prop} (c : CollisionAmong dig S) :
+    Collision dig := by
+  obtain ⟨a, b, _, _, ne, eq⟩ := c
+  exact ⟨a, b, ne, eq⟩
+
+/-- The node input whose digest is the canonical root (`tree_eq_treeNode`). -/
+def treeNode : Nat → List (Entry K V) → NodeIn K V D
+  | _, [] => .empty
+  | _, [e] => .leaf e.1 e.2.2
+  | 0, _ :: _ :: _ => .empty
+  | n + 1, es@(_ :: _ :: _) => .branch (tree dig n (strip false es)) (tree dig n (strip true es))
+
+theorem tree_eq_treeNode : ∀ (n : Nat) (es : List (Entry K V)), tree dig n es = dig (treeNode dig n es)
+  | _, [] => by simp [tree, treeNode]
+  | _, [_] => by simp [tree, treeNode]
+  | 0, _ :: _ :: _ => by simp [tree, treeNode]
+  | _ + 1, _ :: _ :: _ => by simp [tree, treeNode]
+
+/-- The node inputs the canonical tree over `es` hashes: its root's, and its
+subtrees'. At most `2^(n+1) - 1` of them, fixed by the entries. -/
+inductive TreeNode : Nat → List (Entry K V) → NodeIn K V D → Prop
+  | root (n : Nat) (es : List (Entry K V)) : TreeNode n es (treeNode dig n es)
+  | child (m : Nat) (es : List (Entry K V)) (b : Bool) (x : NodeIn K V D) :
+      TreeNode m (strip b es) x → TreeNode (m + 1) es x
+
+/-- The node inputs a climb hashes: the claimed terminal's, then one branch per
+sibling. At most `siblings.length + 1` of them, fixed by the opening. -/
+inductive ClimbNode (t : Terminal K V) : List Bool → List D → NodeIn K V D → Prop
+  | terminal (bits : List Bool) (siblings : List D) : ClimbNode t bits siblings t.input
+  | left (bits : List Bool) (s : D) (siblings : List D) :
+      ClimbNode t (false :: bits) (s :: siblings) (.branch (climb dig bits siblings (dig t.input)) s)
+  | right (bits : List Bool) (s : D) (siblings : List D) :
+      ClimbNode t (true :: bits) (s :: siblings) (.branch s (climb dig bits siblings (dig t.input)))
+  | deeper (b : Bool) (bits : List Bool) (s : D) (siblings : List D) (x : NodeIn K V D) :
+      ClimbNode t bits siblings x → ClimbNode t (b :: bits) (s :: siblings) x
 
 /-- Entries are well formed at `n` remaining bits: every remaining path has
 length `n`, and no two entries share one (keys are distinct as paths). -/
@@ -131,20 +202,36 @@ def Reports : Terminal K V → List (Entry K V) → Prop
   | .empty, es => es = []
   | .leaf k v, es => ∃ bits, es = [(k, bits, v)]
 
+theorem treeNode_nil (n : Nat) : treeNode dig n ([] : List (Entry K V)) = .empty := by
+  cases n <;> rfl
+
+theorem treeNode_single (n : Nat) (e : Entry K V) : treeNode dig n [e] = .leaf e.1 e.2.2 := by
+  cases n <;> rfl
+
 theorem tree_dig_terminal (n : Nat) (es : List (Entry K V)) (wf : WF n es) (t : Terminal K V)
-    (equal : dig t.input = tree dig n es) : Reports t es ∨ Collision dig := by
+    (equal : dig t.input = tree dig n es) :
+    Reports t es ∨ CollisionAmong dig (fun x => x = t.input ∨ TreeNode dig n es x) := by
   match n, es, wf, t with
-  | _, [], _, .empty => exact Or.inl rfl
-  | _, [], _, .leaf k v =>
-      exact Or.inr ⟨.leaf k v, .empty, by simp, by simpa [Terminal.input, tree] using equal⟩
-  | _, [e], _, .empty =>
-      exact Or.inr ⟨.empty, .leaf e.1 e.2.2, by simp, by simpa [Terminal.input, tree] using equal⟩
-  | _, [e], _, .leaf k v =>
+  | n, [], _, .empty => exact Or.inl rfl
+  | n, [], _, .leaf k v =>
+      have root := TreeNode.root (dig := dig) n ([] : List (Entry K V))
+      rw [treeNode_nil] at root
+      exact Or.inr ⟨.leaf k v, .empty, Or.inl rfl, Or.inr root, by simp,
+        by simpa [Terminal.input, tree] using equal⟩
+  | n, [e], _, .empty =>
+      have root := TreeNode.root (dig := dig) n [e]
+      rw [treeNode_single] at root
+      exact Or.inr ⟨.empty, .leaf e.1 e.2.2, Or.inl rfl, Or.inr root, by simp,
+        by simpa [Terminal.input, tree] using equal⟩
+  | n, [e], _, .leaf k v =>
       by_cases same : (NodeIn.leaf k v : NodeIn K V D) = .leaf e.1 e.2.2
       · simp only [NodeIn.leaf.injEq] at same
         obtain ⟨rfl, rfl⟩ := same
         exact Or.inl ⟨e.2.1, rfl⟩
-      · exact Or.inr ⟨_, _, same, by simpa [Terminal.input, tree] using equal⟩
+      · have root := TreeNode.root (dig := dig) n [e]
+        rw [treeNode_single] at root
+        exact Or.inr ⟨_, _, Or.inl rfl, Or.inr root, same,
+          by simpa [Terminal.input, tree] using equal⟩
   | 0, a :: b :: rest, wf, t =>
       exfalso
       have la : a.2.1 = [] := List.eq_nil_of_length_eq_zero (wf.1 a (by simp))
@@ -153,21 +240,30 @@ theorem tree_dig_terminal (n : Nat) (es : List (Entry K V)) (wf : WF n es) (t : 
       exact this (List.mem_map.mpr ⟨b, by simp, by show b.2.1 = a.2.1; rw [la, lb]⟩)
   | m + 1, a :: b :: rest, _, t =>
       refine Or.inr ⟨t.input, .branch (tree dig m (strip false (a :: b :: rest)))
-        (tree dig m (strip true (a :: b :: rest))), ?_, by simpa [tree] using equal⟩
+        (tree dig m (strip true (a :: b :: rest))), Or.inl rfl,
+        Or.inr (TreeNode.root (dig := dig) (m + 1) (a :: b :: rest)), ?_,
+        by simpa [tree] using equal⟩
       cases t <;> simp [Terminal.input]
 
 /-- **Climb soundness.** A claimed terminal that climbs, along the query's
 bits, to the canonical root reports exactly the entries under the walked
-prefix — or a node collision is exhibited. -/
+prefix — or two different node inputs that this climb or the canonical tree
+hashed share a digest. -/
 theorem climb_sound :
     ∀ (n : Nat) (es : List (Entry K V)) (bits : List Bool) (siblings : List D) (t : Terminal K V),
       WF n es → siblings.length ≤ bits.length → bits.length ≤ n →
       climb dig bits siblings (dig t.input) = tree dig n es →
-      Reports t (select (bits.take siblings.length) es) ∨ Collision dig
+      Reports t (select (bits.take siblings.length) es) ∨
+        CollisionAmong dig (fun x => TreeNode dig n es x ∨ ClimbNode dig t bits siblings x)
   | n, es, bits, [], t, wf, _, _, climbed => by
       have : climb dig bits [] (dig t.input) = dig t.input := by cases bits <;> rfl
       rw [this] at climbed
-      simpa [select] using tree_dig_terminal dig n es wf t climbed
+      have r := tree_dig_terminal dig n es wf t climbed
+      simp only [select, List.take_zero] at r ⊢
+      exact r.imp_right (CollisionAmong.mono dig fun x hx => by
+        rcases hx with rfl | hx
+        · exact Or.inr (ClimbNode.terminal _ _)
+        · exact Or.inl hx)
   | n, es, [], s :: siblings, t, _, short, _, _ => by simp at short
   | n, es, b :: bits, s :: siblings, t, wf, short, long, climbed => by
       simp only [climb] at climbed
@@ -175,17 +271,25 @@ theorem climb_sound :
       | 0, es, _ => simp at long
       | m + 1, [], _ =>
           right
+          have root := TreeNode.root (dig := dig) (m + 1) ([] : List (Entry K V))
+          rw [treeNode_nil] at root
           cases b
-          · exact ⟨.branch (climb dig bits siblings (dig t.input)) s, .empty, by simp,
+          · exact ⟨.branch (climb dig bits siblings (dig t.input)) s, .empty,
+              Or.inr (ClimbNode.left _ _ _), Or.inl root, by simp,
               by simpa [tree] using climbed⟩
-          · exact ⟨.branch s (climb dig bits siblings (dig t.input)), .empty, by simp,
+          · exact ⟨.branch s (climb dig bits siblings (dig t.input)), .empty,
+              Or.inr (ClimbNode.right _ _ _), Or.inl root, by simp,
               by simpa [tree] using climbed⟩
       | m + 1, [e], _ =>
           right
+          have root := TreeNode.root (dig := dig) (m + 1) [e]
+          rw [treeNode_single] at root
           cases b
-          · exact ⟨.branch (climb dig bits siblings (dig t.input)) s, .leaf e.1 e.2.2, by simp,
+          · exact ⟨.branch (climb dig bits siblings (dig t.input)) s, .leaf e.1 e.2.2,
+              Or.inr (ClimbNode.left _ _ _), Or.inl root, by simp,
               by simpa [tree] using climbed⟩
-          · exact ⟨.branch s (climb dig bits siblings (dig t.input)), .leaf e.1 e.2.2, by simp,
+          · exact ⟨.branch s (climb dig bits siblings (dig t.input)), .leaf e.1 e.2.2,
+              Or.inr (ClimbNode.right _ _ _), Or.inl root, by simp,
               by simpa [tree] using climbed⟩
       | m + 1, a :: c :: rest, wf =>
           have rootEq : tree dig (m + 1) (a :: c :: rest) =
@@ -194,6 +298,15 @@ theorem climb_sound :
           rw [rootEq] at climbed
           have short' : siblings.length ≤ bits.length := by simpa using short
           have long' : bits.length ≤ m := by simpa using long
+          have root := TreeNode.root (dig := dig) (m + 1) (a :: c :: rest)
+          have lift : ∀ (bb : Bool) (x : NodeIn K V D),
+              (TreeNode dig m (strip bb (a :: c :: rest)) x ∨ ClimbNode dig t bits siblings x) →
+              (TreeNode dig (m + 1) (a :: c :: rest) x ∨
+                ClimbNode dig t (b :: bits) (s :: siblings) x) := by
+            intro bb x hx
+            rcases hx with hx | hx
+            · exact Or.inl (TreeNode.child _ _ bb _ hx)
+            · exact Or.inr (ClimbNode.deeper _ _ _ _ _ hx)
           cases b with
           | false =>
               simp only [Bool.false_eq_true, if_false] at climbed
@@ -202,8 +315,9 @@ theorem climb_sound :
               · simp only [NodeIn.branch.injEq] at same
                 have ih := climb_sound m (strip false (a :: c :: rest)) bits siblings t
                   (strip_wf m false _ wf) short' long' same.1
-                simpa [select] using ih
-              · exact Or.inr ⟨_, _, same, climbed⟩
+                simp only [select, List.length_cons, List.take_succ_cons] at ih ⊢
+                exact ih.imp_right (CollisionAmong.mono dig (lift false))
+              · exact Or.inr ⟨_, _, Or.inr (ClimbNode.left _ _ _), Or.inl root, same, climbed⟩
           | true =>
               simp only [if_true] at climbed
               by_cases same : (NodeIn.branch s (climb dig bits siblings (dig t.input)) : NodeIn K V D) =
@@ -211,8 +325,9 @@ theorem climb_sound :
               · simp only [NodeIn.branch.injEq] at same
                 have ih := climb_sound m (strip true (a :: c :: rest)) bits siblings t
                   (strip_wf m true _ wf) short' long' same.2
-                simpa [select] using ih
-              · exact Or.inr ⟨_, _, same, climbed⟩
+                simp only [select, List.length_cons, List.take_succ_cons] at ih ⊢
+                exact ih.imp_right (CollisionAmong.mono dig (lift true))
+              · exact Or.inr ⟨_, _, Or.inr (ClimbNode.right _ _ _), Or.inl root, same, climbed⟩
 
 /-- Look a full key up in entries carrying their full paths. -/
 def lookup (es : List (Entry K V)) (k : K) : Option V :=
@@ -256,13 +371,16 @@ theorem select_entries_mem (bitsOf : K → List Bool) :
 
 /-- **Soundness at a fixed path length.** If the entries are the key/value
 pairs `kvs` at their full paths (length `L`, injective on keys), an opening
-that verifies against the canonical root answers `lookup` — or a node
-collision is exhibited. -/
+that verifies against the canonical root answers `lookup` — or two different
+node inputs, each hashed by the canonical tree or by this opening's climb, share
+a digest (a finite set fixed by `kvs` and the opening, not supplied by pigeonhole). -/
 theorem verify_sound (bitsOf : K → List Bool) (L : Nat) (lengths : ∀ k, (bitsOf k).length = L)
     (kvs : List (K × V)) (wf : WF L (entries bitsOf kvs))
     (k : K) (answer : Option V) (opening : Opening K V D)
     (accepted : verify dig bitsOf (tree dig L (entries bitsOf kvs)) k answer opening = true) :
-    answer = lookup (entries bitsOf kvs) k ∨ Collision dig := by
+    answer = lookup (entries bitsOf kvs) k ∨
+      CollisionAmong dig (fun x => TreeNode dig L (entries bitsOf kvs) x ∨
+        ClimbNode dig opening.terminal ((bitsOf k).take opening.siblings.length) opening.siblings x) := by
   simp only [verify, Bool.and_eq_true, decide_eq_true_eq] at accepted
   obtain ⟨⟨short, consistent⟩, climbed⟩ := accepted
   have reports := climb_sound dig L (entries bitsOf kvs) ((bitsOf k).take opening.siblings.length)

@@ -1,5 +1,11 @@
 # The landing pipeline on hbox
 
+> **2026-10-27.** hbox is the pipeline's standing run and warm base, nothing else: lanes run their
+> Linux checks and Lean builds on `dregg-build`, timing rows never run on `/tank` (an HDD mirror with no
+> SLOG), and the landing rule below is the one in [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md) §2: reds are named in
+> the run, never ledgered. The mechanics on this page (layout, slots, the standing run, the nightly
+> commands) are current; its rules defer to that document.
+
 Goal: a lane can **land by the rule** on hbox without a rented burst box (PROTOCOL-20261009 §6–7). "Landed" means
 the commit is on GitHub main AND a full static gate is red=0 at that sha AND the standing journey run at that sha has
 every required row PASS. A required row may also be UNCONFIGURED, but only when the missing input is one the box
@@ -24,20 +30,38 @@ copied script.
 The shared git remote is the bundles mirror `/tank/dregg-build/claude-lanes/bundles/burst3-minidregg.git`
 (`PIPELINE_SHARED_GIT`).
 
-### box.env (as written 2026-10-14)
+### box.env (as written 2026-10-14; re-run with the cache line below)
 
 ```
 scripts/pipeline/box-env --layout /tank/dregg-build/pipeline \
   --slots "/tank/dregg-build/pipeline/slots/build-slot-1 /tank/dregg-build/pipeline/slots/build-slot-2" \
   --gate-slots /tank/dregg-build/pipeline/slots/build-slot-mk --lean-threads 8 \
-  --shared-git /tank/dregg-build/claude-lanes/bundles/burst3-minidregg.git --no-lake-shim \
+  --shared-git /tank/dregg-build/claude-lanes/bundles/burst3-minidregg.git \
+  --lake-cache /tank/dregg-build/pipeline/lake-cache \
   --set "PIPELINE_LEANENV_WAIT_S=0 PIPELINE_JOURNEY_JOBS=8 PYTHONPATH=/tank/dregg-build/pipeline/pylib"
 ```
 
-- `--no-lake-shim`: hbox has no `$PIPELINE_ROOT/scripts/lake-shim`. A PATH entry pointing there would be an
-  installed-copy path waiting for someone to plant a file in it.
+- `--lake-cache DIR`: the box's one shared Lake artifact cache. box.env exports `LAKE_CACHE_DIR=DIR` and
+  `LAKE_ARTIFACT_CACHE=true`; there is no shim and no PATH entry (the old `--no-lake-shim` refused the
+  installed-copy PATH entry and, with it, the cache: hbox lanes recompiled each other's modules, e.g. 823
+  modules / 8,046 s in land-perffix4, CYCLE-TIME-20261016 §2 T2). The guard, `lake-cache-audit --since
+  --purge`, runs from the tip tree's `lib.sh` (`pipeline_cache_audit`) before every slot build, lane-check,
+  landing gate and publish.
 - `PIPELINE_LEANENV_WAIT_S=0`: hbox has no lean envs, so `objective` is UNCONFIGURED. It was UNCONFIGURED on
   burst3 too, and it is not a required row.
+
+### Lean slots: `scripts/pipeline/with-lean-slot`
+
+Lanes run every hbox Lean build as `<lane tree>/scripts/pipeline/with-lean-slot swarm-build lake build …`. This is the
+repo copy, run from the lane's own tree. It replaces the hand-installed `pipeline/slots/with-lean-slot`, and while both
+exist they share its locks (`slots/lean-K.lock`) and queue (`slots/waiters/<pid>.pid`).
+- **Queue:** FIFO by ticket age. `WITH_LEAN_SLOT_PRIORITY=1` puts the integrator or tip service ahead of every ordinary
+  ticket.
+- **Box settings:** `PIPELINE_LEAN_SLOTS` (count) and `PIPELINE_LEAN_SLOT_THREADS` (threads per slot) come from box.env
+  via `--set`.
+- **Wait log:** every run appends `pid enqueued granted released slot rc command` to `slots/waits.tsv`.
+- **Sizing:** native builds write per-module peak RSS (`lean-module-rss.tsv`, the `lean-rss` lines of `build.log`, and
+  `lean_maxrss_kib_p95` in the manifest). Size slots × threads from those numbers.
 
 ### What was generalized, not forked
 
@@ -45,7 +69,7 @@ The /srv paths were defaults. Each edit makes a default come from box.env:
 
 - `box-env --layout DIR` sets `PIPELINE_ROOT` and the roots `ARTIFACT_ROOT`, `JOURNEY_ROOT`, `PIPELINE_LANES`,
   `PIPELINE_WARM_BASE`, `PIPELINE_NEXT_BASE` and `PIPELINE_GATE_SLOT`, all under DIR. It also gains
-  `--shared-git`, `--set` and `--no-lake-shim`.
+  `--shared-git`, `--set` and `--lake-cache`.
 - `lib.sh` `pipeline_find_tree`: the next base comes from `PIPELINE_NEXT_BASE`.
 - `mk-lane.sh`: the `shared` remote comes from `PIPELINE_SHARED_GIT`.
 - `advance-base-burst.sh`: the probe lane goes under `$LANES`. `$W/mk-lane.sh` is now a **relative symlink**
@@ -95,7 +119,7 @@ cd /tank/dregg-build/pipeline && PIPELINE_ROOT=$PWD setsid nohup bash <tree>/scr
    source.tar sha256. `SELF-CHECK PASS|FAIL` says whether the executed runner is byte-identical to
    `git show TIP:scripts/pipeline/journey-runner` from the shared repo; FAIL exits 12. If the plant marker
    exists, a `STALE-COPY EXECUTED` line follows. Then the verdict body: `awk -F'\t' '$2!="PASS"' results.tsv` and the row count. Then check every id in
-   `required-rows`, read from the **main base's** tree so a lane cannot drop its own required rows. Each must be
+   `required-rows`, read from the **baseline's own tree** (`journeys/.trees/<artifacts/main>`, the tree main's standing run executed) so a lane cannot drop its own required rows or add its own known-red lines; never from the warm base, which is a build cache. No baseline tree: `NO POLICY`, exit 13. Each must be
    PASS, or UNCONFIGURED with a detail that matches that row's declaration in `absent-inputs.tsv`. A required id
    with no line in results.tsv is MISSING. Exit 0 only if every required id passes this check; otherwise exit 13.
    The verdict is also written to `LANE/logs/landing-TIP.txt`.
@@ -106,21 +130,82 @@ from the results.tsv it has read.
 ### required-rows
 
 The ids come from MATURATION-MAP-20261009 §3. A row id covers its sub-rows. A parent that is UNCONFIGURED only
-because of declared sub-rows is accepted. Three rows on the map do not exist yet: BIRTHS (the bar; `growth`
-measures updates), HERMES-LIVE and jcertify. They are `pending` lines: printed on every landing, not counted. The first time a row of that name appears in
-results.tsv, it is required automatically (ROOT, 2026-10-14).
+because of declared sub-rows is accepted. Two rows on the map do not exist yet: HERMES-LIVE and jcertify. They are
+`pending` lines: printed on every landing, not counted. The first time a row of that name appears in results.tsv, it
+is required automatically (ROOT, 2026-10-14).
+
+`births` (THE BAR) exists and runs on every landing, but its line is `pending births when-green-at-main …`: it
+becomes required only once main's own baseline run has it PASS. Until then landing.sh prints
+`pending   births (when green at main; main's baseline: …; candidate: …)` and does not count it. Rule (b) below
+still applies to it, so once main is PASS a candidate that turns it red is a NEW RED.
+
+## The bar per landing: `births`; the soak: the nightly
+
+THE BAR (cv 01a0f9c0-521b) is on CREATES: write p99 <= 5 s, cold reopen <= 60 s. The standing run judges it with
+`births` (journey-rows `row_births`): `scripts/perf/workload.py --births-only` on a fresh native Store: genesis,
+setup, `PERF_BIRTHS_N` births (default **64**), then the Host stopped by its PID file and restarted on the same
+Store, timed to the first answered read. PASS iff all N resource writes and N `create` turns completed, each
+op's p99 <= 5 s, and the reopen <= 60 s; FAIL names the op and the bound. The detail carries create p50/p99/max,
+resource p99, reopen, cells and records at the end, the Store size, and the 1-min loadavg at start and end: a loaded
+box is recorded, never a reason to skip (the row has no UNCONFIGURED-for-load path, unlike `perf`). Sub-rows
+`births/create`, `births/resource`, `births/reopen`. Plant: `JOURNEY_PLANT_BIRTHS=bar-1ms`
+judges the same run against a 0.001 s write bar and must FAIL naming `births/create p99 … > 1 ms bar`.
+
+`growth` (1000 records through journey.sh; 2,436–5,401 s; it measures UPDATES on existing cells and flipped PASS/FAIL
+on the same bar with box load, FOLLIES-20261014 F1) is **not** in a landing's standing run: journey-rows appends it
+to `JOURNEY_ROWS` only when `PIPELINE_NIGHTLY=1`.
+
+### Nightly
+
+The nightly is the 1000-create run plus the full growth soak, against the `main` set, into its own results root
+(never `$JOURNEY_ROOT`: run_tip moves an existing `TIP/` aside, which would hide the standing run from landing.sh).
+With `PIPELINE_NIGHTLY=1`, `births` defaults to N=1000 (`PERF_BIRTHS_N` overrides), and `growth` and `kernel` (the
+kernel journey: `journey.sh` `JOURNEY_SET=kernel` without G, the steps no public surface needs; docs/JOURNEY.md
+"Two journeys") are in the row set:
+
+```
+cd /tank/dregg-build/pipeline && T=$(readlink artifacts/main) && tree=journeys/.trees/$T && \
+  PIPELINE_ROOT=$PWD PIPELINE_NIGHTLY=1 PIPELINE_ROW_TIMEOUT_S=7200 setsid nohup bash $tree/scripts/pipeline/journey-runner \
+    --tip $T --row births --results-root $PWD/nightly > logs/nightly-births-$T.log 2>&1 < /dev/null & echo $! > logs/nightly-births.pid
+# then the same with --row growth (logs/nightly-growth-$T.log, logs/nightly-growth.pid), after births has finished,
+# and with --row kernel (logs/nightly-kernel-$T.log, logs/nightly-kernel.pid)
+```
+
+Results: `nightly/<tip>/{results.tsv,table.txt,rows/}`. The nightly blocks nothing; it is the measurement a Store
+change that claims a speedup is judged by.
+
+### One row by hand (a lane verifying its own row)
+
+`--source-tree` runs the lane's rows against an existing READY set; the self-check then compares the runner with
+the lane tree's own:
+
+```
+cd /tank/dregg-build/pipeline && PIPELINE_ROOT=$PWD bash LANE/src/scripts/pipeline/journey-runner \
+  --tip $(readlink artifacts/next) --row births --source-tree LANE/src --results-root LANE/journeys
+```
 
 ### absent-inputs.tsv (hbox, measured 2026-10-14)
 
 | row | detail regex | why absent |
 |---|---|---|
-| m6grain | `^missing input: operator uid 1001 ` | the pipeline runs as uid 1000 (`hbox`). There is no uid-1001 operator account or subuid range |
-| m7 | `^missing input: M7_REFERENCE ` | no M7 reference exists on any box yet |
-| jpay/JPAY6 | `^missing input: TEST_PROVIDER=` | the set ships no mini-hermes-test-provider |
-| exchange | `^missing input: MINI_FN_LAUNCHER ` | no fn launcher/core outside /tank/fn |
 | hostupgrade | `^missing hostupgrade candidate input: .*/e0a8ba21…$` | the pinned old-epoch EF set existed only on burst3 |
 | hostupgrade/HOST-UPGRADE-PREVIOUS | `^no previous READY main set with the tip Store epoch$` | no same-epoch main set has been published on hbox yet |
 | hermes | `^missing input: unprivileged user namespaces for bwrap ` | hbox has `kernel.apparmor_restrict_unprivileged_userns=1` and no AppArmor profile that lets bwrap create a user namespace (`bwrap: setting up uid map: Permission denied`). **DECISION PENDING (Ember, box security):** until a bwrap profile exists, hbox landings do not prove hermes. JPAY6 accepts this message too (its probe comes before TEST_PROVIDER) |
+
+Supplied 2026-10-14 (M6GRAIN-HBOX), no longer declared: **m6grain** runs two-world-journey.sh AS the operator
+(`MINI_OPERATOR_UID`/`MINI_OPERATOR_NAME` in box.env: `mini-operator` uid 1001, linger, subuid 165536:65536) through
+`/etc/sudoers.d/mini-operator` (hbox may run only that script as the operator; the operator may run only `install-user-world`
+as root), with `u:mini-operator:r-x` on `/usr/local/libexec/mini-grain-bwrap` (r-x: an exec-only binary is non-dumpable and
+bwrap cannot write its uid_map), `uidmap` installed and `MINI_TEST_SPK` in `inputs/spk/`. Box changes and their undo:
+`$PIPELINE_ROOT/box-changes.md`. It now RUNS and FAILS (cv 01a13d9c-8a9d): spk-host's resident bootstrap unshares its own
+user namespace, AppArmor moves it to `unprivileged_userns`, which denies CAP_SETGID, so `setgroups(0)` is EPERM.
+
+Supplied 2026-10-14 (INPUTS-HBOX), no longer declared: **m7** takes its reference from the newest other READY
+set with identical compiled inputs (journey-runner `m7_reference_for`); **exchange** gets `MINI_FN_LAUNCHER`/`MINI_FN_CORE`
+from box.env = a verified copy of fn's 6679dae0e image at `$PIPELINE_ROOT/inputs/fnbin/6679dae0e/` (outside /tank/fn,
+which the row forbids); **JPAY6** gets `MINI_TEST_PROVIDER_BIN`/`MINI_LAUNCH_GATE_BIN` from box.env
+(`$PIPELINE_ROOT/inputs/fixtures/7ffd6524/`, built from the tree; same sources at next) and its userns probe tries
+`/usr/local/libexec/mini-grain-bwrap`, the AppArmor-profiled copy jpay6.sh itself falls back to.
 
 `sudo -n true` succeeds, `Linger=yes` is set for `hbox`, and sshd, bwrap and jq are present.
 
@@ -157,26 +242,23 @@ it executes; its `lib.sh`, `journey-red-lines` and `journey-rows` were planted b
 - `fleetsign` FAIL, reproduced 3 of 3: interleaved turns refused with "remote challenge differs from locally
   prepared intent" (cv 01a13985). Evidence is in `/tank/dregg-build/pipeline/evidence/fleetsign-race/`.
 - `growth` FAIL (write p99 10 s at 1000 records) and `perf` UNCONFIGURED (box not quiet). Neither is required.
+  `growth` has since moved to the nightly; `births` judges the bar per landing (above).
 - `jserve` is a KNOWN FLAKY row on hbox (cv 01a139e1). It is timing-sensitive and not required. In main 7dea0626's
   hbox run it FAILED 10/12 serve rows; the failing cases were (a) "a client sends 3 bytes then sleeps 30 s" and
   (c) "50 connections that send nothing". It PASSED in the d37eee80 run an hour earlier. It is not declared absent:
   a jserve that was PASS at main's baseline and fails in a candidate counts as a new red.
 
-## Baseline-relative landing rule (ROOT, 2026-10-14; the header of scripts/pipeline/required-rows)
+## Baseline-relative landing rule (the header of scripts/pipeline/required-rows; docs/COORDINATION-2026-10-27.md §2)
 
 A candidate lands when all three hold:
 
-1. Its gate is red=0.
+1. Its gate is red=0 (or its reds are named and owned by a lane in flight).
 2. Its standing run has **no line non-PASS (or missing) that was PASS in main's own most recent standing run on
    this box**. landing.sh prints `new reds vs baseline: N`, and each one as `NEW RED`.
-3. Every required line is PASS or declared absent by name. The exception is a line that was already non-PASS at
-   main's baseline **and** is listed in required-rows as `known-red ROW CV-TASK note`; that line prints as
-   `PRE-RED` and blocks nothing until fixed. A pre-existing red with no `known-red` line still blocks, so its cv
-   task must be opened first.
+3. Every required line is PASS, declared absent by name, or was already non-PASS at main's baseline: such a line
+   prints as `PRE-RED` by name and blocks nothing. There is no accepted-red list to maintain (the `known-red`
+   lines and `known-red-verdict` were deleted on 2026-10-27); the run's output names the reds and the lane
+   brief names the owner.
 
 The verdict prints `required unmet: [...] (of which pre-existing at main: [...])`. Exit 0 iff new reds = 0 and
 nothing blocks.
-
-- Known-red today: fleetsign (cv 01a13985).
-- Plant for the rule: the d37eee80 results with m3 set to FAIL and rooms removed against the main baseline gave
-  `NEW RED rooms MISSING` and `NEW RED m3 FAIL`, and exited 1.

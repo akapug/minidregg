@@ -33,7 +33,7 @@ def main (args : List String) : IO Unit := do
   let selection : Selection := ⟨grainTask, parentTask, publicationTarget⟩
   let .ok rendered := render packageBytes package.originalReceipt context selection
     | throw (IO.userError "valid accepted grain publication did not render")
-  unless ResourceBirthCodec.bytesEqual rendered.source expectedBytes do
+  unless Tower256ConcreteBackend.bytesEqual rendered.source expectedBytes do
     throw (IO.userError "reusable renderer changed exact recorded R source bytes")
   unless rejected (render packageBytes { package.originalReceipt with
       acceptedCount := package.originalReceipt.acceptedCount + 1 } context selection) do

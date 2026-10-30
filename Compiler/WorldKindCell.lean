@@ -2,7 +2,26 @@
 The inner store is typed by its retained descriptor. The outer instance patch
 can only be obtained by running that typed patch, never from a replacement blob.
 -/
-import Kernel.WorldKindInstance
+module
+
+public import Kernel.WorldKindInstance
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.WorldKindCell
 
@@ -102,13 +121,15 @@ def instanceLayout : Layout.{0, 0, 0} where
 def descriptorAddress : Address instanceLayout := ⟨.descriptor, ()⟩
 def payloadAddress : Address instanceLayout := ⟨.payload, ()⟩
 
-def instanceSpaceStream : StreamCodec InstanceSpace where
-  encode | .descriptor => [0] | .payload => [1]
-  decodePrefix
-    | 0 :: rest => some (.descriptor, rest)
-    | 1 :: rest => some (.payload, rest)
-    | _ => none
-  decodePrefix_encode := by intro space suffix; cases space <;> rfl
+def instanceSpaceStream : StreamCodec InstanceSpace :=
+  withTagCursor
+  { encode := fun | .descriptor => [0] | .payload => [1]
+    decodePrefix := fun
+      | 0 :: rest => some (.descriptor, rest)
+      | 1 :: rest => some (.payload, rest)
+      | _ => none
+    decodePrefix_encode := by intro space suffix; cases space <;> rfl }
+    rfl (by one_octet_tag)
 
 def instanceWire : StoreCodec.Wire instanceLayout where
   name := "minidregg/world-kind/instance-carrier/v1"

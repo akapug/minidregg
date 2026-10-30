@@ -28,6 +28,7 @@ import Theory.AuthMap  -- sparse Merkle map over hashed canonical key bytes: roo
 import Theory.LogAccumulator  -- Merkle mountain range over log heights: incremental frontier, completeness, collision-exhibiting soundness
 import Theory.AuthTrie  -- compressed authenticated binary trie: O(log n) openings, soundness up to a node collision
 import Theory.AuthTrieRange  -- subtree reveals: every member under a key prefix, soundness up to a node collision
+import Theory.AuthTrieCache  -- the compressed trie kept: inserts in O(depth), proved equal to the canonical root; honest openings verify
 import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.PlanBinding  -- a plan binds (address, value) reads, not a cell root: admission refuses footprintStale only when a read address moved; whole-cell footprint = root binding under the pair carrier; no-TOCTOU; independent plans admitted in both orders and commute; openings at the cell root under the world root, and why signed openings would re-bind the root
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions
@@ -68,6 +69,8 @@ import Theory.CrossModulus  -- one canonical integer with exact quotient/remaind
 import Theory.CompressedLinearEquation  -- exact signed integer equations normalized to canonical unsigned limb/carry balances for compressed RNS/FHE checks
 import Theory.BinaryTower  -- [OB-8-tower] the GF(2) binary-tower field substrate (Binius path)
 import Theory.BinaryTowerCodec  -- exact recursive Fan--Paar coordinates and fixed-width 32-byte round-trip; native code remains opaque
+import Theory.BinaryCubeAddress  -- the LSB-first Boolean-cube address equivalence shared by the Merkle controller and the lookups
+import Theory.CollisionFloor  -- the global collision floor is true at every fixed-width digest (cshake256Bytes, finite node digests): the teeth of the CollisionAmong restatement
 import Theory.BinaryTowerFanPaarCodec  -- concrete recursive Fan--Paar coordinate codec and canonical fixed-width byte realization; still no native representation theorem
 import Theory.BinaryTowerFanPaar  -- [BTOWER-fanpaar] the Fan–Paar generator recursion + fast tower multiplication
 import Theory.BinaryTowerTrace  -- [BTOWER-fanpaar-basis] CLOSED (Wiedemann trace induction) — FanPaarRecursion holds
@@ -96,6 +99,7 @@ import Theory.Channel.Audit  -- CH-CELL theorems axiom pins (moved out so the ru
 -- extensions) are default-build; the metatheory proofs about them are the separate
 -- `ObjectiveProofs` library (lakefile.toml), gated on its own.
 import Theory.HashBytes  -- big-endian bytes, byte hashes and Collision: the carrier Pred.hashEq and Core4 digest share
+import Theory.Sp800185Cshake256Native  -- HOT-PATH 2d: the kernel seam; the compiled cSHAKE256 is the Rust kernel (native/mini-kernels) behind @[extern], its Lean body the proved fast path
 import Theory.Sp800185Cshake256Core  -- the kernel's cSHAKE256 (spec + @[csimp] fast sponge), moved from Compiler so Core4 can compute it
 import Theory.Sp800185Cshake256Conformance  -- executable NIST SP 800-185 and FIPS 202 vectors on the fast path (native_decide), beside the code they check
 import Theory.ObjectiveBendDigest  -- Core4 `digest`: cSHAKE256 under DREGG.OBEND.DIGEST/v1 over len(a):8 ‖ a ‖ b; binds-or-collides generic in H, length-hash pole, Hiding ASSUMED

@@ -48,13 +48,39 @@ So the before-root check of a kernel checkpoint is codec validity and the digest
 binding (Scribe note B3): no executable machine-state checker is needed for
 states the kernel produced, and no foreign checkpoint is ever admitted (a
 delivery decodes only the record cell's own bytes). -/
-import Kernel.ObjectiveActivity
-import Theory.ObjectiveBendDemandPreservation
-import Theory.ObjectiveBendCheckpointRoundTrip
-import Theory.ObjectiveBendDemandForceProofs
-import Theory.AssertCompiled
-import Theory.ObjectiveBendDemandForcingExtract
-import Theory.ObjectiveBendInteraction
+module
+
+public import Kernel.ObjectiveActivity
+public import Theory.ObjectiveBendDemandPreservation
+public import Theory.ObjectiveBendCheckpointRoundTrip
+public import Theory.ObjectiveBendDemandForceProofs
+public import Theory.AssertCompiled
+public import Theory.ObjectiveBendDemandForcingExtract
+public import Theory.ObjectiveBendInteraction
+meta import Kernel.ObjectiveActivity
+meta import Theory.ObjectiveBendDemandPreservation
+meta import Theory.ObjectiveBendCheckpointRoundTrip
+meta import Theory.ObjectiveBendDemandForceProofs
+meta import Theory.AssertCompiled
+meta import Theory.ObjectiveBendDemandForcingExtract
+meta import Theory.ObjectiveBendInteraction
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveResumeContract
 open Minidregg.Theory Minidregg.Compiler
@@ -122,11 +148,11 @@ theorem runSegment_yielded {config : Config} {ticks : Nat} {start state : State}
   · cases ran
 
 /-- A yielded segment's commit always exists when it was admitted. -/
-theorem segmentCommit_yielded {rootBytes : Bytes → Digest} {config : Config}
+theorem segmentCommit_yielded {rootBytes : Bytes → Digest} {funds : Funds} {config : Config}
     {snapshot : Snapshot rootBytes} {height : Nat} {transaction : TransactionId} {cell object : CellId}
     {generation : Nat} {current : Option ObjectState} {viewed : Bool} {state : State} {plan : PlanAwait}
     {committed : Option YieldCommit}
-    (ok : segmentCommit config snapshot height transaction cell object generation current viewed
+    (ok : segmentCommit config snapshot height transaction cell object generation current viewed funds
       (.yielded state plan) = .ok committed) :
     ∃ yielded, committed = some yielded := by
   simp only [segmentCommit, bind, Except.bind] at ok

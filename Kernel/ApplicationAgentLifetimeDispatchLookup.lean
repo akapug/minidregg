@@ -2,7 +2,26 @@
 Receipt-only event26 recovery. An exact historical record can report its
 receipt; lookup never mints another app delivery permit or resends fd3 bytes.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchProjection
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchLookup
 
@@ -33,7 +52,7 @@ def lookupVerified {config : Config} {target : Durable}
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | .error .nativeHistoryUnavailable
   let some grant := verified.grants.find?
       (fun prior => prior.index == ingress.reserveContext.grantIssueIndex)

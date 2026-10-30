@@ -46,10 +46,31 @@ reallocation whose result, changed between the signing plan and the submission
 no longer matches the signed header and is refused, never settled differently.
 (An offer tolerates movement in the price; the exact signed plan does not.)
 -/
-import Kernel.CapabilityRevocationController
-import Kernel.ResourceBirthController
-import Kernel.SeatStore
-import Kernel.PayAssignmentOwner
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthController
+public import Kernel.SeatStore
+public import Kernel.PayAssignmentOwner
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SeatReceiver
 
@@ -150,6 +171,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.decoded (ingress : DecodedIngress) :
+    commandCodec.encode ingress.command = ingress.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.ingress.envelope =
+        some ingress.envelope :=
+  ⟨ingress.canonical, ingress.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -209,7 +235,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
   (Sp800185Cshake256.hash "DREGG.SEAT.EFFECT/v1".toUTF8.toList
@@ -390,12 +416,15 @@ def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent 
 def nullifier (domain semantics : Digest) (command : Command) : StableNullifier :=
   CredentialAuthorityReplay.nullifier domain (marker domain semantics command)
 
-/-- The exact charge of a turn's footprint. -/
-def charge (ingress : DecodedIngress) (posts : List Post) (guards : List ReadGuard) : ResourceCost.Charge
+/-- The exact charge of a turn's footprint against the image `snap` it is
+admitted on: its storage lane is the World's storage of the posts, the guards
+and the retained event (`DeployedCharge.storageCharge`). -/
+def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : DecodedIngress) (posts : List Post)
+    (guards : List ReadGuard) (retained : StableEvent) : ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => posts.length + guards.length
-  | .storageBytes => (posts.map fun post => post.bytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge snap (posts.map (Post.write ResourceBirthCodec.rootBytes)) retained
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -404,7 +433,7 @@ def charge (ingress : DecodedIngress) (posts : List Post) (guards : List ReadGua
 marker, the replay event carrying the signed ingress, the signer. -/
 def admissionSeal (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) : Seal :=
   ⟨prepared.authority.readGuards, [nullifier deployment.domain profile.semantics command],
-    event deployment.domain profile.semantics ingress, some command.subject, charge ingress⟩
+    event deployment.domain profile.semantics ingress, some command.subject, charge durable.snapshot ingress⟩
 
 def Prepared.intent (prepared : Prepared deployment profile ambient durable command) (ingress : DecodedIngress) :
     DataIntent rootBytes :=
@@ -460,6 +489,13 @@ structure Accepted [DecidableEq F] (deployment : Deployment)
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   physical : PhysicalShape prepared ingress
+theorem Accepted.bound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : Accepted deployment profile ambient durable ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      authorized durable.snapshot accepted.prepared.authority.snapshot profile.semantics ambient
+        ingress.command accepted.prepared.preRoot accepted.prepared.outcome = .ok () ∧
+      PhysicalShape accepted.prepared ingress :=
+  ⟨accepted.envelopeExact, accepted.prepared.authorizedExact, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

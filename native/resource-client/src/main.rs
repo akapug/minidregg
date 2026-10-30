@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
+mod app_interface;
+mod attempt_state;
+mod bounds;
 mod fsio;
 pub(crate) use fsio::{copy_new, create_private, create_public, read_secret, retain_json, sync_directory_ancestors};
 #[cfg(unix)]
@@ -25,24 +29,21 @@ mod key_adoption;
 #[cfg(unix)]
 mod agent_payer;
 #[cfg(unix)]
+mod operator_peer;
+#[cfg(unix)]
 mod agent_reserve;
 #[cfg(unix)]
 mod current_birth;
 #[cfg(unix)]
-mod drain;
-#[cfg(unix)]
-mod fn_frontier;
-#[cfg(unix)]
 mod fleet;
+#[cfg(unix)]
+mod apps;
 #[cfg(unix)]
 mod append_proof;
 #[cfg(unix)]
 mod fleet_sign;
-mod bend_session;
 #[cfg(unix)]
 mod objective_invoke;
-#[cfg(unix)]
-mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
 mod hiding;
@@ -53,6 +54,7 @@ mod meter;
 #[cfg(unix)]
 mod market;
 mod checkpoint;
+mod world_export;
 #[cfg(unix)]
 mod clock;
 mod participant_enrollment;
@@ -77,15 +79,13 @@ mod public_proxy;
 #[cfg(unix)]
 mod operator_drain;
 #[cfg(unix)]
-mod publisher;
-#[cfg(unix)]
-mod relay;
-#[cfg(unix)]
-mod channel;
-#[cfg(unix)]
 mod scheduled_transport;
 #[path = "../../hybrid_kem.rs"]
 mod hybrid_kem;
+// Shared with private-backend; only the sealed-snapshot primitive is used here.
+#[allow(dead_code)]
+#[path = "../../pinned_execution.rs"]
+mod pinned_execution;
 #[cfg(unix)]
 #[path = "../../crypto_transit.rs"]
 mod crypto_transit;
@@ -103,8 +103,6 @@ mod selected_release;
 mod session_enrollment;
 #[cfg(unix)]
 mod render;
-#[cfg(unix)]
-mod session_reenroll;
 #[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
@@ -139,9 +137,13 @@ mod keys;
 #[cfg(unix)]
 mod job;
 mod activity;
+#[cfg(unix)]
+mod private_compute;
+mod bend;
 mod seat;
 #[cfg(unix)]
 mod shell;
+mod shell_grammar;
 #[cfg(unix)]
 mod member;
 #[cfg(unix)]
@@ -155,6 +157,8 @@ mod web;
 mod receipt_continuity;
 #[cfg(unix)]
 mod client_consent;
+#[cfg(unix)]
+mod consent_proxy;
 mod workspace;
 #[cfg(unix)]
 #[path="protected_object/object_keys.rs"]
@@ -176,11 +180,23 @@ mod object_epoch_cli;
 mod object_epoch_packages;
 #[cfg(unix)]
 mod well;
+#[cfg(test)]
+mod signing_wire_tests;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 static SSH_IDENTITY: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
+/// The local Host image a workspace (or an attempt it wrote) pinned at `workspace init`, and the
+/// digest it pinned: `host_image_sha256` of that exact path answers the pin instead of re-hashing
+/// ~170 MB in every `mini` process. What checks the bytes: `serve` hashes the sealed snapshot it
+/// executes (`transport::HostProcess::checked_image`) and the serving Host refuses an envelope that
+/// names another digest (`transport::request_from_envelope`, "host image pin mismatch"). So a Host
+/// file replaced under an unchanged pin is refused at the next `serve` start, on its first request.
+/// `--verify-host` (or MINI_VERIFY_HOST=1) hashes the file anyway and refuses a mismatch here.
+#[cfg(unix)]
+static WORKSPACE_HOST_PIN: OnceLock<(PathBuf, String)> = OnceLock::new();
+static VERIFY_HOST: AtomicBool = AtomicBool::new(false);
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
 /// The exit status a verb chose besides success (1): 3 = the Host refused, 4 = the Host did
 /// not decide (M4's shell contract). The highest one set wins.
@@ -222,11 +238,12 @@ pub(crate) fn take_command_ending() -> Option<CommandEnding> {
 /// from a client error without reading error prose.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum HostDecision {
-    /// The Host session reply carried a refusal byte; `encoded` is the rest of
-    /// the frame (an outcome encoded by the Host's own codec). `decoded` is the
-    /// Host's own `inspect outcome` of that frame over the same session, when
-    /// it could be asked; the client never decodes the frame itself.
-    RefusedFrame {
+    /// The Host session reply carried an outcome marker (`byte`: `NO_RECORD` 253 or
+    /// `HOST_OUTCOME` 255, see [`is_outcome_frame`]; 254 when a caller records a never-forwarded
+    /// reply); `encoded` is the rest of the frame (an outcome encoded by the Host's own codec).
+    /// `decoded` is the Host's own `inspect outcome` of that frame over the same session, when it
+    /// could be asked; the client never decodes the frame itself.
+    Frame {
         command: String,
         byte: u8,
         encoded: Vec<u8>,
@@ -234,6 +251,51 @@ pub(crate) enum HostDecision {
     },
     /// The Host returned a decoded outcome whose type is not `confirmed`.
     Outcome(Value),
+}
+
+impl HostDecision {
+    /// The Host's own decoding of its answer, when there is one.
+    pub(crate) fn outcome(&self) -> Option<&Value> {
+        match self {
+            HostDecision::Frame { decoded, .. } => decoded.as_ref(),
+            HostDecision::Outcome(outcome) => Some(outcome),
+        }
+    }
+
+    /// Whether the Host DECIDED that the request left nothing behind (the refusal class).
+    ///
+    /// - A frame under `NO_RECORD` (253) is that decision by construction: the Host answers it
+    ///   only for an outcome a receiver decided before any append (`refused`, `contention` or
+    ///   `unavailable`, never `uncertain`; `Host/RequestRefusal.lean`), so a fresh attempt is safe.
+    /// - A frame under `HOST_OUTCOME` (255) is NEVER a refusal, whatever it decodes to: it is the
+    ///   envelope of an outcome the Host has not proven no-append (`uncertain`, `unavailable`,
+    ///   `contention`, a handler that threw after dispatch). It is undecided: the exact retained
+    ///   call is looked up, and nothing licenses a second operation.
+    /// - A decoded `refused` that came back as an operation's own answer (not a marker frame) is
+    ///   the receiver's decision too.
+    ///
+    /// Q1 (can a handler commit and then answer?) is answered on the Host side by this split: a
+    /// handler that throws after dispatch on an append operation answers under 255.
+    pub(crate) fn is_refusal(&self) -> bool {
+        match self {
+            HostDecision::Frame { byte, .. } => *byte == RESPONSE_NO_RECORD,
+            HostDecision::Outcome(outcome) => outcome.get("type").and_then(Value::as_str) == Some("refused"),
+        }
+    }
+}
+
+/// The registry's reply markers, by name (`protocol/host-operations.json`, generated).
+pub(crate) use mini_sdk::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NEVER_FORWARDED, RESPONSE_NO_RECORD};
+
+/// Whether a reply's first byte carries a Host outcome to decode: `NO_RECORD` (253, proven
+/// no-append: the refusal class) or `HOST_OUTCOME` (255, undecided).
+pub(crate) fn is_outcome_frame(byte: u8) -> bool {
+    byte == RESPONSE_NO_RECORD || byte == RESPONSE_HOST_OUTCOME
+}
+
+/// The Host's decoded outcome type, or `undecoded`.
+pub(crate) fn outcome_type(outcome: Option<&Value>) -> &str {
+    outcome.and_then(|o| o.get("type")).and_then(Value::as_str).unwrap_or("undecoded")
 }
 
 // Request scratch belongs to its caller. Concurrent browser/native views
@@ -368,7 +430,7 @@ pub(crate) fn outcome_text(value: Option<&Value>) -> String {
     // A controller's nested `Reject` is printed by Lean's `repr` across lines;
     // line breaks and tabs become single spaces. Any other control character
     // keeps the text out of the terminal: it is shown as hex.
-    match decode_hex(hex)
+    match mini_sdk::hex::decode(hex).map_err(|e| e.0)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
     {
@@ -399,6 +461,20 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
         return Some(format!("refused: {reason}: {explain}"));
     }
     let detail = outcome_text(outcome.get("detail"));
+    // The Host's per-subject request rate (`Kernel.SubjectRate`): the detail is
+    // `rate-limited retry-after-ms N`; say when the subject may try again.
+    if reason == "rate-limited" {
+        if let Some(ms) = detail
+            .strip_prefix("rate-limited retry-after-ms ")
+            .and_then(|n| n.parse::<u64>().ok())
+        {
+            return Some(format!(
+                "refused: rate-limited: this subject has used its request rate for now; retry in {} s (phase {})",
+                ms.div_ceil(1000),
+                outcome_text(outcome.get("phase"))
+            ));
+        }
+    }
     let hint = refusal_hint(&detail);
     Some(format!(
         "refused: {reason}: {detail} (phase {}){hint}",
@@ -406,8 +482,8 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
     ))
 }
 
-/// What to do about a refusal whose name alone does not say (AUDIT-ROOMS,
-/// client defect 8). A delegation's `descent` check reads the authority as it
+/// What to do about a refusal whose name alone does not say (JDISCLOSE row
+/// d8). A delegation's `descent` check reads the authority as it
 /// stood when the proposal was authored (its root, the issuer and policy
 /// epochs, a fresh child id, an unspent nullifier); most often the authority
 /// has moved since, and the cure is a new proposal.
@@ -420,27 +496,64 @@ fn refusal_hint(detail: &str) -> &'static str {
     }
 }
 
-/// The line `mini` prints when the Host decided a refusal, from the recorded
-/// decision only.
-fn host_refusal_ending(decision: &HostDecision) -> Option<String> {
-    match decision {
-        HostDecision::RefusedFrame {
-            command,
-            byte,
-            decoded: Some(outcome),
-            ..
-        } => refusal_line(outcome).map(|line| {
-            format!(
-                "{line}{}\n  Host refused {command}, reply byte {byte}",
-                bad_signature_explanation(outcome)
-            )
-        }),
-        HostDecision::RefusedFrame { command, byte, .. } => Some(format!(
-            "refused: Host refused {command}, reply byte {byte}; the frame was not decoded"
-        )),
-        HostDecision::Outcome(outcome) => {
-            refusal_line(outcome).map(|line| format!("{line}{}", bad_signature_explanation(outcome)))
-        }
+/// The exit code and line `mini` prints for the Host's recorded decision: `refused` (exit 3)
+/// only for a decoded refusal; any other decoded type, or a frame the Host could not decode, is
+/// `undecided` (exit 4), never a refusal (`HostDecision::is_refusal`). A charged failure is its
+/// own line (exit 3: decided, and not done).
+pub(crate) fn host_ending(decision: &HostDecision) -> Option<(u8, String)> {
+    if decision.is_refusal() {
+        return Some((EXIT_REFUSED, match (decision, decision.outcome()) {
+            (HostDecision::Frame { command, byte, .. }, outcome) => format!(
+                "{}{}\n  Host refused {command} with no record, reply byte {byte}",
+                no_record_line(outcome),
+                outcome.map(bad_signature_explanation).unwrap_or_default()),
+            (HostDecision::Outcome(outcome), _) => format!("{}{}",
+                refusal_line(outcome).unwrap_or_else(|| "refused: unnamed".into()), bad_signature_explanation(outcome)),
+        }));
+    }
+    if let Some(line) = decision.outcome().and_then(charged_line) {
+        return Some((EXIT_REFUSED, line));
+    }
+    if matches!(decision, HostDecision::Outcome(_)) && outcome_type(decision.outcome()) == "confirmed" {
+        return None; // a confirmation is no Host verdict against the command; the client error stands
+    }
+    let kind = outcome_type(decision.outcome());
+    Some((EXIT_UNDECIDED, match decision {
+        HostDecision::Frame { command, byte, .. } => format!(
+            "undecided: Host answered {command} with reply byte {byte} and outcome {kind}; the effect is unknown, \
+             so do not repeat the operation: look up the exact retained call"),
+        HostDecision::Outcome(_) => format!(
+            "undecided: Host outcome {kind}; the effect is unknown, so do not repeat the operation: look up the exact retained call"),
+    }))
+}
+
+/// The line for a `NO_RECORD` (253) frame: the Host decided before any append, so nothing
+/// happened and a fresh attempt is safe. A decoded `refused` names its reason; `contention` and
+/// `unavailable` say so.
+pub(crate) fn no_record_line(outcome: Option<&Value>) -> String {
+    match outcome {
+        Some(outcome) if outcome_type(Some(outcome)) == "refused" => refusal_line(outcome).unwrap_or_else(|| "refused: unnamed".into()),
+        outcome => format!("refused: no record: the Host answered {} before any append; nothing happened, a fresh attempt is safe",
+            outcome_type(outcome)),
+    }
+}
+
+/// The registry's never-forwarded marker (254).
+pub(crate) fn host_operations_never_forwarded() -> u8 {
+    RESPONSE_NEVER_FORWARDED
+}
+
+/// Exit code for a request whose effect is unknown (`mini retry --mode lookup` asks again).
+pub(crate) const EXIT_UNDECIDED: u8 = 4;
+
+/// `charged: ...` for a confirmed outcome whose disposition is `charged`: the call is admitted and
+/// only its price was posted; nothing else was written (`mini_sdk::custody::Outcome::Charged`).
+pub(crate) fn charged_line(outcome: &Value) -> Option<String> {
+    match mini_sdk::custody::outcome_of(outcome) {
+        mini_sdk::custody::Outcome::Charged { cause, .. } => Some(format!(
+            "charged: the Host admitted the call and posted only its price; nothing else was written (cause {})",
+            match cause.as_str() { Some(hex) => outcome_text(Some(&Value::String(hex.to_owned()))), None => cause.to_string() })),
+        _ => None,
     }
 }
 
@@ -487,6 +600,12 @@ fn host_image_sha256(host: &Path) -> Result<String> {
             (Some(true), None) => Err("a remote workspace must pin the Host SHA-256 (--host-sha256)".into()),
             _ => Err("no Host image: only a remote client (--remote) may omit --host".into()),
         };
+    }
+    let pinned = WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha);
+    if let Some(sha) = pinned {
+        if !verify_host() {
+            return Ok(sha.clone());
+        }
     }
     let mut file = File::open(host).map_err(|error| {
         format!(
@@ -537,9 +656,60 @@ fn host_image_sha256(host: &Path) -> Result<String> {
         ));
     }
     let sha = hex(&digest.finalize());
+    if pinned.is_some_and(|pin| pin != &sha) {
+        return Err(format!(
+            "selected Host image {} differs from the workspace's pinned hostSha256",
+            host.display()
+        ));
+    }
     cache.retain(|(path, _, _)| path != host);
     cache.push((host.to_path_buf(), identity, sha.clone()));
     Ok(sha)
+}
+
+/// Whether this process hashes a pinned Host image anyway (`mini --verify-host ...`, MINI_VERIFY_HOST=1).
+fn verify_host() -> bool {
+    VERIFY_HOST.load(Ordering::Relaxed) || env::var_os("MINI_VERIFY_HOST").as_deref() == Some(OsStr::new("1"))
+}
+
+/// Pins, for this process, the digest a local workspace (or attempt) recorded for its Host image
+/// path at `workspace init`. A second, different pin within one process is refused.
+#[cfg(unix)]
+pub(crate) fn pin_workspace_host(host: &Path, sha: &str) -> Result<()> {
+    if sha.len() != 64 || !mini_sdk::hex::is_lower(sha) {
+        return Err("workspace hostSha256 must be 64 lowercase hex digits".into());
+    }
+    let pin = (host.to_path_buf(), sha.to_owned());
+    match WORKSPACE_HOST_PIN.get() {
+        Some(existing) if existing != &pin => Err("pinned workspace Host image differs within one process".into()),
+        Some(_) => Ok(()),
+        None => WORKSPACE_HOST_PIN.set(pin).map_err(|_| "cannot pin the workspace Host image".into()),
+    }
+}
+
+/// The pin a local attempt manifest records beside its Host path: the workspace's, when one is
+/// loaded for that path (so the manifest and the workspace name the same digest), else none.
+#[cfg(unix)]
+fn workspace_host_pin(host: &Path) -> Option<String> {
+    WORKSPACE_HOST_PIN.get().filter(|(path, _)| path == host).map(|(_, sha)| sha.clone())
+}
+
+/// The op-8 inspect kinds that read the admitted history (`object-audience`,
+/// `object-audience-roster`): the Host session answers these frames from its
+/// walked history, and the storeless codec refuses them
+/// (`Host.Main.sessionInspectKind`). They travel the same `u16(len) ‖ kind ‖
+/// source` framing as codec frames, addressed to the session itself.
+#[cfg(unix)]
+fn session_inspect_kind(operation: u8, payload: &[u8]) -> bool {
+    if operation != mini_sdk::host_operations::INSPECT {
+        return false;
+    }
+    let Some(header) = payload.get(..2).and_then(|bytes| <[u8; 2]>::try_from(bytes).ok()) else {
+        return false;
+    };
+    let width = usize::from(u16::from_le_bytes(header));
+    let kind = payload.get(2..2 + width).and_then(|bytes| std::str::from_utf8(bytes).ok());
+    matches!(kind, Some("object-audience") | Some("object-audience-roster"))
 }
 
 #[cfg(unix)]
@@ -550,7 +720,7 @@ fn session_invoke(
     operation: u8,
     payload: &[u8],
 ) -> Result<Vec<u8>> {
-    if (7..=11).contains(&operation) {
+    if (7..=11).contains(&operation) && !session_inspect_kind(operation, payload) {
         return client_consent::codec_frame(host, config, operation, payload);
     }
     let selected_sha = host_image_sha256(host)?;
@@ -562,40 +732,21 @@ fn session_invoke(
     transport::invoke_pinned_with_local(host, socket, config, &selected_sha, operation, payload)
 }
 
-#[cfg(unix)]
-fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
-    let pin: Value =
-        serde_json::from_slice(&fs::read(state_dir.join("pin.json")).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-    if matches!(
-        pin.get("type").and_then(Value::as_str),
-        Some("minidregg-b-consumer-worker-pin-v2" | "minidregg-a-reply-consumer-worker-pin-v2")
-    ) {
-        let sha = pin
-            .get("hostSha256")
-            .and_then(Value::as_str)
-            .ok_or("v2 worker pin lacks host image digest")?
-            .to_owned();
-        if let Some(existing) = EXPECTED_HOST_SHA.get() {
-            if existing != &sha {
-                return Err("worker host image changed within process".into());
-            }
-        } else {
-            EXPECTED_HOST_SHA
-                .set(sha)
-                .map_err(|_| "cannot pin worker host image")?;
-        }
-    }
-    Ok(())
-}
-
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
-  mini [--remote DEST] COMMAND [options] [--replan-max N]
-    --replan-max N: when a tick, certify or another write lands between an observation and
-    its use, the Host answers stale-root; mini observes again up to N times (default 5;
-    MINI_REPLAN_MAX when the flag is absent). Only stale-root is retried.
+  mini consent-full-ready --host HOST --config CONFIG.json
+  mini [--verify-host] [--remote DEST] COMMAND [options] [--replan-window SECONDS] [--replan-max N]
+    --verify-host (or MINI_VERIFY_HOST=1): hash the local Host image even when the workspace pinned
+    its hostSha256 at init, and refuse a mismatch before any request.
+    --replan-window SECONDS: when a tick, certify or another write lands between an observation and
+    its use (the Host's stale-root, or a document append's moved target), mini observes again,
+    after a random pause of up to a few of its own attempt times, until SECONDS have passed
+    (default 600; MINI_REPLAN_WINDOW when the flag is absent). Each such refusal is the Host's
+    proof that another write landed first.
+    --replan-max N: an explicit ceiling of N re-plans inside the window (none by default; 0 is a
+    single observation; MINI_REPLAN_MAX when the flag is absent).
+  mini private-compute --left 0..=255 --right 0..=255   (research demonstration: a local four-party MPC computation, never an admission; needs the mini-private-compute binary beside mini)
   mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini adopt-next-key --workspace WORKSPACE [--next-key NEXT-KEY] [--attempt CHILD] [--action prepare|submit|lookup]
   mini rotate-key --workspace WORKSPACE --next-key NEXT-KEY [--next-to PATH]
@@ -605,7 +756,6 @@ usage:
   mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT --verifier LOCAL-HOST
   mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
   mini socket-proxy --socket PUBLIC-SOCKET
-  mini key --action export-blinding --secret KEY
   mini verify-view --view VIEW.json
   mini key --action cell-blinding --secret KEY --cell CELL [--storage declared|content --heights H1,H2,...]
   mini key --action derive-salt --secret KEY --cell CELL --storage declared|content [--heights H1,H2,...] --entry HEX
@@ -621,9 +771,13 @@ usage:
   mini operation-proof --dir WORKSPACE --operation-record ABSOLUTE-FILE
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
-  mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
+  mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol tariff]
   mini pay observe --dir OBSERVER-WORKSPACE --capability CAP [--enrol-capability C_ENROL --operator-socket OPERATOR-SOCKET] (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
+  mini bend --action publish --dir WORKSPACE --name NAME --source FILE.obend [--entry DEF] [--account REF]   an Objective Bend, captured and lowered by the Host's front end, then published
+  mini bend --action run --dir WORKSPACE --name NAME --object REF [--seed JSON] [--input JSON] [--deposit N] [--state-type JSON] [--account REF]   create REF pinning the bend when it has no record, then birth its activity
+  mini bend --action show --dir WORKSPACE --object REF
+  mini bend --action lookup|retry --dir WORKSPACE --name NAME   the receipt-only lookup of, or the exact retry of, NAME's last retained attempt
   mini job --action post --dir WORKSPACE --room REF --program ID --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME]
   mini job --action claim --dir WORKSPACE --job ID --room REF --bond B --account REF [--name NAME]
   mini job --action answer|check|settle|show --dir WORKSPACE --name NAME [--output N --steps N]
@@ -631,11 +785,12 @@ usage:
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true] [--operator-socket OPERATOR-SOCKET]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini join --memo-version v2 --solana --host HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --enrol ENROL-V2.json --dir NEW-JOIN-DIR [--weeks N --starter-credit N]
+  mini join --memo-version v2 --solana ... --key BOX-HELD.key --ssh-public LOGIN.pub [--ssh-signature SSHSIG]   (detached: the first run prints the statement to sign, the second takes the signature)
   mini join --memo-version v2 --renew|--wait --host HOST --config CONFIG --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub]
   mini pay-claim --action quote --join-dir JOIN --host LOCAL-HOST --config CONFIG --weeks N --starter-credit N --expiry-hour N --nonce N --output ABS.bin [--mode enrol|renew --payment-record ABS.json]
   mini pay-claim --action accept|rotate|lookup (--dir WORKSPACE | --join-dir JOIN) --operation-record ABS-DIR [--command SOURCE.bin --host LOCAL-HOST --config CONFIG --bootstrap-url HTTPS/mini/v2 --payment-record ABS.json --key SECRET]
   mini enrollment-bootstrap --host HOST --config PUBLIC-CONFIG --socket PUBLIC-SOCKET --listen 127.0.0.1:8794 --metadata PUBLIC-BOOTSTRAP.json [--trusted-proxy IP]
-  mini enrollment-view --socket SOCKET [--config CONFIG]
+  mini enrollment-view --socket SOCKET [--config CONFIG] (--host HOST | --host-sha256 HEX)
   mini join --solana --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir NEW-JOIN-DIR [--key MINI.key] [--ssh-key SSH-KEY] [--name NAME] [--weeks N] [--starter-credit N]
   mini join --wait --host HOST --config PINNED-CONFIG.json [--socket SOCKET | --bootstrap-url HTTPS-BASE] --dir JOIN-DIR [--signature TX --key CURRENT-SECRET --next-public NEXT.pub] [--timeout SECONDS] [--interval SECONDS] [--birth-context CONTEXT.json]
   mini join --renew --host HOST --config PINNED-CONFIG.json (--socket SOCKET | --bootstrap-url HTTPS-BASE | --quote QUOTE.json) --enrol ENROL.json --dir JOIN-DIR
@@ -645,9 +800,11 @@ usage:
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|invite-check|transition|rotate|kick|register|rewrap|pin-member|list|open|forget --dir WORKSPACE --name ROOM [op options]
+  mini workspace --action room-key --op wrap-atom --dir WORKSPACE --epoch E --gen G --member SUBJECT   (the atom a wrap lands at: Kernel/PrivateRoomKeys.lean wrapAtomId)
       private rooms: DEVNET QUALITY; PRIVACY NOT AUDITED (hybrid X25519 + ML-KEM-768 wraps; docs/PRIVATE-ROOMS-DESIGN.txt)
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
-  mini web --dir WORKSPACE --listen 127.0.0.1:PORT   (read-only loopback hypertext over this workspace's signed reads)
+  mini web --dir WORKSPACE --listen 127.0.0.1:PORT [--home H]   (loopback hypertext over this workspace's signed reads, with the document edit/create POST forms; the developer's and the journeys' direct face)
+  mini --socket SOCKET web --body --listen-fd 3 --dir WORKSPACE --home HOME --host HOST --config CONFIG [--anonymous]   (the web front end's body: stage fragments and verb actions for the gateway, over the inherited listener; mini-web-spawn starts it as the member)
   mini workspace --action doc-show|doc-outline --dir WORKSPACE --name DOC [--format text|raw|json|html]
   mini workspace --action doc-insert|doc-move|doc-remove|mark|unmark|transclude|transclusions|follow|doc-backlinks|doc-links --dir WORKSPACE --name DOC [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
@@ -657,6 +814,14 @@ usage:
   mini enroll --action submit|lookup --dir ATTEMPT
   mini key --action providers|choose|set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT --model MODEL] [--task TASK] [--broker CLIENT_CONFIG]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
+  mini apps search [--term TEXT] [--category C] [--qualification FILE] [--json]   the Sandstorm app market and recorded lifecycle verdicts
+  mini apps show --app APP-ID|PACKAGE-ID [--qualification FILE] [--json]
+  mini apps install --app APP-ID|PACKAGE-ID --dir WORKSPACE [--class S|M|L] [--retry REQUEST-ID]   a member turn: birth + delegation, then the worker
+  mini apps list|status|open|stop|start|share|export|delete [--grain a<APP>] [--to MEMBER] [--out FILE]   decoded outcomes over the worker socket
+  mini apps index-check --in RAW.json --out INDEX.json              the fetcher's validation of the downloaded index
+  mini apps bootstrap --dir OPERATOR-WORKSPACE [--budget N] [--tool-ref tool] [--parent-ref parent]   operator, once per world: the metered tasks
+  mini apps-front --listen 127.0.0.1:8797 --origins DIR [--domain demo.dregg.online]   the grain entrance behind Caddy
+  mini apps-worker --state DIR --world WORLD.json [--member-socket PATH] [--edge-socket PATH] [--member-group G] [--edge-group G]   the operator custodian
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
@@ -664,13 +829,29 @@ usage:
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
   mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT] [--limit N]
   mini credit --action balance|room|tariff|pay|topup|renew|status|ledger|install|adopt --dir WORKSPACE [--room REF] … (PLACE §2.10; `mini shell` spells them credit / pay ROOM week / tariff / topup / room status|renew|concierge)
+    pay, topup and refund keep one operation record per request (or --operation-record PATH): a rerun
+    recovers it and never pays twice; --again true pays once more after a decided one
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
   mini fleet --action feed --dir WORKSPACE --accounts NAME[,NAME...] --topic TOPIC   (one topic, several authors: one feed ordered by admission height)
   mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
-  mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
+  mini well --action mint|burn|floor --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR] [--again true]
+    one attempt chain per request: a rerun reports the retained attempt and authors nothing new
+  mini well --action resubmit --dir WORKSPACE --attempt ATTEMPT   (the SAME retained ingress, decoded outcome)
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
-  mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
-  mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
+  mini fleet-sign join|send|transfer|receipt|incoming|retry [--profile P] ...   (dregg-client-sign's verbs on Mini, plus `incoming` for the helm adapter; `mini fleet-sign --help`)
+  mini app-interface --action tools|prepare|call|qualify --declaration FILE [--operation OP --args FILE --context FILE] [--attachment ALIAS --tool NAME --runtime BIN --controller-socket SOCKET --dir NEW_ATTEMPT]
+  mini member --dir WORKSPACE [--name REF] [--home H] [--json true|false] [--action workspace|app-status]   (what `home` prints: your resources and exact recovery actions)
+  mini clock --action init ... | view|tick --workspace WORKSPACE [--capability CAP]
+  mini checkpoint --action view|certify --workspace WORKSPACE [--control CAP --min-tail N]
+  mini activity --action submit|quote|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini seat --action submit|resubmit|lookup|view --workspace WORKSPACE [action options]
+  mini hermes-handoff --action registration|activation|registry|dispatch [action options]   (Hermes's task registrations and dispatch bundles)
+  mini story-law --table TABLE.txt [--player SUBJECT]   (the story law a table of rooms and ways compiles to, printed; installs nothing)
+  mini mix --action registrar-key|native-key|key|seal|batch|scan --state DIR [action options]   (the post-quantum mailbox mix)
+  mini mix-live --action cover|registrar|relay|mailbox|scan|send|receive --state DIR --generation HEX --origin-ms MS --records DIR [action options]
+  mini consent-resident --consent PATH --settings PATH     the resident consent component for this user's `mini` processes
+  mini codec-resident --host HOST --settings PATH          the storeless resident codec Host for this user's `mini` processes
+  mini selected-exchange --phase prepare|status|publish|receive-transport|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
@@ -698,8 +879,8 @@ usage:
   mini agent-lifetime-grant-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
+  mini agent-lifetime-grant-inspect --host HOST --config CONFIG --operator-socket SOCKET --ingress CALL.bin --output NEW.json
   mini agent-lifetime-grant-lookup --attempt PRIVATE-DIR
-  mini session-reenroll --phase capture|resume --contract PRIVATE.json --dir PRIVATE-ATTEMPT --socket PUBLIC-SOCKET [--admission ROOT-ADMISSION.json --new-generation N]
   mini session-enrollment-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini session-enrollment-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini session-enrollment-submit --attempt PRIVATE-DIR
@@ -708,28 +889,35 @@ usage:
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini objective-invoke --host LOCAL-HOST --config CONFIG.json --request REQUEST.json --intent-nonce N --key KEY --dir NEW-ATTEMPT [--prepare-only true]   (lost reply: mini retry --attempt DIR --mode lookup)
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] [--provider-continuity DESCRIPTOR.json] --key KEY --dir ATTEMPT
-  mini query --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] --key KEY --view resource|policy|capability [--presentation fn-inbox-resource] --dir ATTEMPT
+  mini query (--workspace WORKSPACE | --host HOST --config CONFIG.json --key KEY) --intent INTENT.json [--intent-kind KIND] --view resource|policy|capability|at [--presentation fn-inbox-resource] --dir ATTEMPT
+    --workspace takes the Host, config, key and socket from the workspace: the challenge and the query
+    are answered by its serving session (ops 4/5), not by two cold Host opens of the Store.
   mini retry --attempt ATTEMPT [--mode submit|lookup] [--socket SOCKET|--direct true]
+  mini attempt-state --attempt ATTEMPT [--file outcome.json|retry-NNNN.json] [--json]   (local: the retained state, repaired from seal.record)
   mini selected-release-submit --host HOST --config CONFIG.json --socket SOCKET --ingress INGRESS.bin --dir NEW-ATTEMPT
   mini selected-release-sign --host HOST --config SOURCE-CONFIG.json --preimage PREIMAGE.bin --key OWNER.key --output SIGNATURE.bin
   mini selected-source-sign --host HOST --config SOURCE-CONFIG.json --packet PACKET.bin --delegate-capability DECIMAL --key OWNER.key --dir NEW-PRIVATE-DIR
   mini selected-source-publish --host HOST --config SOURCE-CONFIG.json --ingress INGRESS.bin --article ARTICLE.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini selected-release-lookup --attempt ATTEMPT [--socket SOCKET]
-  mini selected-release-retry --attempt ATTEMPT [--socket SOCKET]
-  mini fn-namespace-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --state-dir NEW-PRIVATE-DIR
-  mini fn-namespace-register --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
-  mini fn-namespace-lookup --state-dir PRIVATE-DIR
-  mini fn-frontier-plan --host HOST --config FN-POLL-CONFIG.json --socket OPERATOR-SOCKET --kind selected|empty --transaction MINI-TX|- --state-dir NEW-PRIVATE-DIR
-  mini fn-frontier-advance --state-dir PRIVATE-DIR --key GATEWAY.key --approval APPROVAL.json
-  mini fn-frontier-lookup --state-dir PRIVATE-DIR
   mini export-evidence --host HOST --config CONFIG.json --call CALL.bin --output PACKAGE.bin
   mini verify-evidence --host HOST --config INDEPENDENT-PIN.json --package PACKAGE.bin --output RESULT.json
+  mini export-world --workspace WORKSPACE --home SESSION-HOME --out NEW-ARCHIVE     the member's world, taken with them (one per member per cooldown)
   mini serve --host HOST --config CONFIG.json --socket PRIVATE-DIR/mini.sock
   mini operator-status --socket PRIVATE --host HOST --config CONFIG.json
   mini drain-operator --socket PRIVATE --host HOST --config CONFIG.json --instance ID --pid PID --timeout-seconds 600
-  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID]
+  mini serve-resident-operator-proxy --socket RESIDENT-PRIVATE/mini.sock --upstream PRIVATE --config CONFIG.json --resident-uid UID
+                         requires two systemd-activated listeners (mini.sock, mini.control); the resident's host
+                         operations and the status action only; resident clients pin MINI_OPERATOR_PEER_UID
+  mini serve-agent-operator-proxy --socket CONTROLLER-PRIVATE-SOCKET --upstream PRIVATE --config CONFIG.json --controller-uid UID
+                         requires one systemd-activated listener; controller clients pin --operator-peer-uid
+  mini serve-controller-consent --socket CLIENT-PRIVATE-SOCKET --consent PROVIDER --config CONFIG.json --anchors PRIVATE-DIR --consent-sha256 HEX --config-sha256 HEX --controller-uid UID [--idle-seconds 600]
+                         delegated full consent for one client UID that cannot read the Store (a controller, a
+                         split-tenancy member); requires one systemd-activated listener; ends after --idle-seconds
+                         with no connection; clients pin MINI_CONSENT_SOCKET/_PEER_UID/_SHA256/_CONFIG_SHA256
+  mini serve-public-proxy --socket PUBLIC --upstream PRIVATE --config CONFIG.json [--socket-gid GID | --controller-uid UID]
                          --socket-gid: the public socket's directory may be group GID, mode 0710/0750
                          (never group-writable, never other-accessible); the socket becomes 0660 GID
+                         --controller-uid: exact controller traversal/socket ACLs, retained across restart
   mini serve-operator --host HOST --config CONFIG.json --socket OPERATOR-PRIVATE-DIR/mini.sock [--peer-uid UID]...
                          admitted peers: this service's uid plus each --peer-uid (never a session uid)
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
@@ -742,33 +930,9 @@ usage:
   mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
   mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
-  mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
-  mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
-  mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini reply-consumer-poll --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
-  mini reply-consumer-ack --host HOST --config FN-REPLY-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini origin-outbox-prepare --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --carrier R.eml --dir NEW-ATTEMPT
-  mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
-  mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini provider-continuity --host HOST --config CONFIG.json --socket SOCKET --guarded-attempt ATTEMPT --dir NEW-PROOF
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
-  mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E] [--fault-drop SLOT:TICK] [--records-dir DIR]
-  mini relay-emit --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --slot S --subject ID --key KEY --out MEMBER.csv [--ticks K]
-  mini relay-witness --lean-lib LIB.so --unix WITNESS.sock --out WITNESS.csv
-  mini relay-key --key SEED-FILE
-  mini channel key ROOM [--home DIR]
-  mini channel join ROOM --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --leases LEASES.txt --key ED25519-SEED --roster ROSTER [--class P1|P1phone] [--ticks K] [--records-dir DIR] [--home DIR]
-  mini channel say ROOM @NAME TEXT... [--home DIR]
-  mini channel tail ROOM [--follow] [--home DIR]
-  mini channel status ROOM [--home DIR]
   mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
-  mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
-  mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
-  mini consumer-resume-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
-  mini reply-consumer-resume-ack --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR
-  mini consumer-host-upgrade --old-host OLD-HOST --old-sha256 SHA256 --new-host NEW-HOST --new-sha256 SHA256 --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --known-outcome CONFIRMED.bin --known-sha256 SHA256
-  mini consumer-worker --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
-  mini reply-consumer-worker --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR --worker-config PRIVATE-WAKE.json
 
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
@@ -803,59 +967,46 @@ struct Args {
 
 impl Args {
     fn parse() -> Result<Self> {
-        let mut raw = env::args_os().skip(1);
+        Self::parse_from(env::args_os().skip(1))
+    }
+
+    fn parse_from(raw: impl IntoIterator<Item = OsString>) -> Result<Self> {
+        let mut raw = raw.into_iter();
         let mut values = Vec::new();
-        let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        let no_command = || format!("no command given\n\n{USAGE}");
+        let mut command = raw.next().ok_or_else(no_command)?;
+        if command == OsStr::new("--verify-host") {
+            VERIFY_HOST.store(true, Ordering::Relaxed);
+            command = raw.next().ok_or_else(no_command)?;
+        }
         if command == OsStr::new("--remote") {
             let destination = raw.next().ok_or("missing value for --remote")?;
             values.push((command, destination));
-            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+            command = raw.next().ok_or_else(no_command)?;
         }
         if command == OsStr::new("--help") || command == OsStr::new("-h") {
             return Err(USAGE.to_owned());
         }
         let mut raw = raw.peekable();
-        // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
-        if command == OsStr::new("pay") || command == OsStr::new("store") {
+        // `mini pay ACTION ...` (docs/PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
+        if command == OsStr::new("pay") || command == OsStr::new("store") || command == OsStr::new("apps") {
             if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                // `mini apps share a4501 bob`: the grammar leaf's positionals are the flags
+                // `--grain a4501 --to bob` (the same words the shell takes).
+                let leaf = (command == OsStr::new("apps")).then(|| action.to_str()).flatten()
+                    .and_then(|name| shell_grammar::leaf(&shell_grammar::APPS, &["apps", name]));
                 values.push((OsString::from("--action"), action));
-            }
-        }
-        // `mini channel ACTION ROOM [@NAME TEXT...]` (CHANNELS.md §9 row 10 spells the verbs this way):
-        // ACTION, ROOM, @NAME and the words of TEXT are positional, up to the first `--` flag; a bare
-        // `--follow` (tail) takes no value.
-        if command == OsStr::new("channel") {
-            let mut positional = Vec::new();
-            while let Some(word) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
-                positional.push(word);
-            }
-            let mut words = positional.into_iter();
-            if let Some(action) = words.next() {
-                values.push((OsString::from("--action"), action));
-            }
-            if let Some(room) = words.next() {
-                values.push((OsString::from("--room"), room));
-            }
-            if let Some(to) = words.next() {
-                values.push((OsString::from("--to"), to));
-            }
-            let text: Vec<String> = words.map(|w| w.to_string_lossy().into_owned()).collect();
-            if !text.is_empty() {
-                values.push((OsString::from("--text"), OsString::from(text.join(" "))));
-            }
-            if raw.next_if(|next| next == OsStr::new("--follow")).is_some() {
-                let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
-                values.push((OsString::from("--follow"), value));
+                for argument in leaf.map(|l| l.args).unwrap_or(&[]) {
+                    match raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                        Some(value) => values.push((OsString::from(format!("--{}", apps::positional_flag(argument.name))), value)),
+                        None => break,
+                    }
+                }
             }
         }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
-            if command == OsStr::new("channel") && flag == OsStr::new("--follow") {
-                let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
-                values.push((flag, value));
-                continue;
-            }
-            // `mini join --solana|--wait|--renew` (PAY.md §11.6) is `mini join --mode MODE`.
+            // `mini join --solana|--wait|--renew` (docs/PAY.md §11.6) is `mini join --mode MODE`.
             if command == OsStr::new("join")
                 && matches!(rendered.as_ref(), "--solana" | "--wait" | "--renew")
             {
@@ -865,9 +1016,10 @@ impl Args {
             if !rendered.starts_with("--") || rendered.len() == 2 {
                 return Err(format!("unexpected argument {rendered}\n\n{USAGE}"));
             }
-            // The one valueless switch: opting out of pre-rotation is a
-            // deliberate act and reads as one.
-            if rendered == "--no-prerotation" {
+            // The valueless switches: opting out of pre-rotation is a
+            // deliberate act and reads as one; `web --body` / `--anonymous` name a face; `apps --json` a shape.
+            if rendered == "--no-prerotation" || command == OsStr::new("web") && matches!(rendered.as_ref(), "--body" | "--anonymous")
+                || matches!(command.to_str(), Some("apps" | "attempt-state")) && rendered == "--json" || command == OsStr::new("shell") && rendered == "--plan" {
                 values.push((flag, OsString::from("yes")));
                 continue;
             }
@@ -1028,7 +1180,7 @@ fn keygen(
     hosted: bool,
 ) -> Result<()> {
     let public_key = generate_key(secret, public, escrow, next, hosted)?;
-    eprintln!("Your blinding key is derived from this seed (`mini key --action export-blinding`); it keys the salts that hide each cell’s fields from readers you have not named.");
+    eprintln!("Your blinding key is derived from this seed; it keys the salts that hide each cell’s fields from readers you have not named.");
     println!("{}", hex(&public_key));
     Ok(())
 }
@@ -1174,9 +1326,7 @@ fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     let pure = arguments.first().and_then(|word| word.to_str()).is_some_and(|verb|
         matches!(verb, "author" | "inspect" | "signatures" | "observe-assemble" | "assemble"));
     if pure {
-        if let Some(output) = client_consent::codec_process(host, config, arguments)? { return Ok(output); }
-        let local = client_consent::pure_host(host)?;
-        return local_process(&local, config, arguments);
+        return client_consent::codec_process(host, config, arguments);
     }
     if let Some(socket) = SOCKET.get() {
         return socket_process(host, socket, config, arguments);
@@ -1201,13 +1351,12 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
         .output()
         .map_err(|error| format!("cannot run {}: {error}", host.display()))?;
     if !output.status.success() {
-        // Exit 2 is the Host's definite refusal of a pure codec verb (it reads no Store,
-        // so nothing could have been accepted): stdout is the encoded outcome, stderr
-        // the Host's own decoding of it. Any other failing exit leaves the status uncertain.
-        if output.status.code() == Some(2) {
-            if let Some(refusal) = one_shot_refusal(arguments, &output) {
-                return Err(refusal);
-            }
+        // A decided refusal arrives as exit 3 with the Host's outcome frame on stdout, and is
+        // handled as the socket route handles it. Pure codec verbs never reach here (`process`
+        // sends them to the codec child); any other failing exit is not a decision, so the
+        // status stays uncertain.
+        if let Some(decided) = local_outcome_frame(host, config, arguments, &output) {
+            return decided;
         }
         return Err(format!(
             "{} exited {}; request status uncertain: {}",
@@ -1219,21 +1368,80 @@ fn local_process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Out
     Ok(output)
 }
 
-/// The refusal a one-shot pure codec verb ended in (`Host.RequestRefusal.oneShotFrame`):
-/// the same decision and the same message the session path records for a 255 frame. `None`
-/// when the Host's stderr is not an outcome of type `refused`; the caller then reports the
-/// exit as it would any other.
-fn one_shot_refusal(arguments: &[&OsStr], output: &Output) -> Option<String> {
-    let command = arguments.first()?.to_str()?;
-    let decoded: Value = serde_json::from_slice(&output.stderr).ok()?;
-    let line = refusal_line(&decoded)?;
-    note_host_decision(HostDecision::RefusedFrame {
+/// One Host outcome frame (marker byte 253 or 255, then the encoded Outcome), from either
+/// route: the socket session's reply, or the one-shot Host's stdout when it exits 3 (a decided
+/// refusal of a Store-reading verb). The decision is noted as the Host's (a refusal exits 3),
+/// a prepare refusal is retained for `why` (`prepare_refusal::retain`), and the returned
+/// message names the refusal, or says the effect is undecided. Never "uncertain" for a frame.
+fn host_outcome_frame(
+    command: &str,
+    arguments: &[&OsStr],
+    payload: &[u8],
+    config: &Path,
+    reply: &[u8],
+    decoded: Option<Value>,
+) -> Result<String> {
+    let line = Some(no_record_line(decoded.as_ref()));
+    let decision = HostDecision::Frame {
         command: command.to_owned(),
-        byte: 255,
-        encoded: output.stdout.clone(),
-        decoded: Some(decoded),
-    });
-    Some(refused_frame_message(command, &output.stdout, Some(line)))
+        byte: reply[0],
+        encoded: reply[1..].to_vec(),
+        decoded,
+    };
+    let refusal = decision.is_refusal();
+    let kind = outcome_type(decision.outcome()).to_owned();
+    note_host_decision(decision);
+    let destination = match command {
+        "prepare" | "submit" | "lookup" | "query" | "query-batch" => arguments.get(2).map(Path::new),
+        _ => None,
+    };
+    if command == "prepare" {
+        let destination = Path::new(arguments.get(2).ok_or("prepare has no destination")?);
+        prepare_refusal::retain(destination, payload, config, reply)?;
+    }
+    if command == "query" || command == "query-batch" {
+        let destination = Path::new(arguments.get(2).ok_or("query has no destination")?);
+        query_refusal::retain(destination, payload, config, reply)?;
+    }
+    if !refusal {
+        return Ok(undecided_frame_message(command, &kind, destination, &reply[1..]));
+    }
+    Ok(refused_frame_message(command, &reply[1..], line))
+}
+
+/// The one-shot Host's decided refusal of `prepare`: exit 3 with its outcome frame on stdout
+/// (`Host.Main`, the `prepare` verb). The frame is decoded by the Host's own codec (`inspect
+/// outcome`) and handled exactly as the socket route handles it. Anything else is not a frame.
+fn local_outcome_frame(host: &Path, config: &Path, arguments: &[&OsStr], output: &Output) -> Option<Result<Output>> {
+    let command = arguments.first().and_then(|word| word.to_str())?;
+    if output.status.code() != Some(3) || command != "prepare" || arguments.len() != 3 {
+        return None;
+    }
+    let reply = &output.stdout;
+    if reply.len() < 2 || reply.len() > transport::HOST_MAX_FRAME + 1 || !is_outcome_frame(reply[0]) {
+        return None;
+    }
+    let payload = match fsio::read_bounded_or_empty(Path::new(arguments[1]), transport::HOST_MAX_FRAME) {
+        Ok(payload) => payload,
+        Err(error) => return Some(Err(error)),
+    };
+    let decoded = mini_sdk::local::kind("outcome", &reply[1..])
+        .ok()
+        .and_then(|request| client_consent::codec_frame(host, config, mini_sdk::host_operations::INSPECT, &request).ok())
+        .filter(|inspected| inspected.first() == Some(&mini_sdk::host_operations::INSPECT))
+        .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
+    Some(host_outcome_frame(command, arguments, &payload, config, reply, decoded).and_then(Err))
+}
+
+/// A 255 frame whose decoded outcome is not a refusal (or that the Host could not decode): the
+/// effect is unknown. For an exact call (`submit`, `lookup`) the retry is named: a lookup of the
+/// SAME retained call, never a new operation.
+fn undecided_frame_message(command: &str, kind: &str, destination: Option<&Path>, encoded: &[u8]) -> String {
+    let retry = match (command, destination.and_then(Path::parent)) {
+        ("submit" | "lookup", Some(dir)) => format!("; the exact call is retained: `mini retry --dir {} --mode lookup`", dir.display()),
+        _ => String::new(),
+    };
+    format!("undecided: Host answered {command} with reply byte 255 and outcome {kind}{retry}; encoded frame: {}", hex(encoded))
 }
 
 fn refused_frame_message(command: &str, encoded: &[u8], line: Option<String>) -> String {
@@ -1313,30 +1521,16 @@ fn socket_process(
         }
     };
     let reply = session_invoke(host, socket, config, operation, &payload)?;
-    if reply[0] == 255 {
+    if is_outcome_frame(reply[0]) {
         // Ask the same Host session to decode its own frame (op 8, `inspect
         // outcome`). A failed decode leaves the decision undecoded; it is
-        // never reconstructed here.
+        // never reconstructed here. The class is the marker's (`is_refusal`).
         let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
-            .and_then(|request| session_invoke(host, socket, config, 8, &request))
+            .and_then(|request| session_invoke(host, socket, config, mini_sdk::host_operations::INSPECT, &request))
             .ok()
             .filter(|inspected| inspected.first() == Some(&8))
             .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
-        let line = decoded.as_ref().and_then(refusal_line);
-        note_host_decision(HostDecision::RefusedFrame {
-            command: command.to_owned(),
-            byte: 255,
-            encoded: reply[1..].to_vec(),
-            decoded,
-        });
-        if command == "prepare" {
-            let destination = Path::new(arguments[2]);
-            prepare_refusal::retain(destination, &payload, config, &reply)?;
-        }
-        if command == "query" || command == "query-batch" {
-            query_refusal::retain(Path::new(arguments[2]), &payload, config, &reply)?;
-        }
-        return Err(refused_frame_message(command, &reply[1..], line));
+        return Err(host_outcome_frame(command, arguments, &payload, config, &reply, decoded)?);
     }
     if let Some(destination) = destination {
         write_new(Path::new(destination), &reply[1..])?;
@@ -1377,7 +1571,7 @@ fn create_dir(path: &Path) -> Result<()> {
 /// external submit must never precede a durable exact call and its pathname.
 fn sync_retained_call(directory: &Path, call: &Path) -> Result<()> {
     File::open(call)
-        .and_then(|file| file.sync_all())
+        .and_then(|file| mini_sdk::durable::sync_file(&file))
         .map_err(|error| format!("cannot sync exact call {}: {error}", call.display()))?;
     sync_directory_ancestors(directory)
 }
@@ -1508,8 +1702,8 @@ fn validate_public_inspection(kind: &str, value: &Value, input: Option<&[u8]>) -
                 .get("canonical")
                 .and_then(Value::as_str)
                 .ok_or("schema inspection lacks canonical bytes")?;
-            let decoded = decode_hex(canonical)?;
-            if hex(&decoded) != canonical || Some(decoded.as_slice()) != input {
+            let decoded = mini_sdk::hex::decode(canonical).map_err(|e| e.0)?;
+            if Some(decoded.as_slice()) != input {
                 return Err("schema inspection canonical bytes differ from exact input".into());
             }
             Ok(())
@@ -1592,29 +1786,13 @@ fn inspect_public(
     result
 }
 
-/// The crate's hex codec is mini_sdk::hex: lowercase on encode; this decoder accepts either case
-/// (what a person or another tool may type), ASCII digits only, even length, never a panic on
-/// non-ASCII input and never `from_str_radix`'s leading `+`. Where the spelling is part of the
-/// contract, callers check `mini_sdk::hex::is_canonical*` or decode strictly with `mini_sdk::hex::decode`.
+/// The crate's hex codec for text a person or another tool may type: lowercase on encode; this
+/// decoder accepts either case, ASCII digits only, even length, never a panic on non-ASCII input
+/// and never `from_str_radix`'s leading `+`. Values the Host produced or this client retained
+/// are contract spellings: their sites decode strictly with `mini_sdk::hex::decode`.
 pub(crate) use mini_sdk::hex::encode as hex;
 pub(crate) fn decode_hex(value: &str) -> Result<Vec<u8>> {
     mini_sdk::hex::decode_any_case(value).map_err(|error| error.0)
-}
-
-fn challenge_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
-    let headers = value
-        .get("headers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "host challenge JSON has no headers array".to_owned())?;
-    headers
-        .iter()
-        .map(|header| {
-            header
-                .as_str()
-                .ok_or_else(|| "host challenge header is not a string".to_owned())
-                .and_then(decode_hex)
-        })
-        .collect()
 }
 
 fn plan_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
@@ -1628,7 +1806,7 @@ fn plan_headers(value: &Value) -> Result<Vec<Vec<u8>>> {
             slot.get("header")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "host plan slot has no header string".to_owned())
-                .and_then(decode_hex)
+                .and_then(|header| mini_sdk::hex::decode(header).map_err(|e| e.0))
         })
         .collect()
 }
@@ -1666,8 +1844,12 @@ fn print_confirmed_outcome(value: &Value) -> Result<()> {
 
 fn confirmed_outcome(value: &Value, emit: bool) -> Result<()> {
     if emit { print_json(value)?; }
-    if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+    let charged = charged_line(value);
+    if value.get("type").and_then(Value::as_str) != Some("confirmed") || charged.is_some() {
         note_host_decision(HostDecision::Outcome(value.clone()));
+    }
+    if let Some(line) = charged {
+        return Err(format!("{line}; exact outcome evidence was retained"));
     }
     match value.get("type").and_then(Value::as_str) {
         Some("confirmed") => Ok(()),
@@ -1712,7 +1894,11 @@ fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str)
     if host.as_os_str().is_empty() {
         manifest["hostSha256"] = json!(host_image_sha256(host)?);
     } else {
-        manifest["host"] = json!(utf8_path(&absolute(host)?)?);
+        let host = absolute(host)?;
+        if let Some(sha) = workspace_host_pin(&host) {
+            manifest["hostSha256"] = json!(sha);
+        }
+        manifest["host"] = json!(utf8_path(&host)?);
     }
     if let Some(pins) = client_consent::configured_record()? {
         manifest["localConsent"] = pins;
@@ -1752,6 +1938,59 @@ struct Observed {
     signed: PathBuf,
 }
 
+/// The CLI's side of `mini_sdk::flow`: this process's codec child and consent provider
+/// (`client_consent`) and its transport (`process`: the pinned socket session, or a one-shot
+/// local Host). The order of steps, the signed bytes and the attempt layout are the SDK's.
+pub(crate) struct CliHost<'a> {
+    pub(crate) host: &'a Path,
+    pub(crate) config: &'a Path,
+}
+
+impl mini_sdk::flow::Local for CliHost<'_> {
+    fn author(&mut self, kind: &str, input: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(author(self.host, self.config, OsStr::new(kind), input, output)?)
+    }
+    fn inspect(&mut self, kind: &str, input: &Path, output: &Path) -> mini_sdk::Result<Value> {
+        Ok(inspect(self.host, self.config, kind, input, output)?)
+    }
+    fn signatures(&mut self, json: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(host_files(self.host, self.config, &[Path::new("signatures"), json, output])?)
+    }
+    fn observe_assemble(&mut self, challenge: &Path, signatures: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(host_files(self.host, self.config, &[Path::new("observe-assemble"), challenge, signatures, output])?)
+    }
+    fn assemble(&mut self, plan: &Path, signatures: &Path, output: &Path) -> mini_sdk::Result<()> {
+        Ok(host_files(self.host, self.config, &[Path::new("assemble"), plan, signatures, output])?)
+    }
+    fn consent_intent(&mut self, intent: &Path, key: &[u8]) -> mini_sdk::Result<Vec<u8>> {
+        Ok(client_consent::intent(self.host, self.config, intent, key)?)
+    }
+    fn consent_observation(&mut self, intent: &Path, signature: &Path, challenge: &Path, key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
+        Ok(client_consent::observation(self.host, self.config, intent, signature, challenge, key)?)
+    }
+    fn consent_plan(&mut self, intent: &Path, plan: &Path, key: &[u8]) -> mini_sdk::Result<Vec<Vec<u8>>> {
+        Ok(client_consent::plan(self.host, self.config, intent, plan, key)?)
+    }
+}
+
+impl mini_sdk::flow::Operator for CliHost<'_> {
+    /// The transport turns a marker frame into an error it has already classified and noted
+    /// (`socket_process`, `HostDecision::is_refusal`), so what comes back here is an answer.
+    fn request(&mut self, request: mini_sdk::flow::Request, inputs: &[&Path], output: &Path) -> mini_sdk::Result<mini_sdk::flow::Answered> {
+        let mut arguments = vec![Path::new(request.verb())];
+        arguments.extend_from_slice(inputs);
+        arguments.push(output);
+        host_files(self.host, self.config, &arguments)?;
+        Ok(mini_sdk::flow::Answered::Answer)
+    }
+}
+
+/// The member typed the command: that is the release. The consent provider has already limited
+/// the headers to what the retained intent permits for this plan.
+fn command_release(_: &mini_sdk::flow::Sealing<'_>) -> mini_sdk::Result<()> {
+    Ok(())
+}
+
 fn authorize_observation(
     host: &Path,
     config: &Path,
@@ -1761,46 +2000,13 @@ fn authorize_observation(
     directory: &Path,
 ) -> Result<Observed> {
     note_signer(host, config, intent, intent_kind, signing);
-    let intent_bin = directory.join("intent.bin");
-    let intent_signature = directory.join("intent-signature.bin");
-    let challenge_bin = directory.join("challenge.bin");
-    let challenge_json = directory.join("challenge.json");
-    let signatures_json = directory.join("observation-signatures.json");
-    let signatures_bin = directory.join("observation-signatures.bin");
-    let signed = directory.join("signed-observation.bin");
-    if intent_kind == OsStr::new("binary") {
-        copy_new(intent, &intent_bin)?;
+    let source = if intent_kind == OsStr::new("binary") {
+        mini_sdk::flow::Source::Binary(intent)
     } else {
-        author(host, config, intent_kind, intent, &intent_bin)?;
-    }
-    // The local native verifier binds the retained intent and current subject
-    // to custody before even the observation's initial signature is released.
-    let intent_bytes = client_consent::intent(host, config, &intent_bin, signing)?;
-    write_new(&intent_signature, &signing.sign(&intent_bytes).to_bytes())?;
-    host_files(
-        host,
-        config,
-        &[Path::new("challenge"), &intent_bin, &intent_signature, &challenge_bin],
-    )?;
-    inspect(host, config, "challenge", &challenge_bin, &challenge_json)?;
-    encode_signatures(
-        host,
-        config,
-        signing,
-        client_consent::observation(host, config, &intent_bin, &intent_signature, &challenge_bin, signing)?,
-        &signatures_json,
-        &signatures_bin,
-    )?;
-    host_files(
-        host,
-        config,
-        &[
-            Path::new("observe-assemble"),
-            &challenge_bin,
-            &signatures_bin,
-            &signed,
-        ],
-    )?;
+        mini_sdk::flow::Source::Authored { kind: intent_kind.to_str().ok_or("intent kind must be UTF-8")?, path: intent }
+    };
+    let mut cli = CliHost { host, config };
+    let signed = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: signing }.observe(source)?;
     Ok(Observed { signed })
 }
 
@@ -1861,6 +2067,9 @@ fn submit_once(
 ) -> Result<()> {
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
+    // Until the seal every file of this attempt is a cache of its seal record: staged and linked
+    // without its own fsync (`mini_sdk::phase`). The seal ends the scope; so does any early return.
+    let _caches = mini_sdk::phase::CacheScope::enter(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
     } else {
@@ -1879,92 +2088,55 @@ fn submit_once(
         &signing,
         directory,
     )?;
-    let plan_bin = directory.join("plan.bin");
+    let mut cli = CliHost { host, config: &retained_config };
+    let mut flow = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: &signing };
+    let plan_bin = flow.prepare(&observed.signed)?;
     let plan_json = directory.join("plan.json");
-    let signatures_json = directory.join("transaction-signatures.json");
-    let signatures_bin = directory.join("transaction-signatures.bin");
-    let call = directory.join("call.bin");
-    let prepared_bin = if provider_continuity.is_some() {
-        directory.join("original-plan.bin")
-    } else {
-        plan_bin.clone()
-    };
-    let prepared_json = if provider_continuity.is_some() {
-        directory.join("original-plan.json")
-    } else {
-        plan_json.clone()
-    };
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("prepare"), &observed.signed, &plan_bin],
-    )?;
-    if provider_continuity.is_some() {
+    let (prepared_bin, prepared_json) = if provider_continuity.is_some() {
         // Preserve the existing plan.bin prepare-refusal contract. Only a
         // successful prepare becomes the immutable original guarded plan.
-        fs::hard_link(&plan_bin, &prepared_bin)
+        let (original_bin, original_json) = (directory.join("original-plan.bin"), directory.join("original-plan.json"));
+        fs::hard_link(&plan_bin, &original_bin)
             .map_err(|e| format!("cannot retain original continuity plan: {e}"))?;
         fs::remove_file(&plan_bin)
             .map_err(|e| format!("cannot move original continuity plan: {e}"))?;
-    }
-    let presentation = inspect(host, &retained_config, "plan", &prepared_bin, &prepared_json)?;
+        (original_bin, original_json)
+    } else {
+        (plan_bin.clone(), plan_json.clone())
+    };
+    let presentation = flow.present(&prepared_bin, &prepared_json)?;
     if provider_continuity.is_some() {
         sync_retained_call(directory, &prepared_bin)?;
         sync_retained_call(directory, &prepared_json)?;
     }
     #[cfg(unix)]
-    let presentation = match provider_continuity {
-        Some(descriptor) => match provider_continuity::guard(
+    if let Some(descriptor) = provider_continuity {
+        if let Err(error) = provider_continuity::guard(
             host, &retained_config, descriptor, directory,
             &prepared_bin, &presentation, &plan_bin, &plan_json,
         ) {
-            Ok(presentation) => presentation,
-            Err(error) => {
-                let retained = provider_continuity::retain_rejection(directory, &retained_intent);
-                // This return is the positive control-flow guarantee recorded
-                // by the marker: no transaction signing or submit follows it.
-                return Err(match retained {
-                    Ok(()) => error,
-                    Err(retention) => format!("{error}; cannot retain continuity rejection: {retention}"),
-                });
-            }
-        },
-        None => presentation,
-    };
+            let retained = provider_continuity::retain_rejection(directory, &retained_intent);
+            // This return is the positive control-flow guarantee recorded
+            // by the marker: no transaction signing or submit follows it.
+            return Err(match retained {
+                Ok(()) => error,
+                Err(retention) => format!("{error}; cannot retain continuity rejection: {retention}"),
+            });
+        }
+    }
     #[cfg(not(unix))]
     if provider_continuity.is_some() {
+        let _ = presentation;
         return Err("provider continuity requires Unix sockets".into());
     }
-    encode_signatures(
-        host,
-        &retained_config,
-        &signing,
-        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, &signing)?,
-        &signatures_json,
-        &signatures_bin,
-    )?;
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("assemble"), &plan_bin, &signatures_bin, &call],
-    )?;
-    sync_retained_call(directory, &call)?;
+    flow.seal(&plan_bin, &mut command_release)?;
     if prepare_only {
         return Ok(());
     }
-    let outcome_bin = directory.join("outcome.bin");
-    let outcome_json = directory.join("outcome.json");
-    host_files(
-        host,
-        &retained_config,
-        &[Path::new("submit"), &call, &outcome_bin],
-    )?;
-    let outcome = inspect(
-        host,
-        &retained_config,
-        "outcome",
-        &outcome_bin,
-        &outcome_json,
+    let (outcome, _answered) = flow.transmit(
+        mini_sdk::flow::Request::Submit,
+        &directory.join("outcome.bin"),
+        &directory.join("outcome.json"),
     )?;
     #[cfg(unix)]
     receipt_continuity::finish_attempt(continuity, &outcome, false)?;
@@ -1977,15 +2149,11 @@ fn submit_once(
 pub(crate) fn host_decided<T>(result: Result<T>) -> Result<std::result::Result<T, String>> {
     match result {
         Ok(value) => Ok(Ok(value)),
+        // Only a decoded refusal is the Host's refusal; an undecided 255 frame stays an error
+        // (`HostDecision::is_refusal`), so no caller reads it as "refused, try another way".
         Err(error) => match take_host_decision() {
-            Some(HostDecision::RefusedFrame {
-                decoded: Some(outcome),
-                ..
-            }) => Ok(Err(refusal_line(&outcome)
-                .unwrap_or_else(|| format!("stopped: {}", outcome["type"])))),
-            Some(HostDecision::RefusedFrame { command, .. }) => Ok(Err(format!(
-                "refused: Host refused {command}; the frame was not decoded"
-            ))),
+            Some(decision @ HostDecision::Frame { .. }) if decision.is_refusal() => Ok(Err(
+                decision.outcome().and_then(refusal_line).unwrap_or_else(|| "refused: unnamed".into()))),
             _ => Err(error),
         },
     }
@@ -1999,7 +2167,7 @@ pub(crate) fn host_decided_keeping<T>(
 ) -> Result<std::result::Result<T, String>> {
     if result.is_err() {
         if let Some(decision) = take_host_decision() {
-            if let HostDecision::RefusedFrame { encoded, .. } = &decision {
+            if let HostDecision::Frame { encoded, .. } = &decision {
                 if !path.exists() {
                     create_private(path, encoded)?;
                 }
@@ -2047,30 +2215,15 @@ pub(crate) fn dry_run(
         Ok(observed) => observed,
         Err(line) => return Ok(Some(line)),
     };
-    let plan_bin = directory.join("plan.bin");
-    if let Err(line) = host_decided_keeping(host_files(
-        host,
-        &retained_config,
-        &[Path::new("prepare"), &observed.signed, &plan_bin],
-    ), &directory.join("refusal.frame"))? {
-        return Ok(Some(line));
-    }
-    let presentation = inspect(
-        host,
-        &retained_config,
-        "plan",
-        &plan_bin,
-        &directory.join("plan.json"),
-    )?;
-    let signatures_bin = directory.join("transaction-signatures.bin");
-    encode_signatures(
-        host,
-        &retained_config,
-        &signing,
-        client_consent::plan(host, &retained_config, &directory.join("intent.bin"), &plan_bin, &signing)?,
-        &directory.join("transaction-signatures.json"),
-        &signatures_bin,
-    )?;
+    let mut cli = CliHost { host, config: &retained_config };
+    let mut flow = mini_sdk::flow::Flow { dir: directory, host: &mut cli, signer: &signing };
+    let plan_bin = match host_decided_keeping(flow.prepare(&observed.signed).map_err(String::from),
+        &directory.join("refusal.frame"))? {
+        Ok(plan_bin) => plan_bin,
+        Err(line) => return Ok(Some(line)),
+    };
+    flow.present(&plan_bin, &directory.join("plan.json"))?;
+    let signatures_bin = flow.sign(&plan_bin, &mut command_release)?;
     match host_decided_keeping(host_files(
         host,
         &retained_config,
@@ -2257,7 +2410,7 @@ fn batch_inspect(host: &Path, config: &Path, directory: &Path, stem: &str,
         &directory.join(format!("{stem}.json")))?;
     let rows = value.as_array().ok_or("Host batch is not a collection")?;
     if rows.len() != count { return Err("Host batch count differs from signed intents".into()); }
-    rows.iter().map(|row| decode_hex(row.as_str().ok_or("Host batch item is not hex")?))
+    rows.iter().map(|row| mini_sdk::hex::decode(row.as_str().ok_or("Host batch item is not hex")?).map_err(|e| e.0))
         .collect()
 }
 
@@ -2277,7 +2430,7 @@ fn query_batch_once(
         copy_new(intent, &source)?;
         let binary = child.join("intent.bin");
         author(host, &retained_config, OsStr::new("intent"), &source, &binary)?;
-        let bytes = client_consent::intent(host, &retained_config, &binary, &signing)?;
+        let bytes = client_consent::intent(host, &retained_config, &binary, signing.verifying_key().as_bytes())?;
         let signature = signing.sign(&bytes).to_bytes();
         write_new(&child.join("intent-signature.bin"), &signature)?;
         let width: u32 = bytes.len().try_into().map_err(|_| "batch intent too large")?;
@@ -2311,7 +2464,7 @@ fn query_batch_once(
         }
         encode_signatures(host, &retained_config, &signing,
             client_consent::observation(host, &retained_config, &child.join("intent.bin"),
-                &child.join("intent-signature.bin"), &binary, &signing)?, &child.join("observation-signatures.json"),
+                &child.join("intent-signature.bin"), &binary, signing.verifying_key().as_bytes())?, &child.join("observation-signatures.json"),
             &child.join("observation-signatures.bin"))?;
         let signed = child.join("signed-observation.bin");
         host_files(host, &retained_config, &[Path::new("observe-assemble"), &binary,
@@ -2359,8 +2512,7 @@ fn query(
 
 fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
     let path = directory.join("attempt.json");
-    let bytes =
-        fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let bytes = fsio::read_bounded(&path, 1 << 20)?;
     let value: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid {}: {error}", path.display()))?;
     if value.get("format").and_then(Value::as_str) != Some("minidregg-resource-client-attempt-v1") {
@@ -2371,7 +2523,13 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
     }
     if let Some(pins) = value.get("localConsent") { client_consent::pin_record(pins)?; }
     let host = match value.get("host") {
-        Some(Value::String(host)) => PathBuf::from(host),
+        Some(Value::String(host)) => {
+            let host = PathBuf::from(host);
+            if let Some(sha) = value.get("hostSha256").and_then(Value::as_str) {
+                pin_workspace_host(&host, sha)?;
+            }
+            host
+        }
         Some(Value::Null) => {
             let sha = value
                 .get("hostSha256")
@@ -2398,15 +2556,13 @@ fn next_retry(directory: &Path) -> Result<(PathBuf, PathBuf)> {
     Ok(mini_sdk::store::AttemptDir(directory.to_path_buf()).next_retry()?)
 }
 
-fn retry_with_upgrade(
-    directory: &Path,
-    mode: &str,
-    direct: bool,
-    #[cfg(unix)] upgrade: Option<&drain::HostUpgrade>,
-) -> Result<()> {
+fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
     if !matches!(mode, "submit" | "lookup") {
         return Err("--mode must be submit or lookup".to_owned());
     }
+    // A retained attempt's caches are checked against its seal record before anything (this
+    // process, a one-shot Host, the transport) reads them (`mini_sdk::phase`, invariant 3).
+    mini_sdk::phase::repair_dir(directory)?;
     let call = directory.join("call.bin");
     if !call.is_file() {
         return Err(format!("attempt has no retained {}", call.display()));
@@ -2416,7 +2572,7 @@ fn retry_with_upgrade(
     if let Some(outcome) = receipt_continuity::carry::retry_lookup(directory, mode, direct)? {
         return print_confirmed_outcome(&outcome);
     }
-    let (original_host, config, socket) = manifest_paths(directory)?;
+    let (host, config, socket) = manifest_paths(directory)?;
     if !direct && SOCKET.get().is_none() {
         if let Some(socket) = socket {
             let _ = SOCKET.set(socket);
@@ -2425,219 +2581,12 @@ fn retry_with_upgrade(
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
     let (outcome_bin, outcome_json) = next_retry(directory)?;
-    #[cfg(unix)]
-    let host = if let Some(upgrade) = upgrade {
-        if direct || original_host != upgrade.old_host {
-            return Err("upgraded retry must use the original manifest and pinned socket".into());
-        }
-        let socket = SOCKET
-            .get()
-            .ok_or("upgraded retry requires pinned socket")?;
-        if socket != &upgrade.socket
-            || fs::read(&config).map_err(|e| e.to_string())? != upgrade.config_bytes
-            || fs::read(&call).map_err(|e| e.to_string())? != upgrade.call_bytes
-        {
-            return Err("upgraded retry inputs differ from durable migration evidence".into());
-        }
-        let evidence = fs::read(&upgrade.evidence_path).map_err(|e| e.to_string())?;
-        if hex(&sha2::Sha256::digest(&evidence)) != upgrade.evidence_sha
-            || hex(&sha2::Sha256::digest(
-                fs::read(&upgrade.new_host).map_err(|e| e.to_string())?,
-            )) != upgrade.new_host_sha
-        {
-            return Err("upgraded retry migration evidence changed".into());
-        }
-        let transport_path = outcome_json.with_extension("transport.json");
-        let transport = json!({
-            "type":"minidregg-upgraded-retry-transport-v1",
-            "originalAttemptHost":utf8_path(&original_host)?,
-            "effectiveHost":utf8_path(&upgrade.new_host)?,
-            "effectiveHostSha256":upgrade.new_host_sha,
-            "upgradeEvidencePath":utf8_path(&upgrade.evidence_path)?,
-            "upgradeEvidenceSha256":upgrade.evidence_sha,
-            "callSha256":upgrade.call_sha,
-            "mode":mode,
-            "socket":utf8_path(socket)?
-        });
-        if transport_path.exists() {
-            let existing: Value =
-                serde_json::from_slice(&fs::read(&transport_path).map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
-            if existing != transport {
-                return Err("upgraded retry transport record changed".into());
-            }
-        } else {
-            let mut bytes = serde_json::to_vec_pretty(&transport).map_err(|e| e.to_string())?;
-            bytes.push(b'\n');
-            create_private(&transport_path, &bytes)?;
-            sync_directory_ancestors(directory)?;
-        }
-        &upgrade.new_host
-    } else {
-        &original_host
-    };
-    #[cfg(not(unix))]
-    let host = &original_host;
+    let host = &host;
     host_files(host, &config, &[Path::new(mode), &call, &outcome_bin])?;
     let outcome = inspect(host, &config, "outcome", &outcome_bin, &outcome_json)?;
     #[cfg(unix)]
     receipt_continuity::finish_attempt(continuity, &outcome, true)?;
     print_confirmed_outcome(&outcome)
-}
-
-fn retry(directory: &Path, mode: &str, direct: bool) -> Result<()> {
-    retry_with_upgrade(
-        directory,
-        mode,
-        direct,
-        #[cfg(unix)]
-        None,
-    )
-}
-
-fn host_command(host: &Path, config: &Path, command: &OsStr, arguments: &[OsString]) -> Result<()> {
-    let word = command.to_str().ok_or("host command must be UTF-8")?;
-    if !matches!(
-        word,
-        "portable-verify-fn"
-            | "consumer-verify-poll-files"
-            | "portable-consumer-decide"
-            | "poll-consumer-decide"
-            | "consumer-poll-decide"
-            | "consumer-export-inbox"
-            | "consumer-export-poll"
-            | "consumer-ack-poll"
-            | "reply-consumer-poll-decide"
-            | "reply-consumer-export-result"
-            | "reply-consumer-ack-poll"
-            | "consumer-export-reply"
-            | "consumer-stage-reply-plan"
-            | "consumer-stage-reply-sign"
-            | "consumer-decide-test"
-    ) {
-        return Err(format!("unsupported fn consumer command {word}"));
-    }
-    if SOCKET.get().is_some() {
-        return Err("fn consumer file commands require direct Host/Main CLI until a typed session opcode exists".to_owned());
-    }
-    let mut all = Vec::with_capacity(arguments.len() + 1);
-    all.push(command);
-    all.extend(arguments.iter().map(OsString::as_os_str));
-    let output = process(host, config, &all)?;
-    io::stdout()
-        .write_all(&output.stdout)
-        .map_err(|e| format!("cannot print host output: {e}"))
-}
-
-#[cfg(unix)]
-#[derive(Clone, Copy)]
-struct ConsumerRoute {
-    poll_command: &'static str,
-    ack_command: &'static str,
-    poll_opcode: u8,
-    ack_opcode: u8,
-    poll_type: &'static str,
-    ack_type: &'static str,
-    reply: bool,
-}
-
-#[cfg(unix)]
-const B_CONSUMER: ConsumerRoute = ConsumerRoute {
-    poll_command: "consumer-poll",
-    ack_command: "consumer-ack",
-    poll_opcode: 12,
-    ack_opcode: 13,
-    poll_type: "fn-consumer-poll-session-v1",
-    ack_type: "fn-consumer-ack-session-v1",
-    reply: false,
-};
-
-#[cfg(unix)]
-const A_REPLY_CONSUMER: ConsumerRoute = ConsumerRoute {
-    poll_command: "reply-consumer-poll",
-    ack_command: "reply-consumer-ack",
-    poll_opcode: 14,
-    ack_opcode: 15,
-    poll_type: "fn-a-reply-poll-session-v1",
-    ack_type: "fn-a-reply-ack-session-v1",
-    reply: true,
-};
-
-#[cfg(unix)]
-fn historical_without_intent(value: &Value, route: ConsumerRoute) -> bool {
-    if route.reply {
-        matches!(
-            value.pointer("/decision/decision").and_then(Value::as_str),
-            Some("repeated" | "conflict-recorded")
-        )
-    } else {
-        matches!(
-            value
-                .pointer("/decision/decision/type")
-                .and_then(Value::as_str),
-            Some(
-                "historical-repeat"
-                    | "historical-carrier-variation-evidence"
-                    | "historical-conflict-evidence"
-            )
-        )
-    }
-}
-
-#[cfg(unix)]
-fn canonical_poll_decimal<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
-    let text = value
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| format!("fn progress lacks {field}"))?;
-    if !mini_sdk::decimal::is_canonical_max(text, 80)
-    {
-        return Err(format!("fn progress has noncanonical {field}"));
-    }
-    Ok(text)
-}
-
-#[cfg(unix)]
-fn validate_skip_decision(value: &Value, route: ConsumerRoute, intent: &[u8]) -> Result<()> {
-    let decision = value
-        .get("decision")
-        .ok_or("fn skip reply lacks decision")?;
-    let kind = decision
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or("fn skip reply lacks decision type")?;
-    let own_r = kind == "fn-a-own-r-progress-decision-v1";
-    if kind != "fn-empty-page-progress-decision-v1" && !(route.reply && own_r) {
-        return Err("fn skip decision type is unsupported for this consumer".into());
-    }
-    let fields = decision
-        .as_object()
-        .ok_or("fn skip decision is not an object")?;
-    if fields.len() != if own_r { 5 } else { 4 } {
-        return Err("fn skip decision fields differ from source schema".into());
-    }
-    let from = canonical_poll_decimal(decision, "fromPosition")?
-        .parse::<u128>()
-        .map_err(|_| "fn progress fromPosition exceeds u128")?;
-    let to = canonical_poll_decimal(decision, "toPosition")?
-        .parse::<u128>()
-        .map_err(|_| "fn progress toPosition exceeds u128")?;
-    if to > u32::MAX as u128
-        || !(1..=16).contains(
-            &to.checked_sub(from)
-                .ok_or("fn progress position reversed")?,
-        )
-    {
-        return Err("fn progress exceeds source poll scan bound".into());
-    }
-    if own_r {
-        canonical_poll_decimal(decision, "outboxTransactionId")?;
-    }
-    match decision.get("decision").and_then(Value::as_str) {
-        Some("proposed-fresh") if !intent.is_empty() => Ok(()),
-        Some("repeated") if intent.is_empty() => Ok(()),
-        _ => Err("fn progress decision and intent disagree".into()),
-    }
 }
 
 #[cfg(unix)]
@@ -2652,353 +2601,6 @@ fn private_consumer_attempt(
     copy_new(config, &retained_config)?;
     write_manifest(directory, host, &retained_config, operation)?;
     Ok(retained_config)
-}
-
-#[cfg(unix)]
-fn consumer_poll(host: &Path, config: &Path, directory: &Path, route: ConsumerRoute) -> Result<()> {
-    let socket = SOCKET.get().ok_or("consumer poll requires --socket")?;
-    let retained_config = private_consumer_attempt(host, config, directory, route.poll_command)?;
-    let frame = session_invoke(host, socket, &retained_config, route.poll_opcode, &[])?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err(format!(
-            "host refused {}; complete encoded reply retained in {}",
-            route.poll_command,
-            directory.join("reply.frame").display()
-        ));
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid fn consumer host JSON; complete reply retained: {e}"))?;
-    write_new(&directory.join("decision.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some(route.poll_type) {
-        return Err("unexpected fn consumer host reply type; complete reply retained".to_owned());
-    }
-    let status = value
-        .get("status")
-        .and_then(Value::as_str)
-        .ok_or("fn consumer reply lacks status; complete reply retained")?;
-    let intent_hex = value
-        .get("intentHex")
-        .and_then(Value::as_str)
-        .ok_or("fn consumer reply lacks intentHex; complete reply retained")?;
-    let intent = decode_hex(intent_hex)?;
-    if hex(&intent) != intent_hex {
-        return Err(
-            "fn consumer intentHex is not canonical lowercase; complete reply retained".to_owned(),
-        );
-    }
-    match status {
-        "accepted-decision" => {
-            if intent.is_empty() {
-                if !historical_without_intent(&value, route) {
-                    return Err("fn consumer accepted without an intent or historical decision; complete reply retained".to_owned());
-                }
-            } else {
-                write_new(&directory.join("intent.bin"), &intent)?;
-            }
-            print_json(&value)
-        }
-        "idle"
-            if intent.is_empty()
-                && value.pointer("/decision/type").and_then(Value::as_str)
-                    == Some("fn-empty-page-idle-v1") =>
-        {
-            print_json(&value)
-        }
-        "skip-decision" => {
-            validate_skip_decision(&value, route, &intent)?;
-            if !intent.is_empty() {
-                write_new(&directory.join("intent.bin"), &intent)?;
-            }
-            print_json(&value)
-        }
-        "refused" if intent.is_empty() => {
-            print_json(&value)?;
-            Err("fn consumer refused; complete decision retained".to_owned())
-        }
-        _ => Err("inconsistent fn consumer status and intent; complete reply retained".to_owned()),
-    }
-}
-
-#[cfg(unix)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AckResult {
-    Exact,
-    Covered,
-}
-
-#[cfg(unix)]
-fn parse_ack_result(value: &Value, route: ConsumerRoute, transaction: &str) -> Result<AckResult> {
-    if value.get("type").and_then(Value::as_str) != Some(route.ack_type)
-        || value.get("miniTransactionId").and_then(Value::as_str) != Some(transaction)
-    {
-        return Err("fn ack reply identity mismatch; complete reply retained".into());
-    }
-    let own_r = value.get("kind").and_then(Value::as_str) == Some("own-r-skip");
-    if own_r {
-        if !route.reply || value.as_object().is_none_or(|fields| fields.len() != 9) {
-            return Err("own-R ACK reply has wrong consumer or fields".into());
-        }
-        canonical_poll_decimal(value, "outboxTransactionId")?;
-        let sequence = canonical_poll_decimal(value, "fnStoreSequence")?
-            .parse::<u32>()
-            .map_err(|_| "own-R Store sequence exceeds u32")?;
-        canonical_poll_decimal(value, "fnStoreTransactionId")?
-            .parse::<u32>()
-            .map_err(|_| "own-R Store transaction exceeds u32")?;
-        let cursor = canonical_poll_decimal(value, "fnCursorPosition")?
-            .parse::<u32>()
-            .map_err(|_| "own-R ACK cursor exceeds u32")?;
-        if sequence.checked_add(1) != Some(cursor) {
-            return Err("own-R ACK cursor differs from Store sequence".into());
-        }
-        let committed = canonical_poll_decimal(value, "fnCommittedAck")?
-            .parse::<u32>()
-            .map_err(|_| "own-R committed ACK exceeds u32")?;
-        if matches!(
-            value.get("fnAck").and_then(Value::as_str),
-            Some("durable-accepted" | "covered-by-durable-frontier")
-        ) && committed < cursor
-        {
-            return Err("own-R ACK committed frontier precedes retained cursor".into());
-        }
-    }
-    match value.get("fnAck").and_then(Value::as_str) {
-        Some("durable-accepted") => Ok(AckResult::Exact),
-        Some("covered-by-durable-frontier") => {
-            let cursor = value
-                .get("fnCursorPosition")
-                .and_then(Value::as_str)
-                .ok_or("fn coverage lacks retained cursor position")?;
-            let committed = value
-                .get("fnCommittedAck")
-                .and_then(Value::as_str)
-                .ok_or("fn coverage lacks committed ACK frontier")?;
-            let decimal = |s: &str| -> Result<u128> {
-                if !mini_sdk::decimal::is_canonical(s)
-                {
-                    return Err("fn coverage position is not canonical decimal".into());
-                }
-                s.parse::<u128>()
-                    .map_err(|_| "fn coverage position exceeds u128".into())
-            };
-            if decimal(cursor)? > decimal(committed)? {
-                return Err("fn coverage cursor exceeds committed ACK frontier".into());
-            }
-            let kind = value.get("kind").and_then(Value::as_str);
-            if !(matches!(kind, Some("empty-page-skip" | "article-prefix-coverage"))
-                || (route.reply && kind == Some("own-r-skip")))
-            {
-                return Err("fn coverage lacks supported kind".into());
-            }
-            Ok(AckResult::Covered)
-        }
-        Some("refused" | "uncertain" | "transport-fault") => {
-            Err("fn ack incomplete; complete reply retained for reconciliation".into())
-        }
-        _ => Err("fn ack reply lacks valid status; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn consumer_ack(
-    host: &Path,
-    config: &Path,
-    transaction: &str,
-    directory: &Path,
-    route: ConsumerRoute,
-) -> Result<()> {
-    let socket = SOCKET.get().ok_or("consumer ack requires --socket")?;
-    if !mini_sdk::decimal::is_canonical_max(transaction, 80) {
-        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".to_owned());
-    }
-    let bytes = transaction.as_bytes();
-    let retained_config = private_consumer_attempt(host, config, directory, route.ack_command)?;
-    write_new(&directory.join("transaction-id.txt"), bytes)?;
-    let frame = session_invoke(host, socket, &retained_config, route.ack_opcode, bytes)?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err(format!(
-            "host refused {}; complete encoded reply retained in {}",
-            route.ack_command,
-            directory.join("reply.frame").display()
-        ));
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid fn ack host JSON; complete reply retained: {e}"))?;
-    write_new(&directory.join("ack.json"), &frame[1..])?;
-    print_json(&value)?;
-    let status = parse_ack_result(&value, route, transaction)?;
-    match status {
-        AckResult::Exact => Ok(()),
-        AckResult::Covered => Err("fn cursor is covered by a durable frontier; exact old ACK event is not proven; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_intent(value: &Value) -> Result<Option<Vec<u8>>> {
-    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-session-v1") {
-        return Err("unexpected origin outbox reply type; complete frame retained".into());
-    }
-    if value
-        .get("messageId")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-        || value.get("miniOrigin").is_none_or(|v| !v.is_object())
-    {
-        return Err("origin outbox reply lacks message identity or Mini origin".into());
-    }
-    let source = value
-        .get("sourceIdentity")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox reply lacks source identity")?;
-    let source_bytes = decode_hex(source)?;
-    if source_bytes.is_empty() || hex(&source_bytes) != source {
-        return Err("origin outbox source identity is not canonical lowercase hex".into());
-    }
-    let intent_hex = value
-        .get("intentHex")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox reply lacks intentHex")?;
-    let intent = decode_hex(intent_hex)?;
-    if hex(&intent) != intent_hex {
-        return Err("origin outbox intentHex is not canonical lowercase".into());
-    }
-    match (
-        value.get("status").and_then(Value::as_str),
-        value.get("decision").and_then(Value::as_str),
-        intent.is_empty(),
-    ) {
-        (Some("prepared-decision"), Some("proposed-fresh"), false) => Ok(Some(intent)),
-        (Some("prepared-decision"), Some("repeated"), true) => Ok(None),
-        (Some("refused"), Some("refused"), true) => {
-            Err("origin outbox preparation refused; complete decision retained".into())
-        }
-        _ => Err("inconsistent origin outbox decision and intent; complete reply retained".into()),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_prepare(
-    host: &Path,
-    config: &Path,
-    carrier: &Path,
-    directory: &Path,
-) -> Result<()> {
-    const MAX_CARRIER: usize = 1_516_384;
-    let socket = SOCKET
-        .get()
-        .ok_or("origin-outbox-prepare requires --socket")?;
-    let bytes = fsio::read_bounded(carrier, MAX_CARRIER)?;
-    let retained_config =
-        private_consumer_attempt(host, config, directory, "origin-outbox-prepare")?;
-    create_private(&directory.join("carrier.bin"), &bytes)?;
-    sync_directory_ancestors(directory)?;
-    let frame = session_invoke(host, socket, &retained_config, 16, &bytes)?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err("Host refused origin outbox preparation; complete frame retained".into());
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid origin outbox JSON; complete frame retained: {e}"))?;
-    write_new(&directory.join("decision.json"), &frame[1..])?;
-    let selected = origin_outbox_intent(&value);
-    print_json(&value)?;
-    match selected {
-        Ok(Some(intent)) => {
-            write_new(&directory.join("intent.bin"), &intent)?;
-            Ok(())
-        }
-        Ok(None) => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-#[cfg(unix)]
-fn origin_outbox_export(
-    host: &Path,
-    config: &Path,
-    transaction: &str,
-    directory: &Path,
-) -> Result<()> {
-    let socket = SOCKET
-        .get()
-        .ok_or("origin-outbox-export requires --socket")?;
-    if !mini_sdk::decimal::is_canonical_max(transaction, 80)
-    {
-        return Err("--mini-transaction must be canonical decimal (1–80 bytes)".into());
-    }
-    let retained_config =
-        private_consumer_attempt(host, config, directory, "origin-outbox-export")?;
-    create_private(
-        &directory.join("transaction-id.txt"),
-        transaction.as_bytes(),
-    )?;
-    sync_directory_ancestors(directory)?;
-    let frame = session_invoke(host, socket, &retained_config, 18, transaction.as_bytes())?;
-    write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
-        return Err("Host refused origin outbox export; complete frame retained".into());
-    }
-    let value: Value = serde_json::from_slice(&frame[1..])
-        .map_err(|e| format!("invalid origin outbox export JSON; complete frame retained: {e}"))?;
-    write_new(&directory.join("export.json"), &frame[1..])?;
-    if value.get("type").and_then(Value::as_str) != Some("fn-a-origin-outbox-export-v1") {
-        return Err("unexpected origin outbox export type; complete reply retained".into());
-    }
-    if value.get("status").and_then(Value::as_str) == Some("refused") {
-        print_json(&value)?;
-        return Err("origin outbox export refused; complete typed reply retained".into());
-    }
-    if value.get("status").and_then(Value::as_str) != Some("accepted")
-        || value.get("transactionId").and_then(Value::as_str) != Some(transaction)
-        || value
-            .get("messageId")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-    {
-        return Err("origin outbox export identity mismatch; complete reply retained".into());
-    }
-    for name in ["packageIdentity", "originCallIdentity"] {
-        let Some(text) = value.get(name).and_then(Value::as_str) else {
-            return Err(format!("origin outbox export lacks {name}"));
-        };
-        if !mini_sdk::decimal::is_canonical_max(text, 80)
-        {
-            return Err(format!("origin outbox export has noncanonical {name}"));
-        }
-    }
-    let source_hex = value
-        .get("sourceIdentity")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox export lacks source identity")?;
-    let source = decode_hex(source_hex)?;
-    if source.is_empty() || hex(&source) != source_hex {
-        return Err("origin outbox source identity is not canonical lowercase hex".into());
-    }
-    for name in ["miniOrigin", "miniOutbox"] {
-        if value
-            .get(name)
-            .and_then(|receipt| receipt.get("type"))
-            .and_then(Value::as_str)
-            != Some("verified-mini-native-prefix-v1")
-        {
-            return Err(format!("origin outbox export lacks typed {name} receipt"));
-        }
-    }
-    let carrier_hex = value
-        .get("carrierHex")
-        .and_then(Value::as_str)
-        .ok_or("origin outbox export lacks carrierHex")?;
-    if carrier_hex.is_empty() || carrier_hex.len() > 2 * 1_516_384 {
-        return Err("origin outbox export carrier exceeds selected profile".into());
-    }
-    let carrier = decode_hex(carrier_hex)?;
-    if carrier.is_empty() || hex(&carrier) != carrier_hex {
-        return Err("origin outbox carrier is not canonical lowercase hex".into());
-    }
-    write_new(&directory.join("carrier.bin"), &carrier)?;
-    print_json(&value)
 }
 
 #[cfg(unix)]
@@ -3068,9 +2670,9 @@ fn continuity(
     create_private(&directory.join("outcome.bin"), &outcome_bytes)?;
     sync_directory_ancestors(directory)?;
     let payload = provider_continuity::request_payload(&call_bytes, &outcome_bytes, None, false)?;
-    let frame = session_invoke(host, socket, &retained_config, 17, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_CONTINUITY, &payload)?;
     write_new(&directory.join("reply.frame"), &frame)?;
-    if frame[0] == 255 {
+    if is_outcome_frame(frame[0]) {
         return Err("Host refused provider continuity; complete frame retained".into());
     }
     let value: Value = serde_json::from_slice(&frame[1..])
@@ -3085,13 +2687,14 @@ fn continuity(
     }
 }
 
-/// The Host's public enrollment view (op 112, PAY §11.5), decoded by the same Host (op 8
+/// The Host's public enrollment view (op 112, docs/PAY.md §11.5), decoded by the same Host (op 8
 /// `inspect pay-enrolment-view`) and printed as its JSON. This is the roster sync's input
 /// (`render-authorized-keys.sh --view required`): it needs only the socket, whose own config
-/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config.
+/// pin (`SOCKET.config`, written by `mini serve`) is the default envelope config, and the Host
+/// image the socket serves (`--host HOST`, or its `--host-sha256`) pins the v2 envelope (v1 is retired).
 #[cfg(unix)]
-fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
-    let frame = transport::invoke(socket, config, 112, &[])?;
+fn enrollment_view(socket: &Path, config: &Path, host_sha256: &str) -> Result<()> {
+    let frame = transport::invoke_pinned(socket, config, host_sha256, mini_sdk::host_operations::PAY_ENROLLMENT_VIEW, &[])?;
     let body = match frame.as_slice() {
         [112, body @ ..] => body,
         [code, rest @ ..] => {
@@ -3106,7 +2709,7 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
     let mut request = (kind.len() as u16).to_le_bytes().to_vec();
     request.extend_from_slice(kind);
     request.extend_from_slice(body);
-    let inspected = transport::invoke(socket, config, 8, &request)?;
+    let inspected = transport::invoke_pinned(socket, config, host_sha256, mini_sdk::host_operations::INSPECT, &request)?;
     let json = match inspected.as_slice() {
         [8, json @ ..] => json,
         _ => return Err("the Host could not decode its own enrollment view".into()),
@@ -3120,7 +2723,16 @@ fn enrollment_view(socket: &Path, config: &Path) -> Result<()> {
 }
 
 fn run(mut args: Args) -> Result<()> {
-    replan::configure(args.optional("replan-max"))?;
+    #[cfg(unix)]
+    // The listener creator of an activated operator route (a resident's or an
+    // agent controller's: systemd, uid 0) is pinned explicitly, by flag or by
+    // the root-owned unit's MINI_OPERATOR_PEER_UID, which every child `mini`
+    // of a controller inherits. Never inferred from the path's owner.
+    if let Some(uid) = args.optional("operator-peer-uid").or_else(|| std::env::var_os("MINI_OPERATOR_PEER_UID")) {
+        let uid = uid.to_str().and_then(|n| n.parse::<u32>().ok()).ok_or("operator peer UID must be a u32 decimal")?;
+        operator_peer::configure(uid)?;
+    }
+    replan::configure(args.optional("replan-max"), args.optional("replan-window"))?;
     if let Some(identity) = args.optional("ssh-identity") { pin_ssh_identity(&path(identity))?; }
     let mut socket_argument = args.optional("socket");
     #[cfg(unix)]
@@ -3164,7 +2776,17 @@ fn run(mut args: Args) -> Result<()> {
             proxy::serve(socket)
         }
         #[cfg(unix)]
-        "workspace" => workspace::run(args),
+        "workspace" => {
+            // One `mini workspace` action publishes 30-40 custody files; their directory fsyncs
+            // are coalesced to the barriers (every Host request, and here before exit), each file
+            // still complete or absent (`mini_sdk::durable`).
+            mini_sdk::durable::defer_directory_syncs();
+            let result = workspace::run(args);
+            let barrier = transport::durability_barrier();
+            result.and(barrier)
+        }
+        #[cfg(unix)]
+        "app-interface" => app_interface::run(args),
         "member" => member::run(args),
         #[cfg(unix)]
         "web" => web::run(args),
@@ -3174,9 +2796,13 @@ fn run(mut args: Args) -> Result<()> {
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
         "checkpoint" => checkpoint::run(args),
+        "export-world" => world_export::run(args),
+        #[cfg(unix)]
+        "private-compute" => private_compute::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
         "activity" => activity::run(args),
+        "bend" => bend::run(args),
         "seat" => seat::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
@@ -3185,7 +2811,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "key" if !matches!(
             args.peek("action").and_then(OsStr::to_str),
-            Some("export-blinding" | "cell-blinding" | "derive-salt")
+            Some("cell-blinding" | "derive-salt")
         ) => keys::run(args),
         // The credential service moved into the key broker (native/mini-keys);
         // the old verbs refuse by name rather than reading a seal key.
@@ -3194,17 +2820,11 @@ fn run(mut args: Args) -> Result<()> {
         )),
         "fleet" => fleet::run(args),
         #[cfg(unix)]
-        "relay" => relay::run_relay(args),
+        "apps" => apps::run(args),
         #[cfg(unix)]
-        "relay-emit" => relay::run_emit(args),
+        "apps-front" => apps::front::run(args),
         #[cfg(unix)]
-        "relay-witness" => relay::run_witness(args),
-        #[cfg(unix)]
-        "relay-key" => relay::run_key(args),
-        #[cfg(unix)]
-        "channel" => channel::run(args),
-        #[cfg(unix)]
-        "traffic" => scheduled_transport::run(args),
+        "apps-worker" => apps::worker::run(args),
         #[cfg(unix)]
         "mix" => pq_mailbox::run(args),
         #[cfg(unix)]
@@ -3228,10 +2848,17 @@ fn run(mut args: Args) -> Result<()> {
         "enrollment-bootstrap" => enrollment_bootstrap::run(args),
         "enrollment-view" => {
             let config = args.optional("config").map(path);
+            let host = args.optional("host").map(path);
+            let sha = args.optional("host-sha256").map(|s| s.into_string().map_err(|_| "--host-sha256 must be UTF-8".to_owned())).transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("enrollment-view requires --socket")?;
             let config = config.unwrap_or_else(|| socket.with_extension("config"));
-            enrollment_view(socket, &config)
+            let host_sha256 = match (host, sha) {
+                (Some(host), None) => host_image_sha256(&host)?,
+                (None, Some(sha)) => sha,
+                _ => return Err("enrollment-view requires exactly one of --host HOST or --host-sha256 HEX (the v2 envelope pins the Host image)".to_owned()),
+            };
+            enrollment_view(socket, &config, &host_sha256)
         }
         #[cfg(unix)]
         "selected-exchange" => {
@@ -3241,9 +2868,8 @@ fn run(mut args: Args) -> Result<()> {
                 .ok_or("selected-exchange phase must be UTF-8")?;
             let contract = path(args.required("contract")?);
             let state = path(args.required("state-dir")?);
-            let approval = args.optional("approval").map(path);
             args.finish()?;
-            selected_exchange::run(phase, &contract, &state, approval.as_deref())
+            selected_exchange::run(phase, &contract, &state)
         }
         "serve" => {
             let host = path(args.required("host")?);
@@ -3258,6 +2884,31 @@ fn run(mut args: Args) -> Result<()> {
             {
                 Err("persistent host sessions require Unix sockets".to_owned())
             }
+        }
+        #[cfg(unix)]
+        "consent-full-ready" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            client_consent::full_ready(&host, &config)?;
+            println!("{{\"type\":\"mini-consent-full-readiness-v1\",\"ready\":true}}");
+            Ok(())
+        }
+        #[cfg(unix)]
+        "consent-resident" => {
+            let consent = path(args.required("consent")?);
+            let settings = path(args.required("settings")?);
+            args.finish()?;
+            client_consent::resident(consent, settings)
+        }
+        #[cfg(unix)]
+        "codec-resident" => {
+            // HOT-PATH 2a: one storeless codec Host per image+settings binding for every `mini`
+            // process of this user, started by the first `local_frame` that finds none listening.
+            let host = path(args.required("host")?);
+            let settings = path(args.required("settings")?);
+            args.finish()?;
+            client_consent::codec_resident(host, settings)
         }
         #[cfg(unix)]
         "serve-operator" => {
@@ -3280,9 +2931,50 @@ fn run(mut args: Args) -> Result<()> {
                 .optional("socket-gid")
                 .map(|gid| gid.to_str().and_then(|gid| gid.parse::<u32>().ok()).ok_or("--socket-gid is a decimal gid"))
                 .transpose()?;
+            let controller = args.optional("controller-uid")
+                .map(|uid| uid.to_str().and_then(|uid| uid.parse::<u32>().ok()).ok_or("--controller-uid is a decimal UID"))
+                .transpose()?;
             args.finish()?;
             let socket = SOCKET.get().ok_or("serve-public-proxy requires --socket")?;
-            public_proxy::serve(socket, &upstream, &config, group)
+            public_proxy::serve(socket, &upstream, &config, group, controller)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-resident-operator-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            let uid = args.required("resident-uid")?.to_str().and_then(|n| n.parse::<u32>().ok())
+                .ok_or("resident UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-resident-operator-proxy requires --socket")?;
+            public_proxy::serve_resident_activated(socket, &upstream, &config, uid)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-agent-operator-proxy" => {
+            let upstream = path(args.required("upstream")?);
+            let config = path(args.required("config")?);
+            let uid = args.required("controller-uid")?.to_str().and_then(|n| n.parse::<u32>().ok())
+                .ok_or("controller UID must be a decimal u32")?;
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-agent-operator-proxy requires --socket")?;
+            public_proxy::serve_agent_activated(socket, &upstream, &config, uid)
+        }
+        #[cfg(target_os = "linux")]
+        "serve-controller-consent" => {
+            let consent = path(args.required("consent")?);
+            let config = path(args.required("config")?);
+            let anchors = path(args.required("anchors")?);
+            let image = consent_proxy::digest(args.required("consent-sha256")?.to_str().ok_or("consent digest must be UTF-8")?)?;
+            let settings = consent_proxy::digest(args.required("config-sha256")?.to_str().ok_or("config digest must be UTF-8")?)?;
+            let uid = args.required("controller-uid")?.to_str().and_then(|n|n.parse::<u32>().ok()).ok_or("controller UID must be a decimal u32")?;
+            // Seconds with no connection before the service ends (socket activation restarts it).
+            let idle = match args.optional("idle-seconds") {
+                Some(v) => v.to_str().and_then(|n| n.parse::<u64>().ok()).filter(|n| *n > 0)
+                    .ok_or("idle seconds must be a positive decimal")?,
+                None => mini_sdk::consent::RESIDENT_IDLE_S,
+            };
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("serve-controller-consent requires --socket")?;
+            consent_proxy::serve(socket,&consent,&config,image,settings,uid,&anchors,std::time::Duration::from_secs(idle))
         }
         #[cfg(unix)]
         "operator-status" | "drain-operator" => {
@@ -3295,118 +2987,6 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             let socket = SOCKET.get().ok_or("operator control requires --socket")?;
             operator_drain::command(socket, &host, &config, instance.as_deref().map(|instance| (instance, pid, timeout)))
-        }
-        "host-command" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let command = args.required("command")?;
-            let arguments = args.repeated("arg");
-            args.finish()?;
-            host_command(&host, &config, &command, &arguments)
-        }
-        "consumer-poll" | "reply-consumer-poll" => {
-            let reply = args.command == OsStr::new("reply-consumer-poll");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                consumer_poll(
-                    &host,
-                    &config,
-                    &directory,
-                    if reply { A_REPLY_CONSUMER } else { B_CONSUMER },
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("persistent host sessions require Unix sockets".to_owned())
-            }
-        }
-        "consumer-ack" | "reply-consumer-ack" => {
-            let reply = args.command == OsStr::new("reply-consumer-ack");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let transaction = args.required("mini-transaction")?;
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            let transaction = transaction
-                .to_str()
-                .ok_or("--mini-transaction must be UTF-8")?;
-            #[cfg(unix)]
-            {
-                consumer_ack(
-                    &host,
-                    &config,
-                    transaction,
-                    &directory,
-                    if reply { A_REPLY_CONSUMER } else { B_CONSUMER },
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("persistent host sessions require Unix sockets".to_owned())
-            }
-        }
-        "origin-outbox-prepare" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let carrier = path(args.required("carrier")?);
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                origin_outbox_prepare(&host, &config, &carrier, &directory)
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-outbox-prepare requires Unix sockets".to_owned())
-            }
-        }
-        "origin-outbox-export" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let transaction = args.required("mini-transaction")?;
-            let directory = path(args.required("dir")?);
-            args.finish()?;
-            let transaction = transaction
-                .to_str()
-                .ok_or("--mini-transaction must be UTF-8")?;
-            #[cfg(unix)]
-            {
-                origin_outbox_export(&host, &config, transaction, &directory)
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-outbox-export requires Unix sockets".to_owned())
-            }
-        }
-        "origin-publish" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let carrier = path(args.required("carrier")?);
-            let state_dir = path(args.required("state-dir")?);
-            let post_config = path(args.required("post-config")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET.get().ok_or("origin-publish requires --socket")?;
-                publisher::publish(
-                    &host,
-                    &config,
-                    socket,
-                    &key,
-                    &carrier,
-                    &state_dir,
-                    &post_config,
-                )
-            }
-            #[cfg(not(unix))]
-            {
-                Err("origin-publish requires Unix sockets".to_owned())
-            }
         }
         "provider-continuity" => {
             let host = path(args.required("host")?);
@@ -3457,119 +3037,6 @@ fn run(mut args: Args) -> Result<()> {
             #[cfg(not(unix))]
             {
                 Err("provider metering requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-drain-once" | "reply-consumer-drain-once" => {
-            let reply = args.command == OsStr::new("reply-consumer-drain-once");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            let max_pages = args
-                .optional("max-pages")
-                .unwrap_or_else(|| OsString::from("16"));
-            args.finish()?;
-            let max_pages = max_pages
-                .to_str()
-                .ok_or("--max-pages must be UTF-8")?
-                .parse::<u32>()
-                .map_err(|_| "--max-pages must be an integer from 1 to 16".to_owned())?;
-            if !(1..=16).contains(&max_pages) {
-                return Err("--max-pages must be an integer from 1 to 16".to_owned());
-            }
-            #[cfg(unix)]
-            {
-                let socket = SOCKET
-                    .get()
-                    .ok_or("consumer-drain-once requires --socket")?;
-                if reply {
-                    drain::run_reply(&host, &config, socket, &key, &state_dir, max_pages)
-                } else {
-                    drain::run(&host, &config, socket, &key, &state_dir, max_pages)
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-drain-once requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-resume-ack" | "reply-consumer-resume-ack" => {
-            let reply = args.command == OsStr::new("reply-consumer-resume-ack");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET
-                    .get()
-                    .ok_or("consumer-resume-ack requires --socket")?;
-                if reply {
-                    drain::resume_held_reply_ack(&host, &config, socket, &key, &state_dir)
-                } else {
-                    drain::resume_held_ack(&host, &config, socket, &key, &state_dir)
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-resume-ack requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-host-upgrade" => {
-            let old_host = path(args.required("old-host")?);
-            let old_sha = args.required("old-sha256")?;
-            let new_host = path(args.required("new-host")?);
-            let new_sha = args.required("new-sha256")?;
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            let known_outcome = path(args.required("known-outcome")?);
-            let known_sha = args.required("known-sha256")?;
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET
-                    .get()
-                    .ok_or("consumer-host-upgrade requires --socket")?;
-                drain::upgrade_host(drain::UpgradeRequest {
-                    old_host: &old_host,
-                    new_host: &new_host,
-                    config: &config,
-                    socket,
-                    key: &key,
-                    state_dir: &state_dir,
-                    known_outcome: &known_outcome,
-                    old_sha: old_sha.to_str().ok_or("old SHA must be UTF-8")?,
-                    new_sha: new_sha.to_str().ok_or("new SHA must be UTF-8")?,
-                    known_sha: known_sha.to_str().ok_or("known SHA must be UTF-8")?,
-                })
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-host-upgrade requires Unix sockets".to_owned())
-            }
-        }
-        "consumer-worker" | "reply-consumer-worker" => {
-            let reply = args.command == OsStr::new("reply-consumer-worker");
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let key = path(args.required("key")?);
-            let state_dir = path(args.required("state-dir")?);
-            let worker_config = path(args.required("worker-config")?);
-            args.finish()?;
-            #[cfg(unix)]
-            {
-                let socket = SOCKET.get().ok_or("consumer-worker requires --socket")?;
-                if reply {
-                    worker::run_reply(&host, &config, socket, &key, &state_dir, &worker_config)
-                } else {
-                    worker::run(&host, &config, socket, &key, &state_dir, &worker_config)
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                Err("consumer-worker requires Unix sockets".to_owned())
             }
         }
         "store" => store_run(args),
@@ -3689,12 +3156,6 @@ fn run(mut args: Args) -> Result<()> {
             let action = args.required("action")?;
             let seed = crate::fsio::read_seed(&path(args.required("secret")?))?;
             match action.to_str() {
-                Some("export-blinding") => {
-                    args.finish()?;
-                    eprintln!("{}", hiding::BLINDING_NOTICE);
-                    println!("{}", hex(&hiding::blinding_key(&seed)));
-                    Ok(())
-                }
                 Some("cell-blinding") => {
                     // With --heights, the cell's CURRENT blinding: the birth blinding
                     // ratcheted once per write at each height (K-HIDE-ROTATE).
@@ -3751,7 +3212,7 @@ fn run(mut args: Args) -> Result<()> {
                     println!("{}", hex(&salt));
                     Ok(())
                 }
-                _ => Err("key --action is export-blinding, cell-blinding or derive-salt".to_owned()),
+                _ => Err("key --action is cell-blinding or derive-salt".to_owned()),
             }
         }
         "bootstrap" => {
@@ -3947,27 +3408,20 @@ fn run(mut args: Args) -> Result<()> {
             agent_lifetime_grant::grant_submit(&directory)
         }
         #[cfg(unix)]
+        "agent-lifetime-grant-inspect" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let socket = path(args.required("operator-socket")?);
+            let ingress = path(args.required("ingress")?);
+            let output = path(args.required("output")?);
+            args.finish()?;
+            agent_lifetime_grant::inspect_accepted(&host, &config, &socket, &ingress, &output)
+        }
+        #[cfg(unix)]
         "agent-lifetime-grant-lookup" => {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_lifetime_grant::grant_lookup(&directory)
-        }
-        #[cfg(unix)]
-        "session-reenroll" => {
-            let phase = args.required("phase")?;
-            let phase = phase.to_str().ok_or("reenrollment phase must be UTF-8")?;
-            let contract = path(args.required("contract")?);
-            let directory = path(args.required("dir")?);
-            let admission = args.optional("admission").map(path);
-            let generation = args.optional("new-generation");
-            args.finish()?;
-            session_reenroll::run(
-                phase,
-                &contract,
-                &directory,
-                admission.as_deref(),
-                generation.as_deref().and_then(OsStr::to_str),
-            )
         }
         #[cfg(unix)]
         "session-enrollment-plan" => {
@@ -4178,75 +3632,6 @@ fn run(mut args: Args) -> Result<()> {
                 &directory,
             )
         }
-        #[cfg(unix)]
-        "fn-namespace-plan" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            let socket = SOCKET.get().ok_or("fn-namespace-plan requires --socket")?;
-            fn_namespace::plan(&host, &config, socket, &directory)
-        }
-        #[cfg(unix)]
-        "fn-namespace-register" => {
-            let directory = path(args.required("state-dir")?);
-            let key = path(args.required("key")?);
-            let approval = path(args.required("approval")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-namespace-register uses its retained operator socket".into());
-            }
-            fn_namespace::register(&directory, &key, &approval)
-        }
-        #[cfg(unix)]
-        "fn-namespace-lookup" => {
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-namespace-lookup uses its retained operator socket".into());
-            }
-            fn_namespace::lookup_original(&directory)
-        }
-        #[cfg(unix)]
-        "fn-frontier-plan" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
-            let kind = args.required("kind")?;
-            let transaction = args.required("transaction")?;
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            let socket = SOCKET.get().ok_or("fn-frontier-plan requires --socket")?;
-            fn_frontier::plan(
-                &host,
-                &config,
-                socket,
-                kind.to_str().ok_or("fn frontier kind must be UTF-8")?,
-                transaction
-                    .to_str()
-                    .ok_or("fn frontier transaction must be UTF-8")?,
-                &directory,
-            )
-        }
-        #[cfg(unix)]
-        "fn-frontier-advance" => {
-            let directory = path(args.required("state-dir")?);
-            let key = path(args.required("key")?);
-            let approval = path(args.required("approval")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-frontier-advance uses its retained operator socket".into());
-            }
-            fn_frontier::advance(&directory, &key, &approval)
-        }
-        #[cfg(unix)]
-        "fn-frontier-lookup" => {
-            let directory = path(args.required("state-dir")?);
-            args.finish()?;
-            if SOCKET.get().is_some() {
-                return Err("fn-frontier-lookup uses its retained operator socket".into());
-            }
-            fn_frontier::lookup_original(&directory)
-        }
         "submit" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -4276,13 +3661,27 @@ fn run(mut args: Args) -> Result<()> {
             )
         }
         "query" => {
-            let host = path(args.required("host")?);
-            let config = path(args.required("config")?);
+            // A workspace names its serving socket: the signed read goes to that session (ops 4/5);
+            // without one, each of challenge and query opens the Store in a cold Host.
+            let (host, config, key) = match args.optional("workspace") {
+                Some(root) => {
+                    let workspace = workspace::load(&path(root))?;
+                    (
+                        workspace::workspace_host(&workspace)?,
+                        workspace::member_path(&workspace, "config")?,
+                        workspace::member_path(&workspace, "key")?,
+                    )
+                }
+                None => (
+                    path(args.required("host")?),
+                    path(args.required("config")?),
+                    path(args.required("key")?),
+                ),
+            };
             let intent = path(args.required("intent")?);
             let intent_kind = args
                 .optional("intent-kind")
                 .unwrap_or_else(|| OsString::from("intent"));
-            let key = path(args.required("key")?);
             let view = args.required("view")?;
             let presentation = args.optional("presentation");
             let directory = path(args.required("dir")?);
@@ -4322,6 +3721,14 @@ fn run(mut args: Args) -> Result<()> {
             };
             args.finish()?;
             objective_invoke::submit(&host, &config, &request, &intent_nonce, &key, &directory, prepare_only)
+        }
+        "attempt-state" => {
+            let directory = path(args.required("attempt")?);
+            let file = args.optional("file").map(|f| f.into_string().map_err(|_| "--file must be UTF-8".to_owned())).transpose()?;
+            // `--json` (valueless) is the only rendering; accepted so callers can say what they read.
+            let _ = args.optional("json");
+            args.finish()?;
+            attempt_state::run(&directory, file.as_deref())
         }
         "retry" => {
             let directory = path(args.required("attempt")?);
@@ -4396,12 +3803,6 @@ fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             selected_release::lookup(&directory, SOCKET.get().map(PathBuf::as_path))
         }
-        #[cfg(unix)]
-        "selected-release-retry" => {
-            let directory = path(args.required("attempt")?);
-            args.finish()?;
-            selected_release::retry_submit(&directory, SOCKET.get().map(PathBuf::as_path))
-        }
         "export-evidence" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -4441,12 +3842,6 @@ fn main() -> ExitCode {
     workspace::private::adopt_keycache_passphrase();
     #[cfg(unix)]
     let parsed = match env::args_os().nth(1) {
-        Some(command) if command == OsStr::new("bend-session-sign") => {
-            env::args_os().skip(2)
-                .map(|value| value.into_string().map_err(|_| "Bend session arguments must be UTF-8".to_owned()))
-                .collect::<Result<Vec<_>>>()
-                .and_then(|arguments| bend_session::run(&arguments))
-        }
         Some(command) if command == OsStr::new("fleet-sign") => {
             fleet_sign::run(env::args_os().skip(2).collect())
         }
@@ -4479,8 +3874,8 @@ pub(crate) fn main_ending(parsed: Result<()>, status: u8) -> MainEnding {
     match parsed {
         Ok(()) => ended(status, String::new(), String::new()),
         Err(error) if error == USAGE => ended(0, error, String::new()),
-        Err(error) => match take_host_decision().as_ref().and_then(host_refusal_ending) {
-            Some(line) => ended(EXIT_REFUSED, String::new(), format!("{line}\n  client: {error}\n")),
+        Err(error) => match take_host_decision().as_ref().and_then(host_ending) {
+            Some((code, line)) => ended(code, String::new(), format!("{line}\n  client: {error}\n")),
             None => ended(status.max(1), String::new(), format!("mini: {error}\n")),
         },
     }
@@ -4493,7 +3888,67 @@ pub(crate) fn swap_exit_status(value: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn apps_positionals_are_the_grammar_leafs_flags() {
+        let flags = |words: &[&str]| Args::parse_from(words.iter().map(OsString::from)).unwrap().values.into_iter()
+            .map(|(k, v)| format!("{}={}", k.to_string_lossy(), v.to_string_lossy())).collect::<Vec<_>>();
+        assert_eq!(flags(&["apps", "share", "a4501", "bob"]), ["--action=share", "--grain=a4501", "--to=bob"]);
+        assert_eq!(flags(&["apps", "search", "slides", "--json"]), ["--action=search", "--term=slides", "--json=yes"]);
+        assert_eq!(flags(&["apps", "search", "--term", "slides"]), ["--action=search", "--term=slides"]);
+        assert_eq!(flags(&["apps", "renew", "a4501"]), ["--action=renew", "--grain=a4501"]);
+        assert_eq!(flags(&["apps", "list"]), ["--action=list"]);
+        assert_eq!(flags(&["apps", "revoke-identity", "a4501", "tok"]), ["--action=revoke-identity", "--grain=a4501", "--token=tok"]);
+    }
     use super::*;
+
+    #[test]
+    fn mini_with_no_command_ends_non_zero_and_help_still_ends_zero() {
+        let no_command = Args::parse_from(Vec::<OsString>::new()).err().expect("no command is an error");
+        assert_ne!(no_command, USAGE);
+        assert!(no_command.starts_with("no command given"));
+        assert_ne!(main_ending(Err(no_command), 0).code, 0);
+        let help = Args::parse_from([OsString::from("--help")]).err().expect("--help prints usage");
+        assert_eq!(main_ending(Err(help), 0).code, 0);
+    }
+
+    #[test]
+    fn every_command_the_dispatcher_runs_is_named_in_usage() {
+        let source = include_str!("main.rs");
+        let body = &source[source.find("\nfn run(").expect("fn run")..source.find("\nfn main()").expect("fn main")];
+        let mut hidden = Vec::new();
+        for line in body.lines() {
+            let Some(rest) = line.strip_prefix("        \"") else { continue };
+            let Some((names, _)) = rest.split_once(" =>") else { continue };
+            let names = names.split_once(" if ").map_or(names, |(names, _)| names);
+            for name in names.split(" | ").map(|n| n.trim_matches('"')) {
+                if !name.is_empty() && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+                    && !USAGE.contains(&format!("mini {name} ")) && !USAGE.contains(&format!("mini {name}|"))
+                    && !USAGE.contains(&format!("mini --verify-host {name} "))
+                {
+                    hidden.push(name.to_owned());
+                }
+            }
+        }
+        assert!(hidden.is_empty(), "commands the dispatcher runs that USAGE never names: {hidden:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn object_audience_inspects_are_session_frames_not_codec_frames() {
+        let frame = |kind: &str| mini_sdk::local::kind(kind, b"source").unwrap();
+        let inspect = mini_sdk::host_operations::INSPECT;
+        assert!(session_inspect_kind(inspect, &frame("object-audience")));
+        assert!(session_inspect_kind(inspect, &frame("object-audience-roster")));
+        // The kinds the storeless codec still answers stay codec frames.
+        assert!(!session_inspect_kind(inspect, &frame("object-roster-inspect")));
+        assert!(!session_inspect_kind(inspect, &frame("outcome")));
+        // No other opcode is redirected, whatever its payload.
+        assert!(!session_inspect_kind(mini_sdk::host_operations::AUTHOR, &frame("object-audience")));
+        // A truncated kind header is not a session frame.
+        assert!(!session_inspect_kind(inspect, &[1]));
+        assert!(!session_inspect_kind(inspect, &[]));
+    }
 
     #[test]
     fn store_audit_argv_is_the_host_arm_and_optional_receipts() {
@@ -4524,64 +3979,6 @@ mod tests {
         path
     }
 
-    /// A stand-in Host image that exits `code` with the given stdout bytes and stderr text.
-    #[cfg(unix)]
-    fn fake_host(name: &str, code: i32, stdout: &str, stderr: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = scratch(name);
-        let path = dir.join("host");
-        fs::write(&path, format!("#!/bin/sh\nprintf '%s' '{stdout}'\nprintf '%s' '{stderr}' >&2\nexit {code}\n")).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    }
-
-    /// `local_process` on a freshly written script: another test thread's fork may still hold
-    /// the write descriptor until it execs, which makes the exec fail ETXTBSY. Retry only that.
-    #[cfg(unix)]
-    fn run_fake(host: &Path, args: &[&OsStr]) -> Result<Output> {
-        for _ in 0..50 {
-            match local_process(host, Path::new("config"), args) {
-                Err(error) if error.contains("Text file busy") => {
-                    std::thread::sleep(std::time::Duration::from_millis(20))
-                }
-                other => return other,
-            }
-        }
-        local_process(host, Path::new("config"), args)
-    }
-
-    /// A one-shot pure verb the Host refuses (exit 2) surfaces under the Host's name, as the
-    /// session path does for a 255 frame, never as "request status uncertain".
-    #[cfg(unix)]
-    #[test]
-    fn one_shot_pure_refusal_is_named_not_uncertain() {
-        let host = fake_host(
-            "one-shot-refused",
-            2,
-            "ff00",
-            r#"{"type":"refused","reason":"malformed","phase":"6f702037","detail":"243a206d697373696e67206669656c64206e6f6e6365"}"#,
-        );
-        let args = [OsStr::new("author"), OsStr::new("intent"), OsStr::new("in"), OsStr::new("out")];
-        let error = run_fake(&host, &args).unwrap_err();
-        assert!(error.starts_with("host refused author: refused: malformed: $: missing field nonce (phase op 7)"), "{error}");
-        assert!(!error.contains("uncertain"), "{error}");
-        assert!(matches!(take_host_decision(), Some(HostDecision::RefusedFrame { byte: 255, .. })));
-    }
-
-    /// Any other failing exit of the same verb is not a decision: the status stays uncertain.
-    #[cfg(unix)]
-    #[test]
-    fn one_shot_other_exit_stays_uncertain() {
-        let args = [OsStr::new("author"), OsStr::new("intent"), OsStr::new("in"), OsStr::new("out")];
-        let crashed = fake_host("one-shot-crashed", 1, "", "minidregg-host: boom");
-        let error = run_fake(&crashed, &args).unwrap_err();
-        assert!(error.contains("request status uncertain: minidregg-host: boom"), "{error}");
-        // Exit 2 whose stderr is not a refused outcome is not taken for one.
-        let odd = fake_host("one-shot-odd", 2, "", "not json");
-        let error = run_fake(&odd, &args).unwrap_err();
-        assert!(error.contains("request status uncertain"), "{error}");
-    }
-
     #[cfg(unix)]
     #[test]
     fn host_image_digest_is_cached_per_file_identity() {
@@ -4600,6 +3997,28 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         fs::write(&host, b"third  image").unwrap();
         assert_eq!(host_image_sha256(&host).unwrap(), sha(b"third  image"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The plant of the workspace Host pin: a Host file replaced under an unchanged pin is named by
+    /// the pin without being read (the serving Host's envelope check refuses it after the next
+    /// `serve` start), and `--verify-host` hashes it and refuses the mismatch here.
+    #[cfg(unix)]
+    #[test]
+    fn a_pinned_host_image_is_named_by_its_pin_and_verify_host_refuses_a_replacement() {
+        let dir = scratch("host-image-pin");
+        let host = dir.join("minidregg-host");
+        let sha = |bytes: &[u8]| hex(&sha2::Sha256::digest(bytes));
+        fs::write(&host, b"pinned image").unwrap();
+        pin_workspace_host(&host, &sha(b"pinned image")).unwrap();
+        fs::write(&host, b"replaced image").unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"pinned image"));
+        VERIFY_HOST.store(true, Ordering::Relaxed);
+        let verified = host_image_sha256(&host);
+        VERIFY_HOST.store(false, Ordering::Relaxed);
+        let error = verified.unwrap_err();
+        assert!(error.contains("differs from the workspace's pinned hostSha256"), "{error}");
+        assert!(pin_workspace_host(&host, &sha(b"replaced image")).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -4637,31 +4056,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn historical_fn_decisions_need_no_new_mini_intent() {
-        assert!(historical_without_intent(
-            &json!({"decision": {"decision": {"type": "historical-repeat"}}}),
-            B_CONSUMER,
-        ));
-        assert!(historical_without_intent(
-            &json!({"decision": {"decision": {"type": "historical-carrier-variation-evidence"}}}),
-            B_CONSUMER,
-        ));
-        assert!(historical_without_intent(
-            &json!({"decision": {"decision": "repeated"}}),
-            A_REPLY_CONSUMER,
-        ));
-        assert!(!historical_without_intent(
-            &json!({"decision": {"decision": {"type": "proposed-fresh"}}}),
-            B_CONSUMER,
-        ));
-        assert!(!historical_without_intent(
-            &json!({"decision": {"decision": "proposed-fresh"}}),
-            A_REPLY_CONSUMER,
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn continuity_reply_needs_typed_matching_verdict_and_anchor_shape() {
         let mut value = json!({"type":"minidregg-provider-continuity-v1",
             "status":"confirmed", "continuous":true, "providerResourceId":"7",
@@ -4675,119 +4069,6 @@ mod tests {
         assert!(!continuity_reply(&value).unwrap());
         value["anchor"]["transactionId"] = json!("01");
         assert!(continuity_reply(&value).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn origin_outbox_requires_exact_status_intent_pair() {
-        let mut value = json!({"type":"fn-a-origin-outbox-session-v1",
-            "status":"prepared-decision", "decision":"proposed-fresh",
-            "messageId":"<r@example.invalid>", "sourceIdentity":"ab",
-            "miniOrigin":{"type":"verified-mini-native-prefix-v1"}, "intentHex":"00"});
-        assert_eq!(origin_outbox_intent(&value).unwrap(), Some(vec![0]));
-        value["decision"] = json!("repeated");
-        assert!(origin_outbox_intent(&value).is_err());
-        value["intentHex"] = json!("");
-        assert_eq!(origin_outbox_intent(&value).unwrap(), None);
-        value["status"] = json!("refused");
-        value["decision"] = json!("refused");
-        assert!(origin_outbox_intent(&value)
-            .unwrap_err()
-            .contains("refused"));
-        value["sourceIdentity"] = json!("AB");
-        assert!(origin_outbox_intent(&value).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn ack_coverage_is_distinct_from_exact_durable_ack() {
-        let mut value = json!({"type":"fn-consumer-ack-session-v1",
-            "miniTransactionId":"123", "kind":"empty-page-skip",
-            "fnAck":"covered-by-durable-frontier",
-            "fnCursorPosition":"16", "fnCommittedAck":"23",
-            "fnStoreSequence":"", "fnStoreTransactionId":""});
-        assert_eq!(
-            parse_ack_result(&value, B_CONSUMER, "123").unwrap(),
-            AckResult::Covered
-        );
-        value["fnCursorPosition"] = json!("24");
-        assert!(parse_ack_result(&value, B_CONSUMER, "123").is_err());
-        value["fnCursorPosition"] = json!("16");
-        value["fnAck"] = json!("durable-accepted");
-        assert_eq!(
-            parse_ack_result(&value, B_CONSUMER, "123").unwrap(),
-            AckResult::Exact
-        );
-        assert!(parse_ack_result(&value, B_CONSUMER, "124").is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_own_r_progress_is_bounded_and_never_accepted_as_b_skip() {
-        let mut value = json!({"type":"fn-a-reply-poll-session-v1",
-            "status":"skip-decision", "intentHex":"00",
-            "decision":{"type":"fn-a-own-r-progress-decision-v1",
-                "decision":"proposed-fresh", "fromPosition":"16",
-                "toPosition":"17", "outboxTransactionId":"42"}});
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_ok());
-        assert!(validate_skip_decision(&value, B_CONSUMER, &[0]).is_err());
-        value["decision"]["toPosition"] = json!("33");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
-        value["decision"]["toPosition"] = json!("17");
-        value["decision"]["outboxTransactionId"] = json!("042");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
-        value["decision"]["outboxTransactionId"] = json!("42");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_err());
-        value["decision"]["outboxTransactionId"] = json!("0");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_ok());
-        value["decision"]["toPosition"] = json!("4294967296");
-        value["decision"]["fromPosition"] = json!("4294967295");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[0]).is_err());
-        value["decision"]["toPosition"] = json!("17");
-        value["decision"]["fromPosition"] = json!("16");
-        value["decision"]["decision"] = json!("repeated");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_ok());
-        value["decision"]["decision"] = json!("refused");
-        assert!(validate_skip_decision(&value, A_REPLY_CONSUMER, &[]).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_own_r_ack_requires_selected_transaction_and_durable_cursor() {
-        let mut value = json!({"type":"fn-a-reply-ack-session-v1",
-            "kind":"own-r-skip", "miniTransactionId":"123", "outboxTransactionId":"42",
-            "fnCursorPosition":"17", "fnCommittedAck":"17", "fnStoreSequence":"16",
-            "fnStoreTransactionId":"16", "fnAck":"durable-accepted"});
-        assert_eq!(
-            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
-            AckResult::Exact
-        );
-        value["fnStoreSequence"] = json!("0");
-        value["fnStoreTransactionId"] = json!("0");
-        value["fnCursorPosition"] = json!("1");
-        value["fnCommittedAck"] = json!("1");
-        assert_eq!(
-            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
-            AckResult::Exact
-        );
-        value["fnCursorPosition"] = json!("17");
-        value["fnStoreSequence"] = json!("16");
-        value["fnCommittedAck"] = json!("17");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "124").is_err());
-        assert!(parse_ack_result(&value, B_CONSUMER, "123").is_err());
-        value["fnCommittedAck"] = json!("16");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
-        value["fnCommittedAck"] = json!("18");
-        value["fnAck"] = json!("covered-by-durable-frontier");
-        assert_eq!(
-            parse_ack_result(&value, A_REPLY_CONSUMER, "123").unwrap(),
-            AckResult::Covered
-        );
-        value["outboxTransactionId"] = json!("042");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
-        value["outboxTransactionId"] = json!("42");
-        value["fnStoreSequence"] = json!("15");
-        assert!(parse_ack_result(&value, A_REPLY_CONSUMER, "123").is_err());
     }
 
     #[test]
@@ -4831,9 +4112,7 @@ mod tests {
 
     #[test]
     fn inspected_headers_are_signed_as_exact_bytes_in_order() {
-        let challenge = json!({"headers": ["00ff10", "6d696e69"]});
-        let headers = challenge_headers(&challenge).unwrap();
-        assert_eq!(headers, [vec![0, 255, 16], b"mini".to_vec()]);
+        let headers = vec![vec![0, 255, 16], b"mini".to_vec()];
 
         let signing = SigningKey::from_bytes(&[27; 32]);
         let rendered = sign_headers(&signing, &headers).unwrap();
@@ -4868,15 +4147,24 @@ mod tests {
             refusal_line(&revoked).unwrap(),
             "refused: revoked: the grant is revoked (phase observation)"
         );
-        let decision = HostDecision::RefusedFrame {
+        let decision = HostDecision::Frame {
             command: "query".into(),
-            byte: 255,
+            byte: RESPONSE_NO_RECORD,
             encoded: vec![1],
-            decoded: Some(revoked),
+            decoded: Some(revoked.clone()),
         };
-        assert!(host_refusal_ending(&decision)
-            .unwrap()
-            .starts_with("refused: revoked: the grant is revoked (phase observation)\n"));
+        let (code, line) = host_ending(&decision).unwrap();
+        assert_eq!(code, EXIT_REFUSED);
+        assert!(line.starts_with("refused: revoked: the grant is revoked (phase observation)\n"), "{line}");
+        // The same decoding under the undecided envelope (255) is no refusal.
+        let envelope = HostDecision::Frame { command: "query".into(), byte: RESPONSE_HOST_OUTCOME, encoded: vec![1], decoded: Some(revoked) };
+        assert_eq!(host_ending(&envelope).unwrap().0, EXIT_UNDECIDED);
+        // NO_RECORD with a contention decoding: decided before any append, so a refusal-class line.
+        let contended = HostDecision::Frame { command: "submit".into(), byte: RESPONSE_NO_RECORD, encoded: vec![1],
+            decoded: Some(json!({"type":"contention"})) };
+        let (code, line) = host_ending(&contended).unwrap();
+        assert_eq!(code, EXIT_REFUSED);
+        assert!(line.starts_with("refused: no record: the Host answered contention before any append"), "{line}");
         // Prose that names a reason is not a reason.
         let nested = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
             "detail":hex(b"invocation preparation: A.Reject.scalar\n  (B.Reject.pageMutation\n    (C.RejectReason.overflow))")});
@@ -4886,20 +4174,63 @@ mod tests {
         );
         let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
         assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));
+        let limited = json!({"type":"refused","reason":"rate-limited","phase":hex(b"op 5"),
+            "detail":hex(b"rate-limited retry-after-ms 1500")});
+        assert_eq!(
+            refusal_line(&limited).unwrap(),
+            "refused: rate-limited: this subject has used its request rate for now; retry in 2 s (phase op 5)"
+        );
         let prose = json!({"type":"refused","phase":hex(b"x"),"detail":hex(b"revoked")});
         assert!(refusal_line(&prose)
             .unwrap()
             .starts_with("refused: unnamed: revoked"));
-        let undecoded = HostDecision::RefusedFrame {
+        let undecoded = HostDecision::Frame {
             command: "query".into(),
             byte: 255,
             encoded: vec![1],
             decoded: None,
         };
-        assert!(host_refusal_ending(&undecoded)
-            .unwrap()
-            .starts_with("refused: Host refused query, reply byte 255"));
-        assert!(host_refusal_ending(&HostDecision::Outcome(json!({"type":"uncertain"}))).is_none());
+        // A 255 frame is not a refusal by its byte: undecoded, or decoded as anything but
+        // `refused`, it is undecided (exit 4), and the line says not to repeat the operation.
+        let (code, line) = host_ending(&undecoded).unwrap();
+        assert_eq!(code, EXIT_UNDECIDED);
+        assert!(line.starts_with("undecided: Host answered query with reply byte 255 and outcome undecoded"), "{line}");
+        for kind in ["uncertain", "unavailable", "contention", "absent"] {
+            let frame = HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1],
+                decoded: Some(json!({"type": kind})) };
+            assert!(!frame.is_refusal());
+            let (code, line) = host_ending(&frame).unwrap();
+            assert_eq!(code, EXIT_UNDECIDED, "{kind}");
+            assert!(line.contains(&format!("outcome {kind}")) && !line.starts_with("refused"), "{line}");
+        }
+        let (code, _) = host_ending(&HostDecision::Outcome(json!({"type":"uncertain"}))).unwrap();
+        assert_eq!(code, EXIT_UNDECIDED);
+        assert_eq!(host_ending(&HostDecision::Outcome(json!({"type":"confirmed"}))), None);
+        let charged = json!({"type":"confirmed","confirmation":"installed","disposition":"charged","cause":hex(b"exhausted"),
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
+        let (code, line) = host_ending(&HostDecision::Outcome(charged.clone())).unwrap();
+        assert_eq!((code, line.as_str()), (EXIT_REFUSED,
+            "charged: the Host admitted the call and posted only its price; nothing else was written (cause exhausted)"));
+        assert!(print_confirmed_outcome(&charged).unwrap_err().starts_with("charged: "));
+    }
+
+    /// `host_decided` reports only a decoded refusal as the Host's refusal; an undecided 255
+    /// frame stays an error, so no caller reads it as "refused, so another way is safe".
+    #[test]
+    fn host_decided_reads_only_a_decoded_refusal_as_a_refusal() {
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1],
+            decoded: Some(json!({"type":"unavailable"})) });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()));
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: 255, encoded: vec![1], decoded: None });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()));
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: RESPONSE_HOST_OUTCOME, encoded: vec![1],
+            decoded: Some(json!({"type":"refused","reason":"revoked","phase":hex(b"x"),"detail":hex(b"gone")})) });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Err("lost".into()), "a decoded refusal under 255 is undecided");
+        note_host_decision(HostDecision::Frame { command: "submit".into(), byte: RESPONSE_NO_RECORD, encoded: vec![1],
+            decoded: Some(json!({"type":"refused","reason":"revoked","phase":hex(b"x"),"detail":hex(b"gone")})) });
+        assert_eq!(host_decided::<()>(Err("lost".into())), Ok(Err("refused: revoked: gone (phase x)".into())));
+        let message = undecided_frame_message("submit", "uncertain", Some(Path::new("/w/attempts/a/outcome.bin")), &[7]);
+        assert!(message.contains("`mini retry --dir /w/attempts/a --mode lookup`"), "{message}");
     }
 
     #[test]
@@ -5097,14 +4428,18 @@ mod tests {
         let host = directory.join("fake-host.sh");
         let config = directory.join("config.json");
         let call = directory.join("call.bin");
+        // The one-shot verbs (submit, lookup) echo the call; `inspect` is the storeless codec
+        // loop's, as every pure verb is (`client_consent::codec_loop_arm`).
         fs::write(
             &host,
-            b"#!/bin/sh\nif [ \"$2\" = inspect ]; then printf '{\"type\":\"confirmed\"}' >\"$5\"; else cp \"$3\" \"$4\"; fi\n",
+            format!("#!/bin/sh\ncase \"$2\" in\n{}  *) cp \"$3\" \"$4\" ;;\nesac\n",
+                client_consent::codec_loop_arm(r#"printf '{"type":"confirmed"}' > "$out""#)),
         )
         .unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(&config, b"{}").unwrap();
         fs::write(&call, [0, 1, 2, 255, 17]).unwrap();
+        let _codec = client_consent::codec_test_lock();
         write_json_new(
             &directory.join("attempt.json"),
             &json!({
@@ -5164,17 +4499,9 @@ mod ascii_hex_regression {
         }
         assert_eq!(super::decode_hex("00AaFF").unwrap(), [0, 170, 255]);
         assert!(super::decode_hex("").unwrap().is_empty());
-    }
-}
-
-#[cfg(test)]
-mod decode_hex_tests {
-    #[test]
-    fn decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic() {
-        assert_eq!(super::decode_hex("00aBff").unwrap(), vec![0, 0xab, 0xff]);
-        // A Host plan header (pay refill reads one) with multi-byte text: the
-        // old slicing decoder panicked on the char boundary.
-        for bad in ["\u{e9}\u{e9}", "a\u{e9}a", "a\u{e9}", "+f", "-1", "0x", "abc", "zz", " 1"] {
+        // A Host plan header (pay refill reads one) with multi-byte text: the old slicing decoder
+        // panicked on the char boundary; signs, prefixes, odd lengths and spaces refuse too.
+        for bad in ["a\u{e9}", "-1", "0x", "abc", "zz", " 1"] {
             assert!(super::decode_hex(bad).is_err(), "{bad:?}");
         }
     }

@@ -1,0 +1,132 @@
+{
+ "rows": [
+  {
+   "step": "extract-quote-is-the-policy-ceiling",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "published": {
+     "extractTicks": "3200000"
+    },
+    "policy": 3200000
+   },
+   "group": null
+  },
+  {
+   "step": "publish",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-poster",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "create-counter",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": null
+  },
+  {
+   "step": "post-4",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "send"
+  },
+  {
+   "step": "queued-not-delivered",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "message": 101141698466626614518899625610724549362045313298508530648095705514551872700458
+   },
+   "group": "send"
+  },
+  {
+   "step": "deliver-4",
+   "expect": "installed",
+   "detailExpected": null,
+   "type": "confirmed",
+   "reason": "",
+   "detail": "",
+   "ok": true,
+   "group": "send"
+  },
+  {
+   "step": "delivered-lands-once",
+   "expect": "check",
+   "ok": true,
+   "observed": {
+    "message": 101141698466626614518899625610724549362045313298508530648095705514551872700458
+   },
+   "group": "send"
+  },
+  {
+   "step": "deliver-again-refused",
+   "expect": "refused",
+   "detailExpected": null,
+   "type": "refused",
+   "reason": "conflict",
+   "detail": "transaction identity conflict",
+   "ok": true,
+   "group": "send"
+  },
+  {
+   "step": "send-to-bare-refused",
+   "expect": "refused",
+   "detailExpected": "notAnObject",
+   "type": "refused",
+   "reason": "operation-rejected",
+   "detail": "Minidregg.Kernel.ObjectiveActivityReceiver.Reject.call (Minidregg.Kernel.ObjectiveCall.CallRefusal.notAnObject 14633915052329262203) { source := 17924, core := 108526, postageSource := 0, postageCore := 0 }",
+   "ok": true,
+   "group": "send"
+  }
+ ],
+ "totals": [
+  {
+   "after": "queued",
+   "height": "17",
+   "total": "0"
+  },
+  {
+   "after": "delivered",
+   "height": "18",
+   "total": "0"
+  }
+ ],
+ "objects": {
+  "poster": {
+   "object": "13191545788123343522",
+   "capability": "11745778658519711027"
+  },
+  "counter": {
+   "object": "9549177387465132604",
+   "capability": "10202030662058756452"
+  },
+  "bare": {
+   "object": "14633915052329262203",
+   "capability": "9783925179996046914"
+  }
+ },
+ "allPass": true,
+ "pin": "37475699973840908419353226656074059974293057488264251810271202922569776221370"
+}

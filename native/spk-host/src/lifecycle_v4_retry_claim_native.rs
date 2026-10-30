@@ -4,6 +4,7 @@
 //! claim consumes the one-use retry token; it never clears the v3
 //! first-attempt marker. Only a fresh op26 committed projection can arm the
 //! physical launch, exactly as in v3.
+use crate::io_context::IoContext;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::VerifiedBegin;
@@ -250,9 +251,9 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op68-requested.json", &active)?;
     write_new(parent, ACTIVE_MARKER, &active)?;
-    let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 68, PLAN_TAG)?;
+    let plan = framed_payload("launch claim plan", &reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -289,9 +290,9 @@ pub(crate) fn assemble_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op69-requested.bin", &pair)?;
-    let reply = operator.invoke(69, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op69-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 69, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch claim assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_CLAIM_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, CLAIM_INGRESS_FILE, &ingress)?;
     Ok(AssembledRetryClaim {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -399,9 +400,9 @@ pub(crate) fn submit_fresh_once(
         "op26-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(26, &assembled.ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, &assembled.ingress)?;
     write_new(attempt_dir, "op26-frame.bin", &reply)?;
-    let committed = framed_payload(&reply, 26, COMMITTED_TAG)?.to_vec();
+    let committed = crate::lifecycle_v3_native::committed_payload(operator, attempt_dir, "op26-claim-submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG)?.to_vec();
     let committed_path = write_new(attempt_dir, COMMITTED_FILE, &committed)?;
     let inspection = operator.tool(
         "inspect",
@@ -488,8 +489,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v4 retry claim attempt parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join(ACTIVE_MARKER))? != assembled.active_marker
-        || fs::read(attempt_dir.join(CLAIM_INGRESS_FILE))? != assembled.ingress
+    if fs::read(parent.join(ACTIVE_MARKER)).ctx("read", &(parent.join(ACTIVE_MARKER)))? != assembled.active_marker
+        || fs::read(attempt_dir.join(CLAIM_INGRESS_FILE)).ctx("read", &(attempt_dir.join(CLAIM_INGRESS_FILE)))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.descriptor_sha256 != hex(&Sha256::digest(&launch.descriptor().canonical))
     {
@@ -540,11 +541,11 @@ mod tests {
         reply.push(26);
         reply.extend_from_slice(v3);
         reply.push(1);
-        assert!(framed_payload(&reply, 26, COMMITTED_TAG).is_err());
+        assert!(framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_err());
         let mut reply = ((COMMITTED_TAG.len() + 2) as u32).to_le_bytes().to_vec();
         reply.push(26);
         reply.extend_from_slice(COMMITTED_TAG);
         reply.push(1);
-        assert!(framed_payload(&reply, 26, COMMITTED_TAG).is_ok());
+        assert!(framed_payload("lifecycle claim submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, COMMITTED_TAG).is_ok());
     }
 }

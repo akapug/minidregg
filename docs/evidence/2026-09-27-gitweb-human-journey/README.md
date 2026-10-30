@@ -1,11 +1,11 @@
 # GitWeb human journey helper: focused source check
 
-The new `native/spk-host/src/bin/gitweb-human-journey.rs` was checked in an
+The new `gitweb-human-journey.rs [deleted 68b2214d]` was checked in an
 isolated private snapshot of committed SPK source `8d7a3f8` plus only this new
 bin. Exact helper SHA-256:
 `71170393aed441bb86a411765785dc976aeed74b66328f45064b3a0861112991`.
 The companion operator command contract at
-`scripts/gitweb-shared-journey/README.md` had SHA-256
+`README.md [deleted 68b2214d]` had SHA-256
 `be06effecc9f73db8b3f82ca633d9f29d074350a7d7a44bcfa0fc15ae98efaee`.
 The builder compared 95/95 committed source files before the focused gate.
 

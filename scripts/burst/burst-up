@@ -4,6 +4,7 @@
 #   scripts/burst/burst-up --id BURST_ID --tip SHA [--gate HOST] [--journeys HOST] [--hbox hbox]
 #                          [--briefs DIR] [--spk FILE] [--boot HOST=BOOTHOST]... [--sccache-port N]
 #                          [--phase stage,root,user,keys,hbox,base,check] [--no-data-disk] [--srv /srv] HOST...
+#                          [--no-root [--thread-budget N] [--threads-per-slot T] [--slice-pct P]] [--set 'K=V ...']
 #
 # HOST is an ssh destination for the login user (an alias or ember@ip). Fresh Ubuntu boxes need
 # --boot HOST=ubuntu@ip (the provider's sudo user) for the root phase; afterwards HOST suffices.
@@ -21,12 +22,19 @@
 #   check  remote/check.sh on every host: ok/DIFF rows, exit = total DIFF (the proof, and the hand-built diff)
 # Everything that was applied by hand on burst2 (BURST2-SATURATE's list, 10-07) is a line in one of these.
 # BURST_SSH_OPTS (e.g. "-F my.conf") is passed to every ssh/scp/rsync and, as PIPELINE_SSH, to relay-base.sh.
+# --set 'K=V ...': further box.env exports, kept across user-phase re-runs (e.g. the fn image paths).
+# --no-root: the HOSTs are not ours to administer (Ember's laptop): the root phase runs root.sh --no-root AS the login
+#   user (never sudo; what it cannot do is reported in $SRV/burst/NO-ROOT.txt), the user phase writes nothing outside
+#   --srv but user units, and check accepts what NO-ROOT.txt declares, by name. --thread-budget N caps the lane slots.
+# --gate HOST outside the HOST list (a no-root host joining a running burst): keys pairs each HOST -> gate only (its
+#   peer key authorized on the gate, alias <id>-gate), lanes push to the gate's shared remote, and base PULLS the
+#   gate's warm base on the host (relay-base pull:<id>-gate local): nothing is relayed through this machine.
 # --base-from HOST: a box outside the list whose warm base at TIP seeds the new ones (relay, never a cold build);
 # `local:HOST` when that box IS the one the new box lives on (an nspawn stand-in): the copy stays on its disk.
 set -uo pipefail
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd); repo=$(CDPATH='' cd -- "$here/../.." && pwd)
 SSHOPTS=${BURST_SSH_OPTS:-}; export PIPELINE_SSH="ssh $SSHOPTS"
-id="" tip="" gate="" journeys="" hbox="" briefs="" spk="" port=4226 phases="stage,root,user,keys,hbox,base,check" nodisk="" SRV=/srv basefrom=""
+id="" tip="" gate="" journeys="" hbox="" briefs="" spk="" port=4226 phases="stage,root,user,keys,hbox,base,check" nodisk="" SRV=/srv basefrom="" noroot="" budget="" slicepct="" sets="" tps=""
 declare -A BOOT; hosts=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -34,6 +42,8 @@ while [ $# -gt 0 ]; do
     --hbox) hbox=$2; shift 2 ;; --briefs) briefs=$2; shift 2 ;; --spk) spk=$2; shift 2 ;; --sccache-port) port=$2; shift 2 ;;
     --phase) phases=$2; shift 2 ;; --no-data-disk) nodisk=--no-data-disk; shift ;; --srv) SRV=$2; shift 2 ;;
     --boot) BOOT[${2%%=*}]=${2#*=}; shift 2 ;; --base-from) basefrom=$2; shift 2 ;;
+    --no-root) noroot=1; nodisk=--no-data-disk; shift ;; --thread-budget) budget=$2; shift 2 ;; --threads-per-slot) tps=$2; shift 2 ;; --slice-pct) slicepct=$2; shift 2 ;;
+    --set) sets=$2; shift 2 ;;
     -*) echo "burst-up: unknown $1" >&2; exit 64 ;; *) hosts+=("$1"); shift ;;
   esac
 done
@@ -54,6 +64,7 @@ remote_step() { local h=$1 ph=$2 n=$3 cmd=$4 f; f=$LOGS/$(echo "$h" | tr -c 'A-Z
 others_of() { local h o=""; for h in "${hosts[@]}"; do [ "$h" = "$1" ] || o="$o $h"; done; echo "${o# }"; }
 ipof() { rsh "$1" 'hostname -I 2>/dev/null | cut -d" " -f1'; }
 role_of() { [ "$1" = "$gate" ] && echo gate || echo lane; }
+outside_gate=1; for h in "${hosts[@]}"; do [ "$h" = "$gate" ] && outside_gate=0; done
 fail=0
 
 if has stage; then
@@ -73,6 +84,11 @@ fi
 if has root; then
   for h in "${hosts[@]}"; do
     b=${BOOT[$h]:-$h}
+    if [ -n "$noroot" ]; then
+      nargs="--no-root --role $(role_of "$h") --srv $SRV"; [ -n "$budget" ] && nargs="$nargs --thread-budget $budget"; [ -n "$slicepct" ] && nargs="$nargs --slice-pct $slicepct"; [ -n "$tps" ] && nargs="$nargs --threads-per-slot $tps"
+      remote_step "$h" root 6 "bash $S/burst/remote/root.sh $nargs" && log "root phase (--no-root, as the login user) ok on $h" || { log "ROOT PHASE FAILED on $h"; fail=1; }
+      continue
+    fi
     remote_step "$b" root 4 "sudo -n cp ~/.ssh/authorized_keys $S/boot-keys && sudo -n bash $S/burst/remote/root.sh --role $(role_of "$h") --user ember --pubkeys $S/boot-keys --srv $SRV $nodisk" && log "root phase ok on $h" || { log "ROOT PHASE FAILED on $h"; fail=1; }
   done
 fi
@@ -80,15 +96,24 @@ if has user; then
   for h in "${hosts[@]}"; do
     role=$(role_of "$h"); args="--tip $tip --stage $S --srv $SRV --role $role --sccache-port $port"
     [ -n "$spk" ] && args="$args --spk $S/$(basename "$spk")"
-    [ "$h" = "$journeys" ] && args="$args --journeys"
+    [ "$h" = "$journeys" ] && args="$args --journeys"; [ -n "$sets" ] && args="$args --set '$sets'"
     gip=$(ipof "$gate"); [ -n "$gip" ] && args="$args --origin ember@$gip"
     if [ "$role" = gate ]; then m=""; for o in $(others_of "$h"); do m="$m ember@$(ipof "$o")"; done; [ -n "$m" ] && args="$args --mirrors '${m# }'"
     else args="$args --fetch-from $id-gate"; fi
+    [ "$outside_gate" = 1 ] && args="$args --peer $id-gate"
     o=$(others_of "$h" | cut -d' ' -f1); [ -n "$o" ] && args="$args --peer $id-$( [ "$o" = "$gate" ] && echo gate || echo "$(echo "$o" | tr -c 'a-z0-9\n' '-' )")"
     remote_step "$h" user 12 "bash $S/burst/remote/user.sh $args" && log "user phase ok on $h" || { log "USER PHASE FAILED on $h"; fail=1; }
   done
 fi
-if has keys && [ ${#hosts[@]} -ge 2 ]; then
+if has keys && [ "$outside_gate" = 1 ]; then
+  # each HOST -> the gate only: the gate (a burst box) need not reach a host behind NAT
+  gip=$(ipof "$gate")
+  for h in "${hosts[@]}"; do
+    pub=$(rsh "$h" "$SRV/pipeline/scripts/setup-box-peer")
+    rsh "$gate" "/srv/pipeline/scripts/setup-box-peer --authorize '$pub'" >/dev/null && log "$gate accepts $h's peer key (box-peer-gate)" || { log "KEYS FAILED $gate<-$h"; fail=1; }
+    rsh "$h" "grep -q '^Host $id-gate\$' ~/.ssh/config 2>/dev/null || $SRV/pipeline/scripts/setup-box-peer --alias $id-gate ember@$gip >/dev/null; ssh -o ConnectTimeout=20 $id-gate slots --free >/dev/null 2>&1; [ \$? -le 1 ]" && log "$h: peer $gate as $id-gate" || { log "KEYS FAILED $h->$gate"; fail=1; }
+  done
+elif has keys && [ ${#hosts[@]} -ge 2 ]; then
   declare -A PUB; for h in "${hosts[@]}"; do PUB[$h]=$(rsh "$h" "$SRV/pipeline/scripts/setup-box-peer"); done
   for h in "${hosts[@]}"; do
     for o in $(others_of "$h"); do
@@ -113,6 +138,8 @@ if has base; then
   reseed() { rsh "$1" "W=$SRV/warm-base; if grep -q '^verify FAILED' \$W/NOT-READY.txt 2>/dev/null; then mv \$W/src \$W/src.failed-\$(date +%s); rm -f \$W/NOT-READY.txt \$W/FROZEN; echo reseed; fi"; }
   src=""; for h in "${hosts[@]}"; do [ "$(ft "$h")" = "$tip" ] && { src=$h; break; }; done
   [ -z "$src" ] && [ -n "$basefrom" ] && [ "$(ft "${basefrom#local:}")" = "$tip" ] && src=$basefrom
+  # an outside gate with the base at TIP: each host PULLS it (relay-base pull:<id>-gate local), never a cold build
+  [ -z "$src" ] && [ "$outside_gate" = 1 ] && [ "$(SRV=/srv; ft "$gate")" = "$tip" ] && src=pull:$id-gate
   if [ -z "$src" ]; then
     log "cold build of $tip on $gate (Mathlib cache + umbrella, ~15 min on an f4)"
     if remote_step "$gate" cold-build 3 "SRV=$SRV bash $S/burst/cold-build.sh --tip $tip" && remote_step "$gate" make-warm-base 2 "SRV=$SRV bash $S/burst/make-warm-base.sh"; then src=$gate; else log "BASE FAILED on $gate"; fail=1; fi
@@ -121,6 +148,8 @@ if has base; then
     [ "$h" = "$src" ] && continue; [ "$(ft "$h")" = "$tip" ] && { log "$h already at $tip"; continue; }
     [ "$(reseed "$h")" = reseed ] && log "$h: a base whose verify failed was moved aside; seeding again"
     case "$src" in
+      pull:*)
+        remote_step "$h" relay 4 "export PIPELINE_DST_SRV=$SRV; nice -n 15 bash $SRV/pipeline/scripts/relay-base.sh $tip $src local" && log "$h pulled the base from $gate (rsync over its peer key, run on $h)" || { log "RELAY (pull) FAILED to $h"; fail=1; } ;;
       local:*) # the relay runs ON the source box; the destination is reached from there (BURST_LOCAL_DST_SSH, e.g. "ssh -p 2222 ember@127.0.0.1")
         rsh "${src#local:}" "cat > /tmp/burst-up/relay-base.sh" < "$repo/scripts/pipeline/relay-base.sh"; rsh "${src#local:}" "cat > /tmp/burst-up/mk-lane.sh" < "$repo/scripts/pipeline/mk-lane.sh"
         remote_step "${src#local:}" relay 3 "PIPELINE_SSH='${BURST_LOCAL_DST_SSH:-ssh}' bash /tmp/burst-up/relay-base.sh $tip local '${BURST_LOCAL_DST_HOST:-$h}'" && log "relayed to $h from ${src#local:} (on its disk)" || { log "RELAY FAILED to $h"; fail=1; } ;;
@@ -132,7 +161,8 @@ if has check; then
   total=0
   for h in "${hosts[@]}"; do
     args="--tip $tip --role $(role_of "$h") --srv $SRV --expect-swarm $S/burst/swarm-build"   # the staged copy root.sh installed from; [ "$h" = "$journeys" ] && args="$args --journeys"
-    [ ${#hosts[@]} = 1 ] && args="$args --single"; [ -n "$hbox" ] || args="$args --no-hbox"
+    [ ${#hosts[@]} = 1 ] && [ "$outside_gate" = 0 ] && args="$args --single"; [ -n "$hbox" ] || args="$args --no-hbox"
+    [ "$outside_gate" = 1 ] && args="$args --peer-gate $id-gate"
     rsh "$h" "bash $S/burst/remote/check.sh $args"; rc=$?; total=$((total + rc))
   done
   log "check: $total DIFF in total"; [ "$total" = 0 ] || fail=1

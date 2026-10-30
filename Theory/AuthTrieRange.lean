@@ -23,7 +23,26 @@ reveal can.
 Paging (a large set is read as a sequence of reveals of consecutive sub-prefixes)
 is the caller's cursor over these reveals: each page is one `revealVerify`.
 -/
-import Theory.AuthTrie
+module
+
+public import Theory.AuthTrie
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.AuthTrie
 

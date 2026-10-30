@@ -4,7 +4,28 @@ replay must additionally bind the original claim to its admitted chronological
 walk, and the new BEGIN/CLAIM must check current management authority. The
 retained report certifies a dead incarnation, never absence of past effects.
 -/
-import Kernel.ApplicationFailedStartRecoveryCore
+module
+
+public import Kernel.ApplicationFailedStartRecoveryCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedCreateRetryEvidence
 
@@ -197,5 +218,26 @@ theorem Conditional.recovery_record_exact {config : Config} {store : StoreIdenti
     accepted.selected.record = DurableReceiver.IntentRecord.ofIntent
       (ApplicationFailedStartRecoveryCore.intent accepted.recovered) :=
   accepted.matched.selected.symm.trans accepted.matched.exact
+
+/-- The recovery record is the one verified under `head` at height
+`selector.recoveryIndex + 1` and decodes to exactly the record of the re-admitted
+failed-start recovery intent; the new BEGIN `begin` binds to `selector`'s recovered
+state, app, volume, create and package, and `selector`'s markers are current at
+`ground` under `config`. -/
+theorem Conditional.recovery_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {selector : Selector} {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
+    (accepted : Conditional config head ground selector begin) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (selector.recoveryIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent (ApplicationFailedStartRecoveryCore.intent accepted.recovered))) ∧
+      bindingMatches selector begin = true ∧
+      markersCurrent config ground selector = true :=
+  ⟨⟨accepted.selected.read.verified.record, accepted.selected.read.verified.chain,
+      accepted.selected.read.verified.root, accepted.selected.read.verified.included,
+      accepted.selected.read.decoded.trans (congrArg some (accepted.selected.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord accepted.matched)))⟩,
+    accepted.bindingExact, accepted.markersExact⟩
 
 end Minidregg.Kernel.ApplicationFailedCreateRetryEvidence

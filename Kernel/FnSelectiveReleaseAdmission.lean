@@ -6,9 +6,30 @@ native-checked owner packet, not a forged DRC signed envelope or an fn claim.
 This module does not install a durable effect until the accepted multi-cell
 transition and physical receiver are connected.
 -/
-import Kernel.FnSelectiveReleaseIngress
-import Compiler.CredentialAuthorityPolicyRegistry
-import Kernel.NativeHostServed
+module
+
+public import Kernel.FnSelectiveReleaseIngress
+public import Compiler.CredentialAuthorityPolicyRegistry
+public import Kernel.NativeHostServed
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseAdmission
 
@@ -238,14 +259,12 @@ def admit (config : NativeHost.Config) (opened : NativeHost.Opened config)
 with the exact content and authority writes in the same durable CAS. The
 ordinary marker remains the prepared authority edit; the second marker is
 durable-journal state, not an invented authority-page post. -/
-def charge (ingress : FnSelectiveReleaseIngress.Ingress)
+def charge (snap : DataSnapshot ResourceBirthCodec.rootBytes) (ingress : FnSelectiveReleaseIngress.Ingress)
     (writes : List DataWrite) (guards : List ReadGuard) : Charge
   | .incidences => 2
   | .turnBytes => (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
   | .memoryTouches => writes.length + guards.length
-  | .storageBytes =>
-      (writes.map fun write => write.canonicalPostBytes.length).sum +
-        (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
+  | .storageBytes => DeployedCharge.storageCharge snap writes (FnSelectiveReleaseIngress.event ingress)
   | .witnessBytes => (FnSelectiveReleaseIngress.ingressCodec.encode ingress).length
   | .proofWork => 2
   | .sideEffectCount => 1
@@ -271,7 +290,8 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
           (DeclaredResourceController.operationMarker config.deployment.domain
             config.profile.semantics (FnSelectiveReleaseIngress.command ingress)),
         FnSelectiveReleaseIngress.releaseNullifier ingress.packet.release]
-    exactCharge := charge ingress writes guards
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+      (charge opened.durable.snapshot ingress writes guards)).toCharge
     event := FnSelectiveReleaseIngress.event ingress
     subject := some (FnSelectiveReleaseIngress.command ingress).subject
     postRootsBound := DeclaredResourceController.writes_roots_bound operation

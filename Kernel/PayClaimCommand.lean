@@ -3,9 +3,30 @@ Closed public paid-claim actions. Prepare and seal carry exactly these canonical
 bytes; submit and lookup retain the same ingress. Neither action conveys a
 capability to arbitrary programs or a generic command-execution surface.
 -/
-import Kernel.PayReceivingContract
-import Kernel.PayEnrolClaim
-import Kernel.Receivers.SubjectKeyRotation
+module
+
+public import Kernel.PayReceivingContract
+public import Kernel.PayEnrolClaim
+public import Kernel.Receivers.SubjectKeyRotation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayClaimCommand
 open Minidregg.Compiler
@@ -105,6 +126,10 @@ structure DecodedIngress where
   canonical : commandCodec.encode command = ingress.commandBytes
   signatureShape : ingress.possessionSignature.length = 64
   commandShape : command.valid
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      decoded.ingress.possessionSignature.length = 64 ∧ decoded.command.valid :=
+  ⟨decoded.canonical, decoded.signatureShape, decoded.commandShape⟩
 
 def maxIngressBytes : Nat := 4096
 
@@ -117,8 +142,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
       | some command =>
         if commandShape : command.valid then
           some ⟨ingress, command,
-            ResourceBirthCodec.strictCodec_canonical
-              (ParticipantKeyEnrollment.framedRaw commandFrame commandStream) exact,
+            ParticipantKeyEnrollment.framed_canonical exact,
             signatureShape, commandShape⟩
         else none
     else none
@@ -127,17 +151,38 @@ def marker (domain semantics : Digest) (command : Command) : Digest :=
   (Sp800185Cshake256.hash "DREGG/PAY/CLAIM/OPERATION/v1".toUTF8.toList
     (possessionFrame domain semantics command)).digest
 
+/-- The verdict of the possession-signature oracle over the frame these indices determine. Layer 2
+(the TokenCensus claim): only `verifyNative` mints one. The fields record the question the oracle was
+asked (key, frame, signature), each pinned to the indices, so `valid` is the answer to THAT question and
+not a free flag; that the oracle answered truthfully is its runtime fact. -/
 structure Checked (domain semantics : Digest) (ingress : DecodedIngress) where
   private mk ::
   verifier : CredentialSignatureIO.NativeConfig
+  key : List UInt8
+  frame : List UInt8
+  signature : List UInt8
+  keyExact : key = ingress.command.signingKey
+  frameExact : frame = possessionFrame domain semantics ingress.command
+  signatureExact : signature = ingress.ingress.possessionSignature
   valid : Bool
+
+/-- A `Checked` answers the possession question over exactly the key, frame (domain, semantics, command) and
+signature of its ingress. -/
+theorem Checked.asked {domain semantics : Digest} {ingress : DecodedIngress}
+    (checked : Checked domain semantics ingress) :
+    checked.key = ingress.command.signingKey ∧
+      checked.frame = possessionFrame domain semantics ingress.command ∧
+      checked.signature = ingress.ingress.possessionSignature :=
+  ⟨checked.keyExact, checked.frameExact, checked.signatureExact⟩
 
 def verifyNative (config : CredentialSignatureIO.NativeConfig) (domain semantics : Digest)
     (ingress : DecodedIngress) : IO (Except CredentialSignatureIO.Error (Checked domain semantics ingress)) := do
   match ← CredentialSignatureIO.verify config ingress.command.signingKey
       (possessionFrame domain semantics ingress.command) ingress.ingress.possessionSignature with
   | .error reason => return .error reason
-  | .ok valid => return .ok ⟨config, valid⟩
+  | .ok valid =>
+      return .ok ⟨config, ingress.command.signingKey, possessionFrame domain semantics ingress.command,
+        ingress.ingress.possessionSignature, rfl, rfl, rfl, valid⟩
 
 theorem command_roundtrip (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command := commandCodec.decode_encode _

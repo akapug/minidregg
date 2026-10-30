@@ -1,9 +1,11 @@
 //! Bounded Unix-only HTTP entrance for one participant credential custodian.
 //!
 //! Transport tokens authenticate use of that custodian; they are not Mini
-//! resource authority. The current public binary serves an unavailable
-//! response; the resident signer/permit path is staged separately.
+//! resource authority. The resident serves every route of its grain through
+//! `serve_dynamic_with_aux`; each request is authored, signed and admitted by
+//! Mini before fd 3 delivery (`dispatch_delivery`).
 
+use crate::io_context::IoContext;
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -38,13 +40,22 @@ pub(crate) enum Method {
     Put,
     Patch,
     Delete,
+    /// The WebDAV/CalDAV calls (Lean `davMethod`): ordinary exchanges with typed parameters.
+    Propfind,
+    Proppatch,
+    Mkcol,
+    Copy,
+    Move,
+    Lock,
+    Unlock,
+    Report,
+    Options,
     /// A `GET` carrying a valid RFC 6455 upgrade: a streamed dispatch whose
     /// one Mini write is the open (Sandstorm `openWebSocket`).
     WebSocket,
 }
 
 impl Method {
-    #[allow(dead_code)] // Consumed by the reviewed resident Mini HTTP caller.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Get => "GET",
@@ -53,6 +64,15 @@ impl Method {
             Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
+            Self::Propfind => "PROPFIND",
+            Self::Proppatch => "PROPPATCH",
+            Self::Mkcol => "MKCOL",
+            Self::Copy => "COPY",
+            Self::Move => "MOVE",
+            Self::Lock => "LOCK",
+            Self::Unlock => "UNLOCK",
+            Self::Report => "REPORT",
+            Self::Options => "OPTIONS",
             Self::WebSocket => crate::dispatch_inspection::STREAMED_OPEN_METHOD,
         }
     }
@@ -64,6 +84,15 @@ impl Method {
             "PUT" => Ok(Self::Put),
             "PATCH" => Ok(Self::Patch),
             "DELETE" => Ok(Self::Delete),
+            "PROPFIND" => Ok(Self::Propfind),
+            "PROPPATCH" => Ok(Self::Proppatch),
+            "MKCOL" => Ok(Self::Mkcol),
+            "COPY" => Ok(Self::Copy),
+            "MOVE" => Ok(Self::Move),
+            "LOCK" => Ok(Self::Lock),
+            "UNLOCK" => Ok(Self::Unlock),
+            "REPORT" => Ok(Self::Report),
+            "OPTIONS" => Ok(Self::Options),
             _ => Err(refuse("HTTP method unavailable")),
         }
     }
@@ -71,13 +100,22 @@ impl Method {
     fn safe(self) -> bool {
         matches!(self, Self::Get | Self::Head)
     }
+
+    fn dav(self) -> bool {
+        crate::host_operations::dav_method(self.as_str())
+    }
+
+    /// No body: Lean's `requestSafeFor` empty-body methods.
+    fn bodyless(self) -> bool {
+        matches!(self, Self::Get | Self::Head | Self::Delete | Self::Copy | Self::Move
+            | Self::Unlock | Self::Options | Self::WebSocket)
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct ReceivedRequest {
     response_stream: Option<UnixStream>,
     pub method: Method,
-    #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
     pub path_and_query: String,
     pub ordinary_headers: Vec<(String, String)>,
     /// `x-mini-export-capture`: entrance-level capture intent. It is kept
@@ -108,21 +146,20 @@ pub(crate) enum EntranceKind {
 pub(crate) struct CustodianPolicy {
     /// The one participant's configured HTTPS origin. It is not HTTP input.
     pub expected_host: String,
-    #[allow(dead_code)] // Becomes Mini authoring input only after its native route exists.
     pub fixed_app: String,
-    #[allow(dead_code)]
     pub fixed_subject: String,
-    #[allow(dead_code)]
     pub fixed_session: String,
     /// Bound to the Mini session, never inferred from the bearer or cookie.
     pub fixed_session_kind: EntranceKind,
     pub export_capture: bool,
     pub export_capture_path: Option<String>,
-    #[allow(dead_code)]
     pub fixed_ticket: String,
     pub browser_token_sha256: [u8; 32],
     pub bootstrap_token_sha256: [u8; 32],
     pub api_token_sha256: [u8; 32],
+    /// The TLS edge's group (Caddy), admitted to `http.sock` beside this
+    /// operator uid. Absent (the default): only the operator uid connects.
+    pub edge_gid: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -142,13 +179,12 @@ struct PolicyFile {
     browser_token_sha256: String,
     bootstrap_token_sha256: String,
     api_token_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edge_gid: Option<String>,
 }
 
 fn canonical_nat(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    crate::canonical::decimal(value)
 }
 
 pub(crate) fn valid_export_path(path: &str) -> bool {
@@ -190,24 +226,8 @@ pub(crate) fn valid_expected_host(host: &str) -> bool {
 }
 
 fn hex_digest(value: &str) -> io::Result<[u8; 32]> {
-    if value.len() != 64
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err(refuse("custodian token hash is not lowercase SHA-256"));
-    }
-    let mut digest = [0_u8; 32];
-    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        let high = (pair[0] as char)
-            .to_digit(16)
-            .ok_or_else(|| refuse("token hash hex"))?;
-        let low = (pair[1] as char)
-            .to_digit(16)
-            .ok_or_else(|| refuse("token hash hex"))?;
-        digest[index] = ((high << 4) | low) as u8;
-    }
-    Ok(digest)
+    crate::canonical::unhex_array(value)
+        .ok_or_else(|| refuse("custodian token hash is not lowercase SHA-256"))
 }
 
 impl CustodianPolicy {
@@ -220,7 +240,7 @@ impl CustodianPolicy {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(directory.join("custodian.json"))?;
+            .open(directory.join("custodian.json")).ctx("open", &(directory.join("custodian.json")))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -259,6 +279,15 @@ impl CustodianPolicy {
         {
             return Err(refuse("custodian origin or fixed Mini coordinate refused"));
         }
+        // A system group only by number, never root's group.
+        let edge_gid = match parsed.edge_gid.as_deref() {
+            None => None,
+            Some(gid) if canonical_nat(gid) && gid != "0" => Some(
+                gid.parse::<u32>()
+                    .map_err(|_| refuse("custodian edge gid refused"))?,
+            ),
+            Some(_) => return Err(refuse("custodian edge gid refused")),
+        };
         Ok(Self {
             expected_host: parsed.expected_host,
             fixed_app: parsed.fixed_app,
@@ -275,13 +304,14 @@ impl CustodianPolicy {
             browser_token_sha256: hex_digest(&parsed.browser_token_sha256)?,
             bootstrap_token_sha256: hex_digest(&parsed.bootstrap_token_sha256)?,
             api_token_sha256: hex_digest(&parsed.api_token_sha256)?,
+            edge_gid,
         })
     }
 }
 
 fn random_token() -> io::Result<String> {
     let mut bytes = [0_u8; 32];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let mut token = String::with_capacity(64);
     for byte in bytes {
         use std::fmt::Write as _;
@@ -296,7 +326,7 @@ fn write_private(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join(name))?;
+        .open(directory.join(name)).ctx("open", &(directory.join(name)))?;
     file.write_all(bytes)?;
     file.sync_all()
 }
@@ -366,12 +396,13 @@ fn initialize_custodian_policy(
         browser_token_sha256: digest(&browser),
         bootstrap_token_sha256: digest(&bootstrap),
         api_token_sha256: digest(&api),
+        edge_gid: None,
     };
     write_private(directory, "browser.token", browser.as_bytes())?;
     write_private(directory, "bootstrap.token", bootstrap.as_bytes())?;
     write_private(directory, "api.token", api.as_bytes())?;
     write_private(directory, "custodian.json", &serde_json::to_vec(&config)?)?;
-    File::open(directory)?.sync_all()?;
+    File::open(&directory).ctx("open", &directory)?.sync_all()?;
     let _ = CustodianPolicy::load(directory)?;
     Ok(())
 }
@@ -412,27 +443,10 @@ fn session_cookie(raw: &str) -> io::Result<(String, Option<String>)> {
     Ok((ordinary.join("; "), credential))
 }
 
+/// Lean's `ordinaryHeaderName` (generated, protocol/host-operations.json `ordinary_headers`) minus
+/// `cookie`, which this entrance splits into ordinary cookies and the credential itself.
 fn allowed_ordinary_header(name: &str) -> bool {
-    matches!(
-        name,
-        "accept"
-            | "accept-encoding"
-            | "content-type"
-            | "user-agent"
-            | "if-match"
-            | "if-none-match"
-            | "x-requested-with"
-            | "x-csrftoken"
-            | "x-csrf-token"
-            | "oc-total-length"
-            | "oc-chunk-size"
-            | "x-oc-mtime"
-            | "oc-fileid"
-            | "oc-chunked"
-            | "oc-checksum"
-            | "oc-chunk-offset"
-            | "oc-lazyops"
-    )
+    name != "cookie" && crate::host_operations::ordinary_header_name(name)
 }
 
 fn header_name(name: &str) -> bool {
@@ -443,7 +457,16 @@ fn header_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
 }
 
-fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
+/// How the request body follows the head: a `content-length`, or `transfer-encoding: chunked`
+/// (decoded into the same bounded body; git and WebDAV clients send larger bodies this way), and
+/// whether the client waits for `100 Continue` before sending it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Framing {
+    pub length: Option<usize>,
+    pub expect_continue: bool,
+}
+
+fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, Framing)> {
     let text = std::str::from_utf8(head).map_err(|_| refuse("HTTP headers are not UTF-8"))?;
     let mut lines = text.split("\r\n");
     let request_line = lines
@@ -477,7 +500,10 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     let mut websocket_version = None;
     let mut websocket_protocol = None;
     let mut body_len = None;
+    let mut chunked = false;
+    let mut expect_continue = false;
     let mut ordinary_headers = Vec::new();
+    let mut dav_headers = Vec::new();
     let mut export_capture = None;
     for line in lines {
         if line.is_empty() {
@@ -528,9 +554,19 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
                         .map_err(|_| refuse("HTTP body length overflow"))?,
                 );
             }
-            "transfer-encoding" | "expect" | "content-encoding" => {
-                return Err(refuse("unsupported HTTP transfer encoding"));
+            "transfer-encoding" => {
+                if !value.eq_ignore_ascii_case("chunked") {
+                    return Err(refuse("unsupported HTTP transfer encoding"));
+                }
+                chunked = true;
             }
+            "expect" => {
+                if !value.eq_ignore_ascii_case("100-continue") {
+                    return Err(refuse("unsupported HTTP expectation"));
+                }
+                expect_continue = true;
+            }
+            name if crate::host_operations::dav_header_name(name) => dav_headers.push((name.to_owned(), value)),
             name if name.starts_with("x-sandstorm-") => {
                 return Err(refuse("caller-supplied Sandstorm header"));
             }
@@ -540,6 +576,13 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
         }
     }
     let host = host.ok_or_else(|| refuse("missing HTTP Host"))?;
+    if chunked && body_len.is_some() {
+        return Err(refuse("HTTP content length with chunked transfer encoding"));
+    }
+    // DAV parameter headers are signed on a DAV call and nowhere else (Lean `davHeaderName`).
+    if method.dav() {
+        ordinary_headers.extend(dav_headers);
+    }
     let body_len = body_len.unwrap_or(0);
     // An upgrade is a WebSocket open or nothing. Its subprotocol list is an
     // app-visible input, so it is signed like an ordinary header; the
@@ -555,7 +598,7 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             (method, None)
         }
         Some(upgrade) => {
-            if method != Method::Get || body_len != 0 {
+            if method != Method::Get || body_len != 0 || chunked {
                 return Err(refuse("WebSocket upgrade is not a bodyless GET"));
             }
             let handshake = crate::web_socket::client_handshake(
@@ -577,8 +620,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     if target == "/__mini/bootstrap" && body_len > 128 {
         return Err(refuse("bootstrap form exceeds bound"));
     }
-    if matches!(method, Method::Get | Method::Head | Method::Delete) && body_len != 0 {
+    if method.bodyless() && (body_len != 0 || chunked) {
         return Err(refuse("method cannot carry HTTP body"));
+    }
+    if target == "/__mini/bootstrap" && chunked {
+        return Err(refuse("bootstrap form exceeds bound"));
     }
     Ok((
         ReceivedRequest {
@@ -598,8 +644,73 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             websocket,
             upgrade_stream: None,
         },
-        body_len,
+        Framing {
+            length: (!chunked).then_some(body_len),
+            expect_continue,
+        },
     ))
+}
+
+/// Decodes a complete chunked body from `bytes` (RFC 9112 section 7.1; extensions ignored,
+/// trailers refused). `Ok(None)` asks for more bytes; `Ok(Some((body, used)))` is the decoded
+/// body and the bytes it consumed. The decoded body is bounded by `MAX_BODY`.
+pub(crate) fn decode_chunked(bytes: &[u8]) -> io::Result<Option<(Vec<u8>, usize)>> {
+    // Chunks are located first and copied once the body is complete: an incomplete body is
+    // re-scanned per read, and the scan skips chunk data by its declared size.
+    let mut spans = Vec::new();
+    let mut total = 0_usize;
+    let mut at = 0;
+    loop {
+        let Some(line_end) = bytes[at..].windows(2).position(|w| w == b"\r\n") else {
+            if bytes.len() - at > 1024 {
+                return Err(refuse("HTTP chunk size line exceeds bound"));
+            }
+            return Ok(None);
+        };
+        let line = std::str::from_utf8(&bytes[at..at + line_end])
+            .map_err(|_| refuse("HTTP chunk size is not text"))?;
+        let size_text = line.split(';').next().unwrap_or("").trim();
+        if size_text.is_empty() || size_text.len() > 8 || !size_text.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(refuse("HTTP chunk size is not hexadecimal"));
+        }
+        let size = usize::from_str_radix(size_text, 16).map_err(|_| refuse("HTTP chunk size overflow"))?;
+        at += line_end + 2;
+        if size == 0 {
+            if bytes.len() < at + 2 {
+                return Ok(None);
+            }
+            if &bytes[at..at + 2] != b"\r\n" {
+                return Err(refuse("HTTP chunked trailers are unsupported"));
+            }
+            let mut body = Vec::with_capacity(total);
+            for (start, len) in spans {
+                body.extend_from_slice(&bytes[start..start + len]);
+            }
+            return Ok(Some((body, at + 2)));
+        }
+        if size > MAX_BODY - total {
+            return Err(refuse("HTTP body exceeds native bound"));
+        }
+        if bytes.len() < at + size + 2 {
+            return Ok(None);
+        }
+        if &bytes[at + size..at + size + 2] != b"\r\n" {
+            return Err(refuse("HTTP chunk is not terminated"));
+        }
+        spans.push((at, size));
+        total += size;
+        at += size + 2;
+    }
+}
+
+/// Sleep until `stream` is readable (data, EOF or error) or `deadline` passes, whichever is first.
+/// The caller re-reads and re-checks the deadline, so a spurious or timed-out wake is harmless.
+fn wait_readable(stream: &UnixStream, deadline: Instant) {
+    use std::os::fd::AsRawFd;
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let millis = remaining.as_micros().div_ceil(1000).clamp(1, 1000) as libc::c_int;
+    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    unsafe { libc::poll(&mut fd, 1, millis) };
 }
 
 fn read_until(
@@ -621,7 +732,7 @@ fn read_until(
             Ok(0) => return Err(refuse("HTTP frame ended early")),
             Ok(count) => bytes.extend_from_slice(&chunk[..count]),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(2))
+                wait_readable(stream, deadline)
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(error),
@@ -648,15 +759,33 @@ fn read_request_until(stream: &mut UnixStream, deadline: Instant) -> io::Result<
     if head_end > MAX_HEAD {
         return Err(refuse("HTTP header exceeds bound"));
     }
-    let (mut request, body_len) = parse_head(&bytes[..head_end - 4])?;
-    let total = head_end
-        .checked_add(body_len)
-        .ok_or_else(|| refuse("HTTP frame length overflow"))?;
-    read_until(stream, &mut bytes, total, deadline)?;
-    if bytes.len() != total {
-        return Err(refuse("HTTP pipelining is unsupported"));
+    let (mut request, framing) = parse_head(&bytes[..head_end - 4])?;
+    if framing.expect_continue && bytes.len() == head_end && framing.length != Some(0) {
+        stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n")?;
     }
-    request.body.extend_from_slice(&bytes[head_end..]);
+    match framing.length {
+        Some(body_len) => {
+            let total = head_end
+                .checked_add(body_len)
+                .ok_or_else(|| refuse("HTTP frame length overflow"))?;
+            read_until(stream, &mut bytes, total, deadline)?;
+            if bytes.len() != total {
+                return Err(refuse("HTTP pipelining is unsupported"));
+            }
+            request.body.extend_from_slice(&bytes[head_end..]);
+        }
+        None => loop {
+            if let Some((body, used)) = decode_chunked(&bytes[head_end..])? {
+                if head_end + used != bytes.len() {
+                    return Err(refuse("HTTP pipelining is unsupported"));
+                }
+                request.body = body;
+                break;
+            }
+            let minimum = bytes.len() + 1;
+            read_until(stream, &mut bytes, minimum, deadline)?;
+        },
+    }
     Ok(request)
 }
 
@@ -932,7 +1061,10 @@ fn write_response_bounded(stream: &UnixStream, mut bytes: &[u8]) -> io::Result<(
     Ok(())
 }
 fn dispatch_error_response(method: Method, error: &io::Error) -> Vec<u8> {
-    if error.kind() == io::ErrorKind::WouldBlock {
+    if let Some(outcome) = crate::dispatch_fence::DispatchOutcome::of(error) {
+        eprintln!("spk-host: {outcome}");
+        outcome.http_response(method == Method::Head)
+    } else if error.kind() == io::ErrorKind::WouldBlock {
         admission_response(method, "busy")
     } else if error.kind() == io::ErrorKind::Interrupted {
         admission_response(method, "uncertain")
@@ -972,6 +1104,13 @@ impl PrivateHttpEntrance {
         // no operation ID, Store record or physical effect has been allocated.
         let admission = Arc::new(Mutex::new(Admission::default()));
         let (sender, receiver) = mpsc::sync_channel(MAX_PENDING_REQUESTS);
+        // A reader that hands a request over also writes one byte here, so the
+        // dispatch loop's poll wakes at once instead of at its next tick. Both
+        // ends are nonblocking: a full wake buffer already means "wake".
+        let (wake_rx, wake_tx) = UnixStream::pair()?;
+        wake_rx.set_nonblocking(true)?;
+        wake_tx.set_nonblocking(true)?;
+        let wake_tx = Arc::new(wake_tx);
         let mut pending: VecDeque<ParsedRequest> = VecDeque::new();
         let mut waiting: VecDeque<WaitingConnection> = VecDeque::new();
         let spawn_reader = |connection: WaitingConnection, guard: AdmissionGuard| {
@@ -983,6 +1122,7 @@ impl PrivateHttpEntrance {
                 accepted_at,
             } = connection;
             let sender = sender.clone();
+            let wake = Arc::clone(&wake_tx);
             let mut guard = Some(guard);
             std::thread::Builder::new()
                 .name("mini-spk-http-reader".into())
@@ -1013,6 +1153,7 @@ impl PrivateHttpEntrance {
                             sender
                                 .send(queued)
                                 .map_err(|_| refuse("resident dispatch loop ended"))?;
+                            let _ = (&*wake).write(&[1]);
                             // Ownership of the response passed to the dispatch loop.
                             Ok(Vec::new())
                         },
@@ -1031,6 +1172,7 @@ impl PrivateHttpEntrance {
         let mut served: HashMap<String, u64> = HashMap::new();
         let mut clock = 0_u64;
         let mut next_route = 0_usize;
+        let mut retired_auxiliary = std::collections::HashSet::<usize>::new();
         loop {
             if entrances.len() > crate::resident_route_control::MAX_ROUTES {
                 return Err(refuse("resident route limit reached"));
@@ -1045,40 +1187,63 @@ impl PrivateHttpEntrance {
                     revents: 0,
                 })
                 .collect();
-            for fd in auxiliary_fds {
+            for (index, fd) in auxiliary_fds.iter().enumerate() {
                 if *fd < 0 || polls.iter().any(|poll| poll.fd == *fd) {
                     return Err(refuse("resident auxiliary fd refused"));
                 }
                 polls.push(libc::pollfd {
-                    fd: *fd,
+                    // poll(2) ignores a negative fd: a retired slot keeps its index.
+                    fd: if retired_auxiliary.contains(&index) { -1 } else { *fd },
                     events: libc::POLLIN,
                     revents: 0,
                 });
             }
-            // Readers notify through the bounded channel. Poll at a short bound
-            // while they exist, and block normally when the app is idle.
+            let wake_index = polls.len();
+            polls.push(libc::pollfd {
+                fd: wake_rx.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            });
+            // Readers notify through the bounded channel and wake the poll.
+            // Only connections waiting for admission need the short tick
+            // (their promotion and queue deadline); otherwise block.
             let (promoted, expired) = promote_waiting(&admission, &mut waiting, Instant::now())?;
             for (connection, guard) in promoted {
-                spawn_reader(connection, guard)?;
+                // A reader that cannot start fails its own request (the
+                // connection closes, its admission slot is released); the
+                // generation keeps serving.
+                if let Err(error) = spawn_reader(connection, guard) {
+                    eprintln!("spk-host: HTTP reader not started: {error}");
+                }
             }
             for stream in expired {
-                refuse_busy(stream)?;
+                if let Err(error) = refuse_busy(stream) {
+                    eprintln!("spk-host: busy refusal not started: {error}");
+                }
             }
-            let active = admission
-                .lock()
-                .map_err(|_| refuse("admission lock poisoned"))?
-                .total;
             let timeout = if !pending.is_empty() {
                 0
-            } else if active > 0 || !waiting.is_empty() {
+            } else if !waiting.is_empty() {
                 20
             } else {
                 -1
             };
             let _ = poll_entrances(&mut polls, timeout)?;
+            if polls[wake_index].revents & libc::POLLIN != 0 {
+                let mut drained = [0u8; 64];
+                while matches!((&wake_rx).read(&mut drained), Ok(count) if count > 0) {}
+            }
+            polls.truncate(wake_index);
             for (index, auxiliary) in polls.iter().skip(prior_count).enumerate() {
                 if auxiliary.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                    return Err(refuse("resident auxiliary poll error"));
+                    // The owner decides: its handler ends the generation (app
+                    // exit) or answers; an answered fd still in error is
+                    // retired from the poll set, loudly, instead of ending
+                    // every member's grain.
+                    let _ = dispatch(Err(index), &mut entrances)?;
+                    eprintln!("spk-host: resident auxiliary fd {index} in error; retired from polling");
+                    retired_auxiliary.insert(index);
+                    continue;
                 }
                 if auxiliary.revents & libc::POLLIN != 0 {
                     let _ = dispatch(Err(index), &mut entrances)?;
@@ -1086,18 +1251,31 @@ impl PrivateHttpEntrance {
             }
             // Rotate listener acceptance, then select queued work by principal's
             // last service turn. Multiple routes do not buy a principal priority.
+            let mut accept_failed = false;
             for offset in 0..prior_count {
                 let index = (next_route + offset) % prior_count;
                 let poll = &polls[index];
                 if poll.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
-                    return Err(refuse("resident entrance poll error"));
+                    eprintln!("spk-host: resident entrance {index} poll error; skipped this turn");
+                    accept_failed = true;
+                    continue;
                 }
                 if poll.revents & libc::POLLIN == 0 {
                     continue;
                 }
                 let entrance = &entrances[index];
-                let (stream, _) = entrance.listener.accept()?;
-                if peer_uid(&stream) != Some(unsafe { libc::geteuid() }) {
+                // EMFILE, ENFILE, ENOBUFS or an aborted connection fails that
+                // one connection (it stays in the backlog or is gone), never
+                // the generation.
+                let stream = match entrance.listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(error) => {
+                        eprintln!("spk-host: resident entrance {index} accept failed: {error}");
+                        accept_failed = true;
+                        continue;
+                    }
+                };
+                if !peer_admitted(&stream, &entrance.policy) {
                     continue;
                 }
                 let connection = WaitingConnection {
@@ -1108,10 +1286,23 @@ impl PrivateHttpEntrance {
                     accepted_at: Instant::now(),
                 };
                 match admit_or_wait(&admission, &mut waiting, connection)? {
-                    Ok(Some((connection, guard))) => spawn_reader(connection, guard)?,
+                    Ok(Some((connection, guard))) => {
+                        if let Err(error) = spawn_reader(connection, guard) {
+                            eprintln!("spk-host: HTTP reader not started: {error}");
+                        }
+                    }
                     Ok(None) => {}
-                    Err(stream) => refuse_busy(stream)?,
+                    Err(stream) => {
+                        if let Err(error) = refuse_busy(stream) {
+                            eprintln!("spk-host: busy refusal not started: {error}");
+                        }
+                    }
                 }
+            }
+            if accept_failed {
+                // A listener that stays readable while accept fails (EMFILE)
+                // must not spin the dispatch thread.
+                std::thread::sleep(Duration::from_millis(50));
             }
             next_route = (next_route + 1) % entrances.len();
             pending.extend(receiver.try_iter());
@@ -1125,21 +1316,42 @@ impl PrivateHttpEntrance {
                         .checked_add(1)
                         .ok_or_else(|| refuse("admission turn overflow"))?;
                     served.insert(queued.policy.fixed_subject.clone(), clock);
-                    dispatch(
+                    let waited = queued.queued_at.elapsed();
+                    let began = Instant::now();
+                    let done = dispatch(
                         Ok((queued.index, queued.request, queued.kind, &queued.policy)),
                         &mut entrances,
-                    )
+                    );
+                    eprintln!(
+                        "spk-host: http-timing {method:?} queue_ms={} dispatch_ms={} pending={}",
+                        waited.as_millis(),
+                        began.elapsed().as_millis(),
+                        pending.len()
+                    );
+                    done
                     .and_then(|reply| reply.ok_or_else(|| refuse("resident HTTP response absent")))
-                    .unwrap_or_else(|error| dispatch_error_response(method, &error))
+                    .unwrap_or_else(|error| {
+                        eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");
+                        dispatch_error_response(method, &error)
+                    })
                 };
                 let stream = queued.stream;
                 let guard = queued._guard;
-                std::thread::Builder::new()
+                let fallback = stream.try_clone();
+                let spawned = std::thread::Builder::new()
                     .name("mini-spk-http-response".into())
                     .spawn(move || {
                         let _ = write_response_bounded(&stream, &response);
                         drop(guard);
-                    })?;
+                    });
+                if let Err(error) = spawned {
+                    // The response was moved into the failed closure; close
+                    // the connection rather than end the generation.
+                    eprintln!("spk-host: HTTP response writer not started: {error}");
+                    if let Ok(stream) = fallback {
+                        let _ = stream.shutdown(std::net::Shutdown::Both);
+                    }
+                }
             }
         }
     }
@@ -1157,7 +1369,7 @@ impl PrivateHttpEntrance {
             .create(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(directory.join(".http.lock"))?;
+            .open(directory.join(".http.lock")).ctx("open", &(directory.join(".http.lock")))?;
         let meta = lock.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1179,7 +1391,7 @@ impl PrivateHttpEntrance {
             Ok(old) => {
                 if !old.file_type().is_socket()
                     || old.uid() != unsafe { libc::geteuid() }
-                    || old.permissions().mode() & 0o777 != 0o600
+                    || ![0o600, socket_mode(&policy)].contains(&(old.permissions().mode() & 0o777))
                     || old.nlink() != 1
                 {
                     return Err(refuse("custodian HTTP stale socket identity drift"));
@@ -1192,20 +1404,28 @@ impl PrivateHttpEntrance {
                         ))
                     }
                     Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
-                        let current = fs::symlink_metadata(&socket)?;
+                        let current = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
                         if current.dev() != old.dev() || current.ino() != old.ino() {
                             return Err(refuse("custodian HTTP stale socket changed"));
                         }
-                        fs::remove_file(&socket)?;
+                        fs::remove_file(&socket).ctx("remove", &socket)?;
                     }
                     Err(error) => return Err(error),
                 }
             }
         }
-        let listener = UnixListener::bind(&socket)?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
-        let meta = fs::symlink_metadata(&socket)?;
-        if !meta.file_type().is_socket() || meta.uid() != unsafe { libc::geteuid() } {
+        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
+        if let Some(edge) = policy.edge_gid {
+            // Group first, then the group bits: never group-open to another group.
+            std::os::unix::fs::lchown(&socket, None, Some(edge))?;
+            fs::set_permissions(&socket, fs::Permissions::from_mode(socket_mode(&policy))).ctx("set permissions", &socket)?;
+        }
+        let meta = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
+        if !meta.file_type().is_socket()
+            || meta.uid() != unsafe { libc::geteuid() }
+            || policy.edge_gid.is_some_and(|edge| meta.gid() != edge)
+        {
             return Err(refuse("custodian HTTP socket identity drift"));
         }
         Ok(Self {
@@ -1216,26 +1436,6 @@ impl PrivateHttpEntrance {
             _lock: lock,
             policy,
         })
-    }
-
-    pub fn serve_unavailable(&self) -> io::Result<()> {
-        self.serve_resident(|request, _, _| Ok(unavailable_response(request.method)))
-    }
-
-    /// The caller owns the sole resident RpcDriver and fixed participant
-    /// signer. This entrance authenticates transport before invoking it; the
-    /// callback must still obtain a fresh Mini permit for every request.
-    pub(crate) fn serve_resident(
-        &self,
-        mut dispatch: impl FnMut(ReceivedRequest, EntranceKind, &CustodianPolicy) -> io::Result<Vec<u8>>,
-    ) -> io::Result<()> {
-        loop {
-            let (stream, _) = self.listener.accept()?;
-            if peer_uid(&stream) == Some(unsafe { libc::geteuid() }) {
-                let _ =
-                    handle_stream_with(stream, &self.policy, self.socket.parent(), &mut dispatch);
-            }
-        }
     }
 }
 
@@ -1249,6 +1449,49 @@ fn poll_entrances(polls: &mut [libc::pollfd], timeout_ms: i32) -> io::Result<boo
         return Err(error);
     }
     Ok(ready > 0)
+}
+
+/// The connecting peer is this operator, or a member of the configured edge
+/// group (W6: the TLS edge connects as its own uid with that group).
+fn peer_admitted(stream: &UnixStream, policy: &CustodianPolicy) -> bool {
+    match peer_credential(stream) {
+        Some((uid, gid)) => edge_admits(uid, gid, unsafe { libc::geteuid() }, policy.edge_gid),
+        None => false,
+    }
+}
+
+fn edge_admits(uid: u32, gid: u32, operator: u32, edge_gid: Option<u32>) -> bool {
+    uid == operator || edge_gid.is_some_and(|edge| gid == edge)
+}
+
+/// The socket mode a route's `http.sock` carries: owner-only by default,
+/// group read/write when an edge group is configured.
+fn socket_mode(policy: &CustodianPolicy) -> u32 {
+    if policy.edge_gid.is_some() {
+        0o660
+    } else {
+        0o600
+    }
+}
+
+fn peer_credential(stream: &UnixStream) -> Option<(u32, u32)> {
+    let mut credential = unsafe { std::mem::zeroed::<libc::ucred>() };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    if unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut credential as *mut libc::ucred).cast(),
+            &mut length,
+        )
+    } != 0
+        || length as usize != std::mem::size_of::<libc::ucred>()
+    {
+        None
+    } else {
+        Some((credential.uid, credential.gid))
+    }
 }
 
 pub(crate) fn peer_uid(stream: &UnixStream) -> Option<u32> {
@@ -1275,7 +1518,7 @@ impl Drop for PrivateHttpEntrance {
     fn drop(&mut self) {
         if let Ok(meta) = fs::symlink_metadata(&self.socket) {
             if meta.dev() == self.socket_dev && meta.ino() == self.socket_ino {
-                let _ = fs::remove_file(&self.socket);
+                let _ = fs::remove_file(&self.socket).ctx("remove", &self.socket);
             }
         }
     }
@@ -1290,7 +1533,7 @@ fn read_private_token(directory: &Path, name: &str, expected: &[u8; 32]) -> io::
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join(name))?;
+        .open(directory.join(name)).ctx("open", &(directory.join(name)))?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || meta.nlink() != 1
@@ -1370,7 +1613,7 @@ fn bootstrap(
             // The marker is durable before the cookie is emitted. A lost reply
             // needs operator review; the bootstrap token is never replayed.
             write_private(directory, "bootstrap.used", b"used\n")?;
-            File::open(directory)?.sync_all()?;
+            File::open(&directory).ctx("open", &directory)?.sync_all()?;
             let response = format!(
                 "HTTP/1.1 303 See Other\r\nLocation: /\r\nSet-Cookie: {SESSION_COOKIE}={browser}; Secure; HttpOnly; SameSite=Strict; Path=/\r\nContent-Length: 0\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n"
             );
@@ -1444,8 +1687,6 @@ mod tests {
     use super::*;
     use std::os::unix::fs::DirBuilderExt;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    include!("http_entrance_gitweb_probe.rs");
 
     #[test]
     fn admission_bounds_principals_and_apps_independently() {
@@ -1881,6 +2122,32 @@ mod tests {
             browser_token_sha256: hash("browser-token-abcdefghijklmnopqrstuvwxyz"),
             bootstrap_token_sha256: hash("bootstrap-token-abcdefghijklmnopqrstuvwxyz"),
             api_token_sha256: hash("api-token-abcdefghijklmnopqrstuvwxyz123"),
+            edge_gid: None,
+        }
+    }
+
+    /// W6: the edge group is admitted only when configured; the default
+    /// admits the operator uid alone and keeps the socket owner-only.
+    #[test]
+    fn route_socket_admits_the_configured_edge_group_only() {
+        assert!(edge_admits(1000, 1000, 1000, None));
+        assert!(!edge_admits(997, 997, 1000, None));
+        assert!(edge_admits(997, 997, 1000, Some(997)));
+        assert!(!edge_admits(997, 998, 1000, Some(997)));
+        let mut configured = policy();
+        assert_eq!(socket_mode(&configured), 0o600);
+        configured.edge_gid = Some(997);
+        assert_eq!(socket_mode(&configured), 0o660);
+        let file = |edge: &str| format!(
+            "{{\"protocol\":\"mini-spk-custodian-v1\",\"expectedHost\":\"calc.example.test\",\"fixedApp\":\"1\",\"fixedSubject\":\"2\",\"fixedSession\":\"3\",\"fixedSessionKind\":\"web\",\"fixedTicket\":\"4\",\"browserTokenSha256\":\"{h}\",\"bootstrapTokenSha256\":\"{h}\",\"apiTokenSha256\":\"{h}\"{edge}}}",
+            h = "a".repeat(64));
+        assert_eq!(CustodianPolicy::from_bytes(file("").as_bytes()).unwrap().edge_gid, None);
+        assert_eq!(
+            CustodianPolicy::from_bytes(file(",\"edgeGid\":\"997\"").as_bytes()).unwrap().edge_gid,
+            Some(997)
+        );
+        for bad in [",\"edgeGid\":\"0\"", ",\"edgeGid\":\"07\"", ",\"edgeGid\":\"x\"", ",\"edgeGid\":\"4294967296\""] {
+            assert!(CustodianPolicy::from_bytes(file(bad).as_bytes()).is_err(), "{bad}");
         }
     }
 
@@ -1897,11 +2164,23 @@ mod tests {
             .windows(4)
             .position(|part| part == b"\r\n\r\n")
             .unwrap();
-        let (mut request, body_len) = parse_head(&bytes[..end])?;
-        if bytes.len() != end + 4 + body_len {
-            return Err(refuse("test frame body mismatch"));
+        let (mut request, framing) = parse_head(&bytes[..end])?;
+        match framing.length {
+            Some(body_len) => {
+                if bytes.len() != end + 4 + body_len {
+                    return Err(refuse("test frame body mismatch"));
+                }
+                request.body.extend_from_slice(&bytes[end + 4..]);
+            }
+            None => {
+                let (body, used) = decode_chunked(&bytes[end + 4..])?
+                    .ok_or_else(|| refuse("test frame chunked body incomplete"))?;
+                if end + 4 + used != bytes.len() {
+                    return Err(refuse("test frame body mismatch"));
+                }
+                request.body = body;
+            }
         }
-        request.body.extend_from_slice(&bytes[end + 4..]);
         Ok(request)
     }
 
@@ -1990,6 +2269,43 @@ mod tests {
                 .unwrap();
         assert_eq!(plain.method, Method::Get);
         assert!(plain.websocket.is_none());
+    }
+
+    #[test]
+    fn dav_calls_carry_their_parameter_headers_and_nothing_else_does() {
+        let propfind = parsed("PROPFIND /dav/notes HTTP/1.1\r\nHost: friend.example.test\r\nDepth: 1\r\nContent-Type: application/xml\r\nContent-Length: 11\r\n\r\n<propfind/>").unwrap();
+        assert_eq!(propfind.method, Method::Propfind);
+        assert_eq!(propfind.method.as_str(), "PROPFIND");
+        assert!(propfind.ordinary_headers.contains(&("depth".into(), "1".into())));
+        assert_eq!(propfind.body, b"<propfind/>");
+        let mv = parsed("MOVE /dav/a HTTP/1.1\r\nHost: friend.example.test\r\nDestination: https://friend.example.test/dav/b\r\nOverwrite: F\r\n\r\n").unwrap();
+        assert_eq!(mv.method, Method::Move);
+        assert!(mv.ordinary_headers.contains(&("destination".into(), "https://friend.example.test/dav/b".into())));
+        assert!(mv.ordinary_headers.contains(&("overwrite".into(), "F".into())));
+        // Off a DAV call the parameter headers are dropped like any browser metadata, never signed.
+        let get = parsed("GET /dav HTTP/1.1\r\nHost: friend.example.test\r\nDepth: 1\r\n\r\n").unwrap();
+        assert!(get.ordinary_headers.iter().all(|(name, _)| name != "depth"));
+        // Parameter-only calls carry no body; ACL is not served.
+        assert!(parsed("COPY /dav/a HTTP/1.1\r\nHost: friend.example.test\r\nContent-Length: 1\r\n\r\nx").is_err());
+        assert!(parsed("OPTIONS /dav HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
+        assert!(parsed("ACL /dav HTTP/1.1\r\nHost: friend.example.test\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn chunked_bodies_decode_into_the_bounded_body() {
+        let push = parsed("POST /repo.git/git-receive-pack HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\nContent-Encoding: gzip\r\n\r\n4\r\nPACK\r\n6;ext=1\r\n-bytes\r\n0\r\n\r\n").unwrap();
+        assert_eq!(push.body, b"PACK-bytes");
+        assert!(push.ordinary_headers.contains(&("content-encoding".into(), "gzip".into())));
+        assert_eq!(decode_chunked(b"4\r\nPA").unwrap(), None);
+        assert_eq!(decode_chunked(b"4\r\nPACK\r\n0\r\n").unwrap(), None);
+        assert!(decode_chunked(b"4\r\nPACK\r\n0\r\nTrailer: x\r\n\r\n").is_err());
+        assert!(decode_chunked(b"zz\r\n").is_err());
+        assert!(decode_chunked(b"4\r\nPACKxx").is_err());
+        assert!(decode_chunked(format!("{:x}\r\n", MAX_BODY + 1).as_bytes()).is_err());
+        // A length and a chunked framing together is the smuggling shape: refused.
+        assert!(parsed("POST /x HTTP/1.1\r\nHost: friend.example.test\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n").is_err());
+        assert!(parsed("POST /x HTTP/1.1\r\nHost: friend.example.test\r\nTransfer-Encoding: gzip\r\n\r\n").is_err());
+        assert!(parsed("POST /x HTTP/1.1\r\nHost: friend.example.test\r\nExpect: something-else\r\n\r\n").is_err());
     }
 
     #[test]

@@ -35,9 +35,9 @@ excluded from this commit and are not covered by this table.
 | --- | --- |
 | `native/spk-host/src/install_service.rs` | `2f04150e2b85f07bfa557cca58c9e613dfa1567d38cb7165b3d6e2b24051ea21` |
 | `native/spk-host/src/descriptor_native.rs` | `64cd51e0a73234f96859e6879bf6a26ffc1f7a9e3b17db16a7c5a386c51e7cab` |
-| `native/spk-host/src/claim_descriptor.rs` | `8b465dbece92e9044e19519842043530b9dad2d4e16c5151fb1d2b43c10f42fd` |
-| `native/spk-host/src/claim_native.rs` | `c0f302b18aecb92fc18249fc1d6b42afeb90920a75846dae8352eb0bc53d8497` |
-| `native/spk-host/src/completion_native.rs` | `0c6214fd4877e9f37d252f491a16fc9a26eb4363213fd0987dc76d7abdf6fdd6` |
+| `claim_descriptor.rs [deleted 5816bff1]` | `8b465dbece92e9044e19519842043530b9dad2d4e16c5151fb1d2b43c10f42fd` |
+| `claim_native.rs [deleted dd97fcc6]` | `c0f302b18aecb92fc18249fc1d6b42afeb90920a75846dae8352eb0bc53d8497` |
+| `completion_native.rs [deleted dd97fcc6]` | `0c6214fd4877e9f37d252f491a16fc9a26eb4363213fd0987dc76d7abdf6fdd6` |
 | `native/spk-host/src/materialize.rs` | `9ff8ec603bb083efcd346ffa2f88feaed8121abfbf8f4d577678d1c3684d0602` |
 | `native/spk-host/src/main.rs` | `cb57c866d9f96392f4f444c747bac10993a248527ba131d83e07e1e534148d74` |
 | `native/spk-host/src/lib.rs` | `8703b378ba5089bbc25022e41b9f7c10e32723ce9c35a797440b1dbb336863b7` |

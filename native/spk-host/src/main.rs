@@ -2,7 +2,8 @@
 fn main() {
     use minidregg_spk_host::launch_descriptor_native::qualify_launch;
     use minidregg_spk_host::materialize::{
-        materialize_spk, qualify_bridge_spk, signed_schema_source, verify_installed_spk,
+        materialize_spk_with_profile, qualify_bridge_spk_with_profile, signed_schema_source,
+        verify_installed_spk, ImportProfile,
     };
     use serde_json::json;
     use std::path::Path;
@@ -21,7 +22,22 @@ fn main() {
     unsafe {
         libc::umask(0o077);
     }
-    let args: Vec<_> = std::env::args().collect();
+    let mut args: Vec<_> = std::env::args().collect();
+    // This process is operator tooling. An application or package never chooses
+    // the importer profile through the broker's request protocol.
+    let mut import_profile = ImportProfile::Standard;
+    if matches!(args.get(1).map(String::as_str), Some("qualify" | "materialize"))
+        && args.get(2).map(String::as_str) == Some("--import-profile")
+    {
+        import_profile = match args.get(3).and_then(|name| name.parse().ok()) {
+            Some(profile) => profile,
+            None => {
+                eprintln!("spk-host: import profile must be standard-v1, market-large-v1 or operator-appliance-v1");
+                std::process::exit(2);
+            }
+        };
+        args.drain(2..4);
+    }
     // The modeled unit manager of a fixture build (src/fixture_os.rs).
     #[cfg(feature = "fixture-os")]
     match args.get(1).map(String::as_str) {
@@ -32,6 +48,18 @@ fn main() {
             std::process::exit(minidregg_spk_host::fixture_os::unit_run_main(&args[2..]))
         }
         _ => {}
+    }
+    // The intake bounds of an import profile for a raw package size, for the operator scripts
+    // (spk-ingest, spk-qualify, spk-install-phase), so the table lives once, here:
+    // `import-limits PROFILE RAW_BYTES` prints `RAW_LIMIT DECODED_LIMIT WALL_SECONDS`.
+    if args.len() == 4 && args[1] == "import-limits" {
+        let (Ok(profile), Ok(raw)) = (args[2].parse::<ImportProfile>(), args[3].parse::<u64>()) else {
+            eprintln!("spk-host: import-limits PROFILE RAW_BYTES (standard-v1, market-large-v1 or operator-appliance-v1)");
+            std::process::exit(2);
+        };
+        let limits = profile.limits();
+        println!("{} {} {}", limits.raw_bytes, limits.decoded_bytes, limits.wall_seconds(raw));
+        return;
     }
     if args.len() == 3 && args[1] == "qualify-launch" {
         match qualify_launch(Path::new(&args[2])) {
@@ -57,15 +85,6 @@ fn main() {
                 eprintln!("spk-host: INSTALL refused: {error}");
                 std::process::exit(1);
             }
-        }
-    }
-    if let [_, verb, config] = args.as_slice() {
-        if verb == "broker-serve" {
-            if let Err(error) = minidregg_spk_host::broker::serve(std::path::Path::new(config)) {
-                eprintln!("spk-host broker: {error}");
-                std::process::exit(1);
-            }
-            return;
         }
     }
     let checkpoint_result = match args.as_slice() {
@@ -160,7 +179,7 @@ fn main() {
         }
     }
     if args.len() == 3 && args[1] == "qualify" {
-        match qualify_bridge_spk(Path::new(&args[2])) {
+        match qualify_bridge_spk_with_profile(Path::new(&args[2]), import_profile) {
             Ok((package, bridge)) => {
                 let bridge_sha = package
                     .signed_bridge_config_sha256
@@ -179,6 +198,11 @@ fn main() {
                     "signedBridgeConfigHex":member.iter().map(|byte| format!("{byte:02x}"))
                         .collect::<String>(),
                     "bridgeApiPath":bridge.api_path.clone().unwrap_or_default(),
+                    "bridgeFacilities":{
+                        "saveIdentityCaps":bridge.save_identity_caps,
+                        "expectAppHooks":bridge.expect_app_hooks,
+                        "served":"identity capabilities are saved, restored and dropped through the app's identity custody (revocable, listed in receipts); app hooks answer the bridge's getViewInfo; app-object restore answers unknownToken"
+                    },
                     "signedSchema":signed_schema_source(&bridge, package.manifest.app_version),
                 });
                 println!("{json}");
@@ -242,7 +266,7 @@ fn main() {
                 std::process::exit(2);
             }
         };
-        match materialize_spk(Path::new(&args[2]), Path::new(&args[3]), uid) {
+        match materialize_spk_with_profile(Path::new(&args[2]), Path::new(&args[3]), uid, import_profile) {
             Ok(installed) => {
                 println!(
                     "installed={} spkSha256={} spkLength={} appId={} version={} signedManifestSha256={} signedBridgeConfigSha256={}",
@@ -263,9 +287,10 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ... | broker-serve CONFIG"
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ..."
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
+    eprintln!("qualify and materialize accept --import-profile standard-v1|market-large-v1|operator-appliance-v1 immediately after the verb");
     std::process::exit(2);
 }
 

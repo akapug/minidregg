@@ -1,6 +1,5 @@
 //! Exact op78/79 lifetime paid assembly. This stage retains an ingress but
 //! cannot deliver it: only a later fresh op76 installed callback may do that.
-#![allow(dead_code)] // The versioned resident listener is wired separately.
 
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
 use crate::agent_api_lifetime_reverse_v3::{LifetimeReverseClient, RetainedReserveV3};
@@ -12,13 +11,10 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use crate::canonical::hex;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn source_payload(frame: &[u8], opcode: u8) -> io::Result<&[u8]> {
@@ -29,6 +25,38 @@ fn source_payload(frame: &[u8], opcode: u8) -> io::Result<&[u8]> {
         return Err(refused("lifetime paid native reply opcode/frame drift"));
     }
     Ok(&frame[5..])
+}
+
+// Preserve the authoritative reply before projecting it. A planning refusal
+// does not settle the already-admitted reserve, so this is diagnostic only:
+// the caller still retains its uncertain hold for reconciliation.
+fn retained_source_payload(
+    operator: &PrivateOperator,
+    directory: &Path,
+    name: &str,
+    opcode: u8,
+    frame: &[u8],
+) -> io::Result<Vec<u8>> {
+    write_new(directory, &format!("{name}.frame"), frame)?;
+    match source_payload(frame, opcode) {
+        Ok(payload) => Ok(payload.to_vec()),
+        Err(error) => {
+            use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
+            use crate::lifecycle_receipt_lookup::OUTCOME_TAG;
+            use crate::lifecycle_v3_native::framed_payload;
+            let outcome = framed_payload("lifetime planning outcome", frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
+                .or_else(|_| framed_payload("lifetime planning outcome", frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
+            if let Ok(payload) = outcome {
+                let path = write_new(directory, &format!("{name}-outcome.bin"), payload)?;
+                let bytes = operator.tool("inspect", "outcome", &path,
+                    &directory.join(format!("{name}-outcome.json")))?;
+                let view: Value = serde_json::from_slice(&bytes)?;
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                    format!("lifetime paid op{opcode}: {}", crate::dispatch_fence::refusal_words(&view))));
+            }
+            Err(error)
+        }
+    }
 }
 
 fn pair(left: &[u8], right: &[u8]) -> io::Result<Vec<u8>> {
@@ -60,6 +88,7 @@ fn signatures(
 }
 
 pub(crate) struct AssembledLifetimePaidV3 {
+    #[allow(dead_code)] // Agent API v3 is parked (ruling R7); retained beside the ingress it produced.
     pub plan: Vec<u8>,
     pub ingress: Vec<u8>,
     pub inspection: Value,
@@ -144,7 +173,9 @@ pub(crate) fn assemble_once(input: PaidAssemblyInput<'_>) -> io::Result<Assemble
     {
         return Err(refused("lifetime paid request source projection drift"));
     }
-    let plan = source_payload(&operator.invoke(78, &paid_request)?, 78)?.to_vec();
+    let plan = retained_source_payload(operator, attempt_dir, "paid-plan-v3",
+        crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
+        &operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN, &paid_request)?)?;
     let plan_path = write_new(attempt_dir, "paid-plan-v3.bin", &plan)?;
     let inspection_bytes = operator.tool(
         "inspect",
@@ -180,7 +211,9 @@ pub(crate) fn assemble_once(input: PaidAssemblyInput<'_>) -> io::Result<Assemble
         &json!(payer.signatures),
     )?;
     let detached = pair(&app_binary, &pair(&grant, &payer_binary)?)?;
-    let ingress = source_payload(&operator.invoke(79, &pair(&plan, &detached)?)?, 79)?.to_vec();
+    let ingress = retained_source_payload(operator, attempt_dir, "paid-ingress-v3",
+        crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE,
+        &operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE, &pair(&plan, &detached)?)?)?;
     write_new(attempt_dir, "paid-ingress-v3.bin", &ingress)?;
     write_new(
         attempt_dir,
@@ -223,9 +256,9 @@ mod tests {
         reply[..4].copy_from_slice(&3u32.to_le_bytes());
         reply[4] = 79;
         reply[5..].copy_from_slice(b"ok");
-        assert_eq!(source_payload(&reply, 79).unwrap(), b"ok");
-        assert!(source_payload(&reply, 78).is_err());
+        assert_eq!(source_payload(&reply, crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE).unwrap(), b"ok");
+        assert!(source_payload(&reply, crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN).is_err());
         reply[0] = 4;
-        assert!(source_payload(&reply, 79).is_err());
+        assert!(source_payload(&reply, crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE).is_err());
     }
 }

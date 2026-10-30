@@ -3,8 +3,27 @@ The distinct event26 carrier for an app-authorized lifetime agent route. It
 retains the complete app dispatch and grant-bound v3 reserve/payer selectors.
 Event21's v2 carrier and old ticket/session origin stay byte-for-byte intact.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchReserveContext
-import Kernel.ApplicationDispatchAdmissionIngress
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchReserveContext
+public import Kernel.ApplicationDispatchAdmissionIngress
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchIngress
 
@@ -52,10 +71,10 @@ def ingressStream : StreamCodec Ingress :=
         grantObservationEnvelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def codec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec
-  (NativeHostCodec.framed
+def codec : LawfulCodec Ingress :=
+  NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-DISPATCH-INGRESS/v1".toUTF8.toList
-    ingressStream)
+    ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 := codec.encode ingress
 

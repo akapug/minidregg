@@ -32,14 +32,15 @@ receipt authorize those edits, not release of the earlier origin Store.
 parent witness and generation-pinned worker caveat. The A-side
 [`Kernel/FnOriginOutbox.lean`](../Kernel/FnOriginOutbox.lean) and Host op16
 re-verify an already signed carrier and its Mini origin, then retain its exact
-bytes in a tag-10 prepared atom. The
-[`origin-publish` client](../native/resource-client/src/publisher.rs) pins that
-carrier, submits the outbox with exact-call retry, exports it for exact-byte
-comparison, and records an fn POST attempt before sending. None checks a
-Store-wide release authorization today. The actual publisher path has been
-exercised for one workroom content edit in
+bytes in a tag-10 prepared atom. No client drives op16/op18 today: the
+`origin-publish` client that pinned the carrier and POSTed it was deleted on
+2026-10-26 (it carried a second, contrary NNTP repost rule); the one publisher
+path is `mini selected-exchange --phase publish`
+([SELECTED-EXCHANGE.md](../native/resource-client/SELECTED-EXCHANGE.md)).
+None checks a Store-wide release authorization today. The deleted publisher
+was exercised for one workroom content edit in
 [the workroom evidence](evidence/2026-09-26-workroom-content-publisher/README.md);
-that demonstrates transport and custody, not agent consent to disclose its
+that demonstrated transport and custody, not agent consent to disclose its
 whole origin prefix.
 
 ## Proposed scope and two-stage decision

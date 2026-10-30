@@ -2,10 +2,15 @@
 native resource-view frame. It does not fetch sources, verify a transport
 signature, grant reads, or certify external summaries. The participant client
 first obtains/adopts its current signed resource read. -/
-import Kernel.ResidentContextProjection
-import Kernel.NativeObservationController
-import Host.SourceAgreementLegacyView
-import Lean.Data.Json
+module
+
+public import Kernel.ResidentContextProjection
+public import Kernel.NativeObservationController
+public import Host.SourceAgreementLegacyView
+public import Lean.Data.Json
+
+@[expose] public section
+
 namespace Minidregg.Host.SourceAgreementContextInspection
 open Lean
 open Minidregg.Theory

@@ -1,5 +1,5 @@
 /-
-# Kernel.Door — a program whose state lives in a cell, refereed on any evaluator (EVAL §4, E4)
+# Kernel.Door — a program whose state lives in a cell, refereed on any evaluator (docs/EVAL.md §4, E4)
 
 N11 built the NockApp door (`Kernel.NockDoor`); this is its referee with Nock taken out. An
 **instance** is an ordinary declared object holding the door's state (as the field value
@@ -15,7 +15,7 @@ holds the steps to the ABI fuel, decodes the record's params (`paramsMalformed`)
 (`effects`), and admits exactly the writes: the next state, the next event number, and
 the effects'.
 
-The evaluator brings three terms (EVAL §4): **boot + poke** (`EvalDoor.poke`), **peek**
+The evaluator brings three terms (docs/EVAL.md §4): **boot + poke** (`EvalDoor.poke`), **peek**
 (`EvalDoor.peek`, a read at the ABI's peek arm on a path) and **load** (`EvalDoor.load`,
 the state now), plus the state codec, whose round trip is an `Evaluator` fact
 (`door_decode_encode`; at Nock N11's `ofJamAtom_jamAtom`).
@@ -25,8 +25,27 @@ kernel's sample), `door_other_state_stale` (a claim made on another state or eve
 `door_poke_deterministic`, `door_peek_pure`, `door_load_deterministic`. `Kernel.NockDoor`
 instantiates them at Nock under N11's names.
 -/
-import Kernel.Run
-import Kernel.DeclaredResourceProjection
+module
+
+public import Kernel.Run
+public import Kernel.DeclaredResourceProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.Door
 open Minidregg.Theory

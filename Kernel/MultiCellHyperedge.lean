@@ -17,10 +17,29 @@ The boundary may return evidence, but it cannot alter the Lean-owned exact
 pre/post cells, requests, authority projections, cell identities, or balance
 equation.
 -/
-import Kernel.Turn
-import Theory.AcceptedCellEffect
-import Theory.PolicyInstall
-import Mathlib.Algebra.Group.ULift
+module
+
+public import Kernel.Turn
+public import Theory.AcceptedCellEffect
+public import Theory.PolicyInstall
+public import Mathlib.Algebra.Group.ULift
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.MultiCellHyperedge
 

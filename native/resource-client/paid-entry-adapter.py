@@ -242,7 +242,7 @@ def provision(request, result_path):
             endpoints.append(str(target))
         env = dict(os.environ, MINI=source.manifest['mini'], PAY_WATCHER=source.manifest['payWatcher'], PAY_STATE=str(state),
                    PAY_OBSERVER_WS=str(observer), PAY_OBSERVER_CAPABILITY=request['observer']['capability'],
-                   PAY_ENROL_INDEX='0', PAY_JOURNAL_FLOOR='1000000', PAY_ENROL_CAPABILITY=request['observer']['enrolCapability'],
+                   PAY_WATCH_ENROL='yes', PAY_ENROL_CAPABILITY=request['observer']['enrolCapability'],
                    PAY_OPERATOR_SOCKET=source.deployment['operatorSocket'], PAY_RPC_FIXTURES=' '.join(endpoints),
                    PAY_MIN_ENDPOINTS='2', PAY_ENROL_ROUNDS='0')
         env.pop('PAY_RPC_ENDPOINTS', None)

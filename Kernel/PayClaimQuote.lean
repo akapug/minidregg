@@ -4,8 +4,27 @@ Uncompiled candidate for the integrator's authorized Lean pass. No reservation,
 write, signature, RPC, or duplicated native pricing formula is performed here.
 The Host supplies authenticated cells/Clock and the actual source birth pricing.
 -/
-import Kernel.PayReceivingContract
-import Kernel.PayClaimDecision
+module
+
+public import Kernel.PayReceivingContract
+public import Kernel.PayClaimDecision
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayClaimQuote
 
@@ -93,21 +112,47 @@ instance (request : Request) : Decidable request.valid := by
 def requestFrame : List UInt8 := PayReceivingContract.quoteRequestFrame
 def requestCodec : LawfulCodec Request := framed requestFrame requestStream
 
+/-- The mode tag table: a partial inverse of `Mode.byte`. -/
+def wireModeOfTag : Nat → Option PayEnrolMemoV2.Mode
+  | 1 => some PayEnrolMemoV2.Mode.enroll
+  | 2 => some PayEnrolMemoV2.Mode.renew
+  | 3 => some PayEnrolMemoV2.Mode.renewWithoutCommitment
+  | _ => none
+
+theorem wireModeOfTag_byte (mode : PayEnrolMemoV2.Mode) :
+    wireModeOfTag mode.byte.toNat = some mode := by
+  cases mode <;> rfl
+
+theorem byte_wireModeOfTag {tag : Nat} {mode : PayEnrolMemoV2.Mode}
+    (known : wireModeOfTag tag = some mode) : mode.byte.toNat = tag := by
+  unfold wireModeOfTag at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 /-- Total metadata encoding; purchase output additionally checks the exact fixed
 wire Unsigned.WellFormed before returning it as signing material. -/
 def wireModeStream : StreamCodec PayEnrolMemoV2.Mode where
   encode mode := StreamCodec.nat.encode mode.byte.toNat
   decodePrefix bytes := do
     let (tag, rest) ← StreamCodec.nat.decodePrefix bytes
-    let mode ← match tag with
-      | 1 => some PayEnrolMemoV2.Mode.enroll
-      | 2 => some PayEnrolMemoV2.Mode.renew
-      | 3 => some PayEnrolMemoV2.Mode.renewWithoutCommitment
-      | _ => none
+    let mode ← wireModeOfTag tag
     pure (mode, rest)
   decodePrefix_encode := by
     intro mode rest
-    cases mode <;> simp [StreamCodec.nat.decodePrefix_encode, PayEnrolMemoV2.Mode.byte]
+    simp [StreamCodec.nat.decodePrefix_encode, wireModeOfTag_byte]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨tag, rest⟩ := pair
+      cases known : wireModeOfTag tag with
+      | none => simp [ok, known] at decoded
+      | some mode =>
+        simp only [ok, known, bind, Option.bind, pure, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode mode.byte.toNat ++ rest = bytes
+        rw [byte_wireModeOfTag known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
 
 def unsignedStream : StreamCodec PayEnrolMemoV2.Unsigned :=
   StreamCodec.xmap

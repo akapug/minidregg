@@ -13,8 +13,27 @@ declared-effect page wrote the zigzag natural, and the Book page wrote a
 cells written with it refuse to decode under the store frame, because their
 layout digest names a different value codec id (`intCodecId`).
 -/
-import Compiler.Tower256ConcreteBackend
-import Theory.EffectDeclaration
+module
+
+public import Compiler.Tower256ConcreteBackend
+public import Theory.EffectDeclaration
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.IntStream
 
@@ -23,8 +42,18 @@ open Minidregg.Theory.EffectDeclaration
 
 set_option autoImplicit false
 
+/-- Zigzag is a bijection: every natural is the word of exactly one integer. -/
+theorem encodeInt_decodeInt (word : Nat) : encodeInt (decodeInt word) = word := by
+  by_cases even : word % 2 = 0
+  · simp only [decodeInt, if_pos even]
+    show 2 * (word / 2) = word
+    omega
+  · simp only [decodeInt, if_neg even]
+    show 2 * (word / 2) + 1 = word
+    omega
+
 def intStream : StreamCodec Int :=
-  StreamCodec.xmap StreamCodec.nat encodeInt decodeInt decodeInt_encodeInt
+  StreamCodec.xmap StreamCodec.nat encodeInt decodeInt decodeInt_encodeInt encodeInt_decodeInt
 
 /-- The declared codec id a store layout descriptor commits to. -/
 def intCodecId : String := "int/zigzag-base255"

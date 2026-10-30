@@ -46,6 +46,27 @@ def code(text):
     return " ".join("".join(out).split())
 
 
+def kernel_code(text):
+    """Allow only the exact upstream module-header port, not arbitrary imports.
+
+    The executable namespace remains part of the whole-kernel comparison. C5
+    predates this visibility-only header; its original file is still compiled
+    unchanged by --kernel-check.
+    """
+    header = ("module public import Std " + " ".join(
+        "import all " + name for name in (
+            "Init.Data.Repr", "Init.Data.ToString.Basic", "Init.Data.ToString.Extra",
+            "Init.Data.Array.Basic", "Init.Data.ByteArray.Basic", "Init.Data.String.Decode",
+            "Init.Data.String.Defs", "Init.Control.Except", "Init.Data.List.Basic",
+            "Init.Data.Nat.Bitwise.Basic", "Init.Data.String.Bootstrap",
+            "Init.Data.Format.Basic", "Init.Data.List.Scan.Basic", "Init.Util")) +
+        " @[expose] public section")
+    normalized = code(text)
+    if normalized.startswith(header + " namespace Minidregg.Kernel.GenericSimplex "):
+        return "import Std" + normalized[len(header):]
+    return normalized
+
+
 def bind(args):
     archive = args.bundle
     if archive is None:
@@ -59,16 +80,16 @@ def bind(args):
         raise ValueError("native source digest mismatch")
     if hashlib.sha256(oracle).hexdigest() != args.oracle_sha256:
         raise ValueError("oracle source digest mismatch")
-    mirror = code(oracle.decode())
+    mirror = kernel_code(oracle.decode())
     # C5's documented application policy chooses newest, minidregg oldest.
     # The proved entry frame allows either payload, but this is NOT whole-tree equality.
     newest = "s.offers.reverse.find?"
     if mirror.count(newest) != 1:
         raise ValueError("expected exactly the documented offer-policy difference")
     comparable = mirror.replace(newest, "s.offers.find?")
-    local = code(SOURCE.read_text())
+    local = kernel_code(SOURCE.read_text())
     if comparable != local:
-        raise ValueError("kernel mismatch beyond documented newest/oldest offer policy")
+        raise ValueError("kernel mismatch beyond exact module header and newest/oldest offer policy")
     # Gate sensitivity: a source-level jump successor change must be noticed.
     changed = comparable.replace("preparedAbove s + 1", "preparedAbove s")
     if changed == comparable or changed == local:
@@ -77,6 +98,7 @@ def bind(args):
                       "native_sha256": args.native_sha256, "oracle_sha256": args.oracle_sha256,
                       "local_kernel_sha256": hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
                       "qualified_difference": "propose newest vs oldest checked offer",
+                      "qualified_header": "exact upstream module exposure header",
                       "successor_mutation_rejected": True}, sort_keys=True), flush=True)
     if args.kernel_check:
         if not os.environ.get("FAB_ID"):

@@ -2,7 +2,7 @@
 # Compiler.CanonicalCellRegistry — one executable receiving registry
 
 The production registry of deployed cell roles.  Every role's materializer is
-a `StoreCodec` cell at its layout (DATAMODEL B1): the hyperdocument content and
+a `StoreCodec` cell at its layout (docs/DATAMODEL.md §5 B1): the hyperdocument content and
 event-log cells (`HyperdocumentCell`), the one credential-authority cell
 (`CredentialAuthorityCell`), the declared-effect cells (`DeclaredEffectCell`),
 the canonical resource Book, and immutable policy source cells.  There are no
@@ -50,25 +50,45 @@ view of the birth, with no second judge in the family.  A newborn's law source
 (`policySource`) is born the same way (`kernelOnlyOrBorn`).  A birth with no export
 root is NEUTRAL: admitted only when a judged authorizer of the same patch names it.
 -/
-import Compiler.PersistedCodecTags
-import Compiler.WorldKindCell
-import Compiler.DeclaredEffectCell
-import Compiler.CredentialAuthorityCell
-import Compiler.HyperdocumentCell
-import Compiler.CanonicalResourcePageMaterializer
-import Compiler.ResourceBirthCodec
-import Compiler.PolicySourceCell
-import Kernel.PayCell
-import Compiler.StreamCell
-import Kernel.DomainEpochLaw
-import Compiler.NockProgramCodec
-import Compiler.Evaluator
-import Kernel.ClockCell
-import Kernel.FieldClosure
-import Kernel.SystemCell
-import Theory.CanonicalResourceBookInvariant
-import Kernel.ObjectiveActivityCell
-import Kernel.SeatCell
+module
+
+public import Compiler.PersistedCodecTags
+public import Compiler.WorldKindCell
+public import Compiler.DeclaredEffectCell
+public import Compiler.CredentialAuthorityCell
+public import Compiler.HyperdocumentCell
+public import Compiler.CanonicalResourcePageMaterializer
+public import Compiler.ResourceBirthCodec
+public import Compiler.PolicySourceCell
+public import Kernel.PayCell
+public import Compiler.StreamCell
+public import Kernel.DomainEpochLaw
+public import Compiler.NockProgramCodec
+public import Compiler.Evaluator
+public import Kernel.ClockCell
+public import Kernel.FieldClosure
+public import Kernel.SystemCell
+public import Theory.CanonicalResourceBookInvariant
+public import Kernel.ObjectiveActivityCell
+public import Kernel.SeatCell
+public import Kernel.PlatformCellLayout
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
 
@@ -106,10 +126,17 @@ inductive Kind where
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
-  last observed chain slot.  `ClockTickReceiver` advances it under the clock's
-  own committed law; PayObservation and PayEnrol(V2) also advance it today
-  WITHOUT judging that law (measured at 3b709c87: a live bypass, cv task
-  01a1087d-8a58), until they move onto `Kernel.Receiving.Family`. -/
+  last observed chain slot.  `lawBearing`: its own committed law
+  (`Kernel.ClockLaw.clockPredicate`) judges EVERY write, whoever proposes it:
+  the ticker's `ClockTickReceiver`, and the three pay families that advance it
+  to their verified chain tip (`PayObservationReceiver`, `PayEnrolReceiver`,
+  `PayEnrolV2Receiver`), each a `Kernel.Receiving.Family` whose `lawStepOf`
+  projects the clock write's step (`ClockLaw.step`, their `lawStepOf_clock`),
+  so `Receiving.Family.receive_committed_lawful` covers it: their
+  `committed_lawful` theorems carry the clock clause.  Until 5d0b452d
+  (2026-10-04) the three advanced it unjudged (cv task 01a1087d-8a58, measured
+  at 3b709c87); dropping a family's clock arm of `lawStepOf` would reopen that,
+  and `receive_committed_lawful` refuses the shape. -/
   | clock
   /-- The deployment's system cell (`Kernel.SystemCell`): the certified head
   and the tail bound `L`, written only by a certify record. -/
@@ -124,11 +151,15 @@ inductive Kind where
   a seat, an activity's seat holdings or a contract package, each at its
   coordinate; written only by `SeatReceiver` (and an ending activity's turn). -/
   | seat
+  /-- The deployment's platform cell (`Kernel.PlatformCellLayout`): the current platform
+  record (creation and grain-birth tariffs, completion custodian key, owner budget,
+  lifetime) under its version; written only by the platform-install family. -/
+  | platform
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity, .seat]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry, .system, .worldKind, .worldInstance, .objectiveActivity, .seat, .platform]
 
 /-! ## Who may write which kind -/
 
@@ -163,6 +194,7 @@ inductive FamilyId where
   | fleetTurn
   | objectiveActivity
   | seat
+  | platformInstall
   deriving DecidableEq, Repr
 
 /-- How a cell kind is judged on write. -/
@@ -236,6 +268,9 @@ def Kind.lawClass : Kind → LawClass
   -- written by the seat kernel turns and by an activity's end (which closes the seats
   -- the activity holds, `ActivitySeatEnd`).
   | .seat => .kernelOnly [.seat, .objectiveActivity]
+  -- The controller's signed install of a valid record above the current version
+  -- (`Kernel.PlatformCell.Admits`); no user law sits at its id.
+  | .platform => .kernelOnly [.platformInstall]
   -- A Nock program is not an external resource (`ResourceTargetAdmission.externalKind`):
   -- no law sits at its id; it is born by a birth plan and immutable after.
   | .nockProgram => .kernelOnly [.resourceBirth, .grainResourceBirth, .applicationShareIssue,
@@ -256,11 +291,13 @@ theorem activity_kernelOnly :
 
 theorem seat_kernelOnly : Kind.seat.lawClass = .kernelOnly [.seat, .objectiveActivity] := rfl
 
+theorem platform_only_install : Kind.platform.lawClass = .kernelOnly [.platformInstall] := rfl
+
 /-- The pinned exemption list: exactly these kinds carry no user law. -/
 theorem kernelOnly_kinds :
     Kind.all.filter (fun kind => kind.lawClass != .lawBearing) =
       [.eventHistory, .authority, .resourceBook, .policySource, .nockProgram, .streamEntry,
-        .system, .objectiveActivity, .seat] := by decide
+        .system, .objectiveActivity, .seat, .platform] := by decide
 
 /-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15/16 are deployment pins. The final table across
 lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry, 16 system.  Tag 3 is the one authority
@@ -285,6 +322,7 @@ def Kind.tag : Kind → UInt8
   | .worldInstance => 18
   | .objectiveActivity => Kernel.ObjectiveActivityCell.registryTag
   | .seat => Kernel.SeatCell.registryTag
+  | .platform => Kernel.PlatformCellLayout.registryTag
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -305,10 +343,17 @@ def kindAtTag : UInt8 → Option Kind
   | 18 => some .worldInstance
   | 19 => some .objectiveActivity
   | 20 => some .seat
+  | 21 => some .platform
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
   cases kind <;> rfl
+
+/-- The tag table has no aliases: a tag that names a kind is that kind's tag. -/
+theorem tag_of_kindAtTag (t : UInt8) (kind : Kind) (found : kindAtTag t = some kind) :
+    kind.tag = t := by
+  unfold kindAtTag at found
+  split at found <;> first | (cases found; rfl) | cases found
 
 /-- The retired catalogue tag selects no role: a packed catalogue cell refuses
 to decode. -/
@@ -341,6 +386,7 @@ def schemaRef : Kind → SchemaRef
   | .worldInstance => ⟨⟨91017⟩, 1⟩
   | .objectiveActivity => ⟨⟨Kernel.ObjectiveActivityCell.schemaId⟩, Kernel.ObjectiveActivityCell.wireVersion⟩
   | .seat => ⟨⟨Kernel.SeatCell.schemaId⟩, Kernel.SeatCell.wireVersion⟩
+  | .platform => ⟨⟨Kernel.PlatformCellLayout.schemaId⟩, Kernel.PlatformCellLayout.wireVersion⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -348,7 +394,8 @@ theorem schemaRef_injective : Function.Injective schemaRef := by
     simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion,
       NockProgramCodec.schemaId, NockProgramCodec.wireVersion,
       Kernel.ObjectiveActivityCell.schemaId, Kernel.ObjectiveActivityCell.wireVersion,
-      Kernel.SeatCell.schemaId, Kernel.SeatCell.wireVersion] at same ⊢
+      Kernel.SeatCell.schemaId, Kernel.SeatCell.wireVersion,
+      Kernel.PlatformCellLayout.schemaId, Kernel.PlatformCellLayout.wireVersion] at same ⊢
 
 abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .content => Hyperdocument.layout
@@ -369,6 +416,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .worldInstance => WorldKindCell.instanceLayout
   | .objectiveActivity => Kernel.ObjectiveActivityCell.layout
   | .seat => Kernel.SeatCell.layout
+  | .platform => Kernel.PlatformCellLayout.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -389,6 +437,24 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .worldInstance => WorldKindCell.instanceMaterializer
   | .objectiveActivity => Kernel.ObjectiveActivityCell.materializer
   | .seat => Kernel.SeatCell.materializer
+  | .platform => Kernel.PlatformCellLayout.materializer
+
+/-- Every materializer codec accepts only encodings: the `StoreCodec` frames by
+`StoreCodec.decode_reencodes`, the resource book by its framed stream
+(`framedCodec_canonical`), and the
+policy-source, Nock-program and protected cells by their own `decode_canonical`. -/
+theorem materializer_canonical (kind : Kind) (bytes : List UInt8)
+    (logical : Store (layout kind))
+    (accepted : (materializer kind).codec.decode bytes = some logical) :
+    (materializer kind).codec.encode logical = bytes := by
+  cases kind
+  all_goals first
+    | exact StoreCodec.decode_reencodes _ accepted
+    | exact CanonicalResourcePageMaterializer.framedCodec_canonical 0
+        CanonicalResourcePageMaterializer.stateStream accepted
+    | exact PolicySourceCell.decode_canonical accepted
+    | exact NockProgramCodec.decode_canonical accepted
+    | exact Kernel.ProtectedCell.decode_canonical _ accepted
 
 /-- The store wire of every kind whose materializer is the generic
 `StoreCodec.materializer` (K-NARROW-HIDE): its salted root opens per entry. -/
@@ -406,6 +472,7 @@ def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
   | .system => some Kernel.SystemCell.wire
   | .worldKind => some WorldKindCell.definitionWire
   | .worldInstance => some WorldKindCell.instanceWire
+  | .platform => some Kernel.PlatformCellLayout.wire
   | .resourceBook | .policySource | .nockProgram | .objectiveActivity | .seat => none
 
 /-- A kind with a store wire is materialized by it, so its cell root is that
@@ -432,10 +499,12 @@ def registry : TypeRegistry Digest where
   tag := Kind.tag
   kindAtTag := kindAtTag
   kindAtTag_tag := kindAtTag_tag
+  tag_of_kindAtTag := tag_of_kindAtTag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
   layout := layout
   materializer := materializer
+  materializer_canonical := materializer_canonical
   rootBytes := ResourceBirthCodec.rootBytes
 
 instance registryKindDecidableEq : DecidableEq registry.Kind :=
@@ -478,17 +547,17 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_lifecycle_root :
     registry.rootBytes = ResourceBirthCodec.rootBytes := rfl
 
-/-- Strict dependent decoding preserves the exact selected native codec/root.
-It also rejects aliases accepted by older primitive prefix decoders. -/
-def cellCodec : LawfulCodec (PackedCell registry) :=
-  ResourceBirthCodec.strictCodec (PackedCell.codec registry)
+/-- Dependent decoding preserves the exact selected native codec/root. The
+envelope is canonical (`PackedCell.bytes_of_decode`: the tag cannot alias and
+every materializer codec accepts only encodings), so nothing is re-encoded. -/
+def cellCodec : LawfulCodec (PackedCell registry) := PackedCell.codec registry
 
 @[simp] theorem cell_roundtrip (cell : PackedCell registry) :
     cellCodec.decode (cellCodec.encode cell) = some cell := cellCodec.decode_encode cell
 
 theorem decoded_cell_canonical {bytes : List UInt8} {cell : PackedCell registry}
     (accepted : cellCodec.decode bytes = some cell) : PackedCell.bytes registry cell = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (PackedCell.codec registry) accepted
+  PackedCell.bytes_of_decode registry accepted
 
 /-! ## Source-owned role and identity laws -/
 
@@ -621,10 +690,115 @@ def ContentLaw (store : Store Hyperdocument.layout) : Prop :=
     documentAt store left = none ∨ documentAt store right = none ∨
       documentAt store left = documentAt store right
 
+/-- All present values in one computed list agree. Absent values carry no
+constraint; the first present value is the candidate for the single `all` pass. -/
+private def allPresentEqual {α : Type} [DecidableEq α] (values : List (Option α)) : Bool :=
+  match values.filterMap id with
+  | [] => true
+  | first :: rest => rest.all fun value => decide (value = first)
+
+private theorem allPresentEqual_iff {α : Type} [DecidableEq α] (values : List (Option α)) :
+    allPresentEqual values = true ↔
+      ∀ left ∈ values, ∀ right ∈ values,
+        left = none ∨ right = none ∨ left = right := by
+  have original_of_present : ∀ {value : α}, value ∈ values.filterMap id → some value ∈ values := by
+    intro value member
+    obtain ⟨entry, entryMember, selected⟩ := List.mem_filterMap.mp member
+    cases entry with
+    | none => simp at selected
+    | some actual =>
+      simp only [id_eq, Option.some.injEq] at selected
+      subst actual
+      exact entryMember
+  unfold allPresentEqual
+  cases present : values.filterMap id with
+  | nil =>
+    simp only [true_iff]
+    intro left leftMember right _
+    cases left with
+    | none => exact Or.inl rfl
+    | some left =>
+      cases right with
+      | none => exact Or.inr (Or.inl rfl)
+      | some right =>
+        have member : left ∈ values.filterMap id :=
+          List.mem_filterMap.mpr ⟨some left, leftMember, rfl⟩
+        rw [present] at member
+        simp at member
+  | cons first rest =>
+    constructor
+    · intro checked left leftMember right rightMember
+      have equal_first : ∀ {value : α}, value ∈ first :: rest → value = first := by
+        intro value member
+        rcases List.mem_cons.mp member with rfl | member
+        · rfl
+        · exact of_decide_eq_true (List.all_eq_true.mp checked value member)
+      have present_of_original : ∀ {value : α}, some value ∈ values → value ∈ first :: rest := by
+        intro value member
+        rw [← present]
+        exact List.mem_filterMap.mpr ⟨some value, member, rfl⟩
+      cases left with
+      | none => exact Or.inl rfl
+      | some left =>
+        cases right with
+        | none => exact Or.inr (Or.inl rfl)
+        | some right =>
+          exact Or.inr (Or.inr (congrArg some ((equal_first (present_of_original leftMember)).trans
+            (equal_first (present_of_original rightMember)).symm)))
+    · intro law
+      apply List.all_eq_true.mpr
+      intro value member
+      apply decide_eq_true
+      have firstPresent : first ∈ values.filterMap id := by
+        rw [present]
+        exact List.mem_cons_self
+      have valuePresent : value ∈ values.filterMap id := by
+        rw [present]
+        exact List.mem_cons_of_mem _ member
+      rcases law (some first) (original_of_present firstPresent)
+          (some value) (original_of_present valuePresent) with absent | absent | same
+      · cases absent
+      · cases absent
+      · exact (Option.some.inj same).symm
+
+/-- The same linear check on a multiset, using its computable list representative.
+The result does not depend on which representative the quotient exposes. -/
+private def allPresentEqualMultiset {α : Type} [DecidableEq α] (values : Multiset (Option α)) : Bool :=
+  Quot.liftOn values allPresentEqual fun left right perm => by
+    have same : allPresentEqual left = true ↔ allPresentEqual right = true := by
+      rw [allPresentEqual_iff, allPresentEqual_iff]
+      constructor
+      · intro law l leftMember r rightMember
+        exact law l (perm.mem_iff.mpr leftMember) r (perm.mem_iff.mpr rightMember)
+      · intro law l leftMember r rightMember
+        exact law l (perm.mem_iff.mp leftMember) r (perm.mem_iff.mp rightMember)
+    cases leftResult : allPresentEqual left <;> cases rightResult : allPresentEqual right <;> simp_all
+
+private theorem allPresentEqualMultiset_iff {α : Type} [DecidableEq α]
+    (values : Multiset (Option α)) :
+    allPresentEqualMultiset values = true ↔
+      ∀ left ∈ values, ∀ right ∈ values,
+        left = none ∨ right = none ∨ left = right := by
+  induction values using Quot.inductionOn with
+  | _ values => exact allPresentEqual_iff values
+
 instance contentLawDecidable (store : Store Hyperdocument.layout) :
     Decidable (ContentLaw store) := by
+  apply decidable_of_iff
+    (allPresentEqualMultiset (store.support.val.map (documentAt store)) = true)
+  symm
   unfold ContentLaw
-  infer_instance
+  rw [allPresentEqualMultiset_iff]
+  constructor
+  · intro law left leftMember right rightMember
+    obtain ⟨leftAddress, leftSupport, rfl⟩ := Multiset.mem_map.mp leftMember
+    obtain ⟨rightAddress, rightSupport, rfl⟩ := Multiset.mem_map.mp rightMember
+    exact law leftAddress (by simpa using leftSupport) rightAddress (by simpa using rightSupport)
+  · intro checked left leftSupport right rightSupport
+    exact checked (documentAt store left)
+      (Multiset.mem_map.mpr ⟨left, by simpa using leftSupport, rfl⟩)
+      (documentAt store right)
+      (Multiset.mem_map.mpr ⟨right, by simpa using rightSupport, rfl⟩)
 
 /-! ### Hyperdocument event history: this domain's well-formed, addressed events -/
 
@@ -661,8 +835,36 @@ def EventHistoryLaw (deployment : Deployment)
 instance eventHistoryLawDecidable (deployment : Deployment)
     (store : Store Kernel.HyperdocumentEventLog.Sparse.layout) :
     Decidable (EventHistoryLaw deployment store) := by
+  apply decidable_of_iff
+    ((∀ address ∈ store.support, EventValid deployment address.2 (store address)) ∧
+      allPresentEqualMultiset (store.support.val.map fun address =>
+        (store address).map VersionEventRecord.document) = true)
+  symm
   unfold EventHistoryLaw
-  infer_instance
+  constructor
+  · rintro ⟨valid, same⟩
+    refine ⟨valid, ?_⟩
+    rw [allPresentEqualMultiset_iff]
+    intro left leftMember right rightMember
+    obtain ⟨leftAddress, leftSupport, rfl⟩ := Multiset.mem_map.mp leftMember
+    obtain ⟨rightAddress, rightSupport, rfl⟩ := Multiset.mem_map.mp rightMember
+    exact Or.inr (Or.inr (same leftAddress (by simpa using leftSupport)
+      rightAddress (by simpa using rightSupport)))
+  · rintro ⟨valid, checked⟩
+    refine ⟨valid, ?_⟩
+    rw [allPresentEqualMultiset_iff] at checked
+    intro left leftSupport right rightSupport
+    have compared := checked
+      ((store left).map VersionEventRecord.document)
+      (Multiset.mem_map.mpr ⟨left, by simpa using leftSupport, rfl⟩)
+      ((store right).map VersionEventRecord.document)
+      (Multiset.mem_map.mpr ⟨right, by simpa using rightSupport, rfl⟩)
+    cases leftValue : store left with
+    | none => exact ((DFinsupp.mem_support_toFun _ _).mp leftSupport leftValue).elim
+    | some leftRecord =>
+      cases rightValue : store right with
+      | none => exact ((DFinsupp.mem_support_toFun _ _).mp rightSupport rightValue).elim
+      | some rightRecord => simpa [leftValue, rightValue] using compared
 
 /-- **The domain restoration (S3 decision 1).**  An event record naming any
 other history domain cannot sit in this deployment's event log. -/
@@ -686,7 +888,7 @@ v9 (CH-EPOCH stream law, store encoding v2, blinded cells) and the compute braid
 (K-FIELD-CLOSURE: declared cells closed by default; C14's tail-bound genesis cell) meet here. Each
 of v9 and v10 named a law set without the other, so a Store under any earlier label refuses. -/
 def logicalLawVersion : List UInt8 :=
-  Minidregg.Compiler.PersistedCodecTags.registry_loaded_and_final_store_cells_v16.toUTF8.toList
+  Minidregg.Compiler.PersistedCodecTags.registry_loaded_and_final_store_cells_v17.toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -718,6 +920,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (Kernel.ObjectiveActivityCell.payloadAt state)
   | .seat, state => PresentLaw (Kernel.SeatCell.CellValid deployment.domain cellId)
       (Kernel.SeatCell.payloadAt state)
+  | .platform, state => cellId = Kernel.PlatformCellLayout.physicalId deployment.domain ∧
+      Kernel.PlatformCellLayout.Law state
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -825,7 +1029,7 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .stream, state => StreamCell.headOf state = some StreamCell.emptyRoomHead
   | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
-  | .streamEntry, _ | .system, _ | .objectiveActivity, _ | .seat, _ => False
+  | .streamEntry, _ | .system, _ | .objectiveActivity, _ | .seat, _ | .platform, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by

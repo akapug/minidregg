@@ -2,8 +2,8 @@
 //! START consumes current-image BEGIN/claim plans once, launches the one fd3
 //! owner, and opens HTTP only after fresh native physical completion. INSTALL
 //! materialization and stopped wake remain separate lifecycle operations.
-#![allow(dead_code)] // Enabled only after root reviews the exact native cut.
 
+use crate::io_context::IoContext;
 use crate::agent_api_custody::AgentCustody;
 use crate::agent_api_lifetime_custody_v3::LifetimeCustodyV3;
 use crate::agent_api_lifetime_reverse_v3::LifetimeReverseClient;
@@ -45,7 +45,7 @@ use crate::lifecycle_v4_retry_completion_native::{
 use crate::lifecycle_v4_retry_native::{
     select_retry, submit_once as submit_v4_begin, FixedRetryBeginSigners, RetrySelection,
 };
-use crate::materialize::verify_installed_spk;
+use crate::materialize::{verify_installed_spk, open_signed_public_data};
 use crate::resident_launch::PreparedResident;
 use crate::resident_launch::SourceBoundLaunch;
 use crate::resident_route_control::{
@@ -62,43 +62,48 @@ use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use crate::canonical::{hex as hex_bytes, hex64};
 
 const MAX_CONFIG: u64 = 16 * 1024;
 // Retained routes must remain loadable after the live registry grows. Keep
 // individual custody bounds small while bounding the whole resident config.
-const MAX_RESIDENT_CONFIG: u64 = MAX_CONFIG * (resident_route_control::MAX_ROUTES as u64 + 1);
+use crate::agent_route_profile::{AgentRouteProfile, MAX_RESIDENT_CONFIG};
 const MAX_LIFECYCLE: u64 = 12_102_759;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
+/// The running app's ViewInfo must equal the signed schema. A package that signs no permissions
+/// and no roles (no bridge-config member, so the canonical empty config) has nothing for Mini's
+/// descriptor to author from; an app that nonetheless declares some at runtime (a package whose
+/// root process serves WebSession itself, such as diagrams.net's static server declaring `write`
+/// and the editor/viewer roles) is unsupported, and the refusal says so by name instead of
+/// printing a bare mismatch.
+fn check_running_view_info(
+    running: &minidregg_spk_rpc::ViewInfo,
+    signed: &minidregg_spk_rpc::ViewInfo,
+) -> io::Result<()> {
+    if running == signed {
+        return Ok(());
+    }
+    let signs_nothing = signed.permissions.is_empty() && signed.roles.is_empty();
+    let message = if signs_nothing {
+        format!(
+            "package signs no bridge permissions or roles but the running app declares {} permissions and {} roles ({:?}): a non-bridge app that declares its own ViewInfo is unsupported, because Mini authors its descriptor only from a signed bridge schema",
+            running.permissions.len(),
+            running.roles.len(),
+            running.permission_names
+        )
+    } else {
+        "running app ViewInfo differs from signed bridge schema".to_owned()
+    };
+    Err(io::Error::new(io::ErrorKind::InvalidData, message))
+}
+
 fn private_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| invalid("private file parent absent"))?;
-    private_dir(parent)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !path.is_absolute()
-        || !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > max
-    {
-        return Err(invalid("operator private file identity or size refused"));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != meta.len() || bytes.len() as u64 > max {
-        return Err(invalid("operator private file changed while reading"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("private file parent absent"))?)?;
+    crate::private_file::read(path, max, "operator private file identity or size refused")
 }
 
 #[derive(Deserialize)]
@@ -135,6 +140,12 @@ enum PreparedAgent {
 }
 
 impl PreparedAgent {
+    fn requires_api(&self) -> bool {
+        match self {
+            Self::V2(..) => true,
+            Self::V3(custody, _) => !matches!(custody.route, Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. })),
+        }
+    }
     fn coordinates(&self) -> (&str, &str, &str, &str) {
         match self {
             Self::V2(custody, _) => (
@@ -160,6 +171,8 @@ fn default_stream_lease_seconds() -> u64 {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResidentConfig {
+    #[serde(default)]
+    agent_route_profile: AgentRouteProfile,
     #[serde(skip)]
     loaded_sha256: String,
     protocol: String,
@@ -313,7 +326,7 @@ impl StartLane {
         }
     }
 
-    fn admitted_protocol(self) -> &'static str {
+    pub(crate) fn admitted_protocol(self) -> &'static str {
         match self {
             Self::V3 => "mini-spk-resident-start-admitted-v3",
             Self::RetryV4 => "mini-spk-resident-start-admitted-retry-v4",
@@ -365,6 +378,32 @@ impl StartLane {
             Self::V3 => "claim-v3.bin",
             Self::RetryV4 => crate::lifecycle_v4_retry_claim_native::CLAIM_INGRESS_FILE,
         }
+    }
+
+    /// The exact BEGIN ingress, CLAIM ingress and committed CLAIM of this
+    /// lane's retained START, for failed-START recovery. `v3_begin_dir` and
+    /// `v3_claim_dir` are the resident config's v3 attempt directories; the
+    /// v4 lane's live at fixed names under the journal.
+    pub(crate) fn recovery_artifacts(
+        self,
+        journal_dir: &Path,
+        v3_begin_dir: &Path,
+        v3_claim_dir: &Path,
+    ) -> [PathBuf; 3] {
+        let (begin, claim_dir) = match self {
+            Self::V3 => (v3_begin_dir.join("begin-v3.bin"), v3_claim_dir.to_path_buf()),
+            Self::RetryV4 => (
+                journal_dir
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_ATTEMPT_DIR)
+                    .join(crate::lifecycle_v4_retry_native::BEGIN_INGRESS_FILE),
+                journal_dir.join(crate::lifecycle_v4_retry_claim_native::CLAIM_ATTEMPT_DIR),
+            ),
+        };
+        [
+            begin,
+            claim_dir.join(self.claim_ingress_file()),
+            claim_dir.join(self.committed_file()),
+        ]
     }
 
     fn committed_file(self) -> &'static str {
@@ -453,13 +492,6 @@ impl StartAction {
     }
 }
 
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 fn agent_socket_parent_overlap(earlier: &[FixedAgentConfig], socket: &Path) -> bool {
     let Some(parent) = socket.parent() else {
         return true;
@@ -512,9 +544,9 @@ fn retire_start_markers(
         }
     }
     for path in present {
-        fs::remove_file(path)?;
+        fs::remove_file(&path).ctx("remove", &path)?;
     }
-    File::open(&config.journal_dir)?.sync_all()
+    File::open(&config.journal_dir).ctx("open", &config.journal_dir)?.sync_all()
 }
 
 /// Per-generation artifacts of a governed repeat CREATE (event69/70/72).
@@ -576,9 +608,9 @@ fn retire_retry_v4_markers(config: &ResidentConfig) -> io::Result<()> {
         }
     }
     for path in present {
-        fs::remove_file(path)?;
+        fs::remove_file(&path).ctx("remove", &path)?;
     }
-    File::open(journal)?.sync_all()
+    File::open(&journal).ctx("open", &journal)?.sync_all()
 }
 
 /// Which lawful BEGIN this START consumes. Continue and a first create stay
@@ -963,7 +995,7 @@ fn reconcile_uncertain_submit(
         },
     };
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     write_new(
         &config.journal_dir,
         &format!(
@@ -1090,7 +1122,7 @@ fn reconcile_prior_start(
         PriorUnitState::Uncertain => "uncertain-unit-incarnation",
     };
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     write_new(
         &config.journal_dir,
         &format!(
@@ -1150,7 +1182,7 @@ impl ResidentConfig {
             || config.app_gid == 0
             || config.entrances.is_empty()
             || config.entrances.len() > resident_route_control::MAX_ROUTES
-            || config.agents.len() > 8
+            || config.agents.len() > config.agent_route_profile.active()
             || config.persistent_var_max_bytes == 0
             || crate::broker::class(&config.size_class).is_err()
             || crate::web_socket::StreamLease::begin(Duration::from_secs(
@@ -1248,7 +1280,8 @@ impl ResidentConfig {
 /// This is the systemd ExecStart body for a fresh native START claim. The
 /// stopped unit is installed from operator-reviewed pins; HTTP has no path to
 /// choose a package, task UID, Mini signer, command, or app generation.
-/// The resident never runs as root. Its unit (rendered by the root broker)
+/// The resident never runs as root. Its user unit (rendered by the operator's
+/// per-world broker)
 /// names the app UID/GID, grains root and Store. The trusted bootstrap has
 /// already dropped both parsers to zero capabilities before this config is
 /// read; its app identity must agree with the native source-bound launch.
@@ -1258,6 +1291,10 @@ struct ResidentBound {
     grains_root: PathBuf,
     broker_socket: PathBuf,
     store: String,
+    /// The bwrap bytes the broker pinned for this resident's namespace: the app
+    /// sandbox runs the same build (its path may be a per-app-identity copy,
+    /// scripts/spk-platform/sandbox-launcher-stage.py; the spawn gate pins it).
+    bwrap_sha256: String,
 }
 
 impl ResidentBound {
@@ -1266,11 +1303,12 @@ impl ResidentBound {
             || config.app_gid != self.app_gid
             || config.grains_root != self.grains_root
             || config.store != self.store
+            || config.bwrap_sha256 != self.bwrap_sha256
             || crate::broker::socket_path(&config.grains_root, config.broker_socket.as_deref())?
                 != self.broker_socket
         {
             return Err(invalid(
-                "resident config differs from broker-rendered unit identity or endpoint",
+                "resident config differs from broker-rendered unit identity, endpoint or bwrap",
             ));
         }
         Ok(())
@@ -1299,6 +1337,7 @@ impl ResidentBound {
                 var("MINI_SPK_BROKER_SOCKET")?,
             ),
             store: var("MINI_SPK_STORE")?,
+            bwrap_sha256: var("MINI_SPK_BWRAP_SHA256")?,
         })
     }
 }
@@ -1358,6 +1397,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let bound = ResidentBound::from_unit_environment()?;
     let mut config = ResidentConfig::load(config_path)?;
     bound.validate(&config)?;
+    for agent in &config.agents {
+        crate::namespace_identity::require_registered_controller(agent.controller_uid)?;
+    }
     crate::checkpoint_control::refuse_retained_pause(&config.journal_dir)?;
     resident_route_control::refuse_retained_registrations(&config.journal_dir)?;
     let journal = Journal::open(&config.journal_dir)?
@@ -1429,6 +1471,12 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if package.raw_sha256 != config.expected_raw_sha256 {
         return Err(invalid("resident signed package pin drift"));
     }
+    // Checked before BEGIN/CLAIM: the current signed archive alone selects the
+    // immutable public revision. Continue/restart takes the identical path.
+    let public_data = open_signed_public_data(&package, config.app_uid)?;
+    if let Some(data) = &public_data {
+        crate::resident_privilege::check_public_data_access(data.root_fd())?;
+    }
     preflight_custodian(
         &operator,
         &config.completion_custodian_seed,
@@ -1490,6 +1538,16 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             }
             _ => return Err(invalid("resident agent protocol refused")),
         };
+        if let PreparedAgent::V3(custody, _) = &prepared {
+            if let Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) = &custody.route {
+                if !policies.iter().any(|policy| policy.fixed_session_kind == EntranceKind::Browser
+                    && policy.fixed_app == custody.lineage.app_resource
+                    && policy.fixed_subject == custody.lineage.participant_subject
+                    && format!("https://{}", policy.expected_host) == *origin) {
+                    return Err(invalid("hosted web agent origin lacks same-member browser custody"));
+                }
+            }
+        }
         let (session, ticket, parent, purse) = prepared.coordinates();
         if agent_preflights.iter().any(|prior: &PreparedAgent| {
             let (s, t, p, q) = prior.coordinates();
@@ -1516,7 +1574,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     if bridge.api_path != descriptor.package.api_path {
         return Err(invalid("signed START bridge differs from Mini descriptor"));
     }
-    if (!config.agents.is_empty()
+    if (agent_preflights.iter().any(PreparedAgent::requires_api)
         || policies
             .iter()
             .any(|policy| policy.fixed_session_kind == EntranceKind::Api))
@@ -1628,9 +1686,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "app-output-r{}-g{generation}.log",
             config.volume_resource
         )),
+        ifaddrs_shim: crate::sandbox::needs_ifaddrs_shim(&config.expected_raw_sha256),
     };
     let prepared =
-        PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;
+        PreparedResident::prepare_with_public_data(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256, public_data)?;
     let claim = match (&retry, &retry_signers) {
         (Some(selection), Some((_, fixed, _))) => {
             let assembled = assemble_v4_claim(
@@ -1694,7 +1753,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 custody.lineage.app_resource == claim.physical_begin.app.to_string()
             }
         };
-        if !matches_app || bridge.api_path.is_none() {
+        if !matches_app || (prepared.requires_api() && bridge.api_path.is_none()) {
             return Err(invalid("agent custody differs from claimed shared app"));
         }
     }
@@ -1752,15 +1811,14 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     write_new(&config.journal_dir, admitted_name, &admitted_bytes)?;
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
-    let mut resident = prepared.start(&journal, &claim.physical_begin)?;
+    // The last physical boundary before the one-shot spawn: fd5 is the exact
+    // directory the root witness attests, and the witness itself is unchanged
+    // since preflight (RUST-TRIAGE R15).
+    let mut resident = prepared.start_attested(&journal, &claim.physical_begin, &volume)?;
     // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
     // request is refused before it is sent, after the claim is committed.
     let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
-    if view != bridge.view_info {
-        return Err(invalid(
-            "running app ViewInfo differs from signed bridge schema",
-        ));
-    }
+    check_running_view_info(&view, &bridge.view_info)?;
     let (_receipt, outcome_dir, completed_name) = match (&retry, &retry_signers) {
         (Some(selection), Some((_, _, fixed))) => {
             let report = prepare_v4_running_report(
@@ -1922,6 +1980,13 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     agent_fds.push(checkpoint.as_raw_fd());
     let route_control_index = agent_fds.len();
     agent_fds.push(route_control.as_raw_fd());
+    // The grain's publishing socket (apps/<app>/www.sock): anonymous GET/HEAD of
+    // the app's /var/www, read through the app-identity worker's descriptor.
+    let www = crate::www_publish::WwwListener::bind(&crate::www_publish::socket_for_journal(&config.journal_dir)?)?;
+    let www_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.listener));
+    let www_wake_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&www.wake));
     // One count for the generation: every participant's sockets share the
     // grain's class cap.
     let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
@@ -1966,6 +2031,27 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         if index == app_exit_index {
             return Err(invalid("app process exited; this generation ends"));
         }
+        if index == www_index {
+            if let Err(error) = www.accept_one() {
+                eprintln!("spk-host: publishing connection refused: {error}");
+            }
+            return Ok(None);
+        }
+        if index == www_wake_index {
+            use crate::resident_privilege::WwwFile;
+            use crate::www_publish::Opened;
+            www.answer_asks(|components| match resident.open_www_file(components) {
+                Ok(WwwFile::File(fd)) => Opened::File(std::fs::File::from(fd)),
+                Ok(WwwFile::NoSite) => Opened::NoSite,
+                Ok(WwwFile::NoSuchFile) => Opened::NoSuchFile,
+                Ok(WwwFile::TooLarge) => Opened::TooLarge,
+                Err(error) => {
+                    eprintln!("spk-host: published file unavailable: {error}");
+                    Opened::Unavailable
+                }
+            });
+            return Ok(None);
+        }
         if index == checkpoint_index {
             checkpoint.poll_once(&journal, || {
                 resident.rpc.checkpoint_drain_streams()?;
@@ -1989,7 +2075,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             } else if let Some((listener, _, _)) = agent_routes.get(index) {
                 // No agent frame is read or admitted while paused. EOF cannot
                 // certify a no-record outcome; its client retains exact recovery.
-                drop(listener.accept_authenticated()?);
+                if let Err(error) = listener.accept_authenticated() {
+                    eprintln!("spk-host: paused agent connection refused at accept: {error}");
+                }
             }
             return Ok(None);
         }
@@ -2091,9 +2179,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         let (listener, prepared, agent) = agent_routes
             .get_mut(index)
             .ok_or_else(|| invalid("resident agent poll index drift"))?;
-        let signed_api_path = api_path
-            .as_deref()
-            .ok_or_else(|| invalid("signed API path absent"))?;
+        let signed_api_path = api_path.as_deref().unwrap_or("");
         match prepared {
             PreparedAgent::V2(custody, reverse) => {
                 let mut context = ResidentAgent {
@@ -2134,15 +2220,6 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         }
         Ok(None)
     })
-}
-
-fn hex_bytes(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        write!(out, "{byte:02x}").expect("writing to String");
-    }
-    out
 }
 
 fn deliver_request(
@@ -2208,6 +2285,31 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
     use std::os::unix::net::UnixStream;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn view_info_of(member: &[u8]) -> minidregg_spk_rpc::ViewInfo {
+        minidregg_spk_rpc::decode_bridge_config(member).unwrap().view_info
+    }
+    const SIGNED_GITWEB: &[u8] =
+        include_bytes!("../../spk-rpc/tests/fixtures/gitweb-signed-bridge-config.capnp");
+
+    #[test]
+    fn a_non_bridge_app_declaring_permissions_is_refused_by_name() {
+        let signed = view_info_of(&minidregg_spk_rpc::default_bridge_config_bytes());
+        let running = view_info_of(SIGNED_GITWEB);
+        let error = check_running_view_info(&running, &signed).unwrap_err().to_string();
+        assert!(error.contains("non-bridge app that declares its own ViewInfo is unsupported"), "{error}");
+        assert!(error.contains("signs no bridge permissions or roles"), "{error}");
+    }
+
+    #[test]
+    fn matching_and_signed_mismatching_view_info_keep_their_rules() {
+        let empty = || view_info_of(&minidregg_spk_rpc::default_bridge_config_bytes());
+        assert!(check_running_view_info(&empty(), &empty()).is_ok(), "a silent app under the empty config");
+        assert!(check_running_view_info(&view_info_of(SIGNED_GITWEB), &view_info_of(SIGNED_GITWEB)).is_ok());
+        // A signed non-empty schema against silence stays the plain mismatch, not the non-bridge refusal.
+        let error = check_running_view_info(&empty(), &view_info_of(SIGNED_GITWEB)).unwrap_err().to_string();
+        assert_eq!(error, "running app ViewInfo differs from signed bridge schema");
+    }
 
     #[test]
     fn retry_v4_restart_selects_the_lane_of_the_retained_admitted_marker() {
@@ -2348,6 +2450,38 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn shared_agent_route_profile_reaches_resident_parser() {
+        let (journal, path, mut config) = resident_config_fixture();
+        let template = config["agents"][0].clone();
+        config["agents"] = Value::Array((0..64).map(|i| {
+            let mut agent = template.clone();
+            let name = format!("controller-{i}");
+            agent["socket"] = json!(format!("/run/mini-spk/{name}/api.sock"));
+            agent["reverseSocket"] = json!(format!("/run/mini-spk/{name}-reverse.sock"));
+            agent["controllerUid"] = json!(1001 + i);
+            agent["custody"] = json!(format!("/var/lib/mini-spk/{name}-{}.json", "c".repeat(180)));
+            agent["routeName"] = json!(name);
+            agent["attemptDir"] = json!(journal.join(format!("attempt-{i}-{}", "a".repeat(180))));
+            agent["displayName"] = json!("d".repeat(256));
+            agent["preferredHandle"] = json!("h".repeat(256));
+            agent
+        }).collect());
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        config["agentRouteProfile"] = json!("shared-64-v1");
+        let bytes = serde_json::to_vec(&config).unwrap();
+        assert!(bytes.len() > 64 * 1024);
+        assert!(bytes.len() as u64 <= MAX_RESIDENT_CONFIG);
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(ResidentConfig::load(&path).unwrap().agents.len(), 64);
+        config["agents"][1]["controllerUid"] = json!(1001);
+        fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(ResidentConfig::load(&path).is_err());
+        fs::remove_dir_all(journal).unwrap();
+    }
+
     fn resident_config_fixture() -> (PathBuf, PathBuf, Value) {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2431,7 +2565,12 @@ mod tests {
             grains_root: config.grains_root.clone(),
             store: config.store.clone(),
             broker_socket: crate::broker::socket_path(&config.grains_root,config.broker_socket.as_deref()).unwrap(),
+            bwrap_sha256: config.bwrap_sha256.clone(),
         };
+        assert!(bound.validate(&config).is_ok());
+        bound.bwrap_sha256 = "c".repeat(64);
+        assert!(bound.validate(&config).is_err());
+        bound.bwrap_sha256 = config.bwrap_sha256.clone();
         assert!(bound.validate(&config).is_ok());
         config.broker_socket = Some(config.grains_root.join("runtime-0123456789abcdef/broker.sock"));
         bound.broker_socket=config.grains_root.join("broker.sock");

@@ -10,6 +10,13 @@ the workspace key signs the header, op 211 assemble, op 212 submit); every refus
 name; the public view (op 214) reads the cells back. ROOT/transcript holds every command's exact
 output.
 
+Every submit carries `--again true` unless a step says `again=False`: a scripted journey never reruns a
+step by accident, so a body it submits a second time (the same birth thrice, a top-up per height, the
+deliberate duplicate a refusal row wants) is always its decision, and what the row asserts is the Host's
+decided answer, by name, never the client's local notice. The client's own rule (the same decided turn
+without `--again` is answered locally, nothing signed) has its own row in
+objective-activity-native-acceptance.py.
+
 A journey records its rows through `World.turn` / `World.check` and groups them with `World.group`
 (one group = one row of the journey table). `World.finish` writes ROOT/results.json and
 ROOT/groups.tsv (ID, STATUS, WALL_S, DETAIL: the journey runner's sub-row format) and returns the
@@ -37,10 +44,25 @@ SOURCE_BYTES = 262144
 # Measured 2026-10-07 on burst2-b with the lane Host (`objective-front preview`/`elaborate`, best of 3;
 # KN2-ROW-E STATUS.txt): replay 1.877 us/byte at 258753 source bytes -> 61 ticks/byte; core 0.482 us/byte at
 # 266491 core bytes -> 16 ticks/byte. A world with a larger source bound must re-measure (the rate rises).
+# THE DEMO'S RATES ARE 6 and 2 (2026-10-28, root's ruling), a tenth of the measured worst case: at 61 and 16 one
+# 2 KB Tally birth cost 270,280 and no member's starting grant could run any program. The worst-case package (the
+# source bound) is therefore UNDERPRICED about tenfold; the abuse bound is the member's grant, not the rate
+# (a grant of 1,225,000 buys 10 Tally runs; at the worst case 1.9 us/byte a 256 KiB birth would cost 6*262144 =
+# 1.6M ticks and a member could afford none). Edition 4 refuses a zero rate, so these are the floor to raise from.
 TARIFF = {'version': '4', 'base': '1', 'typeFuel': '0', 'sourceTicks': '1', 'heap': '0', 'stack': '0',
           'outputNodes': '0', 'outputBytes': '0', 'extractTicks': '0', 'inputBytes': '0',
-          'replayBytes': '61', 'coreBytes': '16', 'domainWork': '0'}
+          'replayBytes': '6', 'coreBytes': '2', 'domainWork': '0'}
 RATE_KEYS = [k for k in TARIFF if k not in ('version', 'base')]
+
+
+def policy_of(constants):
+    """The Objective invocation policy JSON every activity world (and the demo genesis, through
+    scripts/author-objective-policy.sh) pins: this file's MAXIMUM, SOURCE_BYTES and TARIFF, and the
+    generic codec and front-end identity of the Host that answered `objective-constants`."""
+    return {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
+            'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']),
+            'outputs': [constants['genericCodec']], 'clearAudience': '01ff', 'frontEnd': constants['frontEnd'],
+            'tariff': TARIFF}
 
 
 def price(c):
@@ -138,10 +160,14 @@ def quoted_heap(view):
 
 
 def with_extra_heap(body, heap, payer):
-    """`body` declaring `heap` cells in its `extra` (other extra fields kept), paid by `payer`, the
-    submitter's (account, spend capability)."""
+    """`body` declaring `heap` cells in its `extra` (other extra fields kept). The added envelope is paid by
+    the account the body names; only a body naming none (`'0'`) is filled with `payer`, the submitter's
+    (account, spend capability). A row that names an account on purpose (a refusal row naming the purse)
+    keeps it: rewriting it to the submitter's own would turn the refusal into an ordinary paid turn."""
     extra = dict(body.get('extra') or {k: '0' for k in MAXIMUM})
     extra['heap'] = str(heap)
+    if str(body.get('account', '0')) not in ('', '0'):
+        return dict(body, extra=extra)
     return dict(body, extra=extra, account=str(payer[0]), accountCapability=str(payer[1]))
 
 
@@ -190,6 +216,9 @@ def unhex(text):
         return bytes.fromhex(text).decode(errors='replace')
     except (ValueError, TypeError):
         return str(text)
+
+
+OWNER_BUDGET = '1000000'
 
 
 class World:
@@ -248,25 +277,21 @@ class World:
             return {'unparsed': text[-800:]}
 
     # --- the world -------------------------------------------------------------------
-    def bring_up(self, object_names, sponsor_balance='1000000000'):
+    def bring_up(self, object_names, sponsor_balance='1000000000', second_balance='100000000000'):
         """Genesis with the Objective policy and a second enrolled subject, then one native resource
         (object cell + operation capability) per name, none of them an object yet (no record)."""
         root = self.root
         constants = json.loads(self.sh('constants', self.host, '/dev/null', 'objective-constants').stdout)
-        policy = {'schema': 'dregg.objective-bend.policy.v1', 'sourceBytes': str(SOURCE_BYTES),
-                  'maximum': {k: str(v) for k, v in MAXIMUM.items()}, 'extractTicksPerTurn': str(16 * MAXIMUM['extractTicks']), 'outputs': [constants['genericCodec']],
-                  'clearAudience': '01ff', 'frontEnd': constants['frontEnd'], 'tariff': TARIFF}
-        (root / 'policy.json').write_text(json.dumps(policy, indent=1))
+        (root / 'policy.json').write_text(json.dumps(policy_of(constants), indent=1))
         self.sh('policy', self.host, '/dev/null', 'author', 'objective-policy', root / 'policy.json',
                 root / 'policy.hex')
-        self.sh('keygen-second', self.mini, 'keygen', '--secret', root / 'second.key', '--public',
-                root / 'second.pub')
-        public = (root / 'second.pub').read_bytes().hex()
+        # The second subject's key is made by the fixture (NEWPARTICIPANT_EXTRA_SUBJECTS -> W/extra/40.key), not
+        # here: a world whose genesis holds no per-run key is the same world every run, so it has a template.
         enrollment = [{'key': {'keyId': '4000', 'keyEpoch': '2', 'algorithm': '1', 'subject': self.SECOND,
-                               'publicKey': public, 'activeFrom': '0', 'activeUntil': '1000000',
+                               'activeFrom': '0', 'activeUntil': '1000000',
                                'nextKeyDigest': None},
                        'accountId': self.SECOND, 'spendCapabilityId': self.SECOND_SPEND, 'controlCapabilityId': '4003',
-                       'factoryObserveCapabilityId': '4004', 'initialBalance': '100000000000',
+                       'factoryObserveCapabilityId': '4004', 'initialBalance': second_balance,
                        'accountPredicate': {'type': 'all', 'predicates': []}}]
         (root / 'enrollment-second.json').write_text(json.dumps(enrollment))
         self.W = root / 'w'
@@ -274,15 +299,22 @@ class World:
         self.sh('genesis', 'sh', self.repo / 'native/resource-client/newparticipant-acceptance.sh', self.host,
                 self.mini, self.store, self.verifier, self.W, self.sock,
                 env={'OBJECTIVE_INVOCATION_POLICY': (root / 'policy.hex').read_text().strip(),
-                     'EXTRA_GENESIS_ENROLLMENTS': str(root / 'enrollment-second.json'),
-                     'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance})
+                     'NEWPARTICIPANT_EXTRA_SUBJECTS': str(root / 'enrollment-second.json'),
+                     'NEWPARTICIPANT_SPONSOR_BALANCE': sponsor_balance,
+                     # every owner capability's maxCost is the template's ownerBudget, and a publish costs its own
+                     # byte length: the world apps' packages (104-150 KB) exceed the default 100000 (`notAccountOwner`)
+                     'NEWPARTICIPANT_OWNER_BUDGET': OWNER_BUDGET})
         self.config = self.W / 'deployment' / 'pinned-config.json'
         self.sponsor = self.W / 'sponsor'
         self.second = root / 'second'
         self.second.mkdir(mode=0o700)
-        (self.second / 'workspace.json').write_text(json.dumps({
-            'type': 'minidregg-participant-workspace-v1', 'host': str(self.host), 'socket': str(self.sock),
-            'config': str(self.config), 'key': str(root / 'second.key'), 'subject': self.SECOND}))
+        second = {'type': 'minidregg-participant-workspace-v1', 'host': str(self.host), 'socket': str(self.sock),
+                  'config': str(self.config), 'key': str(self.W / 'extra' / f'{self.SECOND}.key'), 'subject': self.SECOND}
+        # The second subject names the Host image digest the sponsor's `workspace init` pinned (one hash per run).
+        host_sha = json.loads((self.sponsor / 'workspace.json').read_text()).get('hostSha256')
+        if host_sha:
+            second['hostSha256'] = host_sha
+        (self.second / 'workspace.json').write_text(json.dumps(second))
         params = json.loads((self.W / 'genesis-params.json').read_text())
         self.SPONSOR = str(params['sponsor']['subject'])
         self.SPONSOR_ACCOUNT = str(params['sponsor']['accountId'])
@@ -318,72 +350,83 @@ class World:
         self.totals.append({'after': label, 'height': v.get('height'), 'total': v.get('total')})
         return v
 
-    def submit(self, label, workspace, body, prepare=False):
+    def submit(self, label, workspace, body, prepare=False, again=True):
         """One signed command, unjudged: the Host's outcome value. An `invoke` without an operation id gets
         one minted HERE, written into the caller's body, so no driver can forget it and a driver that
-        resubmits the same body (a retry of the same operation) reuses it."""
+        resubmits the same body (a retry of the same operation) reuses it. An invoke not yet quoted is
+        quoted and submitted by ONE `mini` process (`--quote-front-end`, `front_end_quote`). `again`: the
+        driver's decision that a body it already submitted (and the Host decided) is submitted once more
+        (module docstring); a step that wants the client's own local notice passes False."""
         if body.get('kind') == 'invoke' and 'opId' not in body:
             body['opId'] = op_id()
+        quote = None
         if body.get('kind') == 'invoke' and body['opId'] not in self.front_end_quoted:
-            self.quote_front_end(label, workspace, body)
+            quote = self.front_end_quote(body)
         out = self.attempts / label
         command = self.root / f'{label}.turn.json'
         command.write_text(json.dumps(body))
         args = ['activity', '--action', 'submit', '--workspace', workspace, '--command', command, '--out', out]
+        if quote is not None:
+            args += ['--quote-front-end', json.dumps(quote)]
         if prepare:
             args += ['--prepare-only', 'true']
-        return self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
+        if again:
+            args += ['--again', 'true']
+        value = self.last_json(self.sh(label, self.mini, *args, ok=(0, 1, 2)))
+        if quote is not None:
+            self.adopt_quote(label, body, out, value)
+        return value
 
-    def quote_front_end(self, label, workspace, body):
+    def front_end_quote(self, body):
         """An invocation declares the front-end work its replays draw (GPT-6 row E: one meter over every frame's
         method load and every send's deliverable check, `Invocation.frontEnd_within`), and a postage that pays
-        each send's delivery root load (`Deliverable.postagePays`). The client does not guess either: it PLANS the
-        invoke with a budget it can afford in the envelope and the postage (doubled while the plan runs out of it,
-        up to the policy's ceiling `MAXIMUM`), and reads the plan's `frontEnd`: the bytes the turn's
+        each send's delivery root load (`Deliverable.postagePays`). The client does not guess either: `mini`
+        PLANS the invoke with a budget it can afford in the envelope and the postage (doubled while the plan runs
+        out of it, up to the policy's ceiling `MAXIMUM`), and reads the plan's `frontEnd`: the bytes the turn's
         replays drew, decided or refused (a refused plan reports the meter at its failure point, so the same
         refusal is reached again), and the largest root load any send's delivery replays. It declares exactly the
         first in the envelope and, in the postage, the second times `postageLoads` (default 1): the loads the
         sender intends its message's delivery to perform (its root frame, plus each onward send's check or nested
-        call), which no plan at the sender can see. Once per operation, so a retry resubmits the same body. A body
-        whose envelope is written by hand (a row that under-declares on purpose) sets `frontEndAsWritten`."""
+        call), which no plan at the sender can see (native/resource-client/src/activity.rs `quote_front_end`).
+        Once per operation, so a retry resubmits the same body. A body whose envelope is written by hand (a row
+        that under-declares on purpose) sets `frontEndAsWritten`. Returns the quote `mini` takes, or None.
+        The probe's budget starts at four replays of the largest published package, so the probe is affordable
+        to the payer and its plan decides the same turn the submission will."""
         self.front_end_quoted.add(body['opId'])
         loads = int(body.pop('postageLoads', 1))
         if body.pop('frontEndAsWritten', False):
-            return
-        # The probe's budget starts at four replays of the largest published package and doubles while the plan
-        # runs out of it (`frontEndExhausted` / `postageFrontEnd`), up to the policy's ceiling: so the probe is
-        # affordable to the payer and its plan decides the same turn the submission will.
-        budget = (4 * int(FRONT['replayBytes']), 4 * int(FRONT['coreBytes']))
-        attempt = 0
-        while True:
-            probe = json.loads(json.dumps(body))
-            for key in ('envelope', 'postage'):
-                if key in probe:
-                    probe[key]['replayBytes'] = str(budget[0])
-                    probe[key]['coreBytes'] = str(budget[1])
-            command = self.root / f'{label}.front-end-plan-{attempt}.json'
-            command.write_text(json.dumps(probe))
-            r = self.last_json(self.sh(f'{label}-front-end-plan-{attempt}', self.mini, 'activity', '--action', 'submit',
-                                       '--workspace', workspace, '--command', command,
-                                       '--out', self.attempts / f'{label}-front-end-plan-{attempt}',
-                                       '--prepare-only', 'true', ok=(0, 1, 2))) or {}
-            planned = r.get('frontEnd')
-            if not planned:
-                raise RuntimeError(f'{label}: the plan reported no front end: {r}')
-            short = any(n in str(r.get('verdict') or '') for n in ('frontEndExhausted', 'postageFrontEnd'))
-            ceiling = (int(MAXIMUM['replayBytes']), int(MAXIMUM['coreBytes']))
-            if not short or budget == ceiling:
-                break
-            budget = (min(2 * budget[0], ceiling[0]), min(2 * budget[1], ceiling[1]))
-            attempt += 1
-        body['envelope']['replayBytes'] = str(planned['replayBytes'])
-        body['envelope']['coreBytes'] = str(planned['coreBytes'])
-        if 'postage' in body:
-            body['postage']['replayBytes'] = str(loads * int(planned['postageReplayBytes']))
-            body['postage']['coreBytes'] = str(loads * int(planned['postageCoreBytes']))
+            return None
+        return {'replayBytes': str(4 * int(FRONT['replayBytes'])), 'coreBytes': str(4 * int(FRONT['coreBytes'])),
+                'ceilingReplayBytes': str(MAXIMUM['replayBytes']), 'ceilingCoreBytes': str(MAXIMUM['coreBytes']),
+                'postageLoads': str(loads)}
+
+    def adopt_quote(self, label, body, out, value):
+        """The declaration `mini` quoted (OUT/declared.json, OUT/front-end.json, written before it signs anything)
+        becomes the caller's body, so a retry of the same operation resubmits exactly it."""
+        declared, planned = out / 'declared.json', out / 'front-end.json'
+        if not (declared.exists() and planned.exists()):
+            raise RuntimeError(f'{label}: the plan reported no front end: {value}')
+        declared, planned = json.loads(declared.read_text()), json.loads(planned.read_text())
+        for key in ('envelope', 'postage'):
+            if key in body:
+                body[key] = declared[key]
         self.quoted[label] = (price(body['envelope']), price(body['postage']) if 'postage' in body else 0)
         self.planned[label] = planned
         self.quote_bodies[label] = body
+
+    def quote_front_end(self, label, workspace, body):
+        """Quote an invoke without submitting it (`mini activity --action quote`): `front_end_quote`'s
+        declaration written into BODY and recorded under LABEL."""
+        quote = self.front_end_quote(body)
+        if quote is None:
+            return
+        out = self.attempts / f'{label}-front-end-quote'
+        command = self.root / f'{label}.front-end-quote.json'
+        command.write_text(json.dumps(body))
+        value = self.last_json(self.sh(f'{label}-front-end-quote', self.mini, 'activity', '--action', 'quote',
+                                       '--workspace', workspace, '--command', command, '--out', out,
+                                       '--quote', json.dumps(quote), ok=(0, 1, 2))) or {}
+        self.adopt_quote(label, body, out, value)
 
     def payer_of(self, workspace):
         """The submitter's own (account, spend capability): the sponsor's, or the enrolled second subject's."""
@@ -397,13 +440,13 @@ class World:
                     '--request', json.dumps(quote_request(body)))
         return quoted_heap(self.last_json(r))
 
-    def turn(self, label, workspace, body, expect, detail=None, prepare=False):
+    def turn(self, label, workspace, body, expect, detail=None, prepare=False, again=True):
         """One signed command. `expect`: installed | replayed | refused | conflict | prepared. A refusal
         may name its reason in `detail` (a substring, or a list of substrings, of the Host's refusal text).
         A `deliver`/`exhaust` first asks the Host's quote for the heap its checkpoint needs and declares it."""
         if body.get('kind') in RESUME_KINDS:
             body = covering_body(body, self.quote_heap(label, workspace, body), self.payer_of(workspace))
-        value = self.judge(label, self.submit(label, workspace, body, prepare), expect, detail)
+        value = self.judge(label, self.submit(label, workspace, body, prepare, again), expect, detail)
         if body.get('kind') == 'publish' and value.get('type') == 'confirmed':
             self.learn_front_end(f'{label}-front-end')
         return value
@@ -608,3 +651,36 @@ class World:
             return None
         total = next((f['value'] for f in s.get('fields', []) if f.get('name') == 'total'), {})
         return int(total.get('value', '-1')) if total.get('tag') == 'natural' else None
+
+
+# --- the demo's economy: every credit figure the demo genesis and enrolment carry, from the policy above ---------------
+# The Tally seed's front-end quote (op 214 `pins[].frontEnd`, measured on the shipped Host, 2026-10-27): 2011 source
+# bytes replayed, 9038 typed-core bytes. `bend` declares BEND_TICKS source ticks and a purse of BEND_PURSE_PRICES birth
+# prices (the first await escrows a pair, which the Host priced at 63,392 against 2 birth prices of 60,886: so two prices and one more).
+TALLY_QUOTE = {'replayBytes': 2011, 'coreBytes': 9038}
+BEND_TICKS = 300
+BEND_PURSE_PRICES = 3
+GRANT_RUNS = 10          # a member's starting grant runs the Tally this many times
+HOUSE_HEADROOM_RUNS = 5  # the house runs the seed's Tally once and has this many more runs
+SEED_OTHER_SPEND = 10000  # house's other seed spend (documents, posts, the story, three installs): measured 9,185
+GRANT_SLACK = 7280       # publishes, creates and the like on top of the runs, rounding the grant to a whole 1,225,000
+DEMO_MEMBERS = 55        # door freeCap 50 plus the seed's roster (house, sage, public, hermes, a spare)
+SPONSOR_FLOOR = 20000    # door.json sponsorFloor
+
+
+def demo_economy():
+    """The figures a fresh demo genesis and its enrolment carry, all derived here (policy_of's tariff is the one
+    source of the rates; this is the one source of the rest). infra sets these at re-genesis."""
+    t = {k: int(v) for k, v in TARIFF.items()}
+    birth = t['base'] + t['sourceTicks'] * BEND_TICKS + t['replayBytes'] * TALLY_QUOTE['replayBytes'] + t['coreBytes'] * TALLY_QUOTE['coreBytes']
+    run = (BEND_PURSE_PRICES + 1) * birth
+    grant = GRANT_RUNS * run + GRANT_SLACK
+    house = (1 + HOUSE_HEADROOM_RUNS) * run + SEED_OTHER_SPEND
+    sponsor = DEMO_MEMBERS * grant + SPONSOR_FLOOR
+    return {'tallyBirthPrice': birth, 'tallyRunCost': run, 'memberGrant': grant, 'houseMinimum': house,
+            'houseSatisfiedByGrant': grant >= house, 'sponsorGenesisBalance': sponsor, 'members': DEMO_MEMBERS,
+            'doorFunding': grant, 'sponsorFloor': SPONSOR_FLOOR}
+
+
+if __name__ == '__main__':
+    print(json.dumps(demo_economy(), indent=1))

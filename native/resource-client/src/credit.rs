@@ -1,4 +1,4 @@
-//! P-CREDIT (PLACE §2.10): a week in a room, bought with a posting.
+//! P-CREDIT (docs/PLACE.md §2.10): a week in a room, bought with a posting.
 //!
 //! A room's tariff is data on the room cell `R` itself: declared fields
 //! (`TARIFF_FIELDS`), written only by a holder of `mutate` on `R` (the
@@ -28,7 +28,7 @@ pub(crate) const HERMES_TOPIC: &str = "hermes";
 
 /// Fields a founder sets by `tariff ROOM set FIELD N`; the rest are written
 /// by `room concierge` (install) and name accounts and subjects.
-const SETTABLE: &[&str] = &["week", "birth", "hermes/turn", "period", "open"];
+const SETTABLE: &[&str] = &["week", "birth", "hermes/turn", "period", "open", "hermes/provider", "hermes/tools", "hermes/compute"];
 
 /// The topic a concierge's refund publishes on the till.
 pub(crate) const REFUND_TOPIC: &str = "refund";
@@ -381,6 +381,18 @@ fn window_of(root: &Path, ws: &Value, via: &str, capability: &str) -> Result<(St
     Ok((workspace::member(head, "notAfter")?.to_owned(), places))
 }
 
+/// `chat join` of a room this workspace already names (a guest's observe
+/// reference): adopt the newest member window addressed to me in `inbox`
+/// exactly as `room status --inbox` does. Returns whether NAME now presents
+/// a window (adopted now, or already).
+pub(crate) fn adopt_window_from(root: &Path, ws: &Value, name: &str, inbox: &Path) -> Result<bool> {
+    let current = room(root, ws, name)?;
+    if adopt_window(root, ws, name, &current, inbox)?.is_some() {
+        return Ok(true);
+    }
+    Ok(window(root, name)?.is_some())
+}
+
 /// Adopt the newest member window for room `name` from `inbox`: every
 /// delegated room reference addressed to me whose target is the room; the one
 /// whose signed capability view ends latest replaces `NAME` (the guest
@@ -695,6 +707,37 @@ fn show_tariff(room: &Room, name: &str) {
     }
 }
 
+/// `--again` (present, or `--again true`).
+fn flag(args: &mut Args, name: &str) -> Result<bool> {
+    match args.optional(name).as_deref().map(|v| v.to_str()) {
+        None => Ok(false),
+        Some(Some("true")) => Ok(true),
+        Some(Some("false")) => Ok(false),
+        _ => Err(format!("--{name} must be true or false")),
+    }
+}
+
+/// The operation record a payment is retained under; `None` when an explicitly named record
+/// already holds this exact payment confirmed (printed: nothing more to do). Without a named
+/// record the verb uses its request's record chain (`fleet::default_operation`): a rerun never
+/// pays twice, and a further payment of the same request needs `--again`.
+fn money_record(root: &Path, family: &str, named: Option<PathBuf>, context: &Value, again: bool) -> Result<Option<PathBuf>> {
+    match named {
+        Some(path) => {
+            if again {
+                return Err("--again chooses the next record of the request's chain; with --operation-record name a new record instead".into());
+            }
+            if let Some(recovered) = crate::fleet::recover_bound_operation(root, &path, context)? {
+                print_json(&recovered)?;
+                return if recovered["status"] == "confirmed" { Ok(None) }
+                    else { Err(format!("recorded {family} is not confirmed; exact recovery only")) };
+            }
+            Ok(Some(path))
+        }
+        None => crate::fleet::default_operation(root, family, context, again).map(Some),
+    }
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = text(args.required("action")?, "credit action")?;
     let root = absolute(&path(args.required("dir")?))?;
@@ -752,6 +795,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let amount = opt(&mut args, "amount")?;
             let account = opt(&mut args, "account")?;
             let outbox = opt(&mut args, "outbox")?.map(PathBuf::from);
+            let operation = args.optional("operation-record").map(path);
+            let again = flag(&mut args, "again")?;
             args.finish()?;
             let current = room(&root, &ws, &name)?;
             let week = current.need("week")?.to_owned();
@@ -773,17 +818,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 return Ok(());
             }
             let account = my_account(&root, &ws, account.as_deref())?;
+            // The request's identity (never the height, which moves when this very payment
+            // lands): room, payer, till, amount, and the member window it renews.
+            let window = window(&root, &name)?.map(|(capability, after)| json!([capability, after]));
+            let context = json!({"action":"pay","room":current.target,"account":workspace::reference(&root, &account)?,
+                "till":till,"amount":amount,"window":window});
+            let Some(record) = money_record(&root, "pay", operation, &context, again)? else { return Ok(()) };
             // The price and the height it was read at travel with the payment:
             // the concierge decides against the tariff at that height.
             let payload = renew_memo(&current.target, &week, current.height);
-            let result = crate::fleet::pay_turn(
-                &root,
-                &account,
-                &till,
-                &amount,
-                None,
-                Some((RENEW_TOPIC, payload.as_bytes())),
-            )?;
+            let result = crate::fleet::pay_turn_recorded(&root, &account, &till, &amount, None,
+                Some((RENEW_TOPIC, payload.as_bytes())), Some(&record), context)?;
             println!(
                 "paid {amount} to {name}'s till (account {till}) with {RENEW_TOPIC} #{} at the price {week} read at height {} (fee {}, transaction {}); the concierge issues your window or refunds it",
                 result["publication"]["sequence"].as_str().unwrap_or("?"),
@@ -798,6 +843,8 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let amount = text(args.required("amount")?, "amount")?;
             let account = opt(&mut args, "account")?;
             let to = opt(&mut args, "to")?;
+            let operation = args.optional("operation-record").map(path);
+            let again = flag(&mut args, "again")?;
             args.finish()?;
             let current = room(&root, &ws, &name)?;
             // Hermes's budget when the room has a Hermes, else the
@@ -810,7 +857,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 (Some(other), _) => return Err(format!("topup --to hermes|concierge, not {other}")),
             };
             let account = my_account(&root, &ws, account.as_deref())?;
-            let result = crate::fleet::pay_turn(&root, &account, &destination, &amount, None, None)?;
+            let context = json!({"action":"topup","room":current.target,"account":workspace::reference(&root, &account)?,
+                "to":destination,"amount":amount});
+            let Some(record) = money_record(&root, "topup", operation, &context, again)? else { return Ok(()) };
+            let result = crate::fleet::pay_turn_recorded(&root, &account, &destination, &amount, None, None,
+                Some(&record), context)?;
             println!(
                 "topped up {name}'s {whose} {destination} by {amount} (fee {}, transaction {})",
                 result["fee"].as_str().unwrap_or("?"),
@@ -818,7 +869,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             );
             Ok(())
         }
-        // One Hermes turn's payment (PLACE §2.10 "every Hermes turn debits
+        // One Hermes turn's payment (docs/PLACE.md §2.10 "every Hermes turn debits
         // tariff.hermes/turn"): one fleet turn from Hermes's account to the
         // room's till, `hermes/turn` credit plus the fleet fee, publishing
         // MEMO on Hermes's `hermes` topic. An account that cannot cover it is
@@ -969,11 +1020,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let amount = text(args.required("amount")?, "amount")?;
             let asset = opt(&mut args, "asset")?;
             let memo = text(args.required("memo")?, "memo")?;
+            let operation = args.optional("operation-record").map(path);
+            let again = flag(&mut args, "again")?;
             args.finish()?;
             decimal(&to, "refund account")?;
             decimal(&amount, "refund amount")?;
-            let result = crate::fleet::pay_turn(&root, &account, &to, &amount, asset.as_deref(),
-                Some((REFUND_TOPIC, memo.as_bytes())))?;
+            // The memo names what is refunded, so it is part of the refund's identity.
+            let context = json!({"action":"refund","account":workspace::reference(&root, &account)?,"to":to,
+                "amount":amount,"asset":asset,"memo":memo});
+            let Some(record) = money_record(&root, "refund", operation, &context, again)? else { return Ok(()) };
+            let result = crate::fleet::pay_turn_recorded(&root, &account, &to, &amount, asset.as_deref(),
+                Some((REFUND_TOPIC, memo.as_bytes())), Some(&record), context)?;
             print_json(&json!({"type":"minidregg-refund-v1","from":account,"to":to,"amount":amount,
                 "memo":memo,"fee":result["fee"],"transaction":result["receipt"]["transactionId"]}))
         }

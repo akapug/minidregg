@@ -12,6 +12,7 @@ member's observe grants.
 -/
 import Kernel.NativeClientConsent
 import Kernel.NativeThinConsent
+import Host.ThinBirthConsent
 import Kernel.ConsentAnchor
 import Kernel.NativeSpecializedConsent
 import Kernel.NativeHostGenesis
@@ -19,6 +20,8 @@ import Compiler.GenericSimplexSourceAnchor
 import Compiler.FnEvidenceCodec
 import Host.SourceAgreementJson
 import Host.ObjectiveInvocationSettings
+import Host.ProviderUsage
+import Kernel.ProviderRouteConsent
 import Host.RequestRefusal
 import Lean.Data.Json
 
@@ -36,8 +39,7 @@ instance : FromJson JointConsensusSettings where
       throw "jointConsensus must use canonical lowercase hex"
     let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
       | throw "jointConsensus is not a canonical Context"
-    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
-        context.wellFormed do
+    unless context.wellFormed do
       throw "jointConsensus Context is noncanonical or committee is not well formed"
     pure ⟨context⟩
 
@@ -102,7 +104,24 @@ structure Settings where
   disabledEvaluators : Option (List String) := none
   lifecycleManagement : Option LifecycleManagementSettings := none
   objectiveInvocation : Option ObjectiveInvocationSettings := none
+  /-- The deployment's provider services, as the serving Host and the local
+  semantic Host read them from this same file. Consent USES them: a draft that
+  installs a law at a service resource must install exactly the pinned route
+  law (`Kernel.ProviderRouteConsent.check`). -/
+  providerServices : Option (List ProviderUsage.ServiceSettings) := none
+  /-- Host authoring coordinates, retained without making them consent
+  authority. Host.Main validates their detailed selectors before authoring;
+  consent independently admits history and reconstructs each proposed plan.
+  These rows do not enter NativeHost.Config or provider route laws. -/
+  agentLifetimeDispatchTargets : Option (List Json) := none
   deriving FromJson, ToJson
+
+/-- The pinned services' per-operation fee schedules, parsed with the Host's
+own checker (`ProviderUsage.checkedServices`). -/
+def Settings.providerRoutes (settings : Settings) :
+    Except String ProviderRouteConsent.Services := do
+  let some services := settings.providerServices | return []
+  return (← ProviderUsage.checkedServices services).map fun pin => (pin.1, pin.2.schedule)
 
 def Settings.disabledEvaluatorIds (settings : Settings) :
     List Minidregg.Theory.TypedAuthorization.Digest :=
@@ -114,7 +133,8 @@ def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit 
     if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
-def Settings.config (settings : Settings) : NativeHost.Config where
+def Settings.config (settings : Settings) : NativeHost.Config :=
+  NativeHost.Config.ofInputs {
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   disabledEvaluators := settings.disabledEvaluatorIds
@@ -138,7 +158,19 @@ def Settings.config (settings : Settings) : NativeHost.Config where
       ⟨pin.capability⟩, ⟨pin.policyAddress.toNat!⟩⟩
   grainBirthTariff := settings.grainBirthTariff.map fun tariff => ⟨tariff.base, tariff.perBirth⟩
   completionCustodianKey := settings.completionCustodianKey.map fun key =>
-    (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key)).toOption.getD []
+    (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key)).toOption.getD [] }
+
+/-- Recognizing the Host's authoring table cannot change the verifier's
+deployment, tariffs, storage, signature verifier, evaluator or other law. -/
+theorem Settings.config_lifetimeDispatchTargets (settings : Settings)
+    (targets : Option (List Json)) :
+    ({ settings with agentLifetimeDispatchTargets := targets }).config = settings.config := rfl
+
+/-- The separately checked provider-route laws are equally unaffected. -/
+theorem Settings.providerRoutes_lifetimeDispatchTargets (settings : Settings)
+    (targets : Option (List Json)) :
+    ({ settings with agentLifetimeDispatchTargets := targets }).providerRoutes =
+      settings.providerRoutes := rfl
 
 def Settings.checkJointConsensus (settings : Settings) : Except String Unit := do
   let some pin := settings.jointConsensus | return ()
@@ -161,23 +193,34 @@ def Settings.checkJointConsensus (settings : Settings) : Except String Unit := d
   pure ()
 
 
-def loadSettings (path : System.FilePath) : IO Settings := do
-  let json ← IO.ofExcept (SourceAgreementJson.parse (← IO.FS.readFile path))
-  let object ← IO.ofExcept json.getObj?
+/-- Parse the complete original settings. Unknown non-null fields still
+refuse; no projected configuration or consent fallback is constructed. -/
+def parseSettings (json : Json) : Except String Settings := do
+  let object ← json.getObj?
   let allowed := ["domain", "federation", "factoryId", "resourceBookId",
     "authorityCellId", "issuer", "ownerBudget", "lifetime", "birthSlack",
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "genesisHeight", "expectedSeed", "storageBinary",
     "storageRoot", "signatureBinary", "checkpointKey", "checkpointEvery",
     "jointConsensus", "nockFSync", "disabledEvaluators", "fnGateway",
-    "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation"]
+    "grainBirthTariff", "completionCustodianKey", "lifecycleManagement", "objectiveInvocation",
+    "providerServices", "agentLifetimeDispatchTargets", "requestRate"]
   -- A deployment config written by `mini bootstrap` spells every absent Host
   -- option as null. Null is absence; any other value of a key this provider
   -- cannot honor refuses, since it would change the semantics it verifies.
   unless object.foldl (init := true) (fun valid key value =>
       valid && (allowed.contains key || value == Json.null)) do
-    throw (IO.userError "unsupported settings in client consent provider")
-  let settings : Settings ← IO.ofExcept (fromJson? json)
+    throw "unsupported settings in client consent provider"
+  let settings : Settings ← fromJson? json
+  if let some targets := settings.agentLifetimeDispatchTargets then
+    unless 0 < targets.length && targets.length ≤ 8 && targets.all (fun row =>
+        match row with | .obj _ => true | _ => false) do
+      throw "agentLifetimeDispatchTargets metadata requires one to eight objects"
+  pure settings
+
+def loadSettings (path : System.FilePath) : IO Settings := do
+  let json ← IO.ofExcept (SourceAgreementJson.parse (← IO.FS.readFile path))
+  let settings ← IO.ofExcept (parseSettings json)
   if let some pin := settings.fnGateway then
     let some address := pin.policyAddress.toNat? | throw (IO.userError "invalid gateway policy address")
     unless toString address == pin.policyAddress do
@@ -188,6 +231,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
     let bytes ← IO.ofExcept (SourceAgreementJson.decodeHex "completionCustodianKey" (.str key))
     unless bytes.length == 32 && SourceAgreementJson.encodeHex bytes == key do
       throw (IO.userError "noncanonical completion custodian key")
+  discard <| IO.ofExcept settings.providerRoutes
   IO.ofExcept settings.checkDisabledEvaluators
   IO.ofExcept settings.checkJointConsensus
   pure settings
@@ -223,20 +267,11 @@ def writeSessionFrame (output : IO.FS.Stream) (operation : UInt8)
   output.write (lengthBytes response.size ++ response)
   output.flush
 
+/-- Live signature checks use the linked native kernel. The configured artifact
+path remains available to carry pins, not to a launch-time helper process. -/
 def withPinnedSignature {α : Type} (config : NativeHost.Config)
     (body : NativeHost.Config → IO α) : IO α :=
-  IO.FS.withTempDir fun directory => do
-    let pinned := directory / "credential-verifier"
-    let bytes ← IO.FS.readBinFile config.signature.binary
-    IO.FS.writeBinFile pinned bytes
-    let permission ← IO.Process.output
-      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
-    unless permission.exitCode == 0 do
-      throw (IO.userError "cannot make pinned credential verifier executable")
-    -- A launch failure is detected before the first semantic replay. The
-    -- verifier's usage exit here is expected; it has no arguments yet.
-    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
-    body { config with signature := ⟨pinned⟩ }
+  body config
 
 
 
@@ -250,12 +285,26 @@ abbrev Session (config : NativeHost.Config) := Sigma (ConsentAnchor.Basis config
 abbrev FullSession (config : NativeHost.Config) := Sigma (NativeHostReplay.Verified config)
 
 /-- The Reader of the Store the consent provider opened, at `target`'s head: the
-replay walk reads lifecycle history through it. -/
-def storeReader (config : NativeHost.Config) (target : NativeHost.Durable) :
+replay walk reads lifecycle history through it. Its records are the Store's,
+verified under the head; its past STATES are the provider's own (`own`, the
+bases it computed) or the seed's fold, never a Store checkpoint
+(`Reader.ownOnly`, CONSENT-OWN). -/
+def storeReader (config : NativeHost.Config) (target : NativeHost.Durable)
+    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) :
     IO ((store : DurableHistory.StoreIdentity) × DurableHistoryReader.Reader ResourceBirthCodec.rootBytes store) := do
   match ← DurableHistoryStore.readerOf config.transport ResourceBirthCodec.rootBytes target with
-  | .ok sealed => pure sealed
+  | .ok ⟨store, reader⟩ => pure ⟨store, reader.ownOnly config.transport own⟩
   | .error detail => throw (IO.userError s!"consent history reader: {detail}")
+
+/-- How many own bases a provider retains (newest first). -/
+def retainedOwnBound : Nat := 16
+
+/-- Retain the own bases a new admission holds ahead of the older ones. -/
+def retainOwn {config : NativeHost.Config} (session : Session config)
+    (retained : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes)) :
+    List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) :=
+  (session.2.own ++ retained.filter fun base =>
+    !(session.2.own.any fun held => held.height == base.height)).take retainedOwnBound
 
 /-- First admission. A retained anchor the Store contradicts (another genesis
 log, a rolled-back head, a rewritten prefix, another root at the anchor)
@@ -278,11 +327,12 @@ def verifyInitial (config : NativeHost.Config) (retained : Option ConsentAnchor.
 /-- Admit only the records the Store appended since `old` (`extendFrom`: the
 chain continues from the held one and every new tag verifies). An anchored
 basis whose suffix admission fails is re-admitted from genesis. -/
-def refresh (config : NativeHost.Config) (old : Session config) : IO (Session config) := do
+def refresh (config : NativeHost.Config) (old : Session config)
+    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) : IO (Session config) := do
   let ⟨target, seedExact, acceptedExact, logStartExact⟩ ← IO.ofExcept
     (← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes old.1)
   if target.height = old.1.image.accepted.length then return old
-  let ⟨_, reader⟩ ← storeReader config target
+  let ⟨_, reader⟩ ← storeReader config target own
   match ← old.2.extendAppended config reader target seedExact acceptedExact logStartExact with
   | .ok basis => pure ⟨target, basis⟩
   | .error failure =>
@@ -296,9 +346,10 @@ def refresh (config : NativeHost.Config) (old : Session config) : IO (Session co
 
 /-- The full re-admission of the held target; an anchored session is
 re-admitted from genesis once and then held in full. -/
-def upgrade (config : NativeHost.Config) (session : Session config) :
+def upgrade (config : NativeHost.Config) (session : Session config)
+    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) :
     IO (FullSession config × Session config) := do
-  let ⟨_, reader⟩ ← storeReader config session.1
+  let ⟨_, reader⟩ ← storeReader config session.1 own
   match ← session.2.full? config reader with
   | .error failure =>
       throw (IO.userError s!"consent prefix refused at {failure.index}: {failure.detail}")
@@ -319,11 +370,13 @@ def selectedHeaders (config : NativeHost.Config) (session : Session config)
       throw (IO.userError "prepared role selects another custody signer")
   pure (headersBytes headers)
 
-def consent (config : NativeHost.Config) (session : Session config) (operation : UInt8)
+def consent (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
+    (session : Session config) (operation : UInt8)
     (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
   let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
     | throw (IO.userError "noncanonical retained local intent")
+  IO.ofExcept (ProviderRouteConsent.checkIntent services wanted)
   let (signer, rest) ← splitPair rest
   -- Bind the selected custody key at EACH source extension, including a key
   -- change between intent signing and observation/transaction signing.
@@ -338,15 +391,17 @@ def consent (config : NativeHost.Config) (session : Session config) (operation :
       pure intentBytes
   | 221 =>
       let (signature, candidate) ← splitPair rest
-      let checked ← IO.ofExcept (NativeClientConsent.checkObservation config session.2 wanted signature candidate)
+      let checked ← IO.ofExcept ((NativeClientConsent.checkObservation config session.2 wanted signature candidate).mapError
+        NativeClientConsent.ObservationRefusal.message)
       selectedHeaders config session wanted checked.headers
   | 222 =>
       let headers ← IO.ofExcept (NativeClientConsent.checkIntentPlan config session.2 wanted rest)
       selectedHeaders config session wanted headers
   | _ => throw (IO.userError "unsupported consent operation")
 
-/-- Thin consent frames (230 intent, 231 observation, 232 plan): answered from
-local custody alone, with no Store and no replay (`Kernel.NativeThinConsent`).
+/-- Thin consent frames (230 intent, 231 observation, 232 plan; 234 birth intent and
+235 birth plan, which carry the member's own birth source): answered from local custody alone,
+with no Store and no replay (`Kernel.NativeThinConsent`, `Kernel.NativeThinBirth`).
 A refusal names what thin consent cannot show; nothing falls back to a replay
 or to signing what was not checked. -/
 def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
@@ -355,12 +410,16 @@ def thinRefusal (refusal : NativeThinConsent.Refusal) : String :=
       s!"thin consent cannot display this turn: target {target}: {what} unsigned"
   | other => s!"thin consent refused: {repr other}"
 
+/-- A write's display: the post's bytes at every address the opening discloses, and its root only
+when the opening seals nothing (`NativeThinConsent.Display`). -/
 def displayJson (display : NativeThinConsent.Display) : Json :=
   match display.post with
   | none => Json.mkObj [("target", toJson (toString display.target)), ("read", true)]
-  | some (bytes, root) => Json.mkObj [("target", toJson (toString display.target)),
-      ("postRoot", toJson (toString root.value)),
-      ("postBytes", toJson (SourceAgreementJson.encodeHex bytes))]
+  | some (bytes, root) => Json.mkObj ([("target", toJson (toString display.target))] ++
+      (match root with
+        | some root => [("postRoot", toJson (toString root.value))]
+        | none => []) ++
+      [("postBytes", toJson (SourceAgreementJson.encodeHex bytes))])
 
 /-- A delegation's display: the signed parent id, target and child capability
 bytes. The child's lineage is the kernel's copy of that parent, not shown. -/
@@ -373,16 +432,67 @@ def shownJson : NativeThinConsent.Shown → Json
   | .invocation displays => Json.arr (displays.map displayJson).toArray
   | .delegation display => Json.arr #[delegateJson display]
 
-def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
+/-- A thin birth's display (`Kernel.NativeThinBirth.BirthDisplay`): the member-authored
+descriptor and source capabilities, the coordinates the Host's authoring read (shown, gated at
+admission), and the finalized descriptor the headers sign (the authored one plus the kernel's
+auxiliary creates). -/
+def birthJson (display : NativeThinBirth.BirthDisplay) : Json :=
+  Json.mkObj [("birth", Json.mkObj [
+    ("draft", toJson (SourceAgreementJson.encodeHex display.draft)),
+    ("sourceCapabilities", toJson (display.capabilities.map fun capability => toString capability.value)),
+    ("coordinates", Json.mkObj [
+      ("height", toJson (toString display.coordinates.height)),
+      ("issuerEpoch", toJson (toString display.coordinates.issuerEpoch)),
+      ("policyEpochs", toJson (display.coordinates.policyEpochs.map fun (policy, epoch) =>
+        [toString policy, toString epoch])),
+      ("lineage", toJson (display.coordinates.lineage.map fun (placement, ancestors) =>
+        Json.mkObj [("placement", toJson (toString placement)),
+          ("ancestors", toJson (ancestors.map toString))]))]),
+    -- The money terms the member consents to (audit pass 22/24 follow-up): the owner budget
+    -- and lifetime its grants carry and the fee, rendered, not only inside the draft hex.
+    ("terms", Json.mkObj [
+      ("ownerBudget", toJson (toString display.coordinates.ownerBudget)),
+      ("lifetime", toJson (toString display.coordinates.lifetime)),
+      ("fee", Json.mkObj [
+        ("payer", toJson (toString display.coordinates.fee.payer)),
+        ("collector", toJson (toString display.coordinates.fee.collector)),
+        ("asset", toJson (toString display.coordinates.fee.asset)),
+        ("amount", toJson (toString display.coordinates.fee.amount))])]),
+    ("finalized", toJson (SourceAgreementJson.encodeHex display.finalized))])]
+
+/-- The member's own birth source, as the thin birth frames carry it. -/
+def birthSource (bytes : List UInt8) : IO Json := do
+  let some text := String.fromUTF8? bytes.toByteArray
+    | throw (IO.userError "thin birth source is not UTF-8")
+  match Json.parse text with
+  | .ok json => pure json
+  | .error detail => throw (IO.userError s!"thin birth source JSON: {detail}")
+
+def thin (services : ProviderRouteConsent.Services) (config : NativeHost.Config)
+    (operation : UInt8) (payload : List UInt8) : IO (List UInt8) := do
   let (intentBytes, rest) ← splitPair payload
   let some wanted := NativeObservationCodec.intentCodec.decode intentBytes
     | throw (IO.userError "noncanonical retained local intent")
-  unless NativeObservationCodec.intentCodec.encode wanted == intentBytes do
-    throw (IO.userError "noncanonical retained local intent")
+  IO.ofExcept (ProviderRouteConsent.checkIntent services wanted)
   let (signer, rest) ← splitPair rest
   unless signer.length == 32 do throw (IO.userError "custody signer is not an Ed25519 key")
   let semantics := config.profile.semantics
+  -- Only the births the thin birth arm consents to (`NativeThinBirth.thinBirthIntent`); a grain
+  -- birth (a provider purse's) keeps its intent consent, the provider-route check above.
+  if (operation == 230 || operation == 232) && NativeThinBirth.thinBirthIntent wanted then
+    throw (IO.userError "a thin birth is consented with the member's source (thin birth frames 234/235); nothing signed")
   match operation with
+  | 234 =>
+      match ThinBirthConsent.checkIntent config (← birthSource rest) wanted with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok _ => pure intentBytes
+  | 235 =>
+      let (planBytes, sourceBytes) ← splitPair rest
+      match ThinBirthConsent.checkPlan config (← birthSource sourceBytes) wanted planBytes with
+      | .error refusal => throw (IO.userError (thinRefusal refusal))
+      | .ok (headers, shown) =>
+          pure (Json.mkObj [("headers", toJson (headers.map SourceAgreementJson.encodeHex)),
+            ("display", birthJson shown)]).compress.toUTF8.toList
   | 230 =>
       unless rest.isEmpty do throw (IO.userError "intent consent has unexpected trailing bytes")
       pure intentBytes
@@ -394,7 +504,7 @@ def thin (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8)
       | .ok headers => pure (headersBytes headers)
   | 232 =>
       let (planBytes, viewsBytes) ← splitPair rest
-      let viewsCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+      let viewsCodec := (StreamCodec.list bytesStream).toLawful
       let some views := viewsCodec.decode viewsBytes
         | throw (IO.userError "noncanonical served view list")
       match NativeThinConsent.checkPlanThin config.deployment semantics config.federation
@@ -431,7 +541,9 @@ def specialized (extraExpected : ExtraExpected) (settings : Settings) (config : 
   else match full with
     | some verified => extraExpected settings config verified operation request
     | none => throw (IO.userError "entry consent adapter requires the full re-admission")
-  let _ ← IO.ofExcept (NativeSpecializedConsent.checkExact expected candidate)
+  -- The re-derived plan, or its height pin where the operation has one (op 86 today).
+  let _ ← IO.ofExcept (NativeSpecializedConsent.checkExactOrPinned expected
+    (NativeSpecializedConsent.pinnedExpectedBytes operation request expected) candidate)
   pure candidate
 
 def possession (config : NativeHost.Config) (payload : List UInt8) : IO (List UInt8) := do
@@ -494,16 +606,19 @@ def objectiveHeaders (extraObjective : ExtraObjective) (settings : Settings)
   pure (headersBytes headers)
 
 /-- Frame 228 offers custody's retained anchor before the first admission;
-frame 229 returns the anchor of the current admission. Possession (226) is a
+frame 229 returns the anchor of the current admission; frame 233 re-checks the
+Store against the held admission (a resident provider sends it once per client
+connection, `ConsentAnchor.recheckStore`). Possession (226) is a
 function of the retained command and the configuration, and thin consent
-frames (230–232) read no Store: they admit nothing. This process serves no
+frames (230–232, 234, 235) read no Store: they admit nothing. This process serves no
 codec frames: the one pure codec implementation is the Host's storeless
 `codec` loop (`Host.Main.serveCodec`). Every other frame first admits the Store (`verifyInitial`
 once, then `refresh`); a failed admission terminates the provider, so no cached
 success survives an observed rollback, rewritten prefix, or failed suffix. -/
 partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjective) (settings : Settings)
     (config : NativeHost.Config) (retained : Option ConsentAnchor.Anchor)
-    (held : Option (Session config)) (input output : IO.FS.Stream) : IO Unit := do
+    (held : Option (Session config)) (input output : IO.FS.Stream)
+    (own : List (DurableHistoryReader.OwnBase ResourceBirthCodec.rootBytes) := []) : IO Unit := do
   let first ← input.read 1
   if first.isEmpty then return
   let lengthWire ← readExactly input 4 first
@@ -512,51 +627,83 @@ partial def serve (extraExpected : ExtraExpected) (extraObjective : ExtraObjecti
   let body ← readExactly input length
   let operation := body[0]!
   let payload := body.toList.drop 1
-  if operation ≥ 230 && operation ≤ 232 || operation == 226 then
-    let answer ← try pure (operation, ← if operation == 226 then possession config payload
-        else thin config operation payload)
+  if operation ≥ 230 && operation ≤ 232 || operation == 234 || operation == 235 || operation == 226 then
+    let answer ← try
+        let reply ← if operation == 226 then possession config payload
+          else do thin (← IO.ofExcept settings.providerRoutes) config operation payload
+        pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained held input output
+    serve extraExpected extraObjective settings config retained held input output own
+  else if operation == 236 && !payload.isEmpty then
+    writeSessionFrame output 255 "full consent readiness requires empty input".toUTF8.toList
+    serve extraExpected extraObjective settings config retained held input output own
   else if operation == 228 then
     if held.isSome then
       writeSessionFrame output 255
         "a retained consent anchor is offered only before the first admission".toUTF8.toList
-      serve extraExpected extraObjective settings config retained held input output
+      serve extraExpected extraObjective settings config retained held input output own
     else
       match ConsentAnchor.decode payload with
       | .error detail =>
           writeSessionFrame output 255 detail.toUTF8.toList
-          serve extraExpected extraObjective settings config retained held input output
+          serve extraExpected extraObjective settings config retained held input output own
       | .ok anchor =>
           writeSessionFrame output 228 []
-          serve extraExpected extraObjective settings config (some anchor) held input output
+          serve extraExpected extraObjective settings config (some anchor) held input output own
+  else if operation == 233 then
+    -- A resident provider's per-connection re-check: the Store still carries
+    -- the prefix this provider admitted (`ConsentAnchor.recheckStore`). Before
+    -- any admission there is nothing to re-check: the first admission compares
+    -- the retained anchor itself. A refusal ends the provider.
+    match held with
+    | none => writeSessionFrame output 233 []
+    | some session =>
+        -- HOT-PATH 2f: O(1) against the tag this provider verified at its height; the
+        -- chain-from-genesis re-check only for an image that never saw its head tag.
+        let rechecked ← match session.1.headTag with
+          | some tag => ConsentAnchor.recheckHeld config.transport session.1.image.accepted.length tag
+          | none => ConsentAnchor.recheckStore config.transport session.2.anchor
+        match rechecked with
+        | .ok () => writeSessionFrame output 233 []
+        | .error detail =>
+            writeSessionFrame output 255 s!"consent refused: {detail}".toUTF8.toList
+            throw (IO.userError s!"consent refused: {detail}")
+    serve extraExpected extraObjective settings config retained held input output own
   else if operation == 229 then
     match held with
     | none =>
         writeSessionFrame output 255 "no admitted prefix to anchor yet".toUTF8.toList
     | some session =>
         writeSessionFrame output 229 (ConsentAnchor.encode session.2.anchor)
-    serve extraExpected extraObjective settings config retained held input output
+    serve extraExpected extraObjective settings config retained held input output own
   else
     let admitted ← match held with
       | none => verifyInitial config retained
-      | some session => refresh config session
-    let (full, updated) ← if operation == 224 && specializedNeedsFull payload then do
-        let (full, upgraded) ← upgrade config admitted
+      | some session => refresh config session own
+    let own := retainOwn admitted own
+    let (full, updated) ← if operation == 236 || operation == 224 && specializedNeedsFull payload then do
+        let (full, upgraded) ← upgrade config admitted own
         pure (some full, upgraded)
       else pure (none, admitted)
-    let answer ← try pure (operation, ← if operation == 224 then
-        specialized extraExpected settings config updated full payload
-      else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
-      else consent config updated operation payload)
+    let answer ← try
+        let reply ← if operation == 236 then
+            pure []
+          else if operation == 224 then
+            specialized extraExpected settings config updated full payload
+          else if operation == 227 then objectiveHeaders extraObjective settings config updated payload
+          else do consent (← IO.ofExcept settings.providerRoutes) config updated operation payload
+        pure (operation, reply)
       catch error => pure (255, error.toString.toUTF8.toList)
     writeSessionFrame output answer.1 answer.2
-    serve extraExpected extraObjective settings config retained (some updated) input output
+    serve extraExpected extraObjective settings config retained (some updated) input output own
 
 def run (extraExpected : ExtraExpected) (arguments : List String)
     (extraObjective : ExtraObjective := refuseObjective) : IO UInt32 := do
   match arguments with
+  | [_, "features"] =>
+      IO.println "mini-consent-full-ready-v1"
+      pure 0
   | [path, "stdio"] =>
       let settings ← loadSettings path
       withPinnedSignature settings.config fun config => do

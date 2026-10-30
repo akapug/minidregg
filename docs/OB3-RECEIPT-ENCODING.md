@@ -52,7 +52,7 @@ OB-3 succeeds iff Q **is** such a CRS claim — the light-client object is the Q
 
 ## 2. The checkpoint criterion — what PASS and FAIL look like
 
-**PASS** (v0 milestone): a prototype `Selvage/ReceiptClaim.lean` that, given a landed turn's
+**PASS** (v0 milestone): a prototype `Selvage.ReceiptClaim [not in tree]` that, given a landed turn's
 post-state (`Kernel/Turn.lean` + `Kernel/State.lean`), produces a CRS/`(rt,α,μ,β,η)`-shape
 claim and PROVES: (a) the claim's word is `C(uproj post)`; (b) an honest turn's Q satisfies
 the claim; (c) the TEETH — a tampered post-state (a mutated untouched cell, a non-conserving
@@ -90,7 +90,7 @@ TARGET is fixed now, so those lanes build toward a known encoding rather than a 
 
 ## 4. Next action (when State + Turn land)
 
-Author `Selvage/ReceiptClaim.lean` statement-first: the CRS-claim-of-a-turn as a `def`, with
+Author `Selvage.ReceiptClaim [not in tree]` statement-first: the CRS-claim-of-a-turn as a `def`, with
 the four PASS obligations (a)-(d) as keystone-fielded statements (satisfiable + teeth built,
 per the audit lesson), then fan out the proofs. If (c) or the seam (4) will not close
 linearly, STOP and surface it as the OB-3 finding — that is the checkpoint doing its job.

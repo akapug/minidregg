@@ -29,6 +29,9 @@ candidate_sha256() {
 # map. Sets CANDIDATE_MANIFEST, CANDIDATE_DIR, CANDIDATE_PROVENANCE, HOST, MINI,
 # STORE, VERIFIER, CONSENT after validating their manifest output entries.
 # Call candidate_verify_outputs before launching any resolved binary.
+# Required roles are package.py REQUIRED (host consent mini store verifier keys): what every Store
+# needs. Every other role a candidate carries (grain, SPK, Discord, pay, launch gate) is optional
+# here and, when present, bound like the rest (the .binaries loop above the role list).
 candidate_resolve() {
   manifest=$(candidate_abs "$1")
   [ -f "$manifest" ] || candidate_die "manifest not found: $manifest"
@@ -62,9 +65,7 @@ candidate_resolve() {
       . as $r | ($m.outputs | has($r.value.path)) and
       $m.outputs[$r.value.path].sha256 == $r.value.sha256 and
       $m.sha256[$r.key] == $r.value.sha256)) and
-    (["host", "consent", "mini", "store", "verifier", "grainRuntime",
-      "grainProviderBridge", "inferenceScheduler", "spkHost", "spkBrowserProxy",
-      "spkBroker", "spkHostd", "discord", "payWatcher", "keys"] |
+    (["host", "consent", "mini", "store", "verifier", "keys"] |
       all(. as $r | $p.binaries[$r].path | type == "string"))
     ' "$manifest" >/dev/null || candidate_die "manifest output identity is incomplete or differs from provenance"
   for role in host mini store verifier consent; do

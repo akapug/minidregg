@@ -1,0 +1,14 @@
+# /etc/systemd/system/mini-web-spawn.socket — the one way the web gateway reaches a member:
+# root:mini-web 0660, so only root and the gateway's uid open it (the helper also checks the
+# peer's uid by SO_PEERCRED). One persistent helper serves it (Accept=no).
+[Unit]
+Description=Mini web helper socket (gateway -> member sessions)
+[Socket]
+ListenStream=/run/mini-web-spawn.sock
+SocketUser=root
+SocketGroup=mini-web
+SocketMode=0660
+Accept=no
+Backlog=64
+[Install]
+WantedBy=sockets.target

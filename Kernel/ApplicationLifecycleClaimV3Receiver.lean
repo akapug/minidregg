@@ -2,8 +2,12 @@
 Exact-CAS reservation for a launch-bound lifecycle claim. V1 claims can
 remain in historical replay but never produce this SPK launch handoff.
 -/
-import Kernel.ApplicationLifecycleClaimV3Projection
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.ApplicationLifecycleClaimV3Projection
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimV3Receiver
 
@@ -32,14 +36,14 @@ structure Reservation (config : Config) where
 def Reservation.verified {config : Config} (reservation : Reservation config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate reservation.old
-        reservation.readback.derived reservation.readback.ready) :=
+        reservation.readback.derived reservation.readback.ready reservation.readback.tag) :=
   NativeHostReplay.extendExact reservation.reader reservation.old reservation.readback
 
 def Reservation.receipt {config : Config} (reservation : Reservation config) :
     NativeHostCodec.Receipt :=
   let old := reservation.old
   let candidate := NativeHostReplay.exactCandidate old
-    reservation.readback.derived reservation.readback.ready
+    reservation.readback.derived reservation.readback.ready reservation.readback.tag
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
     old.opened.durable.height + 1,
@@ -51,6 +55,18 @@ theorem Reservation.postRecord_exact {config : Config}
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent reservation.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord reservation.old reservation.readback
+
+/-- The reserved successor is admitted under `config`: the read-back intent
+is the intent admitted for this ingress at `old.opened`, and
+`validateLoaded config` accepts the one candidate extending the verified tip
+by that read-back intent. -/
+theorem Reservation.successor_validated {config : Config} (reservation : Reservation config) :
+    reservation.readback.derived.intent = reservation.admitted.intent ∧
+      NativeHost.validateLoaded config
+          (NativeHostReplay.exactCandidate reservation.old
+            reservation.readback.derived reservation.readback.ready reservation.readback.tag) =
+        .ok reservation.readback.after :=
+  ⟨reservation.derivedExact, reservation.readback.validated⟩
 
 def Reservation.projection {config : Config} (reservation : Reservation config) :
     ApplicationLifecycleClaimV3Projection.Committed :=

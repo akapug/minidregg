@@ -1,6 +1,10 @@
 /- Read-only canonical presentation of event28 custody bytes. This is not admission. -/
-import Host.ApplicationGrainSessionEnrollmentAuthoring
-import Lean.Data.Json
+module
+
+public import Host.ApplicationGrainSessionEnrollmentAuthoring
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationGrainSessionEnrollmentInspection
 
@@ -85,15 +89,11 @@ private def slotJson (slot : SigningSlot) : Except String Json := do
 def inspectRequest (bytes : List UInt8) : Except String Json := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical enrollment request"
-  unless requestCodec.encode request == bytes do
-    throw "noncanonical enrollment request"
   pure (requestJson request)
 
 def inspectPlan (bytes : List UInt8) : Except String Json := do
   let some plan := planCodec.decode bytes
     | throw "noncanonical enrollment plan"
-  unless planCodec.encode plan == bytes do
-    throw "noncanonical enrollment plan"
   unless plan.observationSlots.length == 3 do
     throw "enrollment plan observation slot count differs"
   let slots ← (plan.invocation.slots ++ plan.observationSlots).mapM slotJson
@@ -120,8 +120,6 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
 def inspectIngress (bytes : List UInt8) : Except String Json := do
   let some ingress := ingressCodec.decode bytes
     | throw "noncanonical enrollment ingress"
-  unless ingressCodec.encode ingress == bytes do
-    throw "noncanonical enrollment ingress"
   pure <| .mkObj [("type", "application-session-enrollment-ingress-v1"),
     ("canonicalIngressHex", hex bytes),
     ("canonicalRequestHex", hex <| requestCodec.encode ingress.request),

@@ -1,7 +1,8 @@
 # world/ballot — sealed-ballot (commit/reveal) vote for rooms
 
 `SealedBallot.obend` + `preview-cohort.json` (37 rows). Evidence class: **executed in the
-effect-free preview**; not native, and **not hiding** (see below).
+effect-free preview**; not hiding (see below).
+Native: admitted on the activity route on candidate 0ce31391, scenario `ballot` of `native/resource-client/world-activity-admit.py`, 27/27 rows (every refusal row confirms its refusal); run `scripts/world-native-admit.sh ballot --route activity --scenario ballot --entry ballot`. Evidence: `docs/evidence/2026-10-27-world-native/ballot/` (`verdicts.txt`, `results.json`).
 
 ## What it does
 Three phases by height. COMMIT (`now < commitEnd`): each elector commits a digest of
@@ -36,6 +37,7 @@ mechanism. Shape from `CollectiveAdoption` (unique ballot, quorum) and `Kernel/S
   is readable from the digest. The preview shows the state machine, not secrecy. The native
   digest is the kernel's cSHAKE256 over the whole tuple (`Pred.hashEq`, as `Kernel/SealedMarket`
   does for bids); that needs a native digest atom in the language, which does not exist.
+* Native: native scenario `ballot` in world-activity-admit.py (not yet run; runs in the central gate).
 * No native route: the Plans are proposals; heights are caller-supplied `now` fields. Native
   needs the activity route with height awaits (commit end, reveal end) and the electors as
   authenticated actors (here the voter id is a field, not an authenticated subject).

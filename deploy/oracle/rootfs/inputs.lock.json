@@ -1,0 +1,209 @@
+{
+  "apt_inrelease_hashes": {
+    "archive.ubuntu.com_ubuntu_dists_noble-backports_InRelease": "fd745120d851e35c46cb2a91ca8d5297daa58faf277f4cc0ea43cc339aaa6747",
+    "archive.ubuntu.com_ubuntu_dists_noble-updates_InRelease": "c607e7ab2685b82c6d37a57261f8413d68c82b01a6a4225e1c6292fcb95691b4",
+    "archive.ubuntu.com_ubuntu_dists_noble_InRelease": "cdb2f31d809f589719a53c6ad15f255b27569c4059542ada282aaa21b8e164b0",
+    "security.ubuntu.com_ubuntu_dists_noble-security_InRelease": "25fe752bf07eb17eb5db1fd5a1fe4e40c0382dc2308a602ee9da1abb9d49bac7"
+  },
+  "base": {
+    "export_sha256": "f9d11f6253b08e5c6b2bb7793319ea3f00f711ea39678315a2880c4221898a1b",
+    "image": "ubuntu@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea",
+    "image_id": "sha256:045183670ef29ce21bc22a8d4f62511ce472679ca8fc9774f04181f7f383ca62"
+  },
+  "debs": [
+    {
+      "apt_digest": "SHA512:d19a1620e9e879f4616e1564ff97c6816a8c9c79201292d2d86c9de0c142607bd08be712d599ee8ce8301f6886a0d28aa93ec5504ae21d9c7f42ba8151581eae",
+      "filename": "libreadline8t64_8.2-4build1_amd64.deb",
+      "package": "libreadline8t64",
+      "sha256": "563977a16df03b611f5239cc1e9a0426e86479fcc616b5c9e200ea32063119e5",
+      "size": 152856,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/r/readline/libreadline8t64_8.2-4build1_amd64.deb",
+      "version": "8.2-4build1"
+    },
+    {
+      "apt_digest": "SHA512:cb1f119b47ba7a2c76be0c1ba61cf91263021761ae7238fec3ba4da60e69d51cffc9d33275b0fbe3f5fa3b7abae892043b9a309c7cf9447a825db19595d13bde",
+      "filename": "media-types_10.1.0_all.deb",
+      "package": "media-types",
+      "sha256": "31bfb7eec55ab6d34a50ba995150e1498d4cb897714085d8025e330d3b529747",
+      "size": 27474,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/m/media-types/media-types_10.1.0_all.deb",
+      "version": "10.1.0"
+    },
+    {
+      "apt_digest": "SHA512:11268ff81e6633967dc686913fce2063e999388e6d86a591eb49d497211f2512f91b9a6727c9d2fbceb7c18790c62eb82eea4590388c2531fe826c9051f6fd5f",
+      "filename": "netbase_6.4_all.deb",
+      "package": "netbase",
+      "sha256": "8cdbc9c3dca01e660759bf9d840f72e45ac72faf5d19ca1faecacaf6a60c1a87",
+      "size": 13112,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/n/netbase/netbase_6.4_all.deb",
+      "version": "6.4"
+    },
+    {
+      "apt_digest": "SHA512:e4769b6b47308a41b9cb074191cb7c7f6bd46ce6a8fc518ae1924cba2683945f135bc14d21765a169d88cf3da586f541fcff2386299d21336ef76b0fd21f804e",
+      "filename": "readline-common_8.2-4build1_all.deb",
+      "package": "readline-common",
+      "sha256": "879bfd7f8a9bc4c0f7cdc777cdd8bc6de5f8c4a2ac80c060322a1b22f13504bb",
+      "size": 56484,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/r/readline/readline-common_8.2-4build1_all.deb",
+      "version": "8.2-4build1"
+    },
+    {
+      "apt_digest": "SHA512:f5fcec523bc33c1b76f8e0e7289ace665ca71dd759a2ad1eac1f2c072259f632679fa47f067f1d065bf19039ff0829133754813066a28062d64cbf7f312a5b99",
+      "filename": "libexpat1_2.6.1-2ubuntu0.6_amd64.deb",
+      "package": "libexpat1",
+      "sha256": "494b8e672f722130c6bca6a7bc4cc31a43ca891a31d60d868bfdd699a3c20b13",
+      "size": 98940,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/e/expat/libexpat1_2.6.1-2ubuntu0.6_amd64.deb",
+      "version": "2.6.1-2ubuntu0.6"
+    },
+    {
+      "apt_digest": "SHA512:d12a45592d7fb4025bb173463d98fd06dfd51b7485f7ef1ec893c11663dbfee49ee23055cc0c94803b9a3cc9fd7741eaa594a240bcf77a0a77d8129a89cea372",
+      "filename": "libpython3.12-minimal_3.12.3-1ubuntu0.17_amd64.deb",
+      "package": "libpython3.12-minimal",
+      "sha256": "d646ad7112b5adec21ba0e1af015f04ae8ca7f5efdc619622547dd6673c4c14b",
+      "size": 838536,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/libpython3.12-minimal_3.12.3-1ubuntu0.17_amd64.deb",
+      "version": "3.12.3-1ubuntu0.17"
+    },
+    {
+      "apt_digest": "SHA512:0a454d7e040c31798caeec806cf6a0ac2c8a0bdedbd2b18b53f3ae421b763e0c27b974522039fa2b471d9e7d88825a3955a0be43ae85841bf3c348c93397142a",
+      "filename": "libpython3.12-stdlib_3.12.3-1ubuntu0.17_amd64.deb",
+      "package": "libpython3.12-stdlib",
+      "sha256": "45d3f530ba1f9d6e879ad46b92046fabab13fe50a82450e4f65557a3bbad1489",
+      "size": 2070530,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/libpython3.12-stdlib_3.12.3-1ubuntu0.17_amd64.deb",
+      "version": "3.12.3-1ubuntu0.17"
+    },
+    {
+      "apt_digest": "SHA512:40bff7812a9ee0064bc00efc8740755f1a75ce6f72dd22a2737a948c015b368f4befbe80a106eeae496df4b4105e787a775535fa7b29a20dddc09cd746ff2eb1",
+      "filename": "libsqlite3-0_3.45.1-1ubuntu2.8_amd64.deb",
+      "package": "libsqlite3-0",
+      "sha256": "b1190bb72359f5fcc47406aa46065eaf4f1ca208085c51224a52b04bedc0b4bb",
+      "size": 701602,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/sqlite3/libsqlite3-0_3.45.1-1ubuntu2.8_amd64.deb",
+      "version": "3.45.1-1ubuntu2.8"
+    },
+    {
+      "apt_digest": "SHA512:3433f0cf0b7e34cf83170b5969deaae43e47b1e777d8b98c3675ee0c7c2a05c61a9bdff17d4b123798f65ffafaf15bec1ffb9c89c3bd9655b0c60b71b1f8aa98",
+      "filename": "python3.12_3.12.3-1ubuntu0.17_amd64.deb",
+      "package": "python3.12",
+      "sha256": "6745c9463432e619d7402b117ad4ac86c31dcd3999ba20daa9e395f6f9909d86",
+      "size": 650732,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12_3.12.3-1ubuntu0.17_amd64.deb",
+      "version": "3.12.3-1ubuntu0.17"
+    },
+    {
+      "apt_digest": "SHA512:b57d992d3ccb82955fde9c0d3a7668107d43fbab7aba9ff9692373d4874c76524ce5376d61e1c0d988c17112b983de4e10ce3044a83c710b67c0d47bd6312eea",
+      "filename": "python3.12-minimal_3.12.3-1ubuntu0.17_amd64.deb",
+      "package": "python3.12-minimal",
+      "sha256": "d452689b9660845345a4c3e05e4ad82c082d5474e04031b7aa47f1a6d5610a6e",
+      "size": 2334634,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/p/python3.12/python3.12-minimal_3.12.3-1ubuntu0.17_amd64.deb",
+      "version": "3.12.3-1ubuntu0.17"
+    },
+    {
+      "apt_digest": "SHA512:9fb7d6cc56ee21cc8597338a0ff09d93c7f6a979f0a8e22d9421d3bd4685c214d928e1436ecf291184157a029e055fd3091ce68d1c1e41d56c15c01cf3a543ca",
+      "filename": "tzdata_2026e-0ubuntu0.24.04.1_all.deb",
+      "package": "tzdata",
+      "sha256": "2f6794a7f31753fc947d9ac02ff03ea46510f34864f9d132a93d7b105e3c4447",
+      "size": 282136,
+      "url": "http://archive.ubuntu.com/ubuntu/pool/main/t/tzdata/tzdata_2026e-0ubuntu0.24.04.1_all.deb",
+      "version": "2026e-0ubuntu0.24.04.1"
+    }
+  ],
+  "requirements_sha256": "4185442fddfd802c61692c656c6f64945382eff40eefd5ce6751065f3d15bd86",
+  "schema": 1,
+  "wheels": [
+    {
+      "filename": "sympy-1.14.0-py3-none-any.whl",
+      "name": "sympy",
+      "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+      "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+      "version": "1.14.0"
+    },
+    {
+      "filename": "mpmath-1.3.0-py3-none-any.whl",
+      "name": "mpmath",
+      "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c",
+      "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+      "version": "1.3.0"
+    },
+    {
+      "filename": "numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "numpy",
+      "sha256": "90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853",
+      "url": "https://files.pythonhosted.org/packages/99/60/14115e6364fa676c5397c2ad3004e527e9aa487abf5d0706ec81bbd08529/numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "2.4.6"
+    },
+    {
+      "filename": "scipy-1.17.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "scipy",
+      "sha256": "02ae3b274fde71c5e92ac4d54bc06c42d80e399fec704383dcd99b301df37458",
+      "url": "https://files.pythonhosted.org/packages/01/8e/1e35281b8ab6d5d72ebe9911edcdffa3f36b04ed9d51dec6dd140396e220/scipy-1.17.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.17.1"
+    },
+    {
+      "filename": "scikit_learn-1.8.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "scikit-learn",
+      "sha256": "a0bcfe4d0d14aec44921545fd2af2338c7471de9cb701f1da4c9d85906ab847a",
+      "url": "https://files.pythonhosted.org/packages/97/74/b7a304feb2b49df9fafa9382d4d09061a96ee9a9449a7cbea7988dda0828/scikit_learn-1.8.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "1.8.0"
+    },
+    {
+      "filename": "nltk-3.9.4-py3-none-any.whl",
+      "name": "nltk",
+      "sha256": "f2fa301c3a12718ce4a0e9305c5675299da5ad9e26068218b69d692fda84828f",
+      "url": "https://files.pythonhosted.org/packages/9d/91/04e965f8e717ba0ab4bdca5c112deeab11c9e750d94c4d4602f050295d39/nltk-3.9.4-py3-none-any.whl",
+      "version": "3.9.4"
+    },
+    {
+      "filename": "regex-2026.5.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "name": "regex",
+      "sha256": "dd2810d22146b6d838acc5ec15602cb6b47920aa4e33015df3868eedfd20bab8",
+      "url": "https://files.pythonhosted.org/packages/cc/1e/3fbe2fa1e8cebd62f3bb7d3321cff1640aca2e240b51d9bd624aad949260/regex-2026.5.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "version": "2026.5.9"
+    },
+    {
+      "filename": "zstandard-0.25.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "name": "zstandard",
+      "sha256": "5a56ba0db2d244117ed744dfa8f6f5b366e14148e00de44723413b2f3938a902",
+      "url": "https://files.pythonhosted.org/packages/53/60/7be26e610767316c028a2cbedb9a3beabdbe33e2182c373f71a1c0b88f36/zstandard-0.25.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "version": "0.25.0"
+    },
+    {
+      "filename": "joblib-1.6.0-py3-none-any.whl",
+      "name": "joblib",
+      "sha256": "3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba",
+      "url": "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl",
+      "version": "1.6.0"
+    },
+    {
+      "filename": "threadpoolctl-3.7.0-py3-none-any.whl",
+      "name": "threadpoolctl",
+      "sha256": "cd8b60b5641b45c67bbf73c64c843235fc2d8a480c87389f52f5dbee893b86be",
+      "url": "https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl",
+      "version": "3.7.0"
+    },
+    {
+      "filename": "click-8.5.0-py3-none-any.whl",
+      "name": "click",
+      "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+      "url": "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl",
+      "version": "8.5.0"
+    },
+    {
+      "filename": "tqdm-4.70.1-py3-none-any.whl",
+      "name": "tqdm",
+      "sha256": "c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73",
+      "url": "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl",
+      "version": "4.70.1"
+    },
+    {
+      "filename": "cloudpickle-3.1.2-py3-none-any.whl",
+      "name": "cloudpickle",
+      "sha256": "9acb47f6afd73f60dc1df93bb801b472f05ff42fa6c84167d25cb206be1fbf4a",
+      "url": "https://files.pythonhosted.org/packages/88/39/799be3f2f0f38cc727ee3b4f1445fe6d5e4133064ec2e4115069418a5bb6/cloudpickle-3.1.2-py3-none-any.whl",
+      "version": "3.1.2"
+    }
+  ]
+}

@@ -46,10 +46,10 @@ Frozen candidate SHA-256s for root review:
 
 | File | SHA-256 |
 | --- | --- |
-| `native/spk-host/src/completion_native.rs` | `4790c9cbe2016e9a21822f937a516e6d075c40b6c4d38112daa062af4de36cfb` |
+| `completion_native.rs [deleted dd97fcc6]` | `4790c9cbe2016e9a21822f937a516e6d075c40b6c4d38112daa062af4de36cfb` |
 | `native/spk-host/src/resident_service.rs` | `b7f42dc772fe65bfd9d669bb4bf445aedd616cb3321671d0e7a424de3a2c2b24` |
-| `native/spk-host/src/claim_descriptor.rs` | `2ffcfde37e79797e320442f54854d302aba9f9a17436fe36cb4c3f894305151f` |
-| `native/spk-host/src/claim_native.rs` | `fc5eebc9761be989ae791b35a4e5468bd809f1eb72d81f5a8f4bf934c9a23167` |
+| `claim_descriptor.rs [deleted 5816bff1]` | `2ffcfde37e79797e320442f54854d302aba9f9a17436fe36cb4c3f894305151f` |
+| `claim_native.rs [deleted dd97fcc6]` | `fc5eebc9761be989ae791b35a4e5468bd809f1eb72d81f5a8f4bf934c9a23167` |
 | `native/spk-host/src/materialize.rs` | `02fb9bdcf65f8decb0b1d3b2d3d23510848ebd1d1f47fda607e386a1ef2eb8a1` |
 | `native/spk-host/src/hostd.rs` | `f7d4b1c4cf6a8a66b449edaed177044d958b534cfbb57cdb767684aca52b0e46` |
 | `native/spk-host/src/dispatch_native.rs` | `3aaf1ff2ff0412ad8649b1b9366a2a82b5feaa56116513f8320af7bd45cdccd0` |

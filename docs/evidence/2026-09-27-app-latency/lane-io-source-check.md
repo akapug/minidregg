@@ -1,6 +1,6 @@
 # Proved lane IO replacement
 
-Source SHA-256 for `Compiler/Sp800185Cshake256Core.lean`:
+Source SHA-256 for `Theory/Sp800185Cshake256Core.lean`:
 `9810ddac1911c0126c9558d15af61557f60080cf2e7da146ce856543daf616c9`.
 
 The new `laneFromBlock_eqUInt64` and `stateByte_eqUInt64` are general

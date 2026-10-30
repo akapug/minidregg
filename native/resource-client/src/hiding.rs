@@ -17,8 +17,7 @@
 //! cell blinding = KMAC256(blinding key, nat(cell id), 256, "DREGG.STORE.CELL-BLINDING/v1")
 //! ```
 //!
-//! So the owner, or anyone the owner hands the blinding key to (escrow, a
-//! co-owner: `mini key --action export-blinding`), recomputes every salt of
+//! So the owner, or anyone holding the seed's blinding key (escrow), recomputes every salt of
 //! every cell it birthed without storing one.  The blinding key is not the
 //! signing key: handing it over shares the openings, not the power to sign.
 //! The Host holds each cell's blinding (it must, to serve openings), so the
@@ -42,8 +41,6 @@
 //! recomputes every opened leaf and the root, and checks that every declared
 //! entry the view displays is one of the opened entries.
 
-
-use crate::decode_hex;
 use serde_json::{json, Value};
 use sha3::digest::{core_api::CoreWrapper, ExtendableOutput, Update, XofReader};
 use sha3::CShake256Core;
@@ -58,13 +55,6 @@ const ROOT: &[u8] = b"DREGG.STORE.ROOT/v2";
 const RATCHET: &[u8] = b"DREGG.CELL.BLIND.RATCHET/v1";
 const RATE: usize = 136;
 
-/// The custody text printed with every blinding-key export.
-pub(crate) const BLINDING_NOTICE: &str = "This is your blinding key. It opens every field of every \
-cell you created: whoever holds it can recompute each salt and test guesses against the roots \
-readers hold. It does not sign. Hand it only to an escrow or a co-owner you would show every \
-field to. It is derived from your signing seed, so losing the seed loses it; the Host keeps each \
-cell's blinding, so a lost key loses no existing opening, only the ability to blind new cells \
-from this seed.";
 
 fn cshake(function: &[u8], customization: &[u8], input: &[u8]) -> [u8; 32] {
     let core = if function.is_empty() {
@@ -451,7 +441,7 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
         return Ok(json!({"verified": false, "reason": "view carries no opening"}));
     };
     let opening = resource.get("opening").ok_or("view lacks opening")?;
-    let frame = decode_hex(opening.get("frame").and_then(Value::as_str).ok_or("opening lacks frame")?)?;
+    let frame = mini_sdk::hex::decode(opening.get("frame").and_then(Value::as_str).ok_or("opening lacks frame")?).map_err(|e| e.0)?;
     if frame.is_empty() {
         return Ok(json!({"verified": false, "reason": "this kind has no store opening"}));
     }
@@ -464,12 +454,12 @@ pub(crate) fn verify_view(view: &Value) -> Result<Value> {
     let mut sealed = 0usize;
     for item in items {
         if let Some(salt) = item.get("salt").and_then(Value::as_str) {
-            let salt = decode_hex(salt)?;
-            let entry = decode_hex(item.get("entry").and_then(Value::as_str).ok_or("opened item lacks entry")?)?;
+            let salt = mini_sdk::hex::decode(salt).map_err(|e| e.0)?;
+            let entry = mini_sdk::hex::decode(item.get("entry").and_then(Value::as_str).ok_or("opened item lacks entry")?).map_err(|e| e.0)?;
             preimage.extend(leaf(&salt, &entry));
             opened.push(entry);
         } else {
-            let sealed_leaf = decode_hex(item.get("leaf").and_then(Value::as_str).ok_or("item lacks leaf")?)?;
+            let sealed_leaf = mini_sdk::hex::decode(item.get("leaf").and_then(Value::as_str).ok_or("item lacks leaf")?).map_err(|e| e.0)?;
             if sealed_leaf.len() != 32 {
                 return Err("a sealed leaf is not 32 bytes".to_owned());
             }

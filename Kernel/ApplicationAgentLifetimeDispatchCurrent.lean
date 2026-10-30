@@ -4,8 +4,27 @@ session origin intact, while checking the currently reserved parent as a
 separate execution witness. The grant and ticket certificates supplied to
 this component still require chronological admission in NativeHostReplay.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchIngress
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchIngress
+public import Kernel.ApplicationDispatchAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchCurrent
 
@@ -126,6 +145,30 @@ structure Checked {F : Type} [Field F] [DecidableEq F]
     ingress.dispatch spec selection descriptor prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared
     ingress.dispatch.dispatch.signed
+/-- The checked current dispatch is the certified grant's issued ticket route, at the
+certified grant root, with the signed command derived from the ingress. -/
+theorem Checked.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : Ambient} {ground : Ground deployment} {ingress : Ingress}
+    {spec : ApplicationShareIssueSource.Spec}
+    {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
+    {grant : ApplicationAgentLifetimeGrant.Grant}
+    {ticketIssueIndex : Nat} {ticketIssueReceipt : NativeHostCodec.Receipt}
+    {issuedIngressBytes : List UInt8} {certifiedGrantIssueIndex : Nat}
+    {certifiedGrantRoot : Digest}
+    (checked : Checked deployment profile ambient ground ingress spec descriptor grant
+      ticketIssueIndex ticketIssueReceipt issuedIngressBytes certifiedGrantIssueIndex
+      certifiedGrantRoot) :
+    grant.matchesIssued spec ticketIssueIndex ticketIssueReceipt = true ∧
+      ingress.dispatch.issueIngressBytes = issuedIngressBytes ∧
+      ResourceBirthCodec.physicalRoot (.live checked.grantRead.selected.observed.before) =
+        certifiedGrantRoot ∧
+      grantAt deployment.domain ingress.reserveContext.grantResource
+        checked.grantRead.selected.observed.before = some grant ∧
+      checked.signedCommand = command ingress.dispatch.dispatch checked.selection
+        ingress.dispatch.parent :=
+  ⟨checked.issued, checked.issueBytesExact, checked.grantPhysical, checked.grantExact,
+    checked.commandExact⟩
 
 /-- All five current observations share the exact prepared DRC image. The
 grant read uses the participant's separately issued selector; its signed

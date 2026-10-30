@@ -1,5 +1,5 @@
 /-
-# Kernel.PurseRefillReceiver — the signed refill turn (PAY §2.7, lane P6)
+# Kernel.PurseRefillReceiver — the signed refill turn (docs/PAY.md §2.7, lane P6)
 
 One signed command of the owner of Book account `A`
 (`Command`: account, purse task, burn, purse gain) is one turn over
@@ -22,10 +22,31 @@ bytes and the decided plan, so the signature binds the burn, the gain and the
 purse's pre-state.  The pay cell (the tariff's credit asset) and both laws'
 sources enter as read guards.
 -/
-import Kernel.CapabilityRevocationController
-import Kernel.ResourceBirthController
-import Kernel.PayCellDomain
-import Kernel.PurseRefill
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthController
+public import Kernel.PayCellDomain
+public import Kernel.PurseRefill
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PurseRefillReceiver
 
@@ -130,6 +151,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.envelope =
     some envelope
+theorem DecodedIngress.decoded (ingress : DecodedIngress) :
+    commandCodec.encode ingress.command = ingress.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.ingress.envelope =
+        some ingress.envelope :=
+  ⟨ingress.canonical, ingress.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -182,7 +208,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 /-- The purse's pre-root is the loaded one: the signed request carries it as
 `preStateRoot` and the declaration carries the loaded `before` state, so a
@@ -556,6 +582,11 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.bound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧ Nonempty prepared.SemanticAccepted :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic⟩⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -699,6 +730,10 @@ structure AcceptedRefill [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : PurseRefillReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedRefill.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedRefill deployment profile ambient durable ingress) :
+    Nonempty (Accepted accepted.prepared ingress) ∧ PhysicalShape accepted.prepared :=
+  ⟨⟨accepted.accepted⟩, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -720,7 +755,9 @@ def charge (accepted : AcceptedRefill deployment profile ambient durable ingress
   | .incidences => 2
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -732,7 +769,7 @@ def intent (accepted : AcceptedRefill deployment profile ambient durable ingress
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := accepted.physical.2.2.2.1
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical

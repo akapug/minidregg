@@ -1,18 +1,55 @@
 //! Broker-selected trusted bootstrap switches both identities before any app
 //! bytes. Resident/operator and launch/reap worker then hold zero capabilities.
 //! One private inherited channel, one spawn, actual waitpid; loss is unresolved.
+use crate::io_context::IoContext;
 use crate::spawn_gate::{AppFds, BoundedChild, SpawnSpec};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 const LIMIT: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 static LAUNCH: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
+/// The launch worker's answer when the app has no `/var/www` yet.
+const WWW_ABSENT: &str = "noPublishedSite";
+const WWW_NO_FILE: &str = "noSuchPublishedFile";
+const WWW_TOO_LARGE: &str = "publishedFileTooLarge";
+/// The published tree `/var/www` as a directory descriptor, or -1. Sandstorm's own
+/// publishing follows `/var/www`, and an app may make it a symlink to its real tree:
+/// Hacker CMS runs `symlink("published", "/var/www")` at start. The link is followed
+/// exactly once and only to a single sibling directory of `www` inside `/var`
+/// (`www_link_target`); that sibling is then opened with `O_NOFOLLOW`, so nothing
+/// outside `/var` and no second link is reached.
+fn open_www_tree(var: libc::c_int) -> libc::c_int {
+    let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    let tree = unsafe { libc::openat(var, c"www".as_ptr(), flags) };
+    if tree >= 0 {
+        return tree;
+    }
+    let mut buf = [0u8; 300];
+    let n = unsafe { libc::readlinkat(var, c"www".as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+    if n <= 0 || n as usize >= buf.len() {
+        return -1;
+    }
+    let Some(target) = www_link_target(&buf[..n as usize]) else { return -1 };
+    let Ok(target) = std::ffi::CString::new(target) else { return -1 };
+    unsafe { libc::openat(var, target.as_ptr(), flags) }
+}
+
+/// The one directory name a `/var/www` symlink may point at: a single safe
+/// component, written relative (`published`) or as `/var/<name>`.
+fn www_link_target(raw: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(raw).ok()?;
+    let name = text.strip_prefix("/var/").unwrap_or(text);
+    let name = name.strip_suffix('/').unwrap_or(name);
+    crate::www_publish::valid_components(&[name.to_owned()]).then(|| name.to_owned())
+}
+
 fn refused(s: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, s)
 }
@@ -114,6 +151,19 @@ struct Launch {
     program: std::path::PathBuf,
     sha256: String,
     args: Vec<String>,
+}
+/// Tag 6: one published file, named by checked path components below `/var/www`.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WwwOpen {
+    components: Vec<String>,
+}
+/// What the app-identity worker found for a publishing request.
+pub(crate) enum WwwFile {
+    File(OwnedFd),
+    NoSite,
+    NoSuchFile,
+    TooLarge,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -225,7 +275,7 @@ fn receive_rights(stream: &UnixStream) -> io::Result<(u8, Vec<OwnedFd>)> {
     Ok((tag, fds))
 }
 fn start_identity(pid: u32) -> io::Result<String> {
-    let text = fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    let text = { let stat_path = format!("/proc/{pid}/stat"); fs::read_to_string(&stat_path).ctx("read", &stat_path)? };
     text.rsplit_once(')')
         .and_then(|(_, tail)| tail.split_whitespace().nth(19))
         .map(str::to_owned)
@@ -263,6 +313,7 @@ impl Drop for Client {
     }
 }
 impl Client {
+    #[cfg(test)]
     pub(crate) fn wait(&mut self, pid: u32) -> io::Result<i32> {
         loop {
             let r = self.command(2, pid)?;
@@ -273,6 +324,31 @@ impl Client {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+    /// One file of the grain's published tree `/var/www`, opened by the
+    /// app-identity worker from checked path components.
+    pub(crate) fn open_www_file(&mut self, pid: u32, components: &[String]) -> io::Result<WwwFile> {
+        if self.pid != pid || self.start.is_empty() {
+            return Err(refused("launch reaper identity differs"));
+        }
+        send_rights(&self.stream, 6, &[])?;
+        send_frame(&mut self.stream, &WwwOpen { components: components.to_vec() })?;
+        let r: Reply = receive_frame(&mut self.stream)?;
+        if r.pid != pid || r.start != self.start || r.reaped || r.status.is_some() {
+            return Err(refused("published file reply binding differs"));
+        }
+        match r.error.as_deref() {
+            Some(WWW_ABSENT) => return Ok(WwwFile::NoSite),
+            Some(WWW_NO_FILE) => return Ok(WwwFile::NoSuchFile),
+            Some(WWW_TOO_LARGE) => return Ok(WwwFile::TooLarge),
+            Some(error) => return Err(io::Error::other(error.to_owned())),
+            None => {}
+        }
+        let (tag, mut fds) = receive_rights(&self.stream)?;
+        if tag != 6 || fds.len() != 1 {
+            return Err(refused("published file descriptor absent"));
+        }
+        Ok(WwwFile::File(fds.pop().expect("one descriptor")))
     }
     pub(crate) fn kill_and_reap(&mut self, pid: u32) -> io::Result<bool> {
         Ok(self.command(3, pid)?.reaped)
@@ -306,11 +382,9 @@ pub(crate) fn launch(spec: &SpawnSpec) -> io::Result<Option<BoundedChild>> {
     let f = spec
         .fds
         .ok_or_else(|| refused("admitted launch descriptors absent"))?;
-    send_rights(
-        &client.stream,
-        1,
-        &[f.rpc, f.image, f.persistent_var, f.seccomp, f.output],
-    )?;
+    let mut descriptors = vec![f.rpc, f.image, f.persistent_var, f.seccomp, f.output];
+    descriptors.extend(f.public_data);
+    send_rights(&client.stream, 1, &descriptors)?;
     send_frame(
         &mut client.stream,
         &Launch {
@@ -329,6 +403,52 @@ pub(crate) fn launch(spec: &SpawnSpec) -> io::Result<Option<BoundedChild>> {
     client.pid = r.pid;
     client.start = r.start;
     Ok(Some(BoundedChild::remote(r.pid as i32, client)))
+}
+/// Resolve the pinned public directory exactly as bubblewrap will, under the
+/// existing worker's app identity. This read-only preflight precedes BEGIN and
+/// does not consume the single authorized launch or accept a host pathname.
+pub(crate) fn check_public_data_access(fd: std::os::fd::BorrowedFd<'_>) -> io::Result<()> {
+    let lock = LAUNCH.get().ok_or_else(|| refused("public-data access check requires app worker"))?;
+    let mut guard = lock.lock().map_err(|_| refused("launch channel poisoned"))?;
+    let client = guard.as_mut().ok_or_else(|| refused("generation launch channel already consumed"))?;
+    send_rights(&client.stream, 4, &[fd.as_raw_fd()])?;
+    let reply: Reply = receive_frame(&mut client.stream)?;
+    if reply.pid != 0 || !reply.start.is_empty() || reply.reaped || reply.status.is_some() {
+        return Err(refused("public-data access reply binding differs"));
+    }
+    if let Some(error) = reply.error { return Err(io::Error::other(error)); }
+    Ok(())
+}
+fn public_data_access(fd: &OwnedFd) -> io::Result<()> {
+    let proc_path = format!("/proc/self/fd/{}", fd.as_raw_fd());
+    let held = fs::metadata(&proc_path).ctx("inspect", &proc_path)?;
+    let resolved = fs::canonicalize(&proc_path).ctx("resolve", &proc_path)?;
+    let named = fs::metadata(&resolved).ctx("inspect", &resolved)?;
+    if !held.is_dir() || !named.is_dir() || (held.dev(), held.ino()) != (named.dev(), named.ino()) {
+        return Err(refused("public-data backing pathname differs from pinned directory"));
+    }
+    Ok(())
+}
+fn receive_launch_rights(stream: &mut UnixStream, app: Identity) -> io::Result<Vec<OwnedFd>> {
+    let (mut tag, mut fds) = receive_rights(stream)?;
+    if tag == 4 && fds.len() == 1 {
+        let checked = public_data_access(&fds[0]).map_err(|error| io::Error::new(error.kind(),
+            format!("public-data backing path inaccessible to app uid {} gid {} before BEGIN: {}", app.uid, app.gid, error)));
+        send_frame(stream, &Reply { pid: 0, start: String::new(), reaped: false, status: None,
+            error: checked.as_ref().err().map(ToString::to_string) })?;
+        checked?;
+        drop(fds);
+        // Exactly one optional read-only preflight; a second is refused by the
+        // ordinary launch tag/descriptor check below.
+        (tag, fds) = receive_rights(stream)?;
+    }
+    stream.set_read_timeout(Some(TIMEOUT))?;
+    if tag != 1 || !matches!(fds.len(), 5 | 6) {
+        return Err(refused(
+            "one launch with five descriptors and optional public-data descriptor required",
+        ));
+    }
+    Ok(fds)
 }
 fn worker(stream: UnixStream, app: Identity) -> io::Result<()> {
     worker_inner(stream, app, false)
@@ -349,13 +469,7 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
     }
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(TIMEOUT))?;
-    let (tag, fds) = receive_rights(&stream)?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
-    if tag != 1 || fds.len() != 5 {
-        return Err(refused(
-            "one launch with exactly five admitted descriptors required",
-        ));
-    }
+    let fds = receive_launch_rights(&mut stream, app)?;
     let wire: Launch = receive_frame(&mut stream)?;
     let mut owned = Vec::new();
     for fd in &fds {
@@ -371,6 +485,7 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
         persistent_var: owned[2].as_raw_fd(),
         seccomp: owned[3].as_raw_fd(),
         output: owned[4].as_raw_fd(),
+        public_data: owned.get(5).map(AsRawFd::as_raw_fd),
     };
     let spec = SpawnSpec {
         program: wire.program,
@@ -404,6 +519,21 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
             return Err(e);
         }
     };
+    // The grain's /var is kept (an O_PATH directory, the app's own) for one
+    // purpose: opening its published tree `www` for the resident (tag 6).
+    let var_keep = {
+        let high = unsafe { libc::fcntl(owned[2].as_raw_fd(), libc::F_DUPFD_CLOEXEC, 10) };
+        if high < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe { OwnedFd::from_raw_fd(high) }
+    };
+    // The child inherited its own descriptor table at fork. The reaper must
+    // release both SCM_RIGHTS originals and high duplicates now: retaining an
+    // RPC peer or output writer would hide EOF after the app exits, until the
+    // supervisor sends a wait/kill command or closes this control channel.
+    drop(fds);
+    drop(owned);
     // Only the admitted one-shot fork precedes this filter. Once it becomes
     // the reaper, this app-uid process cannot create or enter namespaces.
     // Installing here keeps bubblewrap's existing namespace setup intact.
@@ -423,8 +553,38 @@ fn worker_inner(mut stream: UnixStream, app: Identity, _audit: bool) -> io::Resu
     stream.set_read_timeout(None)?;
     loop {
         let (tag, fds) = receive_rights(&stream)?;
-        if !fds.is_empty() || !matches!(tag, 2 | 3) {
+        if !fds.is_empty() || !matches!(tag, 2 | 3 | 6) {
             return Err(refused("launch worker command refused"));
+        }
+        if tag == 6 {
+            // One published file, opened as the app (Sandstorm publishes all of
+            // /var/www whatever its modes): checked components, O_NOFOLLOW on
+            // each, a regular file at the end, read-only. The resident receives
+            // only that descriptor; no write, no directory, no path outside www.
+            stream.set_read_timeout(Some(TIMEOUT))?;
+            let request: WwwOpen = receive_frame(&mut stream)?;
+            stream.set_read_timeout(None)?;
+            let opened = if !crate::www_publish::valid_components(&request.components) {
+                Err(WWW_NO_FILE)
+            } else {
+                let tree = open_www_tree(var_keep.as_raw_fd());
+                if tree < 0 {
+                    Err(WWW_ABSENT)
+                } else {
+                    let tree = unsafe { OwnedFd::from_raw_fd(tree) };
+                    match crate::www_publish::open_beneath(&tree, &request.components) {
+                        Ok((file, _, _)) => Ok(OwnedFd::from(file)),
+                        Err((status, _)) if status.starts_with("413") => Err(WWW_TOO_LARGE),
+                        Err(_) => Err(WWW_NO_FILE),
+                    }
+                }
+            };
+            let error = opened.as_ref().err().map(|e| (*e).to_owned());
+            send_frame(&mut stream, &Reply { pid, start: start.clone(), reaped: false, status: None, error })?;
+            if let Ok(file) = opened {
+                send_rights(&stream, 6, &[file.as_raw_fd()])?;
+            }
+            continue;
         }
         let result = if tag == 3 {
             let dead = child.kill_and_reap();
@@ -461,26 +621,17 @@ pub(crate) fn require_parser() -> io::Result<()> {
     }
     dropped(Identity::unit("OPERATOR")?)
 }
-/// Broker-rendered operator unit environment selects mapped identities. No app packet
-/// can name an operator/app UID/GID; neither parser retains switch privileges.
-pub fn run(path: &Path) -> io::Result<()> {
-    let operator = Identity::unit("OPERATOR")?;
-    let app = Identity::unit("APP")?;
-    if operator.uid == app.uid {
-        return Err(refused("operator and app identities must differ"));
-    }
-    let root=std::env::var("MINI_SPK_GRAINS_ROOT").map_err(|_|refused("broker world root absent"))?;
-    let store=std::env::var("MINI_SPK_STORE").map_err(|_|refused("broker store absent"))?;
-    let unit=std::env::var("MINI_SPK_UNIT").map_err(|_|refused("broker resident unit absent"))?;
-    let (named,grain,generation)=crate::broker::parse_resident_unit(&unit).ok_or_else(||refused("broker resident unit refuses missing store"))?;
-    let registry=crate::volume_helper::Registry::load(&store)?;
-    if named!=store || registry.grains_root!=Path::new(&root)
-        || registry.operator_uid!=operator.uid || registry.operator_gid!=operator.gid
-        || !registry.app_uids.contains(&app.uid) || app.gid!=app.uid
-        || path!=registry.grains_root.join(&store).join("host/apps").join(&grain).join(format!("g{generation}/resident.json"))
-    { return Err(refused("namespace bootstrap differs from root-registered world")); }
-    crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
-    crate::namespace_identity::enter(operator.uid,operator.gid,app.uid,app.gid)?;
+/// Enter the mapped {operator, app} namespace, fork the launch worker as the
+/// app, drop this process to the operator, install the parser's namespace
+/// filter, and arm the generation's one launch channel. `run` and the
+/// sandbox-floor audit share this, so the audit measures the production
+/// spawn path (`spawn_gate::spawn_bounded` through the worker).
+fn bootstrap(bwrap: &Path, bwrap_sha256: &str, operator: Identity, app: Identity) -> io::Result<()> {
+    bootstrap_registered(bwrap,bwrap_sha256,operator,app,None)
+}
+fn bootstrap_registered(bwrap: &Path, bwrap_sha256: &str, operator: Identity, app: Identity,
+    controller:Option<&crate::namespace_identity::ControllerIdentity>) -> io::Result<()> {
+    crate::namespace_identity::enter_registered(bwrap,bwrap_sha256,operator.uid,operator.gid,app.uid,app.gid,controller)?;
     let (parent, child) = UnixStream::pair()?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -503,7 +654,40 @@ pub fn run(path: &Path) -> io::Result<()> {
             pid: 0,
             worker: pid,
         })))
-        .map_err(|_| refused("resident bootstrap already initialized"))?;
+        .map_err(|_| refused("resident bootstrap already initialized"))
+}
+
+/// The floor audit's entry to `bootstrap`: this process is the operator and
+/// `app` is a subordinate identity its /etc/subuid grant maps.
+#[cfg(test)]
+pub(crate) fn bootstrap_for_audit(bwrap: &Path, bwrap_sha256: &str, app_uid: u32, app_gid: u32) -> io::Result<()> {
+    let operator = Identity { uid: unsafe { libc::geteuid() }, gid: unsafe { libc::getegid() } };
+    bootstrap(bwrap, bwrap_sha256, operator, Identity { uid: app_uid, gid: app_gid })
+}
+
+/// Broker-rendered operator unit environment selects mapped identities. No app packet
+/// can name an operator/app UID/GID; neither parser retains switch privileges.
+pub fn run(path: &Path) -> io::Result<()> {
+    let operator = Identity::unit("OPERATOR")?;
+    let app = Identity::unit("APP")?;
+    if operator.uid == app.uid {
+        return Err(refused("operator and app identities must differ"));
+    }
+    let root=std::env::var("MINI_SPK_GRAINS_ROOT").map_err(|_|refused("broker world root absent"))?;
+    let store=std::env::var("MINI_SPK_STORE").map_err(|_|refused("broker store absent"))?;
+    let unit=std::env::var("MINI_SPK_UNIT").map_err(|_|refused("broker resident unit absent"))?;
+    let (named,grain,generation)=crate::broker::parse_resident_unit(&unit).ok_or_else(||refused("broker resident unit refuses missing store"))?;
+    let registry=crate::volume_helper::Registry::load(&store)?;
+    if named!=store || registry.grains_root!=Path::new(&root)
+        || registry.operator_uid!=operator.uid || registry.operator_gid!=operator.gid
+        || !registry.app_uids.contains(&app.uid) || app.gid!=app.uid
+        || path!=registry.grains_root.join(&store).join("host/apps").join(&grain).join(format!("g{generation}/resident.json"))
+    { return Err(refused("namespace bootstrap differs from root-registered world")); }
+    let bwrap=std::env::var_os("MINI_SPK_BWRAP").ok_or_else(||refused("broker namespace bwrap absent"))?;
+    let bwrap_sha256=std::env::var("MINI_SPK_BWRAP_SHA256").map_err(|_|refused("broker namespace bwrap pin absent"))?;
+    let controller=crate::namespace_identity::load_registered_controller(&registry)?;
+    crate::namespace_identity::prepare_root_handles(path,&registry.grains_root,&store,&grain)?;
+    bootstrap_registered(Path::new(&bwrap), &bwrap_sha256, operator, app, controller.as_ref())?;
     let result = crate::resident_service::run(path);
     if let Some(lock) = LAUNCH.get() {
         if let Ok(mut client) = lock.lock() {
@@ -513,8 +697,48 @@ pub fn run(path: &Path) -> io::Result<()> {
     result
 }
 
+/// Root-only mount audit setup. Exercise the production descriptor receiver and
+/// app-identity worker without pretending to construct a Mini admission receipt.
+/// This hook is absent from production binaries and has no request entrypoint.
+#[cfg(test)]
+pub(crate) fn initialize_mount_audit_worker(app_uid: u32, app_gid: u32) -> io::Result<libc::pid_t> {
+    if unsafe { libc::geteuid() } != 0 || app_uid == 0 || app_gid == 0 || LAUNCH.get().is_some() {
+        return Err(refused("mount audit needs root and one fresh app worker"));
+    }
+    let (parent, child) = UnixStream::pair()?;
+    let app = Identity { uid: app_uid, gid: app_gid };
+    let pid = unsafe { libc::fork() };
+    if pid < 0 { return Err(io::Error::last_os_error()); }
+    if pid == 0 {
+        drop(parent);
+        let status = match worker(child, app) {
+            Ok(()) => 0,
+            Err(error) => { eprintln!("mount audit app worker: {error}"); 1 }
+        };
+        unsafe { libc::_exit(status) }
+    }
+    drop(child);
+    parent.set_read_timeout(Some(TIMEOUT))?;
+    parent.set_write_timeout(Some(TIMEOUT))?;
+    LAUNCH.set(Mutex::new(Some(Client { stream: parent, start: String::new(), pid: 0, worker: pid })))
+        .map_err(|_| refused("mount audit worker already initialized"))?;
+    Ok(pid)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn www_symlink_may_name_only_one_sibling_directory() {
+        for ok in ["published", "/var/published", "site_v2", "published/"] {
+            assert!(super::www_link_target(ok.as_bytes()).is_some(), "{ok}");
+        }
+        assert_eq!(super::www_link_target(b"/var/published").as_deref(), Some("published"));
+        for bad in ["", "..", "../x", "a/b", ".hidden", "/etc", "/var/a/b", "/var/", "/", "x\\y", "/var/../etc"] {
+            assert!(super::www_link_target(bad.as_bytes()).is_none(), "{bad:?}");
+        }
+        assert!(super::www_link_target(b"a\0b").is_none());
+    }
+
     use super::*;
     #[test]
     fn bootstrap_wire_cannot_select_identity_or_unbounded_bytes() {
@@ -542,6 +766,39 @@ mod tests {
         let (tag, fds) = receive_rights(&b).unwrap();
         assert_eq!(tag, 3);
         assert!(fds.is_empty());
+    }
+    #[test]
+    fn public_data_preflight_is_bounded_and_does_not_authorize_launch() {
+        let app = Identity { uid: unsafe { libc::geteuid() }, gid: unsafe { libc::getegid() } };
+        let directory = fs::File::open("/").unwrap();
+        let regular = fs::File::open("/dev/null").unwrap();
+        for (tag, count) in [(4, 0), (4, 2), (9, 5), (1, 4)] {
+            let (a, mut b) = UnixStream::pair().unwrap();
+            send_rights(&a, tag, &vec![directory.as_raw_fd(); count]).unwrap();
+            assert!(receive_launch_rights(&mut b, app).is_err());
+        }
+        for scenario in ["success", "repeat", "failed"] {
+            let (mut a, mut b) = UnixStream::pair().unwrap();
+            let receiver = std::thread::spawn(move || receive_launch_rights(&mut b, app));
+            let fd = if scenario == "failed" { regular.as_raw_fd() } else { directory.as_raw_fd() };
+            send_rights(&a, 4, &[fd]).unwrap();
+            let reply: Reply = receive_frame(&mut a).unwrap();
+            assert_eq!(reply.pid, 0);
+            assert!(reply.start.is_empty() && !reply.reaped && reply.status.is_none());
+            if scenario == "failed" {
+                assert!(reply.error.unwrap().contains("before BEGIN"));
+                assert!(receiver.join().unwrap().is_err());
+            } else {
+                assert!(reply.error.is_none());
+                if scenario == "repeat" {
+                    send_rights(&a, 4, &[fd]).unwrap();
+                    assert!(receiver.join().unwrap().is_err());
+                } else {
+                    send_rights(&a, 1, &[fd; 5]).unwrap();
+                    assert_eq!(receiver.join().unwrap().unwrap().len(), 5);
+                }
+            }
+        }
     }
     #[test]
     fn bootstrap_channel_loss_never_confirms_child_death() {
@@ -574,15 +831,35 @@ mod tests {
         if operator_pid == 0 {
             drop(receiver);
             let result = (|| -> io::Result<()> {
+                // Every host input this test needs, refused by name when absent
+                // (never a bare ENOENT): the mapping helpers, the subordinate-id
+                // grants, the namespace holder's and the launched app's programs.
+                for input in ["/etc/subuid", "/etc/subgid", "/usr/bin/newuidmap", "/usr/bin/newgidmap",
+                    "/usr/bin/true", "/usr/bin/sleep"] {
+                    if fs::symlink_metadata(input).is_err() {
+                        return Err(refused(&format!("tenancy bootstrap test input absent: {input}")));
+                    }
+                }
                 let operator = Identity {
                     uid: unsafe{libc::geteuid()},
                     gid: unsafe{libc::getegid()},
                 };
-                let app = Identity {
-                    uid: 165536,
-                    gid: 165536,
+                // The first identity of this user's /etc/subuid grant (the same
+                // grant newuidmap checks), and the bwrap resolve-bwrap would pick.
+                let name = unsafe { std::ffi::CStr::from_ptr((*libc::getpwuid(operator.uid)).pw_name) }
+                    .to_str().map_err(|_| refused("user name"))?.to_owned();
+                let first = fs::read_to_string("/etc/subuid")?.lines()
+                    .find_map(|l| l.strip_prefix(&format!("{name}:")).and_then(|r| r.split(':').next()).and_then(|n| n.parse::<u32>().ok()))
+                    .ok_or_else(|| refused("no /etc/subuid grant for the test user"))?;
+                let app = Identity { uid: first, gid: first };
+                let bwrap = match std::env::var("MINI_BWRAP") {
+                    Ok(b) => std::path::PathBuf::from(b),
+                    Err(_) => crate::namespace_identity::PHYSICAL_BWRAPS.iter().map(std::path::PathBuf::from)
+                        .find(|b| unsafe { libc::access(std::ffi::CString::new(b.as_os_str().as_encoded_bytes()).unwrap().as_ptr(), libc::X_OK) } == 0)
+                        .ok_or_else(|| refused("no physical bwrap"))?,
                 };
-                crate::namespace_identity::enter(operator.uid,operator.gid,app.uid,app.gid)?;
+                let sha = format!("{:x}", Sha256::digest(fs::read(&bwrap)?));
+                crate::namespace_identity::enter(&bwrap,&sha,operator.uid,operator.gid,app.uid,app.gid)?;
                 let (mut a, b) = UnixStream::pair()?;
                 let worker_pid = unsafe { libc::fork() };
                 if worker_pid < 0 {

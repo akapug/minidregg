@@ -139,17 +139,8 @@ def requestStream : StreamCodec Request :=
     (by intro r; cases r; rfl)
 
 def frame : List UInt8 := "DREGG/PRIVATE-ROOM/RELEASE-REQUEST".toUTF8.toList ++ [1]
-def rawCodec : LawfulCodec Request where
-  encode r := frame ++ requestStream.encode r
-  decode bytes := if bytes.take frame.length = frame then
-    requestStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro r
-    have exact := requestStream.toLawful.decode_encode r
-    change requestStream.toLawful.decode (requestStream.encode r) = some r at exact
-    simp [exact]
 
-def codec : LawfulCodec Request := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Request := (StreamCodec.framed frame requestStream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 
@@ -161,7 +152,7 @@ theorem encode_injective {left right : Request} (same : encode left = encode rig
 
 theorem decoded_canonical {bytes : List UInt8} {r : Request}
     (accepted : decode bytes = some r) : encode r = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 /-- Canonical equality binds recipients/records/ciphertext commitments together
 with authority/key roots and the exact retained operation. It does not assert

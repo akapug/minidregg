@@ -1,15 +1,14 @@
 //! Physical mapping of an already matched Mini request to packaged WebSession
 //! values. Only the source checked principal and effective ordered bits enter
 //! Sandstorm session identity/permissions; HTTP labels and headers grant none.
-#![allow(dead_code)] // No HTTP delivery until native op34/claim join is complete.
 
 use crate::dispatch_inspection::{
     HttpProjection, MatchedInspection, Route, STREAMED_OPEN_METHOD,
 };
 use crate::rpc_adapter::{SessionBinding, SessionKind};
 use minidregg_spk_rpc::{
-    Body, Cookie, ETag, ETagPrecondition, Header, Method, RequestContext, SessionParameters,
-    WebRequest, WebSocketOpen,
+    Body, Cookie, DavArgs, Depth, ETag, ETagPrecondition, Header, Method, RequestContext,
+    SessionParameters, WebRequest, WebSocketOpen,
 };
 use std::io;
 
@@ -87,6 +86,9 @@ fn cookies(value: &str) -> io::Result<Vec<Cookie>> {
             .trim()
             .split_once('=')
             .ok_or_else(|| invalid("malformed app cookie"))?;
+        if name == "__Host-mini_spk_session" {
+            return Err(invalid("custody session cookie is not an app cookie"));
+        }
         if name.is_empty()
             || name.len() > 8192
             || value.len() > 8192
@@ -171,7 +173,7 @@ pub(crate) fn physical_open_input(
     preferred_handle: &str,
     base_path: &str,
 ) -> io::Result<PhysicalOpenInput> {
-    let (binding, call, context, body, protocols) =
+    let (binding, call, context, body, protocols, _) =
         project(matched, http, display_name, preferred_handle, base_path)?;
     match (call, body) {
         (Call::Open, None) => Ok(PhysicalOpenInput {
@@ -204,7 +206,7 @@ pub(crate) fn physical_web_input(
     preferred_handle: &str,
     base_path: &str,
 ) -> io::Result<PhysicalWebInput> {
-    let (binding, call, context, body, _) =
+    let (binding, call, context, body, _, dav) =
         project(matched, http, display_name, preferred_handle, base_path)?;
     let Call::Exchange(method) = call else {
         return Err(invalid("a streamed open is not a WebSession exchange"));
@@ -216,18 +218,29 @@ pub(crate) fn physical_web_input(
             path_and_query: matched.app_path_and_query.clone(),
             context,
             body,
+            dav,
         },
     })
 }
 
 fn call_for(method: &str) -> io::Result<Call> {
     Ok(match method {
+        crate::hosted_conversation::METHOD => Call::Exchange(Method::HostedConversation),
         "GET" => Call::Exchange(Method::Get),
         "HEAD" => Call::Exchange(Method::Head),
         "POST" => Call::Exchange(Method::Post),
         "PUT" => Call::Exchange(Method::Put),
         "PATCH" => Call::Exchange(Method::Patch),
         "DELETE" => Call::Exchange(Method::Delete),
+        "PROPFIND" => Call::Exchange(Method::Propfind),
+        "PROPPATCH" => Call::Exchange(Method::Proppatch),
+        "MKCOL" => Call::Exchange(Method::Mkcol),
+        "COPY" => Call::Exchange(Method::Copy),
+        "MOVE" => Call::Exchange(Method::Move),
+        "LOCK" => Call::Exchange(Method::Lock),
+        "UNLOCK" => Call::Exchange(Method::Unlock),
+        "REPORT" => Call::Exchange(Method::Report),
+        "OPTIONS" => Call::Exchange(Method::Options),
         STREAMED_OPEN_METHOD => Call::Open,
         _ => return Err(invalid("Mini method unavailable to WebSession")),
     })
@@ -256,6 +269,7 @@ struct HttpParts {
     context: RequestContext,
     body: Option<Body>,
     protocols: Option<Vec<String>>,
+    dav: DavArgs,
     kind: SessionKind,
     base_path: String,
     user_agent: Option<String>,
@@ -268,28 +282,38 @@ fn project(
     display_name: &str,
     preferred_handle: &str,
     base_path: &str,
-) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>)> {
+) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>, DavArgs)> {
     let call = call_for(matched.method.as_str())?;
     let HttpParts {
         context,
         body,
         protocols,
+        dav,
         kind,
         base_path,
         user_agent,
     } = project_http(&call, http, display_name, preferred_handle, base_path)?;
+    let session_resource = matched.session_resource.parse::<u64>()
+        .map_err(|_| invalid("Mini session resource exceeds physical host range"))?;
+    let subject = matched.subject.parse::<u64>()
+        .map_err(|_| invalid("Mini subject exceeds physical host range"))?;
+    if matched.subject != subject.to_string()
+        || matched.session_resource != session_resource.to_string() {
+        return Err(invalid("Mini session identity coordinates must be canonical unsigned integers"));
+    }
+    // Sandstorm tabId correlates a source session across process restarts. It
+    // is not a browser label or request header and carries no new authority.
+    let mut tab_id = b"mini-session-v1\0".to_vec();
+    for id in [matched.app, subject, session_resource] {
+        tab_id.extend_from_slice(&id.to_be_bytes());
+    }
     Ok((
         SessionBinding {
             app: matched.app,
             process_generation: matched.app_generation,
-            session_resource: matched
-                .session_resource
-                .parse()
-                .map_err(|_| invalid("Mini session resource exceeds physical host range"))?,
-            subject: matched
-                .subject
-                .parse()
-                .map_err(|_| invalid("Mini subject exceeds physical host range"))?,
+            session_resource,
+            session_generation: matched.session_generation.clone(),
+            subject,
             projection_fingerprint: matched.session_fingerprint,
             ticket_resource: None,
             kind,
@@ -298,7 +322,7 @@ fn project(
                 display_name: display_name.to_owned(),
                 preferred_handle: preferred_handle.to_owned(),
                 permissions: matched.effective_bits.clone(),
-                tab_id: Vec::new(),
+                tab_id,
                 base_path,
                 user_agent: user_agent.unwrap_or_else(|| "Mini SPK Host".to_owned()),
                 acceptable_languages: Vec::new(),
@@ -308,6 +332,7 @@ fn project(
         context,
         body,
         protocols.unwrap_or_default(),
+        dav,
     ))
 }
 
@@ -328,7 +353,11 @@ fn project_http(
     }
     let mut context = RequestContext::default();
     let mut content_type = None;
+    let mut content_encoding = None;
     let mut user_agent = None;
+    let mut dav = DavArgs::default();
+    let dav_call = matches!(call, Call::Exchange(m) if crate::host_operations::dav_method(dav_name(*m)));
+    let mut dav_seen = std::collections::HashSet::new();
     for (name, value) in http.ordered_headers {
         match name.as_str() {
             "accept" => context.accept.extend(quality_list(value)?),
@@ -341,6 +370,23 @@ fn project_http(
                 if content_type.replace(value.as_str()).is_some() {
                     return Err(invalid("duplicate content-type"));
                 }
+            }
+            "content-encoding" => {
+                if value.len() > 128 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+                    return Err(invalid("content-encoding is not one coding token"));
+                }
+                if content_encoding.replace(value.as_str()).is_some() {
+                    return Err(invalid("duplicate content-encoding"));
+                }
+            }
+            dav_header if crate::host_operations::dav_header_name(dav_header) => {
+                if !dav_call || !matches!(call, Call::Exchange(m) if crate::host_operations::dav_header_allowed(dav_name(*m), dav_header, value)) {
+                    return Err(invalid("DAV parameter header on a non-DAV call"));
+                }
+                if !dav_seen.insert(dav_header) {
+                    return Err(invalid("duplicate DAV parameter header"));
+                }
+                dav_parameter(&mut dav, dav_header, value, http.route, base_path)?;
             }
             "user-agent" => {
                 if value.len() > 4096 {
@@ -356,9 +402,9 @@ fn project_http(
                 }
                 context.etag_precondition = etags(value, name == "if-match")?;
             }
-            "x-requested-with" | "x-csrftoken" | "x-csrf-token" | "oc-total-length"
-            | "oc-chunk-size" | "x-oc-mtime" | "oc-fileid" | "oc-chunked" | "oc-checksum"
-            | "oc-chunk-offset" | "oc-lazyops" => {
+            // The rest of Lean's ordinaryHeaderName (generated): carried as additional headers. The
+            // names with their own projection are matched above this arm.
+            other if crate::host_operations::ordinary_header_name(other) => {
                 context.additional_headers.push(Header {
                     name: name.clone(),
                     value: value.clone(),
@@ -386,22 +432,39 @@ fn project_http(
     {
         return Err(invalid("WebSession context category exceeds bound"));
     }
-    let body = if matches!(
-        call,
-        Call::Exchange(Method::Post | Method::Put | Method::Patch)
-    ) {
-        let mime_type = content_type.unwrap_or("");
-        Some(Body {
-            mime_type: mime_type.to_owned(),
-            encoding: String::new(),
+    let body = match call {
+        Call::Exchange(Method::Post | Method::Put | Method::Patch | Method::Proppatch | Method::HostedConversation) => Some(Body {
+            mime_type: content_type.unwrap_or("").to_owned(),
+            encoding: content_encoding.unwrap_or("").to_owned(),
             bytes: http.body.to_vec(),
-        })
-    } else {
-        if content_type.is_some() || !http.body.is_empty() {
-            return Err(invalid("body/header on bodyless WebSession method"));
+        }),
+        // A DAV call's content is optional: present exactly when the request carried a body.
+        Call::Exchange(Method::Propfind | Method::Lock | Method::Mkcol | Method::Report)
+            if !http.body.is_empty() =>
+        {
+            Some(Body {
+                mime_type: content_type.unwrap_or("").to_owned(),
+                encoding: content_encoding.unwrap_or("").to_owned(),
+                bytes: http.body.to_vec(),
+            })
         }
-        None
+        Call::Exchange(Method::Propfind | Method::Lock | Method::Mkcol | Method::Report) => None,
+        _ => {
+            if content_type.is_some() || content_encoding.is_some() || !http.body.is_empty() {
+                return Err(invalid("body/header on bodyless WebSession method"));
+            }
+            None
+        }
     };
+    match call {
+        Call::Exchange(Method::Copy | Method::Move) if dav.destination.is_none() => {
+            return Err(invalid("COPY/MOVE without a destination"))
+        }
+        Call::Exchange(Method::Unlock) if dav.lock_token.is_none() => {
+            return Err(invalid("UNLOCK without a lock token"))
+        }
+        _ => {}
+    }
     let (kind, base_path) = match http.route {
         Route::Browser => {
             let host = base_path
@@ -420,10 +483,87 @@ fn project_http(
         context,
         body,
         protocols,
+        dav,
         kind,
         base_path,
         user_agent: user_agent.map(str::to_owned),
     })
+}
+
+/// The method token Lean's `davMethod` names for a WebSession DAV call.
+fn dav_name(method: Method) -> &'static str {
+    match method {
+        Method::Propfind => "PROPFIND",
+        Method::Proppatch => "PROPPATCH",
+        Method::Mkcol => "MKCOL",
+        Method::Copy => "COPY",
+        Method::Move => "MOVE",
+        Method::Lock => "LOCK",
+        Method::Unlock => "UNLOCK",
+        Method::Report => "REPORT",
+        Method::Options => "OPTIONS",
+        _ => "",
+    }
+}
+
+/// One signed DAV parameter header into its typed WebSession parameter, as Sandstorm's own
+/// front end maps them: `depth` 0/1/infinity, `overwrite: F` is `noOverwrite`, `lock-token`
+/// verbatim, and `destination` (an absolute URL on this grain's origin, or an absolute path)
+/// into the relative Sandstorm path.
+fn dav_parameter(
+    dav: &mut DavArgs,
+    name: &str,
+    value: &str,
+    route: Route<'_>,
+    base_path: &str,
+) -> io::Result<()> {
+    match name {
+        "depth" => {
+            dav.depth = Some(match value.to_ascii_lowercase().as_str() {
+                "0" => Depth::Zero,
+                "1" => Depth::One,
+                "infinity" => Depth::Infinity,
+                _ => return Err(invalid("DAV depth is not 0, 1 or infinity")),
+            })
+        }
+        "overwrite" => {
+            dav.no_overwrite = match value {
+                "F" | "f" => true,
+                "T" | "t" => false,
+                _ => return Err(invalid("DAV overwrite is not T or F")),
+            }
+        }
+        "lock-token" => dav.lock_token = Some(value.to_owned()),
+        "destination" => {
+            // Browser Destination has HTTP origin semantics; API Destination is an
+            // exact relative path under the already verified signed package prefix.
+            let routed;
+            let path = match route {
+                Route::Api { signed_path } => {
+                    routed = minidregg_signed_api_path::route(signed_path, value)
+                        .map_err(invalid)?;
+                    routed.as_str()
+                }
+                Route::Browser => {
+                    if let Some(rest) = value.strip_prefix("https://") {
+                        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+                        if format!("https://{authority}") != base_path {
+                            return Err(invalid("DAV destination is on another origin"));
+                        }
+                        path
+                    } else {
+                        value.strip_prefix('/').ok_or_else(|| invalid("DAV browser destination is not absolute"))?
+                    }
+                }
+            };
+            if path.len() > 8192 || path.contains(['#', '\r', '\n', '\0']) {
+                return Err(invalid("DAV destination outside protocol bound"));
+            }
+            dav.destination = Some(path.to_owned());
+        }
+        _ => return Err(invalid("unknown DAV parameter header")),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -449,6 +589,25 @@ mod tests {
             effective_bits: vec![true, false],
             app_path_and_query: "repo.git/git-receive-pack".into(),
             method: "POST".into(),
+        }
+    }
+
+    #[test]
+    fn source_session_tab_is_stable_across_restart_and_separates_sessions() {
+        let mut source=matched();
+        let http=HttpProjection {method:"POST",path_and_query:"repo.git/git-receive-pack",
+            ordered_headers:&[],body:b"",route:Route::Api {signed_path:"/repo.git/"}};
+        let project_tab=|m:&MatchedInspection| physical_web_input(m,&http,"label","handle","/")
+            .map(|p|p.binding.params.tab_id);
+        let original=project_tab(&source).unwrap();
+        assert_eq!(original,[b"mini-session-v1\0".as_slice(),&6100_u64.to_be_bytes(),&9_u64.to_be_bytes(),&6209_u64.to_be_bytes()].concat());
+        source.app_generation+=1;source.session_fingerprint=[7;32];
+        assert_eq!(project_tab(&source).unwrap(),original);
+        source.session_resource="6210".into();assert_ne!(project_tab(&source).unwrap(),original);
+        source.app=0;source.subject="0".into();source.session_resource="0".into();
+        assert_eq!(project_tab(&source).unwrap(),[b"mini-session-v1\0".as_slice(), &[0_u8;24]].concat());
+        for bad in ["","01","+9","18446744073709551616"] {
+            source.session_resource=bad.into();assert!(project_tab(&source).is_err());
         }
     }
 
@@ -558,6 +717,58 @@ mod tests {
             ..http
         };
         assert!(physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").is_err());
+    }
+
+    #[test]
+    fn dav_api_destination_is_exactly_under_signed_prefix() {
+        let mut args = DavArgs::default();
+        dav_parameter(&mut args, "destination", "notes/new.txt",
+            Route::Api { signed_path: "/dav/" }, "").unwrap();
+        assert_eq!(args.destination.as_deref(), Some("dav/notes/new.txt"));
+        for destination in ["/elsewhere", "https://elsewhere/a", "../escape", "a/%2e%2e/b"] {
+            assert!(dav_parameter(&mut DavArgs::default(), "destination", destination,
+                Route::Api { signed_path: "/dav/" }, "").is_err());
+        }
+        assert!(!crate::host_operations::dav_header_allowed("MOVE", "depth", "1"));
+        assert!(!crate::host_operations::dav_header_allowed("PROPFIND", "overwrite", "T"));
+    }
+
+    #[test]
+    fn dav_headers_project_into_typed_parameters_and_refuse_off_dav() {
+        let base = "https://friend.example.test";
+        let project = |method: &'static str, path: &'static str, headers: &[(String, String)], body: &'static [u8]| {
+            let mut source = matched();
+            source.method = method.into();
+            source.app_path_and_query = path.into();
+            let http = HttpProjection { method, path_and_query: path, ordered_headers: headers, body, route: Route::Browser };
+            physical_web_input(&source, &http, "Friend", "friend", base)
+        };
+        let h = |pairs: &[(&str, &str)]| pairs.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect::<Vec<_>>();
+        let propfind = project("PROPFIND", "dav/notes", &h(&[("depth", "0"), ("content-type", "application/xml")]), b"<propfind/>").unwrap();
+        assert_eq!(propfind.request.method, Method::Propfind);
+        assert_eq!(propfind.request.dav.depth, Some(Depth::Zero));
+        assert_eq!(propfind.request.body.unwrap().bytes, b"<propfind/>");
+        let mv = project("MOVE", "dav/a", &h(&[("destination", "https://friend.example.test/dav/b%20c"), ("overwrite", "F")]), b"").unwrap();
+        assert_eq!(mv.request.dav.destination.as_deref(), Some("dav/b%20c"));
+        assert!(mv.request.dav.no_overwrite);
+        assert!(mv.request.body.is_none());
+        let by_path = project("COPY", "dav/a", &h(&[("destination", "/dav/c"), ("depth", "0")]), b"").unwrap();
+        assert_eq!(by_path.request.dav.destination.as_deref(), Some("dav/c"));
+        assert_eq!(by_path.request.dav.depth, Some(Depth::Zero));
+        let unlock = project("UNLOCK", "dav/a", &h(&[("lock-token", "<opaquelocktoken:1>")]), b"").unwrap();
+        assert_eq!(unlock.request.dav.lock_token.as_deref(), Some("<opaquelocktoken:1>"));
+        let mkcol = project("MKCOL", "dav/new", &[], b"").unwrap();
+        assert!(mkcol.request.body.is_none());
+        let encoded = project("POST", "repo.git/git-upload-pack", &h(&[("content-type", "application/x-git-upload-pack-request"), ("content-encoding", "gzip")]), b"\x1f\x8b").unwrap();
+        assert_eq!(encoded.request.body.unwrap().encoding, "gzip");
+        // Refusals by name, before any call.
+        assert!(project("MOVE", "dav/a", &h(&[("destination", "https://elsewhere.example/dav/b")]), b"").is_err());
+        assert!(project("MOVE", "dav/a", &[], b"").is_err());
+        assert!(project("UNLOCK", "dav/a", &[], b"").is_err());
+        assert!(project("GET", "dav/a", &h(&[("depth", "1")]), b"").is_err());
+        assert!(project("PROPFIND", "dav/a", &h(&[("depth", "2")]), b"").is_err());
+        assert!(project("COPY", "dav/a", &h(&[("destination", "/dav/b"), ("overwrite", "maybe")]), b"").is_err());
+        assert!(project("PROPFIND", "dav/a", &h(&[("depth", "1"), ("depth", "0")]), b"").is_err());
     }
 
     #[test]
@@ -739,4 +950,30 @@ mod tests {
         preflight_web_input(&open, "Friend", "friend", origin, true).unwrap();
         assert!(preflight_web_input(&open, "Friend", "friend", origin, false).is_err());
     }
+}
+
+/// Lower the fixed HTTP half of an admitted compound hosted descriptor through
+/// the same ordinary header/body projection as every other WebSession request.
+pub(crate) fn hosted_http(value: &serde_json::Value, binding: &SessionBinding,
+    api_prefix: Option<&str>) -> io::Result<WebRequest> {
+    let text = |key: &str| value[key].as_str().ok_or_else(|| invalid("hosted HTTP text field absent"));
+    let method=text("method")?;
+    let call=call_for(method)?;
+    let Call::Exchange(method) = call else { return Err(invalid("nested hosted HTTP must be an exchange")); };
+    if method == Method::HostedConversation { return Err(invalid("nested conversation refused")); }
+    let headers=value["headers"].as_array().ok_or_else(||invalid("hosted HTTP headers absent"))?.iter().map(|header| {
+        Ok((header["name"].as_str().ok_or_else(||invalid("hosted header name absent"))?.to_owned(),
+            header["value"].as_str().ok_or_else(||invalid("hosted header value absent"))?.to_owned()))
+    }).collect::<io::Result<Vec<_>>>()?;
+    let body=crate::canonical::unhex(text("bodyHex")?).ok_or_else(||invalid("hosted HTTP body hex refused"))?;
+    let query=text("query")?;
+    let path=if query.is_empty() { text("path")?.to_owned() } else { format!("{}?{query}",text("path")?) };
+    let route=match binding.kind {
+        SessionKind::Web => Route::Browser,
+        SessionKind::Api => Route::Api { signed_path:api_prefix.ok_or_else(||invalid("hosted API prefix custody absent"))? },
+    };
+    let http=HttpProjection { method:text("method")?,path_and_query:&path,ordered_headers:&headers,body:&body,route };
+    let (app_path,query)=crate::dispatch_inspection::app_route_path(&http)?;
+    let parts=project_http(&call,&http,&binding.params.display_name,&binding.params.preferred_handle,&binding.params.base_path)?;
+    Ok(WebRequest { method,path_and_query:if query.is_empty() {app_path} else {format!("{app_path}?{query}")},context:parts.context,body:parts.body,dav:parts.dav })
 }

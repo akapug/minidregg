@@ -1,12 +1,83 @@
 /- Lossless cached comparator keys: canonical address bytes are computed once
 per inserted coordinate and once per lookup, rather than at every tree edge.
 The dependent value remains indexed by the original typed address. -/
-import Compiler.FiniteDependentMapCodec
-import Mathlib.Data.Finset.Sort
+module
+
+public import Compiler.FiniteDependentMapCodec
+public import Mathlib.Data.Finset.Sort
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FiniteDependentMapCachedOrdering
 
 set_option autoImplicit false
+
+/-- A one-pass Boolean decision of `<` on comparator keys: what the cached
+order runs instead of the key type's generic `Decidable (a < b)`. -/
+class FastKeyOrder (O : Type) [LinearOrder O] where
+  ltb : O → O → Bool
+  ltb_iff : ∀ a b, ltb a b = true ↔ a < b
+
+/-- Strict lexicographic order on byte keys, one tight pass. -/
+def lexLt : List Nat → List Nat → Bool
+  | [], [] => false
+  | [], _ :: _ => true
+  | _ :: _, [] => false
+  | a :: as, b :: bs => if a < b then true else if a = b then lexLt as bs else false
+
+theorem lexLt_iff : ∀ (a b : List Nat), lexLt a b = true ↔ a < b
+  | [], [] => by simp [lexLt]
+  | [], _ :: _ => by simp [lexLt, List.nil_lt_cons]
+  | _ :: _, [] => by simp [lexLt, List.not_lt_nil]
+  | a :: as, b :: bs => by
+      rw [List.cons_lt_cons_iff, ← lexLt_iff as bs]
+      show (if a < b then true else if a = b then lexLt as bs else false) = true ↔ _
+      by_cases h : a < b
+      · simp [h]
+      · by_cases e : a = b
+        · subst e; simp
+        · simp [h, e]
+
+/-- Any key order decides `<` by its own instance; byte keys override it below. -/
+instance (priority := low) {O : Type} [LinearOrder O] : FastKeyOrder O :=
+  ⟨fun a b => decide (a < b), fun _ _ => decide_eq_true_iff⟩
+
+instance : FastKeyOrder (List Nat) := ⟨lexLt, lexLt_iff⟩
+
+/-- `LinearOrder.lift'` along an injective key, deciding only on keys: `<` is one
+`FastKeyOrder.ltb` pass, `≤` its flip negated, `=` the keys' equality; never
+the source type's own equality, never `≤` both ways, never the generic boxed
+`List.Lex` decision. Same `≤` and `<` as `LinearOrder.lift'`. -/
+@[reducible] def FastKeyOrder.lift {α O : Type} [LinearOrder O] [FastKeyOrder O] (f : α → O)
+    (inj : Function.Injective f) : LinearOrder α where
+  le left right := f left ≤ f right
+  lt left right := f left < f right
+  le_refl _ := le_refl _
+  le_trans _ _ _ := le_trans
+  lt_iff_le_not_ge _ _ := lt_iff_le_not_ge
+  le_antisymm _ _ below above := inj (le_antisymm below above)
+  le_total _ _ := le_total _ _
+  toDecidableLE left right :=
+    decidable_of_iff (FastKeyOrder.ltb (f right) (f left) = false)
+      (by rw [← Bool.not_eq_true, FastKeyOrder.ltb_iff]; exact not_lt)
+  toDecidableEq left right := decidable_of_iff (f left = f right) inj.eq_iff
+  toDecidableLT left right :=
+    decidable_of_iff (FastKeyOrder.ltb (f left) (f right) = true) (FastKeyOrder.ltb_iff _ _)
 
 variable {K O : Type} (keyOf : K → O)
 
@@ -28,9 +99,6 @@ theorem cache_injective : Function.Injective (cache keyOf) := by
   intro left right same
   exact congrArg CachedKey.value same
 
-instance [DecidableEq K] : DecidableEq (CachedKey keyOf) := fun left right =>
-  decidable_of_iff (left.value = right.value) (value_injective keyOf).eq_iff
-
 theorem orderKey_injective (keyExact : Function.Injective keyOf) :
     Function.Injective (CachedKey.orderKey (keyOf := keyOf)) := by
   intro left right same
@@ -38,24 +106,25 @@ theorem orderKey_injective (keyExact : Function.Injective keyOf) :
   apply keyExact
   exact left.bound.symm.trans (same.trans right.bound)
 
-@[reducible] def cachedOrder [LinearOrder O] (keyExact : Function.Injective keyOf) :
+/-- The byte order on cached keys: `FastKeyOrder.lift` of the cached key. -/
+@[reducible] def cachedOrder [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf) :
     LinearOrder (CachedKey keyOf) :=
-  LinearOrder.lift' CachedKey.orderKey (orderKey_injective keyOf keyExact)
+  FastKeyOrder.lift CachedKey.orderKey (orderKey_injective keyOf keyExact)
 
 variable [DecidableEq K] {V : K → Type} [∀ key, Zero (V key)]
 
 /-- Sort using cached canonical keys without changing the original key list.
 `Finset.map` needs no duplicate scan because the decoration is injective. -/
-def sortedFinsetCached [LinearOrder O] (keyExact : Function.Injective keyOf)
+def sortedFinsetCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (keys : Finset K) : List K :=
   letI := cachedOrder keyOf keyExact
   ((keys.map ⟨cache keyOf, cache_injective keyOf⟩).sort (· ≤ ·)).map CachedKey.value
 
-theorem sortedFinsetCached_eq [LinearOrder O] (keyExact : Function.Injective keyOf)
+theorem sortedFinsetCached_eq [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (keys : Finset K) :
     sortedFinsetCached keyOf keyExact keys =
-      (letI := LinearOrder.lift' keyOf keyExact; keys.sort (· ≤ ·)) := by
-  letI := LinearOrder.lift' keyOf keyExact
+      (letI := FastKeyOrder.lift keyOf keyExact; keys.sort (· ≤ ·)) := by
+  letI := FastKeyOrder.lift keyOf keyExact
   letI := cachedOrder keyOf keyExact
   have mapped := Finset.map_sort ⟨cache keyOf, cache_injective keyOf⟩ keys
     (· ≤ ·) (· ≤ ·) (fun _ _ _ _ => Iff.rfl)
@@ -88,14 +157,14 @@ private theorem mem_keyTree [LinearOrder K] (keys : List K) (key : K) :
       rw [keyTree, Std.DTreeMap.mem_insert, ih]
       simp [compareOfLessAndEq_eq_eq le_refl not_le, eq_comm]
 
-def uniqueKeysCached [LinearOrder O] (keyExact : Function.Injective keyOf)
+def uniqueKeysCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (keys : List K) : Finset K :=
   letI := cachedOrder keyOf keyExact
   let tree := keyTree (keys.map (cache keyOf))
   let unique : Finset (CachedKey keyOf) := ⟨tree.keys, tree.nodup_keys⟩
   unique.map ⟨CachedKey.value, value_injective keyOf⟩
 
-@[simp] theorem mem_uniqueKeysCached [LinearOrder O] (keyExact : Function.Injective keyOf)
+@[simp] theorem mem_uniqueKeysCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (keys : List K) (key : K) :
     key ∈ uniqueKeysCached keyOf keyExact keys ↔ key ∈ keys := by
   letI := cachedOrder keyOf keyExact
@@ -107,7 +176,7 @@ def uniqueKeysCached [LinearOrder O] (keyExact : Function.Injective keyOf)
   · intro member
     exact ⟨cache keyOf key, ⟨key, member, rfl⟩, rfl⟩
 
-def uniqueMultisetCached [LinearOrder O] (keyExact : Function.Injective keyOf)
+def uniqueMultisetCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (keys : Multiset K) : Finset K :=
   Quotient.lift (uniqueKeysCached keyOf keyExact)
     (by
@@ -116,14 +185,14 @@ def uniqueMultisetCached [LinearOrder O] (keyExact : Function.Injective keyOf)
       simp only [mem_uniqueKeysCached]
       exact same.mem_iff) keys
 
-@[simp] theorem mem_uniqueMultisetCached [LinearOrder O]
+@[simp] theorem mem_uniqueMultisetCached [LinearOrder O] [FastKeyOrder O]
     (keyExact : Function.Injective keyOf) (keys : Multiset K) (key : K) :
     key ∈ uniqueMultisetCached keyOf keyExact keys ↔ key ∈ keys := by
   refine Quotient.inductionOn keys ?_
   intro values
   exact mem_uniqueKeysCached keyOf keyExact values key
 
-def supportCached [LinearOrder O] (keyExact : Function.Injective keyOf)
+def supportCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     [∀ key, DecidableEq (V key)] (fields : Π₀ key : K, V key) : Finset K :=
   fields.support'.lift (fun support =>
     (uniqueMultisetCached keyOf keyExact support.1).filter (fun key => fields key ≠ 0))
@@ -137,7 +206,7 @@ def supportCached [LinearOrder O] (keyExact : Function.Injective keyOf)
       · rintro ⟨_, nonzero⟩
         exact ⟨(left.2 key).resolve_right nonzero, nonzero⟩)
 
-@[simp] theorem supportCached_eq [LinearOrder O] (keyExact : Function.Injective keyOf)
+@[simp] theorem supportCached_eq [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     [∀ key, DecidableEq (V key)] (fields : Π₀ key : K, V key) :
     supportCached keyOf keyExact fields = fields.support := by
   unfold supportCached DFinsupp.support
@@ -152,7 +221,8 @@ def cachedEntries (items : List (Sigma V)) :
     List (Sigma (fun cached : CachedKey keyOf => V cached.value)) :=
   items.map fun item => ⟨cache keyOf item.1, item.2⟩
 
-theorem fromEntries_cached_apply (items : List (Sigma V)) (key : K) :
+/-- For any decision of cached-key equality (they all agree). -/
+theorem fromEntries_cached_apply [DecidableEq (CachedKey keyOf)] (items : List (Sigma V)) (key : K) :
     FiniteDependentMapCodec.fromEntries (cachedEntries keyOf items) (cache keyOf key) =
       FiniteDependentMapCodec.fromEntries items key := by
   induction items with
@@ -183,7 +253,7 @@ theorem fromEntries_zero_of_absent (items : List (Sigma V)) (key : K)
 /-- The support witness carries original typed addresses; the tree carries
 only a lossless decoration of each key. Duplicate/zero/first-wins behavior is
 the original function, and canonical acceptance is unchanged. -/
-def fromEntriesCached [LinearOrder O] (keyExact : Function.Injective keyOf)
+def fromEntriesCached [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (items : List (Sigma V)) : (Π₀ key : K, V key) :=
   letI := cachedOrder keyOf keyExact
   let fields := FiniteDependentMapCodec.fromEntriesFast (cachedEntries keyOf items)
@@ -194,7 +264,7 @@ def fromEntriesCached [LinearOrder O] (keyExact : Function.Injective keyOf)
       · exact Or.inl (Multiset.mem_map.mpr ⟨cache keyOf key, present, rfl⟩)
       · exact Or.inr zero⟩)
 
-@[simp] theorem fromEntriesCached_eq [LinearOrder O] (keyExact : Function.Injective keyOf)
+@[simp] theorem fromEntriesCached_eq [LinearOrder O] [FastKeyOrder O] (keyExact : Function.Injective keyOf)
     (items : List (Sigma V)) :
     fromEntriesCached keyOf keyExact items = FiniteDependentMapCodec.fromEntries items := by
   letI := cachedOrder keyOf keyExact

@@ -1,5 +1,7 @@
-//! Root-declared read-only visibility for an existing Store outside /var.
-//! This affects the operator resident only. The app's bwrap root stays separate.
+//! The resident unit's hardening drop-in, and the root-declared read-only
+//! inventory of home paths it reads. This affects the operator resident only;
+//! the app's bwrap root stays separate.
+use crate::io_context::IoContext;
 use super::*;
 use std::collections::BTreeSet;
 use std::os::unix::fs::FileTypeExt;
@@ -35,13 +37,13 @@ pub(super) fn validate(paths: &[PathBuf], uid: u32) -> io::Result<()> {
     let mut seen = BTreeSet::new();
     for path in paths {
         text(path)?;
-        if !seen.insert(path) || fs::canonicalize(path)? != *path {
+        if !seen.insert(path) || fs::canonicalize(&path).ctx("resolve", &path)? != *path {
             return Err(invalid("resident visibility path duplicated or symlinked"));
         }
         let mut prefix = PathBuf::from("/");
         for part in path.components().skip(1) {
             prefix.push(part);
-            let meta = fs::symlink_metadata(&prefix)?;
+            let meta = fs::symlink_metadata(&prefix).ctx("inspect", &prefix)?;
             if meta.file_type().is_symlink()
                 || ![0, uid].contains(&meta.uid())
                 || meta.mode() & 0o022 != 0
@@ -52,7 +54,7 @@ pub(super) fn validate(paths: &[PathBuf], uid: u32) -> io::Result<()> {
                 )));
             }
         }
-        let meta = fs::symlink_metadata(path)?;
+        let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
         if meta.is_file() {
             if meta.nlink() != 1 {
                 return Err(invalid("resident visibility file has multiple links"));
@@ -63,7 +65,7 @@ pub(super) fn validate(paths: &[PathBuf], uid: u32) -> io::Result<()> {
             if path.components().count() < 4 {
                 return Err(invalid("broad resident directory visibility refused"));
             }
-            let sockets = fs::read_dir(path)?.filter_map(Result::ok).any(|e| {
+            let sockets = fs::read_dir(&path).ctx("list", &path)?.filter_map(Result::ok).any(|e| {
                 fs::symlink_metadata(e.path()).is_ok_and(|m| {
                     m.file_type().is_socket() && m.uid() == uid && m.mode() & 0o002 == 0
                 })
@@ -122,7 +124,7 @@ pub(super) fn render(
     if home(socket_parent) {
         needed.insert(socket_parent.to_path_buf());
     }
-    let actual_socket = fs::symlink_metadata(&socket)?;
+    let actual_socket = fs::symlink_metadata(&socket).ctx("inspect", &socket)?;
     if !actual_socket.file_type().is_socket() || actual_socket.uid() != broker.operator_uid {
         return Err(invalid(
             "resident Mini endpoint is not this operator's socket",
@@ -199,13 +201,38 @@ pub(super) fn render(
             )));
         }
     }
-    if declared.is_empty() {
-        return Ok(String::new());
+    Ok(hardening(&needed))
+}
+
+/// The resident unit's hardening drop-in, as far as a *user* manager can
+/// apply it without breaking the resident's own namespace bootstrap.
+///
+/// Not rendered, on purpose: `ProtectSystem=`, `ProtectHome=`, `PrivateTmp=`,
+/// `BindReadOnlyPaths=`, `InaccessiblePaths=`, `SystemCallFilter=` and
+/// `NoNewPrivileges=yes`. In a user manager every mount-namespace setting
+/// implies `PrivateUsers=yes` (only the operator uid mapped) and every seccomp
+/// setting implies no-new-privileges; either one stops the setuid
+/// `newuidmap`/`newgidmap` that map {operator, app} into the namespace the
+/// resident joins (`namespace_identity.rs`), so the grain could never start.
+/// Filesystem confinement of the resident therefore has to be applied by the
+/// resident itself, in a mount namespace owned by the joined user namespace,
+/// before it parses app bytes; that is not done yet.
+///
+/// Rendered: no core dumps (the resident holds every participant seed), a
+/// private session keyring, and a descriptor bound high enough for the
+/// resident's routes and WebSockets (the app's own bound is set at its spawn,
+/// `spawn_gate::APP_MAX_FILES`). `needed` is the root-declared read-only
+/// inventory the resident reads from home, kept in the drop-in as its audit.
+fn hardening(needed: &BTreeSet<PathBuf>) -> String {
+    let mut text = String::from(
+        "# rendered by mini-spk-broker: resident hardening a user manager can apply\n\
+         [Service]\nLimitCORE=0\nLimitNOFILE=8192\nKeyringMode=private\n",
+    );
+    for path in needed {
+        // Paths passed `text()`: literal, absolute, [A-Za-z0-9/_.-] only.
+        text.push_str(&format!("# reads (root-declared, read-only): {}\n", path.display()));
     }
-    // The operator's user unit already sees its own protected inputs. App
-    // bytes receive only the existing bwrap image/var/RPC descriptors; no
-    // system-manager bind mounts or privileged home overlay is rendered.
-    Ok(String::new())
+    text
 }
 fn seeds(value: &Value, needed: &mut BTreeSet<PathBuf>) -> io::Result<()> {
     for signer in value
@@ -224,6 +251,25 @@ fn seeds(value: &Value, needed: &mut BTreeSet<PathBuf>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hardening_drop_in_is_never_empty_and_never_blocks_newuidmap() {
+        let mut needed = BTreeSet::new();
+        needed.insert(PathBuf::from("/home/ember/a2/keys/mini.key"));
+        let text = hardening(&needed);
+        assert!(text.contains("[Service]\n"));
+        assert!(text.contains("LimitCORE=0\n"));
+        assert!(text.contains("LimitNOFILE=8192\n"));
+        assert!(text.contains("# reads (root-declared, read-only): /home/ember/a2/keys/mini.key\n"));
+        // Settings that would imply PrivateUsers= or no-new-privileges in a
+        // user manager, and so break the namespace bootstrap, stay absent.
+        // RestrictSUIDSGID= also installs a seccomp layer that returns ENOSYS
+        // for openat2, which bwrap >= 0.11 needs (Debian 13, bwrap 0.12).
+        for forbidden in ["ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateUsers",
+            "NoNewPrivileges", "SystemCallFilter", "BindReadOnlyPaths", "InaccessiblePaths",
+            "RestrictSUIDSGID", "NoExecPaths", "LockPersonality", "MemoryDenyWriteExecute"] {
+            assert!(!text.lines().any(|line| line.starts_with(forbidden)), "{forbidden}");
+        }
+    }
     #[test]
     fn unit_path_injection_and_broad_paths_refuse() {
         for bad in [

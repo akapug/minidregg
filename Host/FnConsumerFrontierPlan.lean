@@ -4,12 +4,31 @@ Main alone runs the pinned fn binary and supplies the projected evidence. This
 module binds that evidence to the current gateway credential signing header;
 the detached signature is not an admission or an fn ACK.
 -/
-import Host.FnConsumerNamespacePlan
-import Compiler.FnEvidenceCodec
-import Kernel.FnConsumerFrontierProposal
-import Host.Json
-import Kernel.FnSelectedPollCoverage
-import Kernel.FnEmptyPollProgressV2
+module
+
+public import Host.FnConsumerNamespacePlan
+public import Compiler.FnEvidenceCodec
+public import Kernel.FnConsumerFrontierProposal
+public import Host.Json
+public import Kernel.FnSelectedPollCoverage
+public import Kernel.FnEmptyPollProgressV2
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.FnConsumerFrontierPlan
 
@@ -53,9 +72,7 @@ def planStream : StreamCodec Plan :=
     (by intro plan; cases plan; rfl)
 
 def planCodec : LawfulCodec Plan :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN/v2".toUTF8.toList
-      planStream)
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN/v2".toUTF8.toList planStream
 
 theorem plan_decode_encode (plan : Plan) :
     planCodec.decode (planCodec.encode plan) = some plan :=

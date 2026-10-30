@@ -7,7 +7,11 @@ by abstract Lean evidence portals with data witnesses and explicit acceptance
 laws.  Computation completion is separate from release completion; neither is
 a receipt codec or runtime callback surface.
 -/
-import Theory.DisclosureDeclaration
+module
+
+public import Theory.DisclosureDeclaration
+
+@[expose] public section
 
 namespace Minidregg.Theory
 

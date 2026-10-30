@@ -1,8 +1,12 @@
 /- Live event20 registration requires a native-verified, same-walk Mini history.
 The lower conditional check alone cannot authorize a registration or select a
 legacy predecessor; the private Replay.Verified projection supplies both. -/
-import Kernel.FnConsumerNamespaceAdmissionAt
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.FnConsumerNamespaceAdmissionAt
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerNamespaceAdmission
 
@@ -21,6 +25,13 @@ structure AcceptedVerified {config : NativeHost.Config} {target : NativeHost.Dur
   legacyExact : verified.frontierLegacyFor ingress.spec = .ok legacy
   lower : FnConsumerNamespaceAdmissionAt.Conditional config verified.opened
     legacy ingress
+theorem AcceptedVerified.sound {config : NativeHost.Config} {target : NativeHost.Durable}
+    {verified : NativeHostReplay.Verified config target} {ingress : Ingress}
+    (accepted : AcceptedVerified verified ingress) :
+    verified.frontierRegistrationAbsent ingress.spec.consumerNamespace = true ∧
+    verified.frontierLegacyFor ingress.spec = .ok accepted.legacy ∧
+    FnConsumerNamespaceAdmissionAt.anchorMatches ingress.spec accepted.legacy = true :=
+  ⟨accepted.namespaceAbsent, accepted.legacyExact, accepted.lower.anchorExact⟩
 
 def admitVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (ingress : Ingress) :

@@ -20,7 +20,7 @@ private def tariff : Json := Json.mkObj [
   ("routes", Json.mkObj [("user", Json.mkObj [("perOp", toJson "4")]),
     ("pool", rate), ("homelab", rate)])]
 
-private def service (resource : Nat) : ProviderMeteringSettings :=
+private def service (resource : Nat) : ProviderUsage.ServiceSettings :=
   ⟨resource, tariff⟩
 
 private def refused {α : Type} : Except String α → Bool
@@ -64,11 +64,11 @@ private def quoteFrame (metadata : String) (model : String := "fixture") : List 
   pair metadata.toUTF8.toList (pair request response)
 
 def check : IO Unit := do
-  unless (checkedProviderServices [service 7950, service 7951]).isOk do
+  unless (ProviderUsage.checkedServices [service 7950, service 7951]).isOk do
     throw (IO.userError "two distinct providers refused")
-  unless refused (checkedProviderServices [service 7950, service 7950]) do
+  unless refused (ProviderUsage.checkedServices [service 7950, service 7950]) do
     throw (IO.userError "duplicate provider ID accepted")
-  unless refused (checkedProviderServices [service 0]) do
+  unless refused (ProviderUsage.checkedServices [service 0]) do
     throw (IO.userError "zero provider ID accepted")
   unless providerFromReserveCall [7950, 7951] (call [7950]) == .ok 7950 do
     throw (IO.userError "signed current provider target not selected")
@@ -76,7 +76,7 @@ def check : IO Unit := do
     throw (IO.userError "wrong signed provider target accepted")
   unless refused (providerFromReserveCall [7950, 7951] (call [7950, 7951])) do
     throw (IO.userError "ambiguous signed provider targets accepted")
-  let .ok services := checkedProviderServices [service 7950, service 7951]
+  let .ok services := ProviderUsage.checkedServices [service 7950, service 7951]
     | throw (IO.userError "provider tariffs did not parse")
   let v3 := fun (provider route : String) =>
     "{\"version\":\"3\",\"providerResourceId\":\"" ++ provider ++

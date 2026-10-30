@@ -408,7 +408,8 @@ lake_manifest_sha=$(sha256_file "$source/lake-manifest.json")
 rust_toolchain_sha=none
 [[ ! -f "$source/rust-toolchain.toml" ]] || rust_toolchain_sha=$(sha256_file "$source/rust-toolchain.toml")
 cargo_lock_sha=none
-[[ ! -f "$source/prover/Cargo.lock" ]] || cargo_lock_sha=$(sha256_file "$source/prover/Cargo.lock")
+# The root lock pins every workspace member (Cargo.toml; scripts/check-workspace.sh).
+[[ ! -f "$source/Cargo.lock" ]] || cargo_lock_sha=$(sha256_file "$source/Cargo.lock")
 
 package_count=$(jq '.packages | length' "$source/lake-manifest.json")
 git_package_count=$(jq '[.packages[] | select(.type == "git")] | length' "$source/lake-manifest.json")
@@ -495,7 +496,7 @@ fi
 
 [[ -d "$seed" && ! -L "$seed" && -d "$seed/packages" && ! -L "$seed/packages" ]] ||
   die "dependency seed is absent or unsafe"
-[[ -z "$(find "$seed" ! -type l -perm +222 -print -quit)" ]] || die "dependency seed is writable"
+[[ -z "$(find "$seed" ! -type l \( -perm -0200 -o -perm -0020 -o -perm -0002 \) -print -quit)" ]] || die "dependency seed is writable"
 [[ "$(cat "$seed/.complete")" == "$seed_key" ]] || die "dependency seed completion marker is invalid"
 [[ "$(sha256_file "$seed/dependency-revisions.tsv")" == "$dependency_manifest_sha" ]] ||
   die "dependency seed revision manifest identity is invalid"
@@ -682,7 +683,7 @@ dependency_integrity_exit=0
   else
     seed_identity_status=1
   fi
-  if [[ -z "$(find "$seed" ! -type l -perm +222 -print -quit)" ]]; then
+  if [[ -z "$(find "$seed" ! -type l \( -perm -0200 -o -perm -0020 -o -perm -0002 \) -print -quit)" ]]; then
     seed_permissions_status=0
   else
     seed_permissions_status=1

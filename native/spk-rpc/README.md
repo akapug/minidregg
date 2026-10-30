@@ -11,8 +11,11 @@ There is no listener, app launcher, HTTP facade, or Mini admission rule here.
 
 The included Sandstorm schemas are from upstream commit
 `a97cf3ee19d3bf2761cd597583ca5d998de425d8`; exact file digests are in
-`schema/SHA256SUMS`. The compiled closure is `grain`, `web-session`,
-`api-session`, `util`, `identity`, `powerbox`, `activity`, `supervisor`, and `ip`.
+`schema/SHA256SUMS`. `build.rs` compiles the nine-file closure `grain`,
+`web-session`, `api-session`, `util`, `identity`, `powerbox`, `activity`,
+`supervisor` and `ip`, plus `capnp/persistent.capnp` and `package.capnp`
+(below); `src/lib.rs` exposes the nine as `*_capnp` modules. The other 17
+`schema/*.capnp` files are pinned copies that nothing compiles or uses.
 The `schema/capnp/persistent.capnp` code-generation input comes from Cap'n Proto
 1.5.0, with only its unused `persistent` annotation omitted: `capnpc` 0.27
 otherwise generates a duplicate Rust module for the annotation and the
@@ -57,12 +60,26 @@ upstream. The Cap'n Proto schema has no separate raw-query or arbitrary-header
 field: request/response additional headers are limited to Sandstorm's
 whitelists, and response status codes are limited by its response union. This
 crate rejects unsupported request headers rather than silently dropping them.
-WebSocket, streaming *request* bodies, WebDAV methods, persistence, powerbox,
-and Sandstorm API callbacks are not connected. There is no HTTP fallback.
+`open_web_socket` (`src/web.rs`) calls `openWebSocket` on an admitted
+WebSession: relative path with query, the client's subprotocols (the app may
+choose only among them), a bounded 1 MiB message from the app
+(`MAX_WEBSOCKET_MESSAGE`), and `send_to_app` for client-to-app bytes. The bytes
+are opaque and never parsed here; the unit test in `src/protocol.rs` drives it
+over the socketpair. The Mini side that carries it through a grain route is
+`native/spk-host/src/web_socket.rs`. Streaming *request* bodies (a request body
+is one bounded byte string), WebDAV methods (`Method` has no such arm), the
+powerbox, and every other `SandstormApi` callback are not connected: they answer
+unimplemented by name. There is no HTTP fallback.
 Incoming Cap'n Proto traversal is capped at 16 MiB and 64 nesting levels;
 request content and collected response content have explicit byte bounds.
 The identity capability attached to `UserInfo` answers `getProfile` from the
 same supplied session parameters; it does not authenticate those parameters.
+The exported `SandstormApi` serves three methods, all for identity capabilities
+a grain keeps under `BridgeConfig.saveIdentityCaps`: `save`, `restore` and
+`drop`, against an `IdentityCustody` the owning service supplies
+(the `IdentityCustody` trait in `src/protocol.rs`; `MemoryIdentityCustody` is the in-process default, the
+Mini-backed custody is `native/spk-host/src/identity_custody.rs`). App-object
+persistence is not offered: such a token is `unknownToken`.
 The pinned packaged HTTP bridge accepts `ApiSession` only when its
 `BridgeConfig.apiPath` is nonempty; a typed request can therefore fail on an
 app that exposes only a web view. Its config is read inside the package from

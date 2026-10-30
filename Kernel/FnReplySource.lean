@@ -4,8 +4,12 @@ verifies the exact authored source and historical Store verdict; this module
 only interprets Mini's application body and correlation fields. It does not
 parse or decide NNTP/Store authority.
 -/
-import Kernel.FnReplyPublication
-import Kernel.FnPortableSource
+module
+
+public import Kernel.FnReplyPublication
+public import Kernel.FnPortableSource
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnReplySource
 
@@ -109,7 +113,6 @@ private def parseRaw (source : List UInt8) : Except String Extracted := do
   let some digest := Minidregg.Compiler.Tower256ConcreteBackend.digestStream.toLawful.decode digestBytes
     | throw "Q source has invalid Message-ID digest encoding"
   unless !digestBytes.isEmpty &&
-      Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode digest == digestBytes &&
       messageId == "<mini-e2-" ++ String.ofList digestChars ++ suffix &&
       messageIdValid parentMessageId &&
       (version != 1 || parentMessageId.startsWith "<mini-e1-") do
@@ -122,8 +125,6 @@ private def parseRaw (source : List UInt8) : Except String Extracted := do
     | throw "Q body is not canonical lowercase hexadecimal"
   let some reply := replyCodec.decode bytes
     | throw "Q body is not a canonical Mini reply"
-  unless replyCodec.encode reply == bytes do
-    throw "Q body differs from the canonical reply codec"
   pure ⟨messageId, parentMessageId, reply, creation, version⟩
 
 def extract (source : List UInt8) : Except String Extracted :=

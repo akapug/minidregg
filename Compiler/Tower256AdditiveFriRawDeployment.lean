@@ -41,19 +41,6 @@ noncomputable section
 
 /-! ## Stable concrete raw PCS metadata -/
 
-/-- Compact prefix codec for bounded natural coordinates. -/
-def finStream (size : Nat) : StreamCodec (Fin size) where
-  encode value := StreamCodec.nat.encode value.val
-  decodePrefix bytes := do
-    let (value, suffix) <- StreamCodec.nat.decodePrefix bytes
-    if inBounds : value < size then
-      some (⟨value, inBounds⟩, suffix)
-    else
-      none
-  decodePrefix_encode := by
-    intro value suffix
-    simp [StreamCodec.nat.decodePrefix_encode, value.isLt]
-
 /-- Per-level identifiers are derived injectively from the level.  These are
 the fixture namespace, not the production artifact's final registry IDs. -/
 def levelId (tag level : Nat) : Digest := ⟨970000 + 4 * level + tag⟩
@@ -68,7 +55,7 @@ def levelSpec (ell level : Nat) :
   semanticTypeId := levelId 1 level
   domainId := levelId 2 level
   domainCodecPin := ⟨levelId 3 level, levelId 2 level, 1⟩
-  domainCodec := (finStream (2 ^ (ell - level))).toLawful
+  domainCodec := (StreamCodec.fin (2 ^ (ell - level))).toLawful
 
 /-- A concrete raw Merkle PCS exists at every tree height.  There is no
 `PositionBinding` field to fabricate: collision resistance remains a priced

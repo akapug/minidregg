@@ -1,5 +1,5 @@
-//! The sealed-bid market (PRIVACY §3.4, MUD §2.7/§2.8): one declared cell under
-//! the law `deploy/shell/templates/market/sealed/law.market`, a founder who sells
+//! The sealed-bid market (docs/MUD.md §2.8): one declared cell under
+//! the law `native/resource-client/templates/market/sealed/law.market`, a founder who sells
 //! `supply` units at one uniform price, and up to four sealed bids.
 //!
 //! A bid is a COMMIT to the tuple (price, qty) under a fresh 32-byte blinder
@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 /// The sealed-market law in the shell grammar, with placeholders.
 pub(crate) const LAW_TEMPLATE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../deploy/shell/templates/market/sealed/law.market"
+    "/templates/market/sealed/law.market"
 ));
 
 /// The refusal a deposit gets until the bid-deposit receiver exists.
@@ -287,7 +287,7 @@ pub(crate) fn clear(supply: i128, bids: &[Bid]) -> (i128, Vec<(u64, i128)>) {
 
 // ------------------------------------------------------------ actions
 
-fn scalar(field: u64, value: &str, expected: Option<&str>) -> Value {
+pub(crate) fn scalar(field: u64, value: &str, expected: Option<&str>) -> Value {
     let mut action = json!({"type": if expected.is_some() {"write"} else {"create"},
         "key":{"type":"object","field":field.to_string()},"value":value});
     if let Some(expected) = expected {
@@ -296,7 +296,7 @@ fn scalar(field: u64, value: &str, expected: Option<&str>) -> Value {
     action
 }
 
-fn propose_writes(root: &Path, ws: &Value, name: &str, id: &str, actions: Vec<Value>) -> Result<()> {
+pub(crate) fn propose_writes(root: &Path, ws: &Value, name: &str, id: &str, actions: Vec<Value>) -> Result<()> {
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
         "targets":[{"name":name,"payload":{"type":"scalar","actions":actions}}]});
     let path = root.join("sources").join(format!("market-{id}.json"));
@@ -611,7 +611,7 @@ mod tests {
 
     #[test]
     fn fields_json_is_the_layout() {
-        let file = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../deploy/shell/templates/market/sealed/fields.json")).unwrap();
+        let file = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/market/sealed/fields.json")).unwrap();
         let fields: Value = serde_json::from_str(&file).unwrap();
         let m = &fields["fields"];
         assert_eq!(m["settled"], json!(FIELD_SETTLED.to_string()));

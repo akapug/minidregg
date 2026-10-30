@@ -1,0 +1,49 @@
+{
+  "actual_log": "/var/lib/mini-spk-worlds/bc2f3be5892aafea/bc2f3be5892aafea/host/apps/9101/g2/app-output-r9101-g2.log",
+  "corpus_sha256": "cbda5ea6eef7f36a97a43d4a75f85e07fccbb4f23657d27b4ccbc93e2646ab59",
+  "date": "2026-10-27",
+  "nltk_version": "3.9.4",
+  "probe_directory": "/othersys/lanes/oracle-wordnet-20261027",
+  "probe_hashes": {
+    "probe.py": "ef286729de136fe33dd1b727c8f62677b33de1b5a481d1a75ac8e1323c15f22a",
+    "run.sh": "df72df2ae1a675d61811fb2fbfe618801f74fcca2407f12a9f70e03189f8fb5a"
+  },
+  "probe_results": {
+    "baseline": {
+      "enforce": false,
+      "error_type": null,
+      "loaded": true,
+      "nltk_data": "/opt/oracle/root/nltk_data",
+      "sha256": "2b0495020fbb89f851b09f1b12ad6c2ce968294175ba53f75be676fd3856b482",
+      "warnings": 30
+    },
+    "enforced": {
+      "enforce": true,
+      "error_type": "LookupError",
+      "loaded": false,
+      "nltk_data": "/opt/oracle/root/nltk_data",
+      "sha256": "edc4178a4a19cf627f50fb1fcf7de477e0a95c9d11409ff5bbc00590d8286f03",
+      "warnings": 0
+    },
+    "fixed": {
+      "enforce": true,
+      "error_type": null,
+      "loaded": true,
+      "nltk_data": "/opt/oracle/root/nltk_data:/opt/oracle-data/root/nltk_data",
+      "sha256": "4e0055dc43f9fd9baf2156f090c4da96311b1abe1a14b36fcbb25c8fc2b0e99d",
+      "warnings": 0
+    }
+  },
+  "proposed_repair": "Add NLTK_DATA=/opt/oracle-data/root/nltk_data to the signed environment for shared-data packages; oracle7.py prepends its logical root. Do not change NLTK enforcement or suppress warnings.",
+  "r3_store": "bc2f3be5892aafea",
+  "result": "Current warning does not block WordNet lookup. Explicitly authorizing the fixed mounted corpus root removes the warning and permits lookup even with stricter enforcement.",
+  "rootfs_inventory_sha256": "546fbf49e1e43162917267b643b47505d346398b4940bc4b3803dad9a7925753",
+  "same_lookup_results": true,
+  "scope": "Actual r3 warning plus isolated read-only exact dependency/corpus/symlink reproduction. No live Oracle route qualification; no immutable image, retained Store, or live process mutation.",
+  "source_hashes": {
+    "usr/local/lib/python3.12/dist-packages/nltk/corpus/reader/api.py": "c83b00b43141071111a39460f33401ac9c2afb3a0f5906422eb6e12123bd8c37",
+    "usr/local/lib/python3.12/dist-packages/nltk/corpus/reader/wordnet.py": "561d1503c7ae68961c6f21254ebf80c864e9f72680967e50f52932a4bb215233",
+    "usr/local/lib/python3.12/dist-packages/nltk/data.py": "b90c4b109bf34b39623b8ce215048bcb3055223657e22ba123b41e2032edf8e8",
+    "usr/local/lib/python3.12/dist-packages/nltk/pathsec.py": "9fa455994492df32fcbcce801e7d91d73f552dc75fed77cecf92fd12ae1336f7"
+  }
+}

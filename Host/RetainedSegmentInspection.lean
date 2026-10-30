@@ -2,11 +2,15 @@
 select paths, executables, a historical semantic implementation, or a trust key.
 The immutable capsule must remain in operator custody throughout dispatch.
 This initial registry supports one old segment, not arbitrary carry chains. -/
-import Compiler.CarriedSegmentIO
-import Host.CarryInspection
-import Compiler.DurableHistoryStore
-import Compiler.ReceiptContinuityIO
-import Kernel.NativeHistorySelection
+module
+
+public import Compiler.CarriedSegmentIO
+public import Host.CarryInspection
+public import Compiler.DurableHistoryStore
+public import Compiler.ReceiptContinuityIO
+public import Kernel.NativeHistorySelection
+
+@[expose] public section
 
 namespace Minidregg.Host.RetainedSegmentInspection
 
@@ -187,7 +191,7 @@ private def frameLength (bytes : List UInt8) : Nat :=
   bytes.foldr (fun byte rest => byte.toNat + 256 * rest) 0
 
 /-- The retained process exposes only this closed read-only opcode set. -/
-private inductive ReadonlyOperation where
+inductive ReadonlyOperation where
   | continuity
   | receiptByTransaction
   | dispatchLookup

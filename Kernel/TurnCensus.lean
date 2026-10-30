@@ -1,7 +1,7 @@
 /-
 # Kernel.TurnCensus — every live admission is expressible as a `Turn` (T1)
 
-SURPASS §2(b), lane T1.  The Host admits through the 48 constructors of
+docs/SURPASS.md §2(b), lane T1.  The Host admits through the 48 constructors of
 `NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
 `payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
 the BRAID-PROOF merge), and C14's `certify` (added at the BRAID-COMPUTE merge), ACTIVITY-NATIVE's `activity`, SEATS-NATIVE's `seat`, and rooms' `renounce` and `subjectKeyRotation`, plus current-key commitment adoption and v2 paid admission/claim.  `Compiler.TurnCensusCoverage` fails the build when
@@ -24,7 +24,7 @@ What this is not: `Turn.ofConstructor` here builds from each receiver's
 its `Accepted` object.  Deriving the turn from the admitted object is T3's
 `Turn.ofIntent`; the shapes here are the targets it must hit.
 
-`step_conserves` (SURPASS T9): a Book leg whose patch is a list of postings
+`step_conserves` (docs/SURPASS.md §2(b), lane T9): a Book leg whose patch is a list of postings
 moves the total over any account set by exactly the postings' deltas into it;
 a balanced posting conserves it.  Stated and proved for the census Book
 layout (`total` over a finite account set).  The deployed Book cell
@@ -42,7 +42,7 @@ T3b's create carries its ROM image (`World.applyCreates`), so each of those
 shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
 (`Ctor.romBirth`), and
 
-* `every_admission_is_turn`: every one of the 48 shapes is accepted, and each
+* `census_shapes_admitted_at_w0`: each of the 48 representative shapes is accepted at `w0`, and each
   of the ten ROM-birth receivers (the six above, the control bootstrap and the enrol branches of
   `payEnrol`, `payEnrolV2` and `payClaim`) carries a nonempty ROM image;
 * `theList_empty`: the constructors whose shape is refused -- none;
@@ -91,6 +91,8 @@ inductive Kind
   | activity
   /-- A seat-kernel cell (instance, invitation, seat, holdings, package). -/
   | seat
+  /-- The platform cell: the current platform record and its genesis controller. -/
+  | platform
   deriving DecidableEq, Repr
 
 /-- Every census cell has a RAM row namespace, an append-only log and a ROM
@@ -144,6 +146,10 @@ def censusH : History R Nat Unit Nat where
   logRoot0 := 0
   legBytes := fun l => 16 * (l.patch.filter fun op => !Op.isRead op).length
   imageBytes := fun b => if b.store = 0 then 0 else 16
+  -- A census event is `()`: it retains no bytes.
+  eventBytes := fun _ => 0
+  -- Census turns carry no pins; a slot's digest is whether it is present.
+  cellDigest := fun o => if o.isSome then 1 else 0
 
 /-! ## The census world -/
 
@@ -164,12 +170,13 @@ def cPay : CellId := 12
 def cSystem : CellId := 13
 def cActivity : CellId := 14
 def cSeat : CellId := 15
+def cPlatform : CellId := 16
 
 def cellOf (k : Kind) (rows : List (Nat × Int)) : Cell R :=
   ⟨k, rows.foldl (fun (s : Store layout) e => s.set ⟨Space.rows, e.1⟩ (some e.2)) 0⟩
 
 def cells0 : Cells R :=
-  ((((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
+  (((((((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
     (some (cellOf .resource [(0, 10)]))).update cPolicy (some (cellOf .policy [(0, 1)]))).update
     cBook (some (cellOf .book [(0, 100), (1, 0)]))).update cStream
     (some (cellOf .stream []))).update cTicket (some (cellOf .ticket []))).update cLife
@@ -178,7 +185,8 @@ def cells0 : Cells R :=
     cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))).update
     cPay (some (cellOf .pay [(0, 1)]))).update cSystem (some (cellOf .system [(0, 0)]))).update
     cActivity (some (cellOf .activity [(0, 1)]))).update
-    cSeat (some (cellOf .seat [(0, 1)]))
+    cSeat (some (cellOf .seat [(0, 1)]))).update
+    cPlatform (some (cellOf .platform [(0, 1)]))
 
 /-- The meter every lane starts with. -/
 def budget : Nat := 10000
@@ -204,7 +212,7 @@ def mk (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)
     charge := fun l =>
       if l = .storageBytes then
         storage.getD ((legs.map censusH.legBytes).sum +
-          (creates.map fun c => censusH.imageBytes c.2.1).sum)
+          (creates.map fun c => censusH.imageBytes c.2.1).sum + censusH.eventBytes ())
       else if l = .feeDebit then fee else 0,
     subject := some ⟨1⟩, keyEpoch := 0, capability := cap, notBefore := notBefore,
     validUntil := validUntil }
@@ -228,6 +236,7 @@ inductive Ctor
   | subjectKeyCommitmentAdoption | payEnrolV2 | payClaim
   | jointReserve | bootstrapBundle | applicationFailedStartRecovery
   | applicationRetryBeginV4 | applicationRetryClaimV4 | applicationRetryCompletionV4
+  | platformInstall | meterRefill
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -242,11 +251,12 @@ def Ctor.all : List Ctor :=
     .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney,
     .certify, .renounce, .subjectKeyRotation, .activity, .seat, .subjectKeyCommitmentAdoption, .payEnrolV2, .payClaim,
     .jointReserve, .bootstrapBundle, .applicationFailedStartRecovery,
-    .applicationRetryBeginV4, .applicationRetryClaimV4, .applicationRetryCompletionV4]
+    .applicationRetryBeginV4, .applicationRetryClaimV4, .applicationRetryCompletionV4,
+    .platformInstall, .meterRefill]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 51 := rfl
+theorem Ctor.all_length : Ctor.all.length = 53 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
@@ -343,6 +353,11 @@ def Ctor.turn : Ctor → CTurn
   -- seat (SEATS-NATIVE): an offer writes the seat cell at its loaded value and the
   -- Book postings (the seat account registered fresh); the marker and the invitation claim
   | .seat => mk [] [leg cSeat .seat [wr 0 1 2], leg cBook .book [wr 0 100 90, al 6 10]] [157, 158]
+  -- platform install: the record written at its loaded value, the controller untouched
+  | .platformInstall => mk [] [leg cPlatform .platform [wr 0 1 2]] [159]
+  -- seed-meter refill: no cell written; the authority row read as its guard, one marker
+  -- (the meter credit is the commit protocol's, not a cell's)
+  | .meterRefill => mk [] [leg cAuth .authority [rd 1 (some 1)]] [160]
   -- holder renunciation appends the authority revocation and spends one marker
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [143]
   -- key rotation reads the current authority and appends its successor record
@@ -448,6 +463,10 @@ def Ctor.negation : Ctor → CTurn
       [155, 156]
   -- a seat turn whose seat cell moved under its signed outcome
   | .seat => mk [] [leg cSeat .seat [wr 0 9 2], leg cBook .book [wr 0 100 90, al 6 10]] [157, 158]
+  -- a platform install over a record that moved (a stale base)
+  | .platformInstall => mk [] [leg cPlatform .platform [wr 0 9 2]] [159]
+  -- a refill over an authority row that moved (a revoked capability)
+  | .meterRefill => mk [] [leg cAuth .authority [rd 1 (some 0)]] [160]
   | .renounce => mk [] [leg cAuth .authority [rd 1 (some 1), lg 8 1]] [99]
   | .subjectKeyRotation => mk [] [leg cAuth .authority [rd 1 (some 0), lg 9 1]] [144]
   | .subjectKeyCommitmentAdoption => mk [] [leg cAuth .authority [wr 1 0 2]] [145]
@@ -519,6 +538,8 @@ def Ctor.refusal : Ctor → Reject
   | .certify => .guardFailed cSystem 0
   | .activity => .guardFailed cActivity 0
   | .seat => .guardFailed cSeat 0
+  | .platformInstall => .guardFailed cPlatform 0
+  | .meterRefill => .guardFailed cAuth 0
   | .renounce => .nullifierSpent
   | .subjectKeyRotation => .guardFailed cAuth 0
   | .subjectKeyCommitmentAdoption => .guardFailed cAuth 0
@@ -646,18 +667,20 @@ encoding. -/
 def theListWithoutRomBirth : List Ctor :=
   Ctor.all.filter fun c => c.romBirth && (rejectOf (World.admit censusH w0 c.romByLeg)).isSome
 
-theorem every_admission_is_turn_all :
+theorem census_shapes_admitted_at_w0_all :
     ∀ c ∈ Ctor.all, rejectOf (World.admit censusH w0 c.turn) = none ∧
       (c.romBirth = true → HasRomBirth c.turn = true) := by
   decide +kernel
 
-/-- **`every_admission_is_turn`.**  Each of the 48 admission shapes is
-accepted by the one transition, and each receiver that creates a ROM
-policy-source cell does so by a create carrying its image. -/
-theorem every_admission_is_turn (c : Ctor) :
+/-- **`census_shapes_admitted_at_w0`.**  For each of the 48 constructors, its
+one representative census turn `c.turn` is accepted by the one transition at the
+fixed census world `w0`, and each receiver that creates a ROM policy-source cell
+does so by a create carrying its image. This is a statement about 48 fixed
+constructions at one world, not about every admission `Turn.ofAccepted` derives. -/
+theorem census_shapes_admitted_at_w0 (c : Ctor) :
     rejectOf (World.admit censusH w0 c.turn) = none ∧
       (c.romBirth = true → HasRomBirth c.turn = true) :=
-  every_admission_is_turn_all c (Ctor.mem_all c)
+  census_shapes_admitted_at_w0_all c (Ctor.mem_all c)
 
 /-- **THE LIST is empty.** -/
 theorem theList_empty : theList = [] := by decide +kernel
@@ -740,7 +763,7 @@ theorem run_postings_total (K : Finset Nat) :
         ring
       · simp [ha]
 
-/-- **`step_conserves`** (SURPASS T9's statement, at the census Book): if an
+/-- **`step_conserves`** (docs/SURPASS.md §2(b), lane T9's statement, at the census Book): if an
 accepted turn's leg on an existing Book cell is a list of postings that
 balances over an account set `K`, the Book's total over `K` is the same
 after the turn as before. -/
@@ -787,12 +810,12 @@ theorem payBook_conserves {w w' : CWorld} (h : World.step censusH w (Ctor.turn .
 #assert_axioms step_conserves
 #assert_axioms payPostings_balanced
 #assert_axioms payBook_conserves
-#assert_axioms every_admission_is_turn
+#assert_axioms census_shapes_admitted_at_w0
 #assert_axioms theList_empty
 #assert_axioms rom_by_leg_refused
 #assert_axioms theListWithoutRomBirth_eq
-/-- info: 'Minidregg.Kernel.TurnCensus.every_admission_is_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms every_admission_is_turn
+/-- info: 'Minidregg.Kernel.TurnCensus.census_shapes_admitted_at_w0' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms census_shapes_admitted_at_w0
 /-- info: 'Minidregg.Kernel.TurnCensus.theList_empty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms theList_empty
 

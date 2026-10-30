@@ -1,5 +1,5 @@
 /-
-# Kernel.JobMoneyReceiver — the signed job-money turn (COMPUTE §2.6, lane C3 K-JOB-MONEY)
+# Kernel.JobMoneyReceiver — the signed job-money turn (docs/COMPUTE.md §2.6, lane C3 K-JOB-MONEY)
 
 One signed command (`Command`: job, action, account, amount) is one turn over
 two cells, decided by `JobMoney.decideMoney`:
@@ -31,11 +31,32 @@ digest commits to the command bytes and the decided plan, so the signature
 binds the job's pre-state and every amount.  The pay cell (the tariff: the
 credit asset and the slash split) and both laws' sources enter as read guards.
 -/
-import Kernel.CapabilityRevocationController
-import Kernel.ResourceBirthController
-import Kernel.PayCellDomain
-import Kernel.JobMoney
-import Kernel.ClockCellDomain
+module
+
+public import Kernel.CapabilityRevocationController
+public import Kernel.ResourceBirthController
+public import Kernel.PayCellDomain
+public import Kernel.JobMoney
+public import Kernel.ClockCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.JobMoneyReceiver
 
@@ -202,9 +223,11 @@ def jobStream : StreamCodec Job :=
 
 /-- A move as `(tag, a, b, c)`: fund `(1, account, amount, 0)`, claim
 `(2, provider, account, amount)`, settle `(3, provider, caller, retired)`.
-The declaration codec is strict, so only canonical bytes decode. -/
+Only those three shapes decode: an unknown tag (it used to decode as
+`.settle`) and a fund with a non-zero fourth word (it used to be dropped) are
+refused by the stream decoder. -/
 def moveStream : StreamCodec Move :=
-  StreamCodec.xmap
+  StreamCodec.retract
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
     (fun
@@ -235,7 +258,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 /-- The job's pre-root is the loaded one: the signed request carries it as
 `preStateRoot` and the declaration carries the loaded job, so a job that moved
@@ -694,6 +717,12 @@ structure Accepted [DecidableEq F]
   private mk ::
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.envelope
+  /-- The receipt is for exactly this money turn: its request is the turn's complete
+  request and its nullifier the command's marker. -/
+  bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot
+    (marker prepared.authority.snapshot.domain profile.semantics command)
+    (request prepared.authority.snapshot prepared.job profile.semantics ambient command
+      prepared.plan) receipt = true
   semantic : prepared.SemanticAccepted
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
@@ -707,9 +736,14 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
   | .error reason => return .error (.signature reason)
   | .ok receipt =>
       if same : receipt.envelopeBytes = ingress.ingress.envelope then
-        match authorize prepared receipt with
-        | .error reason => return .error reason
-        | .ok semantic => return .ok ⟨receipt, same, semantic⟩
+        if bound : CredentialSignatureAdmission.verifySignature prepared.authority.snapshot
+            (marker prepared.authority.snapshot.domain profile.semantics command)
+            (request prepared.authority.snapshot prepared.job profile.semantics ambient command
+              prepared.plan) receipt = true then
+          match authorize prepared receipt with
+          | .error reason => return .error reason
+          | .ok semantic => return .ok ⟨receipt, same, bound, semantic⟩
+        else return .error .capabilityRejected
       else return .error .capabilityRejected
 
 /-- The exact header the signer signs.  It discloses no decision: when the
@@ -863,7 +897,9 @@ def charge (accepted : AcceptedMoney deployment profile ambient durable ingress)
   | .incidences => 2
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -875,7 +911,7 @@ def intent (accepted : AcceptedMoney deployment profile ambient durable ingress)
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := accepted.physical.2.2.2.1
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
@@ -889,6 +925,31 @@ theorem intent_writes (accepted : AcceptedMoney deployment profile ambient durab
 theorem accepted_balanced (accepted : AcceptedMoney deployment profile ambient durable ingress) :
     aggregateDelta (bookOf accepted.prepared.book) accepted.prepared.plan = 0 :=
   accepted.prepared.balanced
+
+/-- **An accepted money turn is signed for `ingress` and shaped on `durable`.** The checked
+signature is over exactly the ingress's envelope bytes, for the turn's complete request over
+`ingress.command` (`profile`'s semantics, `ambient`) under the command's marker; every write
+of the prepared turn expects `durable`'s exact root, every read guard is at `durable`'s exact
+root, every write obeys `deployment`'s physical post law, and the effect law accepts. -/
+theorem AcceptedMoney.signed_and_shaped
+    (accepted : AcceptedMoney deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+      accepted.accepted.receipt.request =
+        ⟨kindOf ingress.command, request accepted.prepared.authority.snapshot accepted.prepared.job
+          profile.semantics ambient ingress.command accepted.prepared.plan⟩ ∧
+      accepted.accepted.receipt.nullifier =
+        marker accepted.prepared.authority.snapshot.domain profile.semantics ingress.command ∧
+      (∀ write ∈ writes accepted.prepared,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      (∀ guard ∈ readGuards accepted.prepared,
+        guard.expectedRoot = durable.snapshot.model.roots guard.cellId) ∧
+      (∀ write ∈ writes accepted.prepared,
+        ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
+      effectLawAccepted accepted.prepared = true :=
+  have exact := CredentialSignatureAdmission.verified_request_exact _ _ _
+    accepted.accepted.receipt accepted.accepted.bound
+  ⟨accepted.accepted.envelopeExact, exact.1, exact.2, accepted.physical.2.1,
+    accepted.physical.2.2.2.2.2.1, accepted.physical.2.2.1, accepted.physical.2.2.2.2.2.2.2⟩
 
 structure Receipt where
   transactionId : Digest
@@ -952,5 +1013,6 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #assert_axioms readGuards_readonly
 #assert_axioms intent_writes
 #assert_axioms accepted_balanced
+#assert_axioms AcceptedMoney.signed_and_shaped
 
 end Minidregg.Kernel.JobMoneyReceiver

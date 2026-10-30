@@ -8,9 +8,16 @@
 set -euo pipefail
 umask 077
 [[ ${1:-} == --root ]] || { echo 'fixture spk-ingest: --root SPK_ROOT required' >&2; exit 2; }
-(( $# == 6 )) || { echo 'usage: spk-ingest --root SPK_ROOT HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
 base=$2
 shift 2
+profile=standard-v1
+if [[ ${1:-} == --import-profile ]]; then
+  (( $# >= 2 )) || exit 2
+  profile=$2
+  shift 2
+fi
+case $profile in standard-v1|market-large-v1|operator-appliance-v1) ;; *) exit 2 ;; esac
+(( $# == 4 )) || { echo 'usage: spk-ingest --root SPK_ROOT [--import-profile PROFILE] HOST_BINARY HOST_SHA256 INBOX_SPK APP_UID' >&2; exit 2; }
 host_binary=$1 expected_host_sha=$2 package=$3 app_uid=$4
 [[ $expected_host_sha =~ ^[0-9a-f]{64}$ && $app_uid =~ ^[1-9][0-9]{0,9}$ ]] || exit 2
 inbox=$base/inbox
@@ -24,7 +31,7 @@ store=$base/packages
 input_sha=$(sha256sum -- "$package" | cut -c1-64)
 installed=$store/sha256-$input_sha
 [[ ! -e $installed && ! -L $installed ]] || { echo 'exact SPK already installed' >&2; exit 1; }
-"$host_binary" materialize "$package" "$store" "$app_uid"
+"$host_binary" materialize --import-profile "$profile" "$package" "$store" "$app_uid"
 [[ -d $installed/root && ! -L $installed/root ]] || {
   echo 'materialize succeeded without publishing exact image' >&2; exit 1;
 }

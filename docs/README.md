@@ -1,107 +1,149 @@
-# Mini: a programmable shared world
+# Documentation index
 
-Mini is the construction home for the next Dregg: a shared computing environment
-where people and agents author objects, documents, tools and institutions, and
-where changes pass through explicit authority, resource and history contracts.
-**Objective Bend is its central authored language and live-environment direction.**
-Nock compatibility preserves existing executable programs and history.
+Mini is one shared world whose writes all pass through a Lean admission function; the
+[repository README](../README.md) explains it and maps the tree. This page lists the documents
+by subsystem, one line each. Where a document and the source disagree, the source is right:
+read the declaration it names.
 
-Start with [Objective Bend](OBJECTIVE-BEND.md) for the language and a worked
-composition, then [Developing Mini](DEVELOPING.md) to follow the actual source and
-commands. The [dated evidence index](evidence/2026-10-03-objective-bend.md) separates
-checked source, executed components and joined native behavior. These guides
-explain the system; the older [proof-system introduction](../README.md#selvage),
-[project architecture](../PROJECT.md) and [founding atlas](../ATLAS.md) retain their
-useful detail and historical context.
+## Start here
 
-## The system in one pass
+- [Objective Bend](OBJECTIVE-BEND.md): the language world programs are written in, with a
+  worked composition and what is proved about it.
+- [Developing Mini](DEVELOPING.md): where each part of the implementation lives, and how to
+  build and check it.
+- [The journey](JOURNEY.md): the end-to-end acceptance test.
+- [Status](STATUS.md): what the next build carries, each row with its evidence.
 
-A member observes an authorized view of current state, computes a proposed
-change, and asks Mini to admit it. Lean defines the values, checks and transition
-meaning. The native Rust boundary supplies physical transport, signing, custody,
-storage and external services. An accepted transition must have a durable outcome;
-a lost network reply does not turn an uncertain operation into permission to
-perform a second one.
+## The demo
 
-```text
-source modules + sealed imports + partial specifications
-                         |
-            checked core term + exact entry
-                         |
-  authorized invocation sample -> computation -> typed Plan / result
-                         |
-       current authority + laws + read roots + funding
-                         |
-       admitted durable transition / retained outcome
-                         |
-     authorized views, durable delivery, separate private release
-```
+- [The demo, as a stranger meets it](DEMO-EXPERIENCE-2026-10-27.md): the tour, the web-parity
+  rule, and the ranked ambitions.
+- [Web front end](WEB-FRONTEND-2026-10-27.md): the browser gateway, its pages and its sessions.
+- [App market](APP-MARKET-2026-10-27.md): any Sandstorm app, installed by a member on its own
+  origin.
+- [Hermes tools](HERMES-TOOLS-2026-10-27.md): what an agent resident's sandbox may use.
+- Operator guides: [the join door](../deploy/door/README.md), [payments](../deploy/pay/README.md),
+  [agent residents and provider keys](../deploy/hermes/README.md),
+  [resident dispatch](../deploy/hermes-dispatch/README.md), [Discord](../deploy/discord/README.md),
+  [the shell over ssh](../deploy/shell/README.md), [SPK hosting](../deploy/spk-host/README.md),
+  [agent grains](../deploy/grain-host/README.md), [the demo seed](../deploy/demo-seed/README.md),
+  [candidate files and formats](../deploy/candidate/INTERFACES.md).
+- The Oracle: [the appliance](oracle-appliance.md), [its tools for agents](oracle-agent-tools.md),
+  [the Oracle as a grain](ORACLE-GRAIN-2026-10-27.md), [operator guide](../deploy/oracle/README.md).
 
-This is a map of the shared contract, not a claim that every arrow is already
-wired for every language and backend. A source checker establishes properties of
-the checked program. An admission check establishes permission for this exact
-transition. A runtime or proof backend must separately establish what it computed.
+## Admission and the kernel
 
-The useful vocabulary is small:
+- [Data model](DATAMODEL.md): kernel state as one store over a fold of patches; roots,
+  history, checkpoints.
+- [SURPASS](SURPASS.md): the Host's admission as one World transition (`Turn.ofIntent`).
+- [The place](PLACE.md): rooms, streams, documents, laws and runners;
+  [the docuverse](DEOS.md).
+- [Programs](NOCK.md): Nock programs refereed by re-execution, and
+  [any registered evaluator](EVAL.md).
+- [Jobs](COMPUTE.md): compute jobs as cells, checked by re-execution and paid through the Book.
+- [The MUD](MUD.md): rooms, items, combat and markets as laws.
+- [Channels](CHANNELS.md): constant-rate broadcast domains (Lean model and epoch record).
+- [Hyperedge design](HYPEREDGE-DESIGN.md): a turn as a wide pullback; the design behind
+  `Kernel/Turn`.
+- [Kernel necessity](KERNEL-NECESSITY.md), [N2](N2-HYPEREDGE-LIMIT.md),
+  [N4](N4-DISTRIBUTIVE-LAW.md): the universal properties the kernel is built to satisfy.
+- [Kernel twin audit](KERNEL-TWIN-AUDIT.md): duplicated kernel structures and the decisions
+  they wait on.
+- [One receiver](design/RECEIVER.md): the receiving design behind `Theory.Receiving`.
+- [Law composition](design/law-composition-source-codec.md) and
+  [world-kind methods](design/world-kind-executable-methods.md).
+- [Seats](SEATS.md): seats and invitations, with offer safety over the Book.
+- [Application protocol allocations](APPLICATION-PROTOCOL-ALLOCATIONS.md): the registry of
+  event codec tags.
+- [Resource money operations](RESOURCE-MONEY-OPERATIONS.md) and
+  [its JSON](RESOURCE-MONEY-JSON.md).
+- [Per-member request rate](PD-HOST-RATE-DESIGN.md), [thin birth](THIN-BIRTH-2026-10-28.md).
+- [Effects revival](EFFECTS-REVIVAL.md): deriving kernel effects from declarations.
+- [Proofs at admission](ZK.md): when Mini may admit by proof, and what an Objective proof
+  establishes.
+- [Observation and physical roots](OBSERVATION-AND-PHYSICAL-ROOTS.md): logical world roots
+  versus physical Store roots.
+- [Protected authored fragments](contracts/protected-authored-fragments.md).
 
-| Term | Meaning |
-| --- | --- |
-| Participant | A signing identity; a room alias or fictional role is not this identity. |
-| Resource | Governed state with an exact current representation and history. |
-| Capability and law | The delegated action and the current conditions it must satisfy. Neither is replaced by an object reference. |
-| Kind / instance | A definition of fields and behavior, and a particular persistent object with its own state. |
-| Spec | A composable, possibly incomplete definition of behavior. |
-| Program / source artifact | An immutable executable identity, and retained source, imports and interpretation metadata. |
-| Plan | Proposed typed effects, dependencies, messages and results; computation alone does not admit it. |
-| Activity | A continuing computation with execution context, continuation and pending obligations. |
-| Receipt / retained outcome | Evidence of the particular admitted operation; distinct from physical delivery or decryption. |
+## The language
 
-## One medium, several experiences
+- [Tutorial](OBJECTIVE-BEND-TUTORIAL.md), checked by `scripts/check-objective-tutorial.ts`.
+- [Front end](OBJECTIVE-BEND-FRONTEND.md): parse, elaborate, type.
+- [Activities and events](OBJECTIVE-BEND-EVENTS.md), [surfaces](OBJECTIVE-BEND-SURFACE.md),
+  [backends](OBJECTIVE-BEND-BACKENDS.md).
+- [Modular typing](objective-bend/MODULAR-TYPING.md), [reflection](objective-bend/REFLECTION.md),
+  [proof engineering](../PROOF-ENG-DESIGN.md).
+- World programs: [markets and collectives](BEND-COLLECTIVE-DOMAINS.md),
+  [the resident service commons](BEND-RESIDENT-SERVICE-COMMONS.md),
+  [the world programmer guide](../native/resource-client/WORLD-PROGRAMMER.md).
 
-The destination is a shared multiuser agentic world host. Its experiences should
-be intelligible in their own terms while sharing the same underlying contracts:
+## The Host and the Store
 
-- **Docuverse and workdesk:** documents, source inspection, transclusion, research,
-  annotations and review, with exact revision support for derived views.
-- **Hosted applications and residents:** SPK applications, browser/API access,
-  Hermes tools, private context, delegated actions and recoverable work.
-- **Authored worlds:** places, characters, collective fiction and community rules,
-  with real shared consequences rather than isolated presentation demos.
-- **Allocation and service commons:** contributed capacity, exchange, reservations,
-  accounting and recovery, with explicit allocation rules and conservation.
+- [Native Host](NATIVE-HOST.md): building and operating the Host.
+- [Lean qualification](LEAN-QUALIFICATION.md): the Lean build targets and what each checks.
+- [Durable Store](DURABLE-STORE.md): files, schema, backup and restore.
+- [PAY](PAY.md): the $DREGG payment rail and self-enrollment by payment, as shipped.
+- [Hot path](HOT-PATH-2026-10-27.md): the signed-write path and its representation.
+- [Carry verifier](CARRY-VERIFIER.md), [audit phase timing](audit-phase-timing.md),
+  [observation batches](latency-observation-batch-2026-10-02.md),
+  [resource scope queries](latency-resource-scope-2026-10-02.md).
+- [Connection bounds](NATIVE-MULTIUSER-CAPACITY.md), [async request custody](ASYNC-NATIVE-CUSTODY.md),
+  [source-agreement reader](SOURCE-AGREEMENT-READER.md),
+  [deployment manifest](DEPLOYMENT-MANIFEST-JOIN.md).
 
-A workshop is a useful demanding example, not the boundary of the product. The
-October 13 alpha direction includes traffic privacy and distributed agreement;
-component demonstrations do not satisfy those requirements on their own.
+## Clients, keys and consent
 
-## Find the contract and its implementation
+- [The client](../native/resource-client/README.md): the `mini` command.
+- [SDK](SDK.md), [SDK design](design/SDK-DESIGN.md), [post-quantum signing](SDK-PQ.md).
+- [Signing consent](CLIENT-SIGNING-CONSENT.md): the client derives what a key may sign.
+- [Receipt continuity](RECEIPT-CONTINUITY.md) and [custody across a carry](RECEIPT-CARRY.md).
+- [Key commitment adoption](../native/resource-client/KEY-ADOPTION.md).
+- [Fleet surface](FLEET-SURFACE.md) and [migrating helm to it](FLEET-MIGRATION.md).
+- [Resident context](RESIDENT-CONTEXT.md), [shared room names](SHARED-NAMES.md).
 
-The following is a navigation skeleton. Each row points to an existing contract
-or implementation; there is no second manual for each subsystem.
+## Privacy
 
-| Area | Start here | Semantic / physical owner in source |
-| --- | --- | --- |
-| Language and object composition | [Objective Bend](OBJECTIVE-BEND.md), [tutorial](OBJECTIVE-BEND-TUTORIAL.md) | `Theory/ObjectiveBend*.lean` (semantics, demand machine, typing, proofs); `Compiler/ObjectiveBendParse.lean`, `Compiler/ObjectiveBendElaborate.lean`, `Host/ObjectiveBendFrontEnd.lean` (the Lean front end); `Host/ObjectiveBendPreview.lean`; [activities and events](OBJECTIVE-BEND-EVENTS.md), [seats and invitations](SEATS.md) |
-| Native kinds and methods | [World programmer](../native/resource-client/WORLD-PROGRAMMER.md) | [WorldKindMethods](../Kernel/WorldKindMethods.lean), [WorldPrototypeConstruction](../Kernel/WorldPrototypeConstruction.lean), [WorldMethodTrace](../Kernel/WorldMethodTrace.lean) |
-| Authority and transactions | [Client contract](../native/resource-client/README.md) | [ResourceTransaction](../Kernel/ResourceTransaction.lean), [Run](../Kernel/Run.lean) |
-| Durability, retry and history | [Durable store](DURABLE-STORE.md), [receipt continuity](RECEIPT-CONTINUITY.md) | [DurableReceiver](../Kernel/DurableReceiver.lean), [DurableReceiverIO](../Compiler/DurableReceiverIO.lean) |
-| Documents and authorized views | [Protected authored fragments](contracts/protected-authored-fragments.md), [observation roots](OBSERVATION-AND-PHYSICAL-ROOTS.md) | [HyperdocumentPublication](../Kernel/HyperdocumentPublication.lean), [HyperdocumentCell](../Compiler/HyperdocumentCell.lean) |
-| Agreement across domains | [Distributed design history](DISTRIBUTED-DESIGN.md), [current scope](evidence/2026-10-03-objective-bend.md) | [JointReservation](../Kernel/JointReservation.lean), [NativeJointAgreement](../Kernel/NativeJointAgreement.lean), [JointDecisionRecovery](../Kernel/JointDecisionRecovery.lean) |
-| Confidential computation and custody | [Private cell](PRIVATE-CELL.md), [language execution contract](OBJECTIVE-BEND.md#backends-and-privacy) | [PrivateWorldIR](../Compiler/PrivateWorldIR.lean), [PrivateSuccessorCustody](../Kernel/PrivateSuccessorCustody.lean) |
-| Traffic privacy | [Traffic privacy contract](../native/resource-client/TRAFFIC-PRIVACY.md) | Channel/client/relay paths named by that contract; distinct from computation secrecy |
-| Hosted services and SPK | [Provider custody](HOSTED-PROVIDER-CUSTODY.md), [SPK RPC](../native/spk-rpc/README.md) | `native/grain-runtime/`, `native/spk-host/`, `native/resource-client/` |
-| Proof systems and compilation | [Selvage introduction](../README.md#selvage), [proof-system survey](PROOF-SYSTEM-SURVEY.md) | `Theory/`, `Selvage/`, `Compiler/`, `Assurance/` |
-| Build and native qualification | [Developer guide](DEVELOPING.md), [native host](NATIVE-HOST.md), [journey](JOURNEY.md) | `scripts/build-native-host.sh`, `native/resource-client/journey.sh` |
+- [Private cell](PRIVATE-CELL.md) and [private rooms](PRIVATE-ROOMS-DESIGN.txt).
+- [MPC profile P2](MPC-PROFILE-P2.md), [distributed degree proofs](DZK-REFERENCE.md),
+  [Sh2t-Id sharing](SH2T-ID-REFERENCE.md): the private backend.
+- Traffic: [privacy profile P1](TRAFFIC-PRIVACY-PROFILE-P1.md),
+  [PQ mailbox](../native/resource-client/PQ-MAILBOX.md),
+  [cohort TCP](../native/resource-client/COHORT-TCP.md).
 
-Dated design documents sometimes describe gaps that subsequent source has closed.
-Use them for rationale, then inspect the current declaration and its consumer.
-[HANDOFF.md](../HANDOFF.md) links the wider suite's project tracking; it is not a
-prerequisite for understanding this guide.
+## Agreement across domains
 
-## Keep the guide useful
+- [Distributed design](DISTRIBUTED-DESIGN.md).
+- [Generic Simplex](GENERIC-SIMPLEX-NATIVE.md): the BFT engine compiled native.
+- In the opt-in research library: [portable continuation](PORTABLE-CONTINUATION.md),
+  [regime-typed installs](design/regime-typed-installs.md).
 
-When a contract changes, update its owning page, the example or source pointer
-that exercises it, and the dated evidence entry if qualification changed. Put
-counts, source pins and run outcomes in evidence, not introductory paragraphs.
-Preserve historical evidence with its scope. Avoid copying task rosters or local
-handoffs into the public manual.
+## Applications and residents
+
+- [SPK lifecycle](SPK-LIFECYCLE.md), [resident privilege boundary](SPK-RESIDENT-PRIVILEGE-BOUNDARY.md).
+- [SPK RPC](../native/spk-rpc/README.md), [grain runtime](../native/grain-runtime/README.md),
+  [inference scheduler](../native/inference-scheduler/README.md).
+
+## Proof systems
+
+- [Selvage recomposition](SELVAGE-RECOMPOSITION.md): the design ledger and its obligations.
+- [Selvage completeness](SELVAGE-COMPLETE.md), [native prover plan](PROVER-PLAN.md), [receipt encoding (OB-3)](OB3-RECEIPT-ENCODING.md),
+  [proof-system survey](PROOF-SYSTEM-SURVEY.md).
+- Decisions: [authenticated column history](decisions/D-0001-authenticated-column-history.md),
+  [canonical hyperedge kernel](decisions/D-0002-canonical-hyperedge-kernel.md),
+  [why Selvage](decisions/D-0004-why-selvage.md),
+  [hyperdocuments](decisions/D-0005-hyperdocument-semantic-family.md),
+  [a refuted floor](decisions/D-0006-polishchuk-spielman-unfixed-floor-refuted.md),
+  [Rust-native authority](decisions/2026-08-09-rust-native-authority.md).
+- [Project design](../PROJECT.md) and [the atlas](../ATLAS.md): the founding design.
+
+## The fn transport
+
+fn is not part of this demo. Its consumer contracts are the `FN-*.md` files in this directory.
+
+## How the project is run
+
+[The plan](DEMO-PREFIX-2026-10-26.md), [coordination](COORDINATION-2026-10-27.md),
+[the hbox pipeline](PIPELINE-HBOX.md), [the perf workload](PERF-WORKLOAD.md),
+[the backlog](BACKLOG-2026-10-27.md), and the `*-STATE.md` files. Reviews are under
+[`review/`](review/) and dated evidence under [`evidence/`](evidence/); both are records of
+the run or reading they name, not current descriptions.

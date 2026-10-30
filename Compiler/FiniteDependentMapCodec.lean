@@ -4,12 +4,32 @@
 Finite support is structural `DFinsupp` data. Keys are canonically sorted and
 each dependent value is read at its actual key. The decoder reconstructs that
 same finite map; there is no countability-selected enumeration or focused
-codec. A carrier's outer canonical decoder additionally rejects duplicate,
-out-of-order and explicit-zero entries by exact re-encoding.
+codec. The whole-map stream (`xmap` of an entry list onto the map) is gone: it
+decoded unsorted, duplicated and explicit-zero entry lists into the same map, so
+it was not canonical, and nothing used it. Carriers compose `entryStream`.
 -/
-import Compiler.Tower256ConcreteBackend
-import Mathlib.Data.Finset.Sort
-import Std.Data.DTreeMap.Lemmas
+module
+
+public import Compiler.Tower256ConcreteBackend
+public import Mathlib.Data.Finset.Sort
+public import Std.Data.DTreeMap.Lemmas
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.FiniteDependentMapCodec
 
@@ -106,24 +126,175 @@ def entryStream (keyStream : StreamCodec K)
     rintro ⟨key, value⟩ suffix
     simp [List.append_assoc, keyStream.decodePrefix_encode,
       (valueStream key).decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes entry suffix decoded
+    cases keyOk : keyStream.decodePrefix bytes with
+    | none => simp [keyOk] at decoded
+    | some keyPair =>
+      obtain ⟨key, afterKey⟩ := keyPair
+      cases valueOk : (valueStream key).decodePrefix afterKey with
+      | none => simp [keyOk, valueOk] at decoded
+      | some valuePair =>
+        obtain ⟨value, rest⟩ := valuePair
+        simp only [keyOk, valueOk, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [List.append_assoc, (valueStream key).encode_decodePrefix _ _ _ valueOk,
+          keyStream.encode_decodePrefix _ _ _ keyOk]
+  decodeAt bytes start :=
+    match keyStream.decodeAt bytes start with
+    | some (key, afterKey) =>
+        match (valueStream key).decodeAt bytes afterKey with
+        | some (value, after) => some (⟨key, value⟩, after)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [keyStream.decodeAt_spec bytes start inside]
+    simp only [cursorOfPrefix]
+    cases keyOk : keyStream.decodePrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some keyPair =>
+        obtain ⟨key, afterKey⟩ := keyPair
+        simp only [Option.map_some]
+        rw [(valueStream key).decodeAt_spec bytes _ (Nat.sub_le _ _)]
+        simp only [cursorOfPrefix, keyStream.rest_at keyOk]
+        cases valueOk : (valueStream key).decodePrefix afterKey <;> simp [valueOk]
+  encodeInto out entry := (valueStream entry.1).encodeInto (keyStream.encodeInto out entry.1) entry.2
+  encodeInto_spec := by
+    intro out entry
+    rw [(valueStream entry.1).encodeInto_spec, keyStream.encodeInto_spec, List.append_assoc]
+  -- `cursorNative` stays false: whether every `valueStream key` is native is not computable
+  -- for an arbitrary key type. A consumer that knows its keys sets the bit on the codec it
+  -- decodes with (`StoreCodec.payloadStream`, by `StoreCodec.Wire.cursorReady`).
 
-def stream [LinearOrder K] [∀ key, DecidableEq (V key)]
-    (keyStream : StreamCodec K)
-    (valueStream : (key : K) → StreamCodec (V key)) :
+/-! ## Canonical finite sets and sparse maps
+
+A finite set is spelled as its strictly increasing element list and a sparse
+map as its strictly key-increasing list of non-default entries. The decoders
+REFUSE every other list (unsorted, duplicated, explicit default), so each set
+and each map has exactly one spelling; the bytes are those of the sorted list. -/
+
+theorem sort_isChain {α : Type} [LinearOrder α] (values : Finset α) :
+    (values.sort (· ≤ ·)).IsChain (· < ·) :=
+  (Finset.sortedLT_sort values).isChain
+
+theorem sort_toFinset_of_isChain {α : Type} [LinearOrder α] {values : List α}
+    (chain : values.IsChain (· < ·)) : values.toFinset.sort (· ≤ ·) = values := by
+  have pairwise : values.Pairwise (· < ·) := List.isChain_iff_pairwise.mp chain
+  exact (List.toFinset_sort (· ≤ ·) pairwise.nodup).mpr (pairwise.imp le_of_lt)
+
+/-- A finite set as its strictly increasing element list. -/
+def finsetStream {α : Type} [LinearOrder α] (codec : StreamCodec α) : StreamCodec (Finset α) :=
+  StreamCodec.xmap
+    (StreamCodec.refine (StreamCodec.list codec) (List.IsChain (· < ·)))
+    (fun values => ⟨values.sort (· ≤ ·), sort_isChain values⟩)
+    (fun values => values.val.toFinset)
+    (by intro values; exact Finset.sort_toFinset _ _)
+    (by intro values; exact Subtype.ext (sort_toFinset_of_isChain values.property))
+
+theorem finsetStream_encode {α : Type} [LinearOrder α] (codec : StreamCodec α) (values : Finset α) :
+    (finsetStream codec).encode values = (StreamCodec.list codec).encode (values.sort (· ≤ ·)) :=
+  rfl
+
+/-- The canonical spelling of a sparse map: keys strictly increasing, no
+explicit default value. -/
+def CanonicalEntries [LinearOrder K] (items : List (Sigma V)) : Prop :=
+  (items.map Sigma.fst).IsChain (· < ·) ∧ ∀ entry ∈ items, entry.2 ≠ 0
+
+instance [LinearOrder K] [∀ key, DecidableEq (V key)] :
+    DecidablePred (CanonicalEntries (K := K) (V := V)) :=
+  fun _ => inferInstanceAs (Decidable (_ ∧ _))
+
+theorem entries_canonical [LinearOrder K] [∀ key, DecidableEq (V key)]
+    (fields : Π₀ key : K, V key) : CanonicalEntries (entries fields) := by
+  refine ⟨?_, ?_⟩
+  · have keys : (entries fields).map Sigma.fst = fields.support.sort (· ≤ ·) := by
+      simp [entries, List.map_map, Function.comp_def]
+    rw [keys]
+    exact sort_isChain _
+  · intro entry member
+    simp only [entries, List.mem_map, Finset.mem_sort] at member
+    obtain ⟨key, present, rfl⟩ := member
+    simpa using present
+
+theorem mem_keys_of_fromEntries_ne {items : List (Sigma V)} {key : K}
+    (nonzero : fromEntries items key ≠ 0) : key ∈ items.map Sigma.fst := by
+  induction items with
+  | nil => simp [fromEntries] at nonzero
+  | cons entry rest ih =>
+      rcases entry with ⟨head, value⟩
+      by_cases same : head = key
+      · simp [same]
+      · have restNonzero : fromEntries rest key ≠ 0 := by
+          simpa [fromEntries, DFinsupp.update, Function.update, Ne.symm same] using nonzero
+        simp [ih restNonzero]
+
+theorem entries_fromEntries_of_canonical [LinearOrder K] [∀ key, DecidableEq (V key)]
+    (items : List (Sigma V)) (canonical : CanonicalEntries items) :
+    entries (fromEntries items) = items := by
+  induction items with
+  | nil =>
+      simp [entries, fromEntries]
+  | cons entry rest ih =>
+      rcases entry with ⟨head, value⟩
+      obtain ⟨chain, nonzero⟩ := canonical
+      have pairwise : ((⟨head, value⟩ :: rest : List (Sigma V)).map Sigma.fst).Pairwise (· < ·) :=
+        List.isChain_iff_pairwise.mp chain
+      simp only [List.map_cons, List.pairwise_cons] at pairwise
+      obtain ⟨headLeast, restPairwise⟩ := pairwise
+      have restCanonical : CanonicalEntries rest :=
+        ⟨List.isChain_iff_pairwise.mpr restPairwise,
+          fun entry member => nonzero entry (List.mem_cons_of_mem _ member)⟩
+      have valueNonzero : value ≠ 0 := nonzero ⟨head, value⟩ List.mem_cons_self
+      have below : ∀ key ∈ (fromEntries rest).support, head ≤ key := by
+        intro key member
+        exact le_of_lt (headLeast key (mem_keys_of_fromEntries_ne (DFinsupp.mem_support_iff.mp member)))
+      have absent : head ∉ (fromEntries rest).support := by
+        intro member
+        exact lt_irrefl head (headLeast head (mem_keys_of_fromEntries_ne (DFinsupp.mem_support_iff.mp member)))
+      have support : (fromEntries (⟨head, value⟩ :: rest)).support =
+          insert head (fromEntries rest).support := by
+        simp only [fromEntries]
+        exact DFinsupp.support_update_ne_zero _ _ valueNonzero
+      unfold entries
+      rw [support, Finset.sort_insert (· ≤ ·) below absent, List.map_cons]
+      have headValue : fromEntries (⟨head, value⟩ :: rest) head = value := by
+        simp [fromEntries]
+      rw [headValue]
+      congr 1
+      have tail : ((fromEntries rest).support.sort (· ≤ ·)).map
+            (fun key => (⟨key, fromEntries (⟨head, value⟩ :: rest) key⟩ : Sigma V)) =
+          ((fromEntries rest).support.sort (· ≤ ·)).map
+            (fun key => (⟨key, fromEntries rest key⟩ : Sigma V)) := by
+        apply List.map_congr_left
+        intro key member
+        have different : key ≠ head := by
+          intro same
+          subst same
+          exact absent ((Finset.mem_sort _).mp member)
+        simp [fromEntries, DFinsupp.update, Function.update, different]
+      rw [tail]
+      exact ih restCanonical
+
+/-- A sparse map as its canonical entry list. -/
+def mapStream [LinearOrder K] [∀ key, DecidableEq (V key)]
+    (keyStream : StreamCodec K) (valueStream : (key : K) → StreamCodec (V key)) :
     StreamCodec (Π₀ key : K, V key) :=
-  StreamCodec.xmap (StreamCodec.list (entryStream keyStream valueStream))
-    entries fromEntriesFast (by intro fields; simpa using fromEntries_entries fields)
+  StreamCodec.xmap
+    (StreamCodec.refine (StreamCodec.list (entryStream keyStream valueStream)) CanonicalEntries)
+    (fun fields => ⟨entries fields, entries_canonical fields⟩)
+    (fun items => fromEntriesFast items.val)
+    (by intro fields; simpa using fromEntries_entries fields)
+    (by
+      intro items
+      apply Subtype.ext
+      simpa using entries_fromEntries_of_canonical items.val items.property)
 
-
-/-- The complete stream codec is unchanged extensionally, including lax decoding. -/
-theorem stream_eq [LinearOrder K] [∀ key, DecidableEq (V key)]
-    (keyStream : StreamCodec K)
-    (valueStream : (key : K) → StreamCodec (V key)) :
-    stream keyStream valueStream =
-      StreamCodec.xmap (StreamCodec.list (entryStream keyStream valueStream))
-        entries fromEntries fromEntries_entries := by
-  have same : (fromEntriesFast : List (Sigma V) → (Π₀ key : K, V key)) = fromEntries :=
-    funext fromEntriesFast_eq
-  simp only [stream, same]
+theorem mapStream_encode [LinearOrder K] [∀ key, DecidableEq (V key)]
+    (keyStream : StreamCodec K) (valueStream : (key : K) → StreamCodec (V key))
+    (fields : Π₀ key : K, V key) :
+    (mapStream keyStream valueStream).encode fields =
+      (StreamCodec.list (entryStream keyStream valueStream)).encode (entries fields) :=
+  rfl
 
 end Minidregg.Compiler.FiniteDependentMapCodec

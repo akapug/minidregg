@@ -1,14 +1,14 @@
 //! Root-observed persistent /var identity for the resident START profile.
 //! These bytes are physical evidence, never Mini launch authority by themselves.
 
-#![allow(dead_code)] // Connected only after source-qualified v3 START routes.
-
+use crate::io_context::IoContext;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
 use std::os::fd::RawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
+use crate::canonical::{decimal_u64 as decimal, hex64 as hex32};
 
 const TAG: &str = "DREGG/SPK-VAR-CUSTODY/v1";
 const MAX_WITNESS: u64 = 4096;
@@ -17,23 +17,6 @@ const FUTURE_TOLERANCE: Duration = Duration::from_secs(5);
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn decimal(text: &str) -> Option<u64> {
-    if text.is_empty()
-        || (text.len() > 1 && text.starts_with('0'))
-        || !text.bytes().all(|b| b.is_ascii_digit())
-    {
-        return None;
-    }
-    text.parse().ok()
-}
-
-fn hex32(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 fn uuid(text: &str) -> bool {
@@ -77,10 +60,7 @@ pub(crate) struct VolumeSite {
 impl VolumeSite {
     pub(crate) fn new(grains_root: &Path, store: &str) -> io::Result<Self> {
         if !grains_root.is_absolute()
-            || store.len() != 16
-            || !store
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::canonical::lower_hex_of(&store, 8)
         {
             return Err(invalid("volume site refused"));
         }
@@ -120,9 +100,6 @@ pub(crate) struct VolumeWitness {
     pub(crate) volume_id: String,
     pub(crate) app_uid: u32,
     pub(crate) quota_bytes: u64,
-    pub(crate) backing_inode: u64,
-    pub(crate) backing_fs: String,
-    pub(crate) image_ext4_uuid: String,
     pub(crate) mount: PathBuf,
     site: VolumeSite,
     file_dev: u64,
@@ -167,7 +144,8 @@ impl VolumeWitness {
             return Err(invalid("volume witness backing path refused"));
         }
         let backing_fs = value(lines[8], "backing_fs=")?.to_owned();
-        let backing_inode = decimal(value(lines[9], "backing_inode=")?)
+        // Validated here; the retained witness bytes are what later checks compare.
+        decimal(value(lines[9], "backing_inode=")?)
             .filter(|n| *n > 0)
             .ok_or_else(|| invalid("volume witness backing inode refused"))?;
         let backing_size = decimal(value(lines[10], "backing_size=")?)
@@ -189,9 +167,6 @@ impl VolumeWitness {
             volume_id,
             app_uid,
             quota_bytes,
-            backing_inode,
-            backing_fs,
-            image_ext4_uuid,
             mount: PathBuf::from(mount),
             site: site.clone(),
             file_dev: 0,
@@ -200,7 +175,7 @@ impl VolumeWitness {
     }
 
     pub(crate) fn compare_open_mount(&self, persistent_var_fd: RawFd) -> io::Result<()> {
-        let path_meta = fs::symlink_metadata(&self.mount)?;
+        let path_meta = fs::symlink_metadata(&self.mount).ctx("inspect", &self.mount)?;
         if !path_meta.is_dir()
             || !crate::os::app_owner(path_meta.uid(), self.app_uid)
             || path_meta.permissions().mode() & 0o777 != 0o700
@@ -239,7 +214,7 @@ fn root_chain(path: &Path) -> io::Result<()> {
             return Err(invalid("attestation path contains dot component"));
         };
         prefix.push(name);
-        let meta = fs::symlink_metadata(&prefix)?;
+        let meta = fs::symlink_metadata(&prefix).ctx("inspect", &prefix)?;
         if !meta.is_dir() || !crate::namespace_identity::root_owned(&prefix, &meta) || meta.permissions().mode() & 0o022 != 0 {
             return Err(invalid("attestation directory custody refused"));
         }
@@ -260,7 +235,7 @@ fn read_root_witness(
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&path)?;
+        .open(&path).ctx("open", &path)?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || !crate::namespace_identity::root_owned(&path, &meta)
@@ -347,12 +322,46 @@ mod tests {
         VolumeSite::new(Path::new("/var/lib/mini/grains"), "0123456789abcdef").unwrap()
     }
 
+    /// The attested-start boundary (`PreparedResident::start_attested`): the
+    /// directory held open for fd5 must be the attested mount, by device and
+    /// inode, with the app's ownership and mode. Each tamper is refused by name.
+    #[test]
+    fn compare_open_mount_refuses_a_replaced_or_loosened_mount_by_name() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        let root = std::env::temp_dir().join(format!(
+            "spk-attested-mount-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        let mount = root.join("var");
+        fs::DirBuilder::new().mode(0o700).create(&mount).unwrap();
+        let mut witness = VolumeWitness::parse(example(), &site()).unwrap();
+        witness.app_uid = unsafe { libc::geteuid() };
+        witness.mount = mount.clone();
+        let held = fs::File::open(&mount).unwrap();
+        witness.compare_open_mount(held.as_raw_fd()).unwrap();
+        // Loosened: the mount is no longer the app's private directory.
+        fs::set_permissions(&mount, fs::Permissions::from_mode(0o755)).unwrap();
+        let loosened = witness.compare_open_mount(held.as_raw_fd()).unwrap_err();
+        assert_eq!(loosened.to_string(), "attested /var mount path identity drift");
+        fs::set_permissions(&mount, fs::Permissions::from_mode(0o700)).unwrap();
+        witness.compare_open_mount(held.as_raw_fd()).unwrap();
+        // Replaced: a fresh directory under the attested path, while fd5 still
+        // holds the one that was verified (another inode).
+        fs::rename(&mount, root.join("var.moved")).unwrap();
+        fs::DirBuilder::new().mode(0o700).create(&mount).unwrap();
+        let replaced = witness.compare_open_mount(held.as_raw_fd()).unwrap_err();
+        assert_eq!(replaced.to_string(), "preopened /var differs from attested mount");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn stable_witness_parses_exact_root_profile() {
         let parsed = VolumeWitness::parse(example(), &site()).unwrap();
         assert_eq!(parsed.resource, 8401);
         assert_eq!(parsed.volume_id, "c".repeat(64));
-        assert_eq!(parsed.backing_inode, 7654);
         assert_eq!(parsed.bytes, example());
     }
 

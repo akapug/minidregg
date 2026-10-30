@@ -1,4 +1,5 @@
 //! The operator checks retained settled pauses before the typed helper copies volumes.
+use crate::io_context::IoContext;
 use super::*;
 use crate::checkpoint_control::{Intent, Request as PauseRequest};
 #[derive(Deserialize)]
@@ -38,7 +39,7 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
         return Err(invalid("checkpoint inventory path invalid"));
     }
     for parent in input.ancestors().skip(1) {
-        let meta = fs::symlink_metadata(parent)?;
+        let meta = fs::symlink_metadata(&parent).ctx("inspect", &parent)?;
         if !meta.is_dir()
             || ![0, broker.operator_uid].contains(&meta.uid())
             || meta.mode() & 0o022 != 0
@@ -49,7 +50,7 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(input)?;
+        .open(&input).ctx("open", &input)?;
     let meta = file.metadata()?;
     if !meta.is_file()
         || meta.nlink() != 1
@@ -77,11 +78,7 @@ fn checked(broker: &Broker, input: &Path) -> io::Result<Checked> {
             || !decimal(&b.generation)
             || request.protocol != "mini-spk-checkpoint-control-v1"
             || request.action != "pause"
-            || !(request.nonce_hex.len() == 64
-                && request
-                    .nonce_hex
-                    .bytes()
-                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+            || !(crate::canonical::hex64(&request.nonce_hex))
         {
             return Err(invalid("checkpoint pause selector invalid"));
         }

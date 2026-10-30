@@ -21,9 +21,28 @@ role codec and customization strings). Two families' coordinates are distinct
 unless cSHAKE256 collides on two preimages that differ in their customization
 string, a collision bound, not a check.
 -/
-import Compiler.PolicyRecordCodec
-import Theory.ResourceBirth
-import Theory.AssertAxioms
+module
+
+public import Compiler.PolicyRecordCodec
+public import Theory.ResourceBirth
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ProtectedCell
 
@@ -113,39 +132,43 @@ def wirePayloadStream := StreamCodec.product StreamCodec.nat (StreamCodec.option
 def encode (state : Store (layout spec)) : List UInt8 :=
   spec.wireFrame ++ (wirePayloadStream spec).encode (spec.wireVersion, payloadAt spec state)
 
-def decodeRaw (bytes : List UInt8) : Option (Store (layout spec)) :=
+/-- The frame, a fully consumed payload, and the deployed wire version: one
+spelling per state (`decode_canonical`), with no re-encode. -/
+def decode (bytes : List UInt8) : Option (Store (layout spec)) :=
   if bytes.take spec.wireFrame.length = spec.wireFrame then do
     let (version, payload) ← (wirePayloadStream spec).toLawful.decode (bytes.drop spec.wireFrame.length)
     if version = spec.wireVersion then some (stateOfOption spec payload) else none
   else none
 
-@[simp] theorem decodeRaw_encode (state : Store (layout spec)) :
-    decodeRaw spec (encode spec state) = some state := by
+@[simp] theorem decode_encode (state : Store (layout spec)) : decode spec (encode spec state) = some state := by
   have decoded := (wirePayloadStream spec).toLawful.decode_encode (spec.wireVersion, payloadAt spec state)
   change (wirePayloadStream spec).toLawful.decode
     ((wirePayloadStream spec).encode (spec.wireVersion, payloadAt spec state)) =
       some (spec.wireVersion, payloadAt spec state) at decoded
-  simp [decodeRaw, encode, decoded, ← state_ext spec state]
-
-def decode (bytes : List UInt8) : Option (Store (layout spec)) := do
-  let state ← decodeRaw spec bytes
-  if encode spec state = bytes then some state else none
-
-@[simp] theorem decode_encode (state : Store (layout spec)) : decode spec (encode spec state) = some state := by
-  simp [decode]
+  simp [decode, encode, decoded, ← state_ext spec state]
 
 theorem decode_canonical {bytes : List UInt8} {state : Store (layout spec)}
     (accepted : decode spec bytes = some state) : encode spec state = bytes := by
   unfold decode at accepted
-  cases raw : decodeRaw spec bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
-      split at accepted
-      next canonical =>
-        cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
+  split at accepted
+  · rename_i prefixed
+    cases payload : (wirePayloadStream spec).toLawful.decode (bytes.drop spec.wireFrame.length) with
+    | none => simp [payload] at accepted
+    | some pair =>
+        obtain ⟨version, value⟩ := pair
+        simp only [payload, bind, Option.bind] at accepted
+        split at accepted
+        · rename_i sameVersion
+          cases Option.some.inj accepted
+          subst sameVersion
+          have exact := (wirePayloadStream spec).toLawful_canonical _ _ payload
+          simp only [encode, payloadAt_stateOfOption]
+          change spec.wireFrame ++ (wirePayloadStream spec).encode (spec.wireVersion, value) = bytes
+          rw [exact]
+          conv => rhs; rw [← List.take_append_drop spec.wireFrame.length bytes]
+          rw [prefixed]
+        · cases accepted
+  · cases accepted
 
 def stateCodec : LawfulCodec (Store (layout spec)) where
   encode := encode spec
@@ -181,7 +204,6 @@ theorem cellValid_coordinate (domain : Digest) (payload : Payload spec) :
 
 #assert_axioms payloadAt_stateOfOption
 #assert_axioms state_ext
-#assert_axioms decodeRaw_encode
 #assert_axioms decode_encode
 #assert_axioms decode_canonical
 #assert_axioms payloadAt_cellOf

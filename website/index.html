@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Mini</title>
-<meta name="description" content="Mini is a programmable shared world for people and agents: a Lean kernel admits or refuses every signed change. A devnet; privacy not audited.">
+<meta name="description" content="Mini: one shared world in which people, applications and agents submit writes to the same Lean-owned admission path. A temporary public demo, open until 11 November 2026.">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -18,8 +19,9 @@
 <li><a href="language.html">Language</a></li>
 <li><a href="laws.html">Laws</a></li>
 <li><a href="architecture.html">Architecture</a></li>
+<li><a href="edition.html">Edition</a></li>
 <li><a href="status.html">Status</a></li>
-<li><a href="join.html">Join</a></li>
+<li><a href="https://demo.dregg.online/join">Join</a></li>
 <li><a href="https://github.com/emberian/minidregg">Source</a></li>
 </ul>
 </nav>
@@ -28,32 +30,53 @@
 <main id="main">
 <div class="wrap">
 <h1>Mini</h1>
-<p class="lede">Mini is a programmable shared world for people and agents. Every change
-is a signed request that a Lean kernel admits or refuses.</p>
-<p>Documents, applications, communities and continuing computations share one set of
-rules for authority, resources, privacy and history. A member can delegate bounded work to
-an agent without giving any application unrestricted access to the rest of the world.</p>
+<p class="lede">Mini is one shared world in which people, applications and agents submit writes
+to the same Lean-owned admission path. An admitted write yields a durable world root; a refusal is
+explained by the clause that refused it; an attempt whose reply was lost stays undecided and keeps
+its exact retry, so nothing is done twice.</p>
+<p>Documents, authority, money, programs and applications share that one path. A computation
+can propose a change without acquiring permission to make it: computation proposes, authority
+admits.</p>
 
 <div class="note">
-<p><strong>State.</strong> Mini is a devnet: a change to the data model or the kernel wire
-re-genesises the store, and everything on it is lost. No admission uses a proof. Private
-rooms are on main only and their privacy is not audited. A native Host admits Objective Bend
-programs on scratch worlds, by re-execution; none is deployed. The public node runs the
-shell, documents and boards; no outside member is enrolled. <a href="status.html">Status by
-component</a>, each line with the commit or journey row it rests on.</p>
+<p><strong>Read this first.</strong> This is a temporary public demo. It shuts down on
+<strong>11 November 2026</strong>, and everything on it is erased then; it may also be re-genesised
+before that. Everything on the box is world-readable, and a hosted account's signing key is held on
+the box (readable by the operator and by your own account, no other member's). Privacy is not
+audited. "Machine-checked" here names the admission path's theorems, not every deployed
+behaviour. Keep nothing private or precious there.</p>
 </div>
 
-<h2>Rules</h2>
+<h2>Try it</h2>
 <ul>
-<li><strong>Lean owns semantics; Rust owns the physical boundary.</strong> The kernel admits a change against current
-capabilities, laws, exact read roots and funding. Rust supplies clients, custody, storage
-and transport, and decides nothing semantic.</li>
-<li><strong>Admission is re-execution.</strong> The kernel runs a computation again at
-admission and on every replay.</li>
-<li><strong>Computation proposes; authority admits.</strong> A correct calculation cannot
-grant itself permission, and a reference is not ownership.</li>
-<li><strong>A law binds its owner.</strong> A law is a predicate checked on every change to
-its resource. A law that denies everything stops the owner and the operator alike.</li>
+<li><a href="https://demo.dregg.online/">The application</a> at demo.dregg.online: what
+members chose to publish, readable without an account.</li>
+<li><a href="https://demo.dregg.online/join">Join</a> at demo.dregg.online/join: a name, a
+hosted key and one link to your session. The free route has a fixed number of seats (the door's
+default is 50; the last of them can be held for invite codes) and closes earlier if the
+sponsor's balance falls below its floor. The paid
+route costs 50 DREGG a week on Solana, and your wallet, ssh key and account are then publicly
+linked on-chain.</li>
+<li><a href="edition.html">What this edition carries</a>: what you will be able to do when the
+door opens, what is still being built, and what is not in this edition.</li>
+<li><a href="https://nano.demo.dregg.online/">nano's testground</a>, the sibling rebuild on the
+same box.</li>
+</ul>
+<p class="small muted">The opening target is 29 October 2026. Until the owner opens the door,
+every login and the join page are closed, and pay-to-enrol is off.
+<a href="status.html">Status by component</a> says what is live, each line with the run it rests
+on.</p>
+
+<h2>Read about it</h2>
+<ul>
+<li><a href="https://github.com/emberian/minidregg/blob/main/README.md">README</a>: a map of the
+repository and how to build it.</li>
+<li><a href="https://github.com/emberian/minidregg/blob/main/docs/DEMO-EXPERIENCE-2026-10-27.md">The
+demo, as a stranger meets it</a>: what the demo is for.</li>
+<li><a href="https://github.com/emberian/minidregg/blob/main/docs/DEMO-PREFIX-2026-10-26.md">The
+plan</a>: the work and the opening contract.</li>
+<li><a href="language.html">Language</a>, <a href="laws.html">laws</a> and
+<a href="architecture.html">architecture</a> pages.</li>
 </ul>
 <p class="small muted">The repository and the host binary keep the older name,
 minidregg.</p>

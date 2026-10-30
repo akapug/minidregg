@@ -67,7 +67,7 @@ if [ -f "$state/pre-submit" ] && grep -q '"type": "settle"' "$intent" &&
   cp "$config" "$dir/config.json"
   printf 'signed observation' > "$dir/signed-observation.bin"
   printf '{"format":"minidregg-resource-client-attempt-v1","operation":"submit","host":"%s","config":"%s/config.json","socket":"%s"}\n' "$host" "$dir" "$socket" > "$dir/attempt.json"
-  printf '\377canonical refused outcome' > "$dir/pre-submit-refusal.frame"
+  printf '\__NO_RECORD_OCTAL__canonical refused outcome' > "$dir/pre-submit-refusal.frame"
   digest() { /usr/bin/openssl dgst -sha256 "$1" | awk '{print $NF}'; }
   printf '{"type":"minidregg-pre-submit-refusal-v1","stage":"prepare","operation":1,"frameSha256":"%s","requestSha256":"%s","hostConfigSha256":"%s","attemptManifestSha256":"%s"}\n' \
     "$(digest "$dir/pre-submit-refusal.frame")" "$(digest "$dir/signed-observation.bin")" \
@@ -96,7 +96,9 @@ elif grep -q '"type": "settle"' "$intent"; then
 fi
 printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
 "#
-    .replace("__STATE__", state.to_str().unwrap());
+    .replace("__STATE__", state.to_str().unwrap())
+    // A prepare refusal is a NO_RECORD frame (c5e268ebd): the marker byte from the one wire.
+    .replace("__NO_RECORD_OCTAL__", &format!("{:o}", mini_sdk::host_operations::RESPONSE_NO_RECORD));
     fs::write(&mini, script).unwrap();
     fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
     let host = root.join("host");
@@ -111,6 +113,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         host,
         host_config,
         host_socket: pre_submit.then(|| root.join("mini.sock")),
+        startup_timeout_seconds: None,
+        consent_full_readiness: None,
         control_socket: state.join("control.sock"),
         custody_key: root.join("parent.key"),
         state_dir: state,
@@ -120,6 +124,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         capability: "71".into(),
         query_capability: "74".into(),
         policy_control_capability: Some("72".into()),
+        sandbox: None,
         foreground_tool: None,
         dispatch_task: None,
         tool_task: Some(ToolTask {
@@ -154,6 +159,8 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             registered_shared_applications: vec![],
             allowed_application_api_routes: vec![],
             allowed_application_lifetime_routes: vec![],
+            application_services: vec![],
+            typed_applications: vec![],
             agent_api_host_sha256: None,
             lifetime_api_host_sha256: None,
             current_birth_host_sha256: None,
@@ -314,6 +321,30 @@ fn foreground_status_uses_signed_parent_lease_without_a_hermes_child() {
         reserve: "2".into(),
         charge: "0".into(),
     });
+    let workspace = runtime.config.state_dir.join("resource-workspace");
+    let room_home = runtime.config.state_dir.join("room-home");
+    for path in [workspace.clone(), workspace.join("refs"), workspace.join("attempts"),
+        workspace.join("sources"), workspace.join("proposals"), room_home.clone()] {
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    runtime.config.host_socket = Some(root.join("mini.sock"));
+    let tool = runtime.config.tool_task.as_mut().unwrap();
+    tool.resource_workspace = Some(workspace.clone());
+    let record = json!({"type":"minidregg-participant-workspace-v1",
+        "host":runtime.config.host,"config":runtime.config.host_config,
+        "key":tool.custody_key,"subject":tool.subject,"socket":runtime.config.host_socket,
+        "birthContext":null,"namespaceRoot":null});
+    fs::write(workspace.join("workspace.json"), serde_json::to_vec(&record).unwrap()).unwrap();
+    fs::set_permissions(workspace.join("workspace.json"), fs::Permissions::from_mode(0o600)).unwrap();
+    runtime.config.tool_task.as_mut().unwrap().room = Some(resource_tools::RoomToolsConfig {
+        restrict_tools: true, mini: runtime.config.mini.clone(), host: runtime.config.host.clone(),
+        host_config: runtime.config.host_config.clone(), socket: root.join("mini.sock"),
+        workspace, home: room_home, room: "lab".into(), account: None,
+    });
+    assert!(runtime.tool_call("mini_grain_status", &json!({})).unwrap_err().contains("only room tools"));
+    assert!(runtime.tool_call("mini_create_application_session", &json!({})).unwrap_err().contains("only room tools"));
+    assert!(runtime.require_foreground_execution("mini_grain_status", &json!({})).is_err());
     runtime.journal.connection = Connection::Soft;
     runtime.journal.child = None;
     runtime.journal.hermes_session = None;
@@ -335,6 +366,12 @@ fn foreground_status_uses_signed_parent_lease_without_a_hermes_child() {
     runtime.output = Some(server.output_handle());
     let (_sender, input) = mpsc::channel();
     let before_rejected = runtime.journal.next_operation_id;
+    assert!(runtime.foreground_tool(attachment_id,
+        br#"{"requestId":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","name":"mini_room_attempts","arguments":{}}"#,
+        &input).unwrap_err().contains("not delegated"));
+    assert_eq!(runtime.journal.next_operation_id, before_rejected);
+    assert!(runtime.journal.parent_hold.is_none());
+
     assert!(runtime.foreground_tool(
         attachment_id,
         br#"{"requestId":"ffffffffffffffffffffffffffffffff","name":"mini_grain_status","arguments":{"unexpected":true}}"#,
@@ -522,6 +559,7 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         socket_path: runtime.config.state_dir.join("dispatch.sock"),
         host_uid: unsafe { libc::geteuid() } + 1,
         operator_socket: None,
+            operator_peer_uid: None,
         reserve_signer: None,
     });
     runtime.config.provider_task = Some(ProviderTask {
@@ -550,12 +588,12 @@ fn paused_parent_next_generation_policy_includes_three_fixed_workers() {
         local_fixture_host_network: true,
     });
     let workers = runtime.managed_worker_subjects().unwrap();
-    assert_eq!(workers, ["8", "9", "10"]);
+    assert_eq!(workers, ["8", "10", "9"]);
     let next_generation = managed_worker_policy_source("7", &workers, "2");
     assert_eq!(
         next_generation,
         json!({"owner":"7",
-        "workerSubjects":["8","9","10"],"workerGeneration":"2"})
+        "workerSubjects":["8","10","9"],"workerGeneration":"2"})
     );
     assert_ne!(
         next_generation,
@@ -608,6 +646,27 @@ fi
         .replace("\"task\":\"7102\"", "\"task\":\"7101\"");
     assert_ne!(original, patched);
     fs::write(&runtime.config.mini, patched).unwrap();
+    // Fixture authoring preserves exact source bytes; this checks orchestration,
+    // not the native policy compiler (the receiving journey supplies that proof).
+    let legacy = vec!["8".to_owned(), "9".to_owned(), "10".to_owned()];
+    assert_eq!(runtime.managed_worker_policy_orders().unwrap(), vec![workers.clone(), legacy.clone()]);
+    for order in [&workers, &legacy] {
+        let view = json!({"predicate":managed_worker_policy_source("7", order, "1")});
+        runtime.require_managed_worker_policy(&view, &workers, "0", "2").unwrap();
+    }
+    for bad in [
+        managed_worker_policy_source("77", &workers, "1"),
+        managed_worker_policy_source("7", &workers, "9"),
+        managed_worker_policy_source("7", &["10".into(), "8".into(), "9".into()], "1"),
+        managed_worker_policy_source("7", &["8".into(), "10".into()], "1"),
+        managed_worker_policy_source("7", &["8".into(), "10".into(), "9".into(), "11".into()], "1"),
+    ] {
+        assert!(runtime.require_managed_worker_policy(&json!({"predicate":bad}), &workers, "0", "2").is_err());
+    }
+    let mut policy: Value = serde_json::from_slice(&fs::read(state.join("policy-view.json")).unwrap()).unwrap();
+    policy["predicate"] = managed_worker_policy_source("7", &legacy, "1");
+    fs::write(state.join("policy-view.json"), serde_json::to_vec(&policy).unwrap()).unwrap();
+    // A recognized historical ordering is renewed into the canonical birth order.
     runtime.renew_worker_policy(true).unwrap();
     let source_path = fs::read_dir(&state)
         .unwrap()
@@ -620,7 +679,7 @@ fi
         })
         .unwrap();
     let installed: Value = serde_json::from_slice(&fs::read(source_path).unwrap()).unwrap();
-    assert_eq!(installed["workerSubjects"], json!(["8", "9", "10"]));
+    assert_eq!(installed["workerSubjects"], json!(["8", "10", "9"]));
     assert_eq!(installed["workerGeneration"], "2");
     // The re-pin carries the signed view's canonical source, so the Host
     // preserves its non-predicate metadata (30746612).
@@ -817,5 +876,54 @@ fn uncertain_disconnect_after_release_retains_exact_attempt_and_blocks_tools() {
         .tool_call("mini_read_resource", &json!({"name":"publication"}))
         .unwrap_err()
         .contains("owner reconciliation"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn operator_execution_cannot_borrow_a_flag_or_change_the_retained_request() {
+    let (mut runtime, root) = fixture(false, false, false);
+    runtime.config.foreground_tool = Some(ForegroundToolProfile {reserve:"1".into(), charge:"0".into()});
+    runtime.journal.child = None;
+    runtime.prompt_active = false;
+    let operation_id = runtime.next_id().unwrap();
+    let request = json!({"requestId":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "name":"mini_create_application_session", "arguments":{"family":"session", "application":"oracle-app"}});
+    let bytes = serde_json::to_vec(&request).unwrap();
+    let digest = sha256_bytes(&bytes).unwrap();
+    let request_path = runtime.config.state_dir.join(format!("foreground-{operation_id:016}.request.json"));
+    fs::write(&request_path, &bytes).unwrap();
+    fs::write(foreground_tombstone_path(&runtime.config.state_dir, request["requestId"].as_str().unwrap()),
+        serde_json::to_vec(&ForegroundTombstone {
+            request_id:request["requestId"].as_str().unwrap().into(), operation_id, request_sha256:digest.clone(),
+        }).unwrap()).unwrap();
+    runtime.journal.foreground_attempt = Some(ForegroundAttempt {
+        request_id:request["requestId"].as_str().unwrap().into(), operation_id,
+        name:"mini_create_application_session".into(), request_path:request_path.clone(), request_sha256:digest,
+        phase:ForegroundPhase::Executing, result_path:None, result_sha256:None, reported:false,
+    });
+    runtime.foreground_operation = Some(operation_id);
+    let name = request["name"].as_str().unwrap();
+    let args = &request["arguments"];
+    runtime.require_tool_surface(ToolSurface::OperatorForeground, name).unwrap();
+    runtime.require_foreground_execution(name, args).unwrap();
+    assert!(runtime.require_foreground_execution(name, &json!({"family":"other", "application":"oracle-app"})).is_err());
+    assert!(runtime.require_foreground_execution("mini_grain_status", &json!({})).is_err());
+    runtime.foreground_operation = Some(operation_id + 1);
+    assert!(runtime.require_foreground_execution(name, args).is_err());
+    runtime.foreground_operation = Some(operation_id);
+    for phase in [ForegroundPhase::Prepared, ForegroundPhase::Reserved, ForegroundPhase::Uncertain, ForegroundPhase::Definite] {
+        runtime.journal.foreground_attempt.as_mut().unwrap().phase = phase;
+        assert!(runtime.require_foreground_execution(name, args).is_err());
+    }
+    runtime.journal.foreground_attempt.as_mut().unwrap().phase = ForegroundPhase::Executing;
+    runtime.prompt_active = true;
+    assert!(runtime.require_foreground_execution(name, args).is_err());
+    runtime.prompt_active = false;
+    let before = runtime.journal.next_operation_id;
+    assert!(runtime.tool_call("mini_grain_status", &json!({})).unwrap_err().contains("cannot borrow"));
+    assert_eq!(before, runtime.journal.next_operation_id);
+    fs::write(&request_path, b"changed").unwrap();
+    assert!(runtime.require_foreground_execution(name, args).is_err());
+    drop(runtime);
     fs::remove_dir_all(root).unwrap();
 }

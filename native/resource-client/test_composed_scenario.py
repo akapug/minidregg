@@ -201,6 +201,14 @@ class ComposedTests(unittest.TestCase):
             if len(argv) > 1 and argv[1] == "key-status":
                 return w.key_status(argv)
             calls.append(Path(argv[1]).name)
+            if calls[-1] == "connector-authority.py":
+                # The connector's own held task and document grant, named by the selection, under
+                # the selection's document as proposal; it runs after attachment, before provisioning.
+                flags = dict(zip(argv[2::2], argv[3::2]))
+                self.assertEqual(flags["--selection"], str(root / "selection.json"))
+                self.assertEqual(flags["--world-inventory"], str(self.world))
+                self.assertEqual(flags["--proposal-id"], w.selection["connector"]["document"])
+                return mock.Mock(returncode=0, stdout=b"{}", stderr=b"")
             binding = c.read(argv[2])
             if calls[-1] == "same-store-app.py":
                 target = Path(binding["root"]); target.mkdir()
@@ -215,6 +223,8 @@ class ComposedTests(unittest.TestCase):
                 (target / "result.json").write_text(json.dumps({"protocol": "mini-app-document-provisioned-v1",
                     "subject": binding["delegate"]["subject"], "fixture": str(connector_fixture)}))
                 output = b"{}"
+            elif calls[-1] == "connector-sheet-seed.py":
+                output = b"{}"
             else:
                 self.assertEqual(calls[-1], "app-document-journey.py")
                 output = json.dumps({"protocol": "mini-app-document-journey-result-v1", "status": "saved", "operation": binding["operation"],
@@ -226,7 +236,7 @@ class ComposedTests(unittest.TestCase):
             self.assertEqual(first["phases"], {"apps": "pass", "connector": "pass"})
             second = c.Scenario(value, "spec.json").run()
             self.assertEqual(second["phases"], first["phases"])
-        self.assertEqual(calls, ["same-store-app.py", "app-document-provision.py", "app-document-journey.py"])
+        self.assertEqual(calls, ["same-store-app.py", "connector-authority.py", "app-document-provision.py", "connector-sheet-seed.py", "app-document-journey.py"])
         state = c.read(self.state / "state.json")
         self.assertEqual(set(state["derivedInputPins"]), {"sheet:attach", "sheet:connector", "sheet:journey"})
         (root / "selection.json").write_text("{}")
@@ -247,7 +257,8 @@ class ComposedTests(unittest.TestCase):
         scenario = c.Scenario(value, "spec.json")
         scenario.state["connectorResultPin"] = {"path": str(connector), "sha256": c.sha(connector)}
         scenario.persist()
-        with mock.patch.object(c.subprocess, "run", side_effect=run):
+        # The binding is a stand-in; the adapter boundary is mocked, so is its preflight.
+        with mock.patch.object(c.subprocess, "run", side_effect=run), mock.patch.object(c, "preflight", return_value={}):
             result = scenario.run()
         self.assertEqual(result["phases"], {"residents": "pass", "restart": "pass"})
         self.assertEqual([argv[argv.index("--through") + 1] for argv in calls], ["verify", "retain"])
@@ -259,7 +270,7 @@ class ComposedTests(unittest.TestCase):
     def test_typed_resident_cannot_run_without_actual_connector_result(self):
         binding = self.root / "resident-binding.json"; binding.write_text("{}")
         value = self.spec(phases=["residents"], residents={"binding": str(binding)})
-        with mock.patch.object(c.subprocess, "run") as native:
+        with mock.patch.object(c.subprocess, "run") as native, mock.patch.object(c, "preflight", return_value={}):
             result = c.Scenario(value, "spec.json").run()
         self.assertIn("requires retained actual connector", result["phases"]["residents"])
         native.assert_not_called()
@@ -284,8 +295,8 @@ class ComposedTests(unittest.TestCase):
         shell = Shell(self.value["members"])
         shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
         first = self.scenario(self.spec(), shell).run()
-        self.assertTrue(first["phases"]["rooms"].startswith("stopped"))
-        self.assertEqual(first["pending"]["name"], "room:overlap:invite:ada:submit")
+        self.assertTrue(first["phases"]["rooms"].startswith("fail:"))
+        self.assertEqual(first["pending"]["rooms"]["name"], "room:overlap:invite:ada:submit")
         shell.receipts[("bo", "t1-overlap-invite-ada")] = "confirmed"
         second = self.scenario(self.spec(), shell).run()
         self.assertEqual(second["phases"], {"rooms": "pass"})
@@ -307,7 +318,7 @@ class ComposedTests(unittest.TestCase):
         shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
         self.scenario(self.spec(), shell).run()
         again = self.scenario(self.spec(), shell).run()
-        self.assertTrue(again["phases"]["rooms"].startswith("stopped"))
+        self.assertTrue(again["phases"]["rooms"].startswith("fail:"))
         self.assertIn("undecided", again["phases"]["rooms"])
         s = self.scenario(self.spec(), shell)
         pending = s.ledger.pending()
@@ -372,13 +383,13 @@ class ComposedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "member inventory changed"):
             c.plan(value)
 
-    def test_a_stopped_phase_reports_later_phases_as_not_reached(self):
+    def test_a_red_phase_blocks_its_dependents_by_name(self):
         shell = Shell(self.value["members"])
         shell.fail[r"submit t1-overlap-invite-ada"] = "undecided-after-attempt"
         result = self.scenario(self.spec(phases=["rooms", "apps", "residents"]), shell).run()
-        self.assertTrue(result["phases"]["rooms"].startswith("stopped"))
-        self.assertTrue(result["phases"]["apps"].startswith("not reached: stopped at rooms; would be blocked"))
-        self.assertTrue(result["phases"]["residents"].startswith("not reached: stopped at rooms; would be blocked"))
+        self.assertTrue(result["phases"]["rooms"].startswith("fail:"))
+        self.assertTrue(result["phases"]["apps"].startswith("blocked: prerequisite rooms has not passed"))
+        self.assertTrue(result["phases"]["residents"].startswith("blocked: prerequisite rooms"))
 
     def connector_spec(self):
         journey = self.root / "journey-input.json"
@@ -423,8 +434,8 @@ class ComposedTests(unittest.TestCase):
                 self.adapter_response(self.saved_export(status="source-uncertain")),
                 self.adapter_response(self.saved_export())]) as run:
             first = c.Scenario(value, "spec.json").run()
-            self.assertTrue(first["phases"]["connector"].startswith("stopped:"))
-            self.assertEqual(first["pending"]["name"], "connector:journey")
+            self.assertTrue(first["phases"]["connector"].startswith("fail:"))
+            self.assertEqual(first["pending"]["connector"]["name"], "connector:journey")
             second = c.Scenario(value, "spec.json").run()
             self.assertEqual(second["phases"]["connector"], "pass")
             names = [Path(call.args[0][1]).name for call in run.call_args_list]
@@ -436,17 +447,18 @@ class ComposedTests(unittest.TestCase):
         with mock.patch.object(c.subprocess, "run", side_effect=[
                 self.adapter_response({}), self.adapter_response(self.saved_export(status="uncertain"))]) as run:
             first = c.Scenario(value, "spec.json").run()
-        self.assertEqual(first["pending"]["name"], "connector:journey")
+        self.assertEqual(first["pending"]["connector"]["name"], "connector:journey")
         Path(value["connector"]["journeyInput"]).write_text(json.dumps({"operation": "export-2"}))
         with mock.patch.object(c.subprocess, "run") as run:
             second = c.Scenario(value, "spec.json").run()
         run.assert_not_called()
         self.assertIn("journey input changed", second["phases"]["connector"])
-        self.assertEqual(second["pending"]["name"], "connector:journey")
+        self.assertEqual(second["pending"]["connector"]["name"], "connector:journey")
 
     def test_old_provision_only_pass_must_receive_the_export_before_passing(self):
         value = self.connector_spec()
         scenario = c.Scenario(value, "spec.json")
+        scenario.current = "connector"
         scenario.ledger.step("connector", lambda: None, scenario.attempt("old-provision"), reentrant=True)
         scenario.state["phases"]["connector"] = "pass"
         scenario.persist()
@@ -463,13 +475,24 @@ class ComposedTests(unittest.TestCase):
                          self.saved_export(callSha256="")):
             with mock.patch.object(c.subprocess, "run", return_value=self.adapter_response(response)):
                 result = c.Scenario(value, "spec.json").run()
-            self.assertTrue(result["phases"]["connector"].startswith("stopped:"))
-            self.assertEqual(result["pending"]["name"], "connector:journey")
+            self.assertTrue(result["phases"]["connector"].startswith("fail:"))
+            self.assertEqual(result["pending"]["connector"]["name"], "connector:journey")
 
     def documents_binding(self):
         path = self.root / "documents-binding.json"
         path.write_text(json.dumps({"protocol": "mini-protected-same-store-v1"}))
         return path
+
+    def test_spec_room_owner_names_the_shared_room_owner_within_the_population(self):
+        world_value = json.loads(self.world.read_text())
+        world_value["restart"] = {"argv": [str(self.root / "restart.sh")]}
+        self.world.write_text(json.dumps(world_value))
+        self.assertEqual(c.generate(str(self.world), str(self.state), 3, "jd3")["rooms"]["shared"]["owner"], "ada")
+        value = c.generate(str(self.world), str(self.state), 3, "jd3", room_owner="bo")
+        self.assertEqual(value["rooms"]["shared"]["owner"], "bo")
+        self.assertEqual(value["churn"]["rooms"]["shared"]["member"], "cy")
+        with self.assertRaisesRegex(ValueError, "not among the first 3"):
+            c.generate(str(self.world), str(self.state), 3, "jd3", room_owner="helper")
 
     def test_spec_documents_binding_declares_both_adapters_under_state(self):
         world_value = json.loads(self.world.read_text())

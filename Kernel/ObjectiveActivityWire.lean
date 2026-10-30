@@ -7,15 +7,34 @@ and the one constructor of a root-bound `DataIntent` from post images.
 Nothing here decides anything: it is the byte layer the two kernel modules
 judge with. Every decoder is strict (a decoded value re-encodes to exactly the
 bytes it came from), so a cell holds one spelling of each value. -/
-import Kernel.DurableDataIntent
-import Theory.ObjectiveBendCheckpoint
-import Theory.ObjectiveBendDemandData
-import Theory.ObjectiveBendTyping
-import Compiler.Tower256ConcreteBackend
-import Compiler.PolicyRecordCodec
-import Compiler.ResourceBirthCodec
-import Theory.AssertAxioms
-import Theory.ResourceCost
+module
+
+public import Kernel.DurableDataIntent
+public import Theory.ObjectiveBendCheckpoint
+public import Theory.ObjectiveBendDemandData
+public import Theory.ObjectiveBendTyping
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.PolicyRecordCodec
+public import Compiler.ResourceBirthCodec
+public import Theory.AssertAxioms
+public import Theory.ResourceCost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveActivityWire
 open Minidregg.Theory Minidregg.Compiler
@@ -47,6 +66,11 @@ def unitStream : StreamCodec Unit where
   encode _ := []
   decodePrefix bytes := some ((), bytes)
   decodePrefix_encode := by intro value suffix; cases value; rfl
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+    obtain ⟨-, rfl⟩ := decoded
+    rfl
 
 def subjectStream : StreamCodec SubjectId :=
   StreamCodec.xmap StreamCodec.nat (fun subject => subject.value) (fun value => ⟨value⟩)
@@ -59,20 +83,10 @@ def readGuardStream : StreamCodec ReadGuard :=
 
 def stringStream : StreamCodec String := PolicyRecordCodec.stringStream
 
-/-- A frame prefix plus a stream codec, strict: decoding refuses any other
-spelling of the same value (`ResourceBirthCodec.strictCodec`). -/
-def framedRaw {α : Type} (frame : Bytes) (stream : StreamCodec α) : LawfulCodec α where
-  encode value := frame ++ stream.encode value
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro value
-    have exact := stream.toLawful.decode_encode value
-    change stream.toLawful.decode (stream.encode value) = some value at exact
-    simp [exact]
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : Bytes) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
 
 theorem framed_roundTrip {α : Type} (frame : Bytes) (stream : StreamCodec α) (value : α) :
     (framed frame stream).decode ((framed frame stream).encode value) = some value :=
@@ -81,7 +95,7 @@ theorem framed_roundTrip {α : Type} (frame : Bytes) (stream : StreamCodec α) (
 theorem framed_canonical {α : Type} {frame : Bytes} {stream : StreamCodec α} {bytes : Bytes}
     {value : α} (decoded : (framed frame stream).decode bytes = some value) :
     (framed frame stream).encode value = bytes :=
-  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 /-! ## Checkpoint bytes
 
@@ -224,17 +238,30 @@ CAS already binds them. -/
 def readOnly (rootBytes : Bytes → Digest) (posts : List Post) (guards : List ReadGuard) : List ReadGuard :=
   guards.filter fun guard => decide (guard.cellId ∉ (posts.map (Post.write rootBytes)).map DataWrite.cellId)
 
+/-- `readOnly` as compiled: a write's cell is its post's cell, so the written
+cells are read off the posts once, never by re-hashing every post per guard. -/
+def readOnlyFast (rootBytes : Bytes → Digest) (posts : List Post) (guards : List ReadGuard) : List ReadGuard :=
+  let written := posts.map Post.cell
+  guards.filter fun guard => decide (guard.cellId ∉ written)
+
+@[csimp] theorem readOnly_eq_fast : @readOnly = @readOnlyFast := by
+  funext rootBytes posts guards
+  simp only [readOnly, readOnlyFast, List.map_map]
+  rfl
+
 /-- What the admitting receiver adds to a kernel turn: the guards of the
 authority it checked (authority cell, capability laws), its own claims (the
 signed marker), the replay event that carries the signed ingress, the signer,
-and the exact charge of the turn's footprint. The kernel turn is ONE intent
+and the exact charge of the turn's footprint: a function of its posts, its
+guards and the event it retains, so a seal whose event is replaced (a charged
+failure's) charges the event it carries. The kernel turn is ONE intent
 whatever sealing it carries: `intentOf` below. -/
 structure Seal where
   guards : List ReadGuard
   nullifiers : List StableNullifier
   event : StableEvent
   subject : Option SubjectId
-  charge : List Post → List ReadGuard → Minidregg.Theory.ResourceCost.Charge
+  charge : List Post → List ReadGuard → StableEvent → Minidregg.Theory.ResourceCost.Charge
 
 /-- The one constructor of every activity-kernel intent: writes are exactly the
 post images, so their roots are bound by construction; the seal's guards and
@@ -245,7 +272,7 @@ def intentOf (rootBytes : Bytes → Digest) (transaction : TransactionId) (posts
   writes := posts.map (Post.write rootBytes)
   readGuards := readOnly rootBytes posts (guards ++ sealing.guards)
   nullifiers := nullifiers ++ sealing.nullifiers
-  exactCharge := sealing.charge posts (readOnly rootBytes posts (guards ++ sealing.guards))
+  exactCharge := sealing.charge posts (readOnly rootBytes posts (guards ++ sealing.guards)) sealing.event
   event := sealing.event
   subject := sealing.subject
   postRootsBound := by

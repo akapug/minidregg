@@ -4,7 +4,7 @@
 use super::*;
 use mini_sdk::lock::{Create, Lease, LockError, Wait};
 
-struct QuietReplies(bool);
+pub(crate) struct QuietReplies(pub(crate) bool);
 impl Drop for QuietReplies {
     fn drop(&mut self) {
         crate::QUIET_WORKER.store(self.0, std::sync::atomic::Ordering::Relaxed);

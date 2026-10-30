@@ -4,9 +4,30 @@ ingredient, not an installed Mini effect or a source-history receipt. The
 recipient selects the current key and current policy source from its complete
 opened authority; no fn article or caller-supplied verifier bit selects them.
 -/
-import Kernel.FnSelectiveRelease
-import Kernel.FnGatewayPolicy
-import Compiler.CredentialSignatureAdmission
+module
+
+public import Kernel.FnSelectiveRelease
+public import Kernel.FnGatewayPolicy
+public import Compiler.CredentialSignatureAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectiveReleaseSignature
 
@@ -37,16 +58,13 @@ def packetStream : StreamCodec Packet :=
     (by intro packet; cases packet; rfl)
 
 def packetCodec : LawfulCodec Packet :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream
 
 theorem packetCodec_accepted_bytes {bytes : List UInt8} {packet : Packet}
     (accepted : packetCodec.decode bytes = some packet) :
     packetCodec.encode packet = bytes := by
   unfold packetCodec at accepted ⊢
-  exact ResourceBirthCodec.strictCodec_canonical
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-OWNER-PACKET/v2".toUTF8.toList packetStream)
-    accepted
+  exact NativeHostCodec.framed_canonical _ _ accepted
 
 /-- Source and destination fields remain signed context, not evidence of
 source admission. The current recipient law is deliberately the exact

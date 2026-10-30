@@ -13,6 +13,7 @@
 //! admitted by Mini (op36/37/34), including the current enrollment, before
 //! fd3 delivery.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_native::{private_dir, write_new};
 use crate::grain::HostView;
@@ -46,7 +47,7 @@ fn decimal(value: &str) -> bool {
 }
 
 fn read_json(path: &Path) -> io::Result<Value> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !meta.is_file()
         || meta.uid() != unsafe { libc::geteuid() }
         || meta.permissions().mode() & 0o077 != 0
@@ -58,7 +59,7 @@ fn read_json(path: &Path) -> io::Result<Value> {
             path.display()
         )));
     }
-    Ok(serde_json::from_slice(&fs::read(path)?)?)
+    Ok(serde_json::from_slice(&fs::read(&path).ctx("read", &path)?)?)
 }
 
 fn text<'a>(value: &'a Value, pointer: &str) -> io::Result<&'a str> {
@@ -240,7 +241,7 @@ fn check_retained_custody(custody: &Value, derived: &Derived, route_name: &str) 
 }
 
 pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::Result<Value> {
-    let request: RouteRequest = serde_json::from_slice(&fs::read(request_path)?)?;
+    let request: RouteRequest = serde_json::from_slice(&fs::read(&request_path).ctx("read", &request_path)?)?;
     if request.protocol != "mini-spk-grain-route-request-v1"
         || request.name.is_empty()
         || request.name.len() > 32
@@ -271,7 +272,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     .map_err(io::Error::other)?;
     let routes = app_dir.join("routes");
     match DirBuilder::new().mode(0o700).create(&routes) {
-        Ok(()) => File::open(&app_dir)?.sync_all()?,
+        Ok(()) => File::open(&app_dir).ctx("open", &app_dir)?.sync_all()?,
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error),
     }
@@ -287,7 +288,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
             .collect();
         let staging = routes.join(format!(".{}.staging", request.name));
         if staging.exists() {
-            fs::remove_dir_all(&staging)?;
+            fs::remove_dir_all(&staging).ctx("remove", &staging)?;
         }
         if request.export_capture {
             crate::http_entrance::initialize_connector_custodian(
@@ -339,9 +340,9 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
                 "preferredHandle":request.preferred_handle,
             }))?,
         )?;
-        File::open(&staging)?.sync_all()?;
-        fs::rename(&staging, &directory)?;
-        File::open(&routes)?.sync_all()?;
+        File::open(&staging).ctx("open", &staging)?.sync_all()?;
+        fs::rename(&staging, &directory).ctx("rename", &staging)?;
+        File::open(&routes).ctx("open", &routes)?.sync_all()?;
     }
     let custody = read_json(&directory.join("dispatch-custody.json"))?;
     check_retained_custody(&custody, &derived, &request.name)?;
@@ -511,6 +512,7 @@ mod tests {
             browser_token_sha256: [0; 32],
             bootstrap_token_sha256: [0; 32],
             api_token_sha256: [0; 32],
+            edge_gid: None,
         };
         check_retained_policy(&p, "4601", &d, &req).unwrap();
         req.export_capture = true;

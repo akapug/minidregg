@@ -1,7 +1,7 @@
 /-
 # Theory.AuthMap — an authenticated map with an incremental root and openings
 
-DATAMODEL §3.2 / §3.9 / §5 A3.  Today a cell root is a hash of the whole encoded
+docs/DATAMODEL.md §3.2 / §3.9 / §5 A3.  Today a cell root is a hash of the whole encoded
 cell (`CellState.Materialized.root`) and the world "root" is cSHAKE over the whole
 image; nothing can be opened and every write rehashes everything.  This module is
 the object that replaces that: a sparse Merkle map of fixed depth whose root is a
@@ -46,7 +46,27 @@ membership / non-membership openings.
 * `pathRootM_tick` — cost: `depth + 1` hash invocations per verification and per
   incremental update, measured on the same monadic code the pure path runs.
 -/
-import Mathlib.Data.List.Forall2
+module
+
+public import Mathlib.Data.List.Forall2
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.AuthMap
 
@@ -1048,5 +1068,29 @@ end IdToy
 /-- info: 'Minidregg.Theory.AuthMap.IdToy.two_level_sound_idToy' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms IdToy.two_level_sound_idToy
+
+/-! ## Poles of `PrefixFree` and `WF`
+
+`unaryFrame_prefixFree` and `wf_empty` are the satisfying poles.  A rendering
+whose images are prefixes of one another is refuted, and so is a map whose one
+occupant sits at another key's index. -/
+
+theorem replicateZero_not_prefixFree :
+    ¬ PrefixFree (fun n : Nat => List.replicate n (0 : UInt8)) := by
+  intro h
+  exact absurd (h 0 1 [0] [] rfl).1 (by decide)
+
+/-- One occupant, key `true`, sitting at the root path `[]` instead of `[true]`. -/
+def misplaced : Map Bool Unit := fun p => if p = [] then some (true, ()) else none
+
+theorem wf_bool_empty : WF (fun b : Bool => [b]) (Map.empty : Map Bool Unit) :=
+  wf_empty _
+
+theorem misplaced_not_wf : ¬ WF (fun b : Bool => [b]) misplaced := by
+  intro h
+  have := h [] true () (by simp [misplaced])
+  simp at this
+
+#assert_axioms replicateZero_not_prefixFree wf_bool_empty misplaced_not_wf
 
 end Minidregg.Theory.AuthMap

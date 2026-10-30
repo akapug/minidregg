@@ -17,8 +17,27 @@ boundary. Here authorization compares concrete stable identity, current key and
 epoch, and recomputes value from the retained deposit and current source tariff.
 No caller-supplied boolean acts as a proof of possession or correct pricing.
 -/
-import Kernel.PayReceivingContract
-import Kernel.PayTariff
+module
+
+public import Kernel.PayReceivingContract
+public import Kernel.PayTariff
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolClaim
 
@@ -48,6 +67,13 @@ theorem PendingReason.ofCode_code (reason : PendingReason) :
     PendingReason.ofCode reason.code = some reason := by
   cases reason <;> rfl
 
+/-- `PendingReason.ofCode` is a partial inverse of `PendingReason.code`: every code it accepts is
+the code of the value it returns. -/
+theorem PendingReason.code_ofCode {code : Nat} {value : PendingReason} (known : PendingReason.ofCode code = some value) :
+    value.code = code := by
+  unfold PendingReason.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 def pendingReasonStream : StreamCodec PendingReason where
   encode reason := StreamCodec.nat.encode reason.code
   decodePrefix bytes := do
@@ -57,6 +83,35 @@ def pendingReasonStream : StreamCodec PendingReason where
   decodePrefix_encode := by
     intro reason suffix
     simp [StreamCodec.nat.decodePrefix_encode, PendingReason.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : PendingReason.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [PendingReason.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (code, next) =>
+        match PendingReason.ofCode code with
+        | some reason => some (reason, next)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair => cases known : PendingReason.ofCode pair.1 <;> simp [known]
+  cursorNative := true
 
 /-- Exact deposit provenance, independent of the observer's ingress type. -/
 structure Observation where
@@ -117,6 +172,13 @@ def Mode.ofCode : Nat → Option Mode
 theorem Mode.ofCode_code (mode : Mode) : Mode.ofCode mode.code = some mode := by
   cases mode <;> rfl
 
+/-- `Mode.ofCode` is a partial inverse of `Mode.code`: every code it accepts is
+the code of the value it returns. -/
+theorem Mode.code_ofCode {code : Nat} {value : Mode} (known : Mode.ofCode code = some value) :
+    value.code = code := by
+  unfold Mode.ofCode at known
+  split at known <;> first | (cases known; rfl) | cases known
+
 def modeStream : StreamCodec Mode where
   encode mode := StreamCodec.nat.encode mode.code
   decodePrefix bytes := do
@@ -126,6 +188,35 @@ def modeStream : StreamCodec Mode where
   decodePrefix_encode := by
     intro mode suffix
     simp [StreamCodec.nat.decodePrefix_encode, Mode.ofCode_code]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨code, rest⟩ := pair
+      cases known : Mode.ofCode code with
+      | none => simp [ok, known] at decoded
+      | some decodedValue =>
+        simp only [ok, known, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode decodedValue.code ++ rest = bytes
+        rw [Mode.code_ofCode known]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
+  decodeAt bytes start :=
+    match StreamCodec.decodeNatAt bytes start with
+    | some (code, next) =>
+        match Mode.ofCode code with
+        | some mode => some (mode, next)
+        | none => none
+    | none => none
+  decodeAt_spec := by
+    intro bytes start inside
+    rw [StreamCodec.decodeNatAt_spec bytes start inside]
+    simp only [cursorOfPrefix, StreamCodec.nat]
+    cases StreamCodec.decodeNatPrefix (bytes.data.toList.drop start) with
+    | none => rfl
+    | some pair => cases known : Mode.ofCode pair.1 <;> simp [known]
+  cursorNative := true
 
 /-- Complete signed acceptance identity. claimId binds the original amount,
 recipient and signature through immutable storage, not a new transfer. The

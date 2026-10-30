@@ -55,7 +55,26 @@ Core Lean (Init) plus `Pred.HashEqDigest`, whose one import is the leaf cSHAKE25
 `Theory.Sp800185Cshake256Core` (Init only, no candidate code): the `hashEq` atom evaluates a
 hash, and this is the kernel's one executable cSHAKE256. Pred imports no `Compiler` module.
 -/
-import Pred.HashEqDigest
+module
+
+public import Pred.HashEqDigest
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Pred
 
@@ -137,7 +156,7 @@ re-executing the program whose `programId` value is `program` (`Kernel.Run`):
 named under `run/`; only the controller writes this namespace. -/
 def ranSlot (program : Nat) : Slot := "run/program/" ++ toString program
 
-/-- Beside `ranSlot`, the evaluator the checked run was re-executed on (K-EVAL, EVAL
+/-- Beside `ranSlot`, the evaluator the checked run was re-executed on (K-EVAL, docs/EVAL.md
 §1.4): `run/evaluator/<decimal evaluator id>` holds `1`. The law atom stays `ran P`
 (the program's id already covers its evaluator); a room that wants one evaluator only
 says so with `eq (evaluatorSlot id) 1`. Absent that leaf, any registered, enabled
@@ -198,7 +217,7 @@ inductive Pred where
   | hashEq    (values : List Slot) (blinder commit : Slot)
   /-- **`ran program`** — this step's writes ARE the product of the Nock program
   `program` (its `programId` value), re-executed by the kernel on its own sample
-  (NOCK §2.4). A first-party read of the controller-projected `ranSlot program`
+  (docs/NOCK.md §2.4). A first-party read of the controller-projected `ranSlot program`
   (`= 1`), not an oracle: re-execution is a controller fact the policy consumes. -/
   | ran       (program : Nat)
   /-- Boolean negation. -/

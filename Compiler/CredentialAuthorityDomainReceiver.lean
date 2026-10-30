@@ -12,11 +12,30 @@ the snapshot's root of the same cell.  There is no catalogue to rewrite, no
 shard to place and no auxiliary create; the write is a function of the post
 cell's logical content alone (`write_of_planes`).
 -/
-import Compiler.CanonicalCellRegistry
-import Compiler.CredentialAuthorityDomain
-import Compiler.CredentialAuthorityReplay
-import Compiler.DurableReceiverCore
-import Theory.ResourceBirthAuthority
+module
+
+public import Compiler.CanonicalCellRegistry
+public import Compiler.CredentialAuthorityDomain
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.DurableReceiverCore
+public import Theory.ResourceBirthAuthority
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityDomainReceiver
 
@@ -128,16 +147,30 @@ structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : Phy
   spentExact : snapshot.spent = spentOf deployment.domain physical
   observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes snapshot.cell
 
-def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
+/-- Load at an already established clock. The exactness argument makes the
+supplied height the snapshot's history length; a loaded durable image supplies
+it in O(1). -/
+def loadDeploymentAt (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) :
     Option (Loaded deployment physical) :=
   if valid : deployment.Valid then
     match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
     | none => none
     | some cell =>
-        some ⟨Snapshot.ofCell deployment.domain (clockOf physical)
-            (spentOf deployment.domain physical) cell, valid, rfl, rfl, rfl,
+        some ⟨Snapshot.ofCell deployment.domain height
+            (spentOf deployment.domain physical) cell, valid, rfl, heightExact, rfl,
           (decodeCell_canonical decoded).symm⟩
   else none
+
+def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
+    Option (Loaded deployment physical) :=
+  loadDeploymentAt deployment physical (clockOf physical) rfl
+
+theorem loadDeploymentAt_eq (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) :
+    loadDeploymentAt deployment physical height heightExact = loadDeployment deployment physical := by
+  cases heightExact
+  rfl
 
 /-- Refuting pole: a pinned identifier that does not hold a live authority cell
 (a retired image, a fresh slot, another role, or a retired catalogue frame)
@@ -145,7 +178,7 @@ loads nothing. -/
 theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
     (undecodable : decodeCell (physical.canonicalBytes (cellIdOf deployment)) = none) :
     loadDeployment deployment physical = none := by
-  unfold loadDeployment
+  unfold loadDeployment loadDeploymentAt
   split
   · split
     · rfl
@@ -154,12 +187,15 @@ theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (
       cases decoded
   · rfl
 
-/-- Satisfiable pole: the cell the physical snapshot holds is loaded exactly. -/
-theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+/-- Satisfiable pole at a supplied clock: the cell the physical snapshot holds
+is loaded exactly. -/
+theorem loadDeploymentAt_exact (deployment : CanonicalCellRegistry.Deployment)
+    (physical : PhysicalSnapshot) (height : Nat) (heightExact : height = clockOf physical)
     (valid : deployment.Valid) (cell : CredentialAuthorityDomain.Cell)
     (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell) :
-    ∃ loaded, loadDeployment deployment physical = some loaded ∧ loaded.snapshot.cell = cell := by
-  unfold loadDeployment
+    ∃ loaded, loadDeploymentAt deployment physical height heightExact = some loaded ∧
+      loaded.snapshot.cell = cell := by
+  unfold loadDeploymentAt
   rw [dif_pos valid]
   split
   · rename_i decoded
@@ -168,6 +204,13 @@ theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (ph
   · rename_i found decoded
     rw [holds, decodeCell_bytes] at decoded
     exact ⟨_, rfl, (Option.some.inj decoded).symm⟩
+
+/-- Satisfiable pole: the cell the physical snapshot holds is loaded exactly. -/
+theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
+    (valid : deployment.Valid) (cell : CredentialAuthorityDomain.Cell)
+    (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell) :
+    ∃ loaded, loadDeployment deployment physical = some loaded ∧ loaded.snapshot.cell = cell :=
+  loadDeploymentAt_exact deployment physical (clockOf physical) rfl valid cell holds
 
 /-- Two loads of the same deployment from the same physical snapshot are the
 same authority snapshot: the pinned cell's bytes determine it. -/
@@ -194,6 +237,44 @@ theorem Loaded.unique {deployment : CanonicalCellRegistry.Deployment}
   rfl
 
 #assert_axioms Loaded.unique
+
+/-- `loadDeployment` of a later physical snapshot: when the authority cell's
+bytes equal `held`'s snapshot's, the held cell and its projection are reused
+under this snapshot's clock and spent markers; otherwise the bytes are decoded.
+`loadDeploymentFrom_eq`: it is `loadDeployment`. -/
+def loadDeploymentFromAt {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) : Option (Loaded deployment physical) :=
+  if same : physical.canonicalBytes (cellIdOf deployment) == before.canonicalBytes (cellIdOf deployment) then
+    some ⟨⟨deployment.domain, height, spentOf deployment.domain physical, held.snapshot.cell,
+        held.snapshot.authState, held.snapshot.authStateExact⟩, held.valid, rfl, heightExact, rfl,
+      (beq_iff_eq.mp same).trans held.observed⟩
+  else loadDeploymentAt deployment physical height heightExact
+
+def loadDeploymentFrom {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot) : Option (Loaded deployment physical) :=
+  loadDeploymentFromAt held physical (clockOf physical) rfl
+
+theorem loadDeploymentFromAt_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot)
+    (height : Nat) (heightExact : height = clockOf physical) :
+    loadDeploymentFromAt held physical height heightExact =
+      loadDeploymentAt deployment physical height heightExact := by
+  unfold loadDeploymentFromAt
+  split
+  · rename_i same
+    obtain ⟨loaded, found, _⟩ := loadDeploymentAt_exact deployment physical height heightExact
+      held.valid held.snapshot.cell ((beq_iff_eq.mp same).trans held.observed)
+    rw [found]
+    exact congrArg some (Loaded.unique _ loaded)
+  · rfl
+
+theorem loadDeploymentFrom_eq {deployment : CanonicalCellRegistry.Deployment} {before : PhysicalSnapshot}
+    (held : Loaded deployment before) (physical : PhysicalSnapshot) :
+    loadDeploymentFrom held physical = loadDeployment deployment physical :=
+  loadDeploymentFromAt_eq held physical (clockOf physical) rfl
+
+#assert_axioms loadDeploymentFrom_eq
 
 theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
@@ -436,6 +517,24 @@ def decodeFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
   let rows ← decodeRowsFrom held input
   if (rows.map Prod.fst).Nodup then some (DirectoryImage.ofRows registry rows) else none
 
+/-- `decodeFrom` as compiled: the identity check is one hashed pass. -/
+def decodeFromFast {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
+    Option (Directory Nat registry) := do
+  let rows ← decodeRowsFrom held input
+  if CompiledListOps.nodupNat (rows.map Prod.fst) then some (DirectoryImage.ofRows registry rows) else none
+
+@[csimp] theorem decodeFrom_eq_fast : @decodeFrom = @decodeFromFast := by
+  funext prior held input
+  unfold decodeFrom decodeFromFast
+  cases decodeRowsFrom held input with
+  | none => rfl
+  | some rows =>
+      simp only [Option.bind_eq_bind, Option.bind_some]
+      by_cases unique : (rows.map Prod.fst).Nodup
+      · rw [if_pos unique, if_pos ((CompiledListOps.nodupNat_iff _).mpr unique)]
+      · rw [if_neg unique, if_neg (fun fast => unique ((CompiledListOps.nodupNat_iff _).mp fast))]
+
 theorem decodeFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
     decodeFrom held input = DirectoryImage.decode registry input := by
@@ -570,6 +669,39 @@ structure PreparedGrantBatch {F : Type} [Field F]
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
   mode : ResourceBirthAuthority.BatchEvidence
     loaded.snapshot.cell descriptor
+/-- The prepared batch is fresh at the loaded authority cell. -/
+theorem PreparedGrantBatch.batchFresh {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {descriptor : Descriptor registry}
+    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
+      descriptor.GrantIdsDistinct ∧
+      (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) :=
+  ⟨prepared.mode.slotsDistinct, prepared.mode.grantIdsDistinct, prepared.mode.parentsFresh⟩
+
+/-- **What a prepared grant batch guarantees about its indices**: the batch's slots and grant ids
+are distinct, every parent row is absent in `loaded`'s authority cell, and every initial policy of
+`descriptor` decodes to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`
+(the profile has a descriptor, the record names this domain and the profile's semantics, is version 0
+with no predecessor, and its predicate is one the profile's compiler supports). -/
+theorem PreparedGrantBatch.sound {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
+    {descriptor : Descriptor registry}
+    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
+      descriptor.GrantIdsDistinct ∧
+      (∀ row ∈ descriptor.parentRows, loaded.snapshot.cell.logical ⟨.parent, row.1⟩ = none) ∧
+      ∀ initial ∈ descriptor.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record :=
+  ⟨prepared.mode.slotsDistinct, prepared.mode.grantIdsDistinct, prepared.mode.parentsFresh,
+    fun initial member => by
+      obtain ⟨record, _, decoded, facts⟩ := prepared.initialSources.record_of_member initial member
+      exact ⟨record, decoded, facts⟩⟩
 
 def prepareGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}

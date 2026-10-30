@@ -3,10 +3,14 @@ Read-only export and independent verification of one public native operation.
 Verification calls the existing native historical re-admission path. It never
 installs the foreign image or treats a carried receipt as execution authority.
 -/
-import Kernel.NativeHost
-import Kernel.NativeHistorySelection
-import Compiler.DurableHistoryStore
-import Compiler.FnEvidenceCodec
+module
+
+public import Kernel.NativeHost
+public import Kernel.NativeHistorySelection
+public import Compiler.DurableHistoryStore
+public import Compiler.FnEvidenceCodec
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnEvidence
 
@@ -56,7 +60,7 @@ def exportPackage (config : Config) (signedCall : List UInt8)
   let records ← match gathered with
     | .error detail => return .error detail
     | .ok (records, _) => pure records
-  let image : DurableReceiver.Image := ⟨reader.seed, records⟩
+  let image : DurableReceiver.Image := DurableReceiver.Image.ofAccepted reader.seed records
   return encodeCheckedWith limits ⟨config.deployment.domain, config.profile.semantics,
     config.expectedSeed, signedCall, receipt, DurableReceiverCodec.encode image⟩
 

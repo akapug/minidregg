@@ -110,3 +110,31 @@ fn divergent_cursor_or_changed_observer_never_rewinds_pending_tick() {
     assert_eq!(f.run(false, None).status.code(), Some(2));
     assert_eq!(f.pending(), pending);
 }
+
+#[test]
+fn an_undecidable_pending_tick_is_quarantined_whole_and_its_id_is_never_reused() {
+    let f = Fixture::new();
+    success(f.run(true, None));
+    let pending = f.pending();
+    let id = pending["id"].as_str().unwrap().to_owned();
+    let quarantine = |id: &str, reason: Option<&str>| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_pay-watcher"));
+        c.env_remove("PAY_RPC_ENDPOINTS").args(["--config"]).arg(f.config()).args(["--out"]).arg(f.out())
+            .args(["--quarantine-tick", id]);
+        if let Some(reason) = reason { c.args(["--reason", reason]); }
+        c.output().unwrap()
+    };
+    // Both halves are required; another tick's ID is refused and moves nothing.
+    assert_eq!(quarantine(&id, None).status.code(), Some(2));
+    assert_eq!(quarantine("00000000000000000099", Some("observer exits 4")).status.code(), Some(2));
+    assert_eq!(f.pending(), pending);
+    success(quarantine(&id, Some("observer exits 4 on every tick")));
+    assert!(!f.out().join("pending.json").exists());
+    let kept = read(&f.out().join("quarantine").join(format!("{id}.json")));
+    assert_eq!(kept["tick"], pending);
+    assert_eq!(kept["reason"], "observer exits 4 on every tick");
+    // The next scan proceeds (the stall is gone) under a fresh ID. (The fixture has no
+    // answer for the advanced cursor's listing, so that scan reports a refusal: exit 3.)
+    assert!(matches!(f.run(true, None).status.code(), Some(0 | 3)));
+    assert_ne!(f.pending()["id"], pending["id"]);
+}

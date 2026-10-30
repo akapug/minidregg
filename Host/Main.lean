@@ -90,128 +90,273 @@ committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
 -/
-import Kernel.NativeHost
-import Host.ObjectiveActivityJson
-import Host.SeatJson
-import Compiler.GenericSimplexSourceAnchor
-import Compiler.FnWireFncu
-import Compiler.DurableStoreAudit
-import Compiler.FnWirePinned
-import Kernel.NativeHostObjectAudience
-import Kernel.NativeHostSession
-import Kernel.NativeReserveContinuity
-import Kernel.NativeProviderHistory
-import Kernel.NativePlanHeight
-import Kernel.NativeHostGenesis
-import Kernel.FnEvidence
-import Kernel.FnConsumerOperation
-import Kernel.FnConsumerProgress
-import Kernel.FnConsumerNamespaceReceiver
-import Kernel.FnSelectedPollReceiver
-import Kernel.FnEmptyPollReceiverV2
-import Kernel.FnCatalogOwnRProgress
-import Kernel.FnReplyPublication
-import Kernel.FnReplyConsumption
-import Kernel.FnOriginOutbox
-import Host.FnArchivePublisher
-import Kernel.FnPortableSource
-import Host.FnOutcome
-import Kernel.FnSelectiveReleaseReceiver
-import Kernel.ApplicationShareIssueReceiver
-import Kernel.ApplicationShareIssueAuthoring
-import Kernel.ApplicationShareIssueGrainAuthoring
-import Kernel.ApplicationShareIssueGrainReceiver
-import Kernel.ApplicationShareIssueGrainLookup
-import Kernel.ApplicationGrainSessionEnrollmentReceiver
-import Kernel.ApplicationAgentLifetimeGrantLookup
-import Kernel.ApplicationDispatchReceiver
-import Kernel.ApplicationDispatchLookup
-import Kernel.ApplicationDispatchAgentReceiver
-import Kernel.ApplicationDispatchAgentLookup
-import Kernel.ApplicationDispatchAgentPaidAuthoring
-import Kernel.ApplicationAgentLifetimeDispatchReceiver
-import Kernel.ApplicationAgentLifetimeDispatchLookup
-import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
-import Kernel.ApplicationDispatchAuthoring
-import Kernel.ApplicationLifecycleBeginV2Receiver
-import Kernel.ApplicationLifecycleBeginV3Receiver
-import Kernel.ApplicationLifecycleClaimV2Receiver
-import Kernel.ApplicationLifecycleClaimV3Receiver
-import Kernel.ApplicationLifecycleV2Lookup
-import Kernel.ApplicationLifecycleV3Lookup
-import Kernel.ApplicationLifecycleCompletionReceiver
-import Kernel.ApplicationLifecycleCompletionV2Receiver
-import Host.ApplicationFailedStartEndpoint
-import Kernel.ApplicationLifecycleCompletionLookup
-import Kernel.ApplicationLifecycleCompletionV2Lookup
-import Host.ApplicationDispatchReady
-import Host.ApplicationDispatchInspection
-import Host.ReceiptContinuity
-import Host.ApplicationStreamContinuityInspection
-import Host.ApplicationRouteAdmissionInspection
-import Host.CarryInspection
-import Host.NeutralCarryReceiving
-import Host.KeyCommitmentAdoptionInspection
-import Host.RetainedSegmentInspection
-import Kernel.CarriedNativeHostSession
-import Kernel.CarriedSessionEnrollmentReceiver
-import Kernel.CarriedApplicationDispatchReceiver
-import Host.ApplicationDispatchAgentPaidInspection
-import Host.ApplicationDispatchAgentInspection
-import Host.ApplicationAgentLifetimeDispatchInspection
-import Host.ApplicationAgentLifetimeDispatchPaidInspection
-import Host.ApplicationLifecycleClaimInspection
-import Host.ApplicationLifecycleCompletionOperator
-import Host.ApplicationLifecycleBeginOperator
-import Host.DryRun
-import Host.RequestRefusal
-import Host.LawSatWire
-import Host.ApplicationLifecycleLaunchBeginAuthoring
-import Host.ApplicationLifecycleLaunchBeginInspection
-import Host.ApplicationLifecycleLaunchClaimAuthoring
-import Host.ApplicationLifecycleLaunchClaimInspection
-import Host.ApplicationLifecycleLaunchCompletionAuthoring
-import Host.ApplicationLifecycleLaunchCompletionInspection
-import Host.ApplicationLifecycleClaimV3Inspection
-import Host.ApplicationLifecycleRetryBeginV4Authoring
-import Host.ApplicationLifecycleRetryBeginV4Inspection
-import Host.ApplicationLifecycleRetryClaimV4Authoring
-import Host.ApplicationLifecycleRetryClaimV4Inspection
-import Host.ApplicationLifecycleRetryCompletionV4Authoring
-import Host.ApplicationLifecycleRetryCompletionV4Inspection
-import Host.ApplicationLifecycleClaimV4Inspection
-import Kernel.ApplicationLifecycleRetryBeginV4Receiver
-import Kernel.ApplicationLifecycleRetryClaimV4Receiver
-import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
-import Kernel.ApplicationLifecycleRetryV4Lookup
-import Host.ApplicationLifecycleStopClaimInspection
-import Host.ApplicationAgentLifetimePaidIngressInspection
-import Host.ApplicationAgentLifetimeGrantInspection
-import Host.ApplicationGrainSessionEnrollmentAuthoring
-import Host.ApplicationGrainSessionEnrollmentInspection
-import Host.ApplicationLifecycleClaimOperator
-import Host.FnConsumerNamespacePlan
-import Host.FnConsumerFrontierPlan
-import Kernel.FnSelectiveReleaseSourceReceiver
-import Host.FnSelectiveReleaseAuthoring
-import Host.FnSelectiveReleaseSourceAuthoring
-import Host.FnSelectiveReleaseFnReceiving
-import Host.FnSelectiveReleaseFnAck
-import Host.Json
-import Kernel.ObjectiveBendNativeAdmission
-import Host.ObjectiveInvocationQuote
-import Host.ObjectiveInvocationSettings
-import Host.ObjectivePackageAuthor
-import Host.ObjectiveBendFrontEnd
-import Host.PayClaims
-import Host.ApplicationCurrentBirthAuthoring
-import Host.CurrentResourceBirthAuthoring
-import Kernel.NativeHostReserveBirth
-import Host.NativeReserveBirthAuthoring
-import Host.FnInboxView
-import Host.GrainOriginCommand
-import Host.ProviderUsage
-import Lean.Data.Json
+module
+
+public import Kernel.NativeHost
+public import Kernel.NativeHostHeld
+public import Host.ObjectiveActivityJson
+public import Host.SeatJson
+public import Compiler.GenericSimplexSourceAnchor
+public import Compiler.FnWireFncu
+public import Compiler.DurableStoreAudit
+public import Compiler.FnWirePinned
+public import Kernel.NativeHostObjectAudience
+public import Kernel.NativeHostSession
+public import Kernel.NativeReserveContinuity
+public import Kernel.NativeProviderHistory
+public import Kernel.NativePlanHeight
+public import Kernel.NativeHostGenesis
+public import Kernel.FnEvidence
+public import Kernel.FnConsumerOperation
+public import Kernel.FnConsumerProgress
+public import Kernel.FnConsumerNamespaceReceiver
+public import Kernel.FnSelectedPollReceiver
+public import Kernel.FnEmptyPollReceiverV2
+public import Kernel.FnCatalogOwnRProgress
+public import Kernel.FnReplyPublication
+public import Kernel.FnReplyConsumption
+public import Kernel.FnOriginOutbox
+public import Host.FnArchivePublisher
+public import Kernel.FnPortableSource
+public import Host.FnOutcome
+public import Kernel.FnSelectiveReleaseReceiver
+public import Kernel.ApplicationShareIssueReceiver
+public import Kernel.ApplicationShareIssueAuthoring
+public import Kernel.ApplicationShareIssueGrainAuthoring
+public import Kernel.ApplicationShareIssueGrainReceiver
+public import Kernel.ApplicationShareIssueGrainLookup
+public import Kernel.ApplicationGrainSessionEnrollmentReceiver
+public import Kernel.ApplicationAgentLifetimeGrantLookup
+public import Kernel.ApplicationDispatchReceiver
+public import Kernel.ApplicationDispatchLookup
+public import Kernel.ApplicationDispatchAgentReceiver
+public import Kernel.ApplicationDispatchAgentLookup
+public import Kernel.ApplicationDispatchAgentPaidAuthoring
+public import Kernel.ApplicationAgentLifetimeDispatchReceiver
+public import Kernel.ApplicationAgentLifetimeDispatchLookup
+public import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
+public import Kernel.ApplicationDispatchAuthoring
+public import Kernel.ApplicationLifecycleBeginV3Receiver
+public import Kernel.ApplicationLifecycleClaimV3Receiver
+public import Kernel.ApplicationLifecycleV2Lookup
+public import Kernel.ApplicationLifecycleV3Lookup
+public import Kernel.ApplicationLifecycleCompletionV2Receiver
+public import Host.ApplicationFailedStartEndpoint
+public import Kernel.ApplicationLifecycleCompletionLookup
+public import Kernel.ApplicationLifecycleCompletionV2Lookup
+public import Host.ApplicationDispatchReady
+public import Host.ApplicationDispatchInspection
+public import Host.ReceiptContinuity
+public import Host.ApplicationStreamContinuityInspection
+public import Host.ApplicationRouteAdmissionInspection
+public import Host.CarryInspection
+public import Host.NeutralCarryReceiving
+public import Host.KeyCommitmentAdoptionInspection
+public import Host.RetainedSegmentInspection
+public import Kernel.CarriedNativeHostSession
+public import Kernel.CarriedSessionEnrollmentReceiver
+public import Kernel.CarriedApplicationDispatchReceiver
+public import Host.ApplicationDispatchAgentPaidInspection
+public import Host.ApplicationDispatchAgentInspection
+public import Host.ApplicationAgentLifetimeDispatchInspection
+public import Host.ApplicationAgentLifetimeDispatchPaidInspection
+public import Host.ApplicationLifecycleClaimInspection
+public import Host.ApplicationLifecycleCompletionOperator
+public import Host.ApplicationLifecycleBeginOperator
+public import Host.DryRun
+public import Host.RequestRefusal
+public import Kernel.Bounds
+public import Kernel.SubjectRate
+public import Host.LawSatWire
+public import Host.ApplicationLifecycleLaunchBeginAuthoring
+public import Host.ApplicationLifecycleLaunchBeginInspection
+public import Host.ApplicationLifecycleLaunchClaimAuthoring
+public import Host.ApplicationLifecycleLaunchClaimInspection
+public import Host.ApplicationLifecycleLaunchCompletionAuthoring
+public import Host.ApplicationLifecycleLaunchCompletionInspection
+public import Host.ApplicationLifecycleClaimV3Inspection
+public import Host.ApplicationLifecycleRetryBeginV4Authoring
+public import Host.ApplicationLifecycleRetryBeginV4Inspection
+public import Host.ApplicationLifecycleRetryClaimV4Authoring
+public import Host.ApplicationLifecycleRetryClaimV4Inspection
+public import Host.ApplicationLifecycleRetryCompletionV4Authoring
+public import Host.ApplicationLifecycleRetryCompletionV4Inspection
+public import Host.ApplicationLifecycleClaimV4Inspection
+public import Kernel.ApplicationLifecycleRetryBeginV4Receiver
+public import Kernel.ApplicationLifecycleRetryClaimV4Receiver
+public import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
+public import Kernel.ApplicationLifecycleRetryV4Lookup
+public import Host.ApplicationLifecycleStopClaimInspection
+public import Host.ApplicationAgentLifetimePaidIngressInspection
+public import Host.ApplicationAgentLifetimeGrantInspection
+public import Host.ApplicationGrainSessionEnrollmentAuthoring
+public import Host.ApplicationGrainSessionEnrollmentInspection
+public import Host.ApplicationLifecycleClaimOperator
+public import Host.FnConsumerNamespacePlan
+public import Host.FnConsumerFrontierPlan
+public import Kernel.FnSelectiveReleaseSourceReceiver
+public import Host.FnSelectiveReleaseAuthoring
+public import Host.FnSelectiveReleaseSourceAuthoring
+public import Host.FnSelectiveReleaseFnReceiving
+public import Host.FnSelectiveReleaseFnAck
+public import Host.Json
+public import Kernel.ObjectiveBendNativeAdmission
+public import Host.ObjectiveInvocationQuote
+public import Host.ObjectiveInvocationSettings
+public import Host.ObjectivePackageAuthor
+public import Host.ObjectiveBendFrontEnd
+public import Host.PayClaims
+public import Host.ApplicationCurrentBirthAuthoring
+public import Host.CurrentResourceBirthAuthoring
+public import Kernel.NativeHostReserveBirth
+public import Host.NativeReserveBirthAuthoring
+public import Host.FnInboxView
+public import Host.GrainOriginCommand
+public import Host.ProviderUsage
+public import Lean.Data.Json
+public import Kernel.NativeHostStoreIdentity
+meta import Kernel.NativeHost
+meta import Kernel.NativeHostHeld
+meta import Host.ObjectiveActivityJson
+meta import Host.SeatJson
+meta import Compiler.GenericSimplexSourceAnchor
+meta import Compiler.FnWireFncu
+meta import Compiler.DurableStoreAudit
+meta import Compiler.FnWirePinned
+meta import Kernel.NativeHostObjectAudience
+meta import Kernel.NativeHostSession
+meta import Kernel.NativeReserveContinuity
+meta import Kernel.NativeProviderHistory
+meta import Kernel.NativePlanHeight
+meta import Kernel.NativeHostGenesis
+meta import Kernel.FnEvidence
+meta import Kernel.FnConsumerOperation
+meta import Kernel.FnConsumerProgress
+meta import Kernel.FnConsumerNamespaceReceiver
+meta import Kernel.FnSelectedPollReceiver
+meta import Kernel.FnEmptyPollReceiverV2
+meta import Kernel.FnCatalogOwnRProgress
+meta import Kernel.FnReplyPublication
+meta import Kernel.FnReplyConsumption
+meta import Kernel.FnOriginOutbox
+meta import Host.FnArchivePublisher
+meta import Kernel.FnPortableSource
+meta import Host.FnOutcome
+meta import Kernel.FnSelectiveReleaseReceiver
+meta import Kernel.ApplicationShareIssueReceiver
+meta import Kernel.ApplicationShareIssueAuthoring
+meta import Kernel.ApplicationShareIssueGrainAuthoring
+meta import Kernel.ApplicationShareIssueGrainReceiver
+meta import Kernel.ApplicationShareIssueGrainLookup
+meta import Kernel.ApplicationGrainSessionEnrollmentReceiver
+meta import Kernel.ApplicationAgentLifetimeGrantLookup
+meta import Kernel.ApplicationDispatchReceiver
+meta import Kernel.ApplicationDispatchLookup
+meta import Kernel.ApplicationDispatchAgentReceiver
+meta import Kernel.ApplicationDispatchAgentLookup
+meta import Kernel.ApplicationDispatchAgentPaidAuthoring
+meta import Kernel.ApplicationAgentLifetimeDispatchReceiver
+meta import Kernel.ApplicationAgentLifetimeDispatchLookup
+meta import Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
+meta import Kernel.ApplicationDispatchAuthoring
+meta import Kernel.ApplicationLifecycleBeginV3Receiver
+meta import Kernel.ApplicationLifecycleClaimV3Receiver
+meta import Kernel.ApplicationLifecycleV2Lookup
+meta import Kernel.ApplicationLifecycleV3Lookup
+meta import Kernel.ApplicationLifecycleCompletionV2Receiver
+meta import Host.ApplicationFailedStartEndpoint
+meta import Kernel.ApplicationLifecycleCompletionLookup
+meta import Kernel.ApplicationLifecycleCompletionV2Lookup
+meta import Host.ApplicationDispatchReady
+meta import Host.ApplicationDispatchInspection
+meta import Host.ReceiptContinuity
+meta import Host.ApplicationStreamContinuityInspection
+meta import Host.ApplicationRouteAdmissionInspection
+meta import Host.CarryInspection
+meta import Host.NeutralCarryReceiving
+meta import Host.KeyCommitmentAdoptionInspection
+meta import Host.RetainedSegmentInspection
+meta import Kernel.CarriedNativeHostSession
+meta import Kernel.CarriedSessionEnrollmentReceiver
+meta import Kernel.CarriedApplicationDispatchReceiver
+meta import Host.ApplicationDispatchAgentPaidInspection
+meta import Host.ApplicationDispatchAgentInspection
+meta import Host.ApplicationAgentLifetimeDispatchInspection
+meta import Host.ApplicationAgentLifetimeDispatchPaidInspection
+meta import Host.ApplicationLifecycleClaimInspection
+meta import Host.ApplicationLifecycleCompletionOperator
+meta import Host.ApplicationLifecycleBeginOperator
+meta import Host.DryRun
+meta import Host.RequestRefusal
+meta import Kernel.Bounds
+meta import Kernel.SubjectRate
+meta import Host.LawSatWire
+meta import Host.ApplicationLifecycleLaunchBeginAuthoring
+meta import Host.ApplicationLifecycleLaunchBeginInspection
+meta import Host.ApplicationLifecycleLaunchClaimAuthoring
+meta import Host.ApplicationLifecycleLaunchClaimInspection
+meta import Host.ApplicationLifecycleLaunchCompletionAuthoring
+meta import Host.ApplicationLifecycleLaunchCompletionInspection
+meta import Host.ApplicationLifecycleClaimV3Inspection
+meta import Host.ApplicationLifecycleRetryBeginV4Authoring
+meta import Host.ApplicationLifecycleRetryBeginV4Inspection
+meta import Host.ApplicationLifecycleRetryClaimV4Authoring
+meta import Host.ApplicationLifecycleRetryClaimV4Inspection
+meta import Host.ApplicationLifecycleRetryCompletionV4Authoring
+meta import Host.ApplicationLifecycleRetryCompletionV4Inspection
+meta import Host.ApplicationLifecycleClaimV4Inspection
+meta import Kernel.ApplicationLifecycleRetryBeginV4Receiver
+meta import Kernel.ApplicationLifecycleRetryClaimV4Receiver
+meta import Kernel.ApplicationLifecycleRetryCompletionV4Receiver
+meta import Kernel.ApplicationLifecycleRetryV4Lookup
+meta import Host.ApplicationLifecycleStopClaimInspection
+meta import Host.ApplicationAgentLifetimePaidIngressInspection
+meta import Host.ApplicationAgentLifetimeGrantInspection
+meta import Host.ApplicationGrainSessionEnrollmentAuthoring
+meta import Host.ApplicationGrainSessionEnrollmentInspection
+meta import Host.ApplicationLifecycleClaimOperator
+meta import Host.FnConsumerNamespacePlan
+meta import Host.FnConsumerFrontierPlan
+meta import Kernel.FnSelectiveReleaseSourceReceiver
+meta import Host.FnSelectiveReleaseAuthoring
+meta import Host.FnSelectiveReleaseSourceAuthoring
+meta import Host.FnSelectiveReleaseFnReceiving
+meta import Host.FnSelectiveReleaseFnAck
+meta import Host.Json
+meta import Kernel.ObjectiveBendNativeAdmission
+meta import Host.ObjectiveInvocationQuote
+meta import Host.ObjectiveInvocationSettings
+meta import Host.ObjectivePackageAuthor
+meta import Host.ObjectiveBendFrontEnd
+meta import Host.PayClaims
+meta import Host.ApplicationCurrentBirthAuthoring
+meta import Host.CurrentResourceBirthAuthoring
+meta import Kernel.NativeHostReserveBirth
+meta import Host.NativeReserveBirthAuthoring
+meta import Host.FnInboxView
+meta import Host.GrainOriginCommand
+meta import Host.ProviderUsage
+meta import Lean.Data.Json
+meta import Kernel.NativeHostStoreIdentity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 open Lean
 open Minidregg.Compiler
@@ -220,6 +365,11 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel
 
 namespace Minidregg.Host
+
+-- The selected-release receivers' rejections render in the operator's log.
+deriving instance Repr for FnSelectiveReleaseAdmission.PrepareReject,
+  FnSelectiveReleaseAdmission.Reject, FnSelectiveReleaseReceiver.Reject,
+  FnSelectiveReleaseSourceReceiver.Reject
 
 structure GatewayPinSettings where
   application : String
@@ -330,13 +480,6 @@ structure FnReplyCatalogService where
   policyPath : String
   controlPath : String
 
-/-- Operator-pinned source-owned metering context. The socket caller can
-submit exact retained HTTP bytes but cannot select the provider cell or tariff. -/
-structure ProviderMeteringSettings where
-  providerResourceId : Nat
-  tariff : Lean.Json
-  deriving FromJson, ToJson
-
 structure GrainBirthTariffSettings where
   base : Nat
   perBirth : Nat
@@ -356,8 +499,7 @@ instance : FromJson JointConsensusSettings where
       throw "jointConsensus must use canonical lowercase hex"
     let some context := Minidregg.Compiler.GenericSimplexCodec.contextStream.toLawful.decode bytes
       | throw "jointConsensus is not a canonical Context"
-    unless Minidregg.Compiler.GenericSimplexCodec.contextStream.encode context == bytes &&
-        context.wellFormed do
+    unless context.wellFormed do
       throw "jointConsensus Context is noncanonical or committee is not well formed"
     pure ⟨context⟩
 
@@ -582,6 +724,131 @@ def AgentLifetimeDispatchFixedSettings.selectors
     grantResource := settings.grantResource
     grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
 
+
+/-- Stable operator coordinates may be pinned before the two source events are
+admitted. The JSON deliberately has neither history index. Zero is only the
+internal erased-coordinate representation, never a proposed receipt position. -/
+structure AgentLifetimeDispatchTargetSettings where
+  legacy : AgentDispatchFixedSettings
+  grantResource : Nat
+  grantObserveCapability : Nat
+  deriving DecidableEq
+
+instance : FromJson AgentLifetimeDispatchTargetSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["legacy", "grantResource", "grantObserveCapability"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "agentLifetimeDispatchTargets entry has missing or unknown fields"
+    let legacyJson ← json.getObjVal? "legacy"
+    let legacyObject ← legacyJson.getObj?
+    if (legacyJson.getObjVal? "issueIndex").toOption.isSome then
+      throw "agentLifetimeDispatchTargets must not predict issueIndex"
+    let legacy : AgentDispatchFixedSettings ← fromJson? <| Lean.Json.mkObj <|
+      legacyObject.foldl (init := [("issueIndex", toJson (0 : Nat))])
+        (fun fields key value => (key, value) :: fields)
+    return ⟨legacy, ← json.getObjValAs? Nat "grantResource",
+      ← json.getObjValAs? Nat "grantObserveCapability"⟩
+
+instance : ToJson AgentLifetimeDispatchTargetSettings where
+  toJson settings :=
+    let legacy := match toJson settings.legacy with
+      | .obj fields => Lean.Json.mkObj <| fields.foldl (init := [])
+          (fun kept key value => if key == "issueIndex" then kept else (key, value) :: kept)
+      | other => other
+    Lean.Json.mkObj [("legacy", legacy), ("grantResource", toJson settings.grantResource),
+      ("grantObserveCapability", toJson settings.grantObserveCapability)]
+
+def AgentLifetimeDispatchTargetSettings.selectors
+    (settings : AgentLifetimeDispatchTargetSettings) :
+    ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors :=
+  { legacy := { settings.legacy.selectors with issueIndex := 0 }
+    grantIssueIndex := 0
+    grantResource := settings.grantResource
+    grantObserveCapability := ⟨settings.grantObserveCapability⟩ }
+
+inductive LifetimeDispatchPin where
+  | indexed (fixed : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+  | targets (fixed : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+
+def LifetimeDispatchPin.matches (pin : LifetimeDispatchPin)
+    (actual : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) : Bool :=
+  match pin with
+  | .indexed fixed => decide (actual = fixed)
+  | .targets fixed => decide (
+      { actual with legacy := { actual.legacy with issueIndex := 0 }, grantIssueIndex := 0 } = fixed)
+
+/-- Resource pins leave precisely the two history positions to source selection.
+All other fixed selectors must equal the operator's value. -/
+theorem LifetimeDispatchPin.targets_exact_except_indices
+    (actual fixed : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (normalized : fixed.legacy.issueIndex = 0 ∧ fixed.grantIssueIndex = 0) :
+    (LifetimeDispatchPin.targets fixed).matches actual = true ↔
+      actual = { fixed with
+        legacy := { fixed.legacy with issueIndex := actual.legacy.issueIndex }
+        grantIssueIndex := actual.grantIssueIndex } := by
+  rcases actual with ⟨a, ai, ar, ao⟩
+  rcases fixed with ⟨b, bi, br, bo⟩
+  cases a
+  cases b
+  simp_all [LifetimeDispatchPin.matches]
+
+private def lifetimeTargetProbe : AgentLifetimeDispatchTargetSettings :=
+  { legacy :=
+      { issueIndex := 0
+        ticketResource := 29520
+        packageManifest := 9102
+        snapshotManifest := 9103
+        sessionObserve := 20241
+        manifestObserve := 20279
+        enrollmentObserve := 20243
+        parentTask := 27920
+        parentCapability := 20201
+        parentObserve := 20201
+        purseTask := 27940
+        purseCapability := 20221
+        purseObserve := 20221
+        payerSubject := 20012
+        reserveAmount := 1
+        maximumCharge := 1 }
+    grantResource := 29530
+    grantObserveCapability := 20283 }
+
+#guard (fromJson? (toJson lifetimeTargetProbe) : Except String AgentLifetimeDispatchTargetSettings).toOption =
+  some lifetimeTargetProbe
+#guard (fromJson? (toJson
+  ({ legacy := lifetimeTargetProbe.legacy
+     grantIssueIndex := 0
+     grantResource := 29530
+     grantObserveCapability := 20283 } : AgentLifetimeDispatchFixedSettings)) :
+  Except String AgentLifetimeDispatchTargetSettings).toOption.isNone
+#guard (LifetimeDispatchPin.targets lifetimeTargetProbe.selectors).matches
+  { lifetimeTargetProbe.selectors with
+    legacy := { lifetimeTargetProbe.selectors.legacy with issueIndex := 123 }, grantIssueIndex := 456 }
+#guard !(LifetimeDispatchPin.indexed lifetimeTargetProbe.selectors).matches
+  { lifetimeTargetProbe.selectors with grantIssueIndex := 456 }
+#guard [
+  { lifetimeTargetProbe.selectors with grantResource := 29531 },
+  { lifetimeTargetProbe.selectors with grantObserveCapability := ⟨20284⟩ },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with ticketResource := 29521 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with parentTask := 27921 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with purseTask := 27941 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with payerSubject := ⟨20013⟩ } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with reserveAmount := 2 } },
+  { lifetimeTargetProbe.selectors with legacy := { lifetimeTargetProbe.selectors.legacy with maximumCharge := 2 } }
+  ].all (fun wrong => !(LifetimeDispatchPin.targets lifetimeTargetProbe.selectors).matches wrong)
+
+/-- The operator's per-subject request rate (`Kernel.SubjectRate`): `limit` signed reads per
+subject per `windowMs`, the `exempt` subjects (the operator's own and the sponsor's) never
+rated. Operator-local admission policy, not runtime semantics: absent, the Host applies
+`SubjectRate.hostDefault` with no exempt subject. -/
+structure RequestRateSettings where
+  limit : Nat
+  windowMs : Nat
+  exempt : Option (List Nat) := none
+  deriving FromJson, ToJson
+
 structure Settings where
   /-- Operator-local carry registry and independently authorized handoff key.
   Neither value can be selected by a network frame. -/
@@ -618,9 +885,10 @@ structure Settings where
   fnPoll : Option FnPollServiceSettings := none
   fnReplyPoll : Option FnReplyPollServiceSettings := none
   fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
-  continuityProviderResourceId : Option Nat := none
-  providerMetering : Option ProviderMeteringSettings := none
-  providerServices : Option (List ProviderMeteringSettings) := none
+  /-- The operator's provider services (one to eight): each resource is a
+  provider purse whose law carries its tariff's per-route fees, and the list is
+  shared by continuity (API17), metering quotes (API19) and the profile. -/
+  providerServices : Option (List ProviderUsage.ServiceSettings) := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
   jointConsensus : Option JointConsensusSettings := none
@@ -629,6 +897,7 @@ structure Settings where
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
+  agentLifetimeDispatchTargets : Option (List AgentLifetimeDispatchTargetSettings) := none
   /-- The operator's synchronous run budget in Lean steps (default
   `NativeHost.defaultNockFSync`, C17's measured 1,000,000). -/
   nockFSync : Option Nat := none
@@ -636,6 +905,8 @@ structure Settings where
   committed in the runtime semantics, so `expectedSemantics` must be computed with the same
   list. A name the registry lacks refuses the config (`loadSettings`). -/
   disabledEvaluators : Option (List String) := none
+  /-- The per-subject request rate (`RequestRateSettings`); absent is the Host default. -/
+  requestRate : Option RequestRateSettings := none
   deriving FromJson, ToJson
 
 /-- The disabled evaluators' registry ids, by name. `loadSettings` refuses a name the registry
@@ -652,7 +923,8 @@ def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit 
     if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
-def Settings.config (settings : Settings) : NativeHost.Config where
+def Settings.config (settings : Settings) : NativeHost.Config :=
+  NativeHost.Config.ofInputs {
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   disabledEvaluators := settings.disabledEvaluatorIds
@@ -675,7 +947,13 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     CompletionCustodianKeySettings.bytes
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
-  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation
+  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation }
+
+/-- Authoring allowlists do not alter the verifier's configuration or the
+meaning of already admitted history. -/
+theorem Settings.config_lifetimeDispatchTargets (settings : Settings)
+    (targets : Option (List AgentLifetimeDispatchTargetSettings)) :
+    ({ settings with agentLifetimeDispatchTargets := targets }).config = settings.config := rfl
 
 /-- Check the complete declared source genesis before opening or authoring
 under this profile. Membership enters runtime semantics with only the anchor
@@ -701,55 +979,20 @@ def Settings.checkJointConsensus (settings : Settings) : Except String Unit := d
   let _ ← NativeHost.validateLoaded config genesis
   pure ()
 
-def Settings.providerMeteringPin (settings : Settings) :
-    Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
-  let some metering := settings.providerMetering | return none
-  unless metering.providerResourceId > 0 do
-    throw "provider metering resource ID must be positive"
-  if let some continuityId := settings.continuityProviderResourceId then
-    unless continuityId == metering.providerResourceId do
-      throw "provider metering and continuity resource IDs differ"
-  let tariff ← ProviderUsage.parseTariff metering.tariff.compress
-  return some (metering.providerResourceId, tariff)
-
-/-- Bounded unique service table, parsed once from operator configuration. -/
-def checkedProviderServices (services : List ProviderMeteringSettings) :
-    Except String (List (Nat × Kernel.ProviderMetering.Tariff)) := do
-  unless 0 < services.length && services.length ≤ 8 do
-    throw "providerServices requires one to eight entries"
-  let ids := services.map (·.providerResourceId)
-  unless ids.all (fun id => decide (0 < id)) && decide ids.Nodup do
-    throw "providerServices resource IDs must be positive and unique"
-  services.mapM fun service => do
-    let tariff ← ProviderUsage.parseTariff service.tariff.compress
-    pure (service.providerResourceId, tariff)
-
-/-- One operator-owned service list is shared by continuity and metering.
-Legacy scalar pins remain byte-compatible but cannot be mixed with the list. -/
+/-- The pinned provider services, parsed once from operator configuration. -/
 def Settings.providerServicePins (settings : Settings) :
     Except String (List (Nat × Kernel.ProviderMetering.Tariff)) := do
   let some services := settings.providerServices | return []
-  unless settings.continuityProviderResourceId.isNone &&
-      settings.providerMetering.isNone do
-    throw "providerServices cannot be combined with legacy provider pins"
-  checkedProviderServices services
+  ProviderUsage.checkedServices services
 
 /-- The per-operation fees of every pinned provider service, by resource:
 the constants a provider purse born at that resource carries in its law. -/
 def Settings.providerRoutes (settings : Settings) :
     Except String (List (Nat × Kernel.ProviderMetering.Schedule)) := do
-  let legacy ← settings.providerMeteringPin
-  let services ← settings.providerServicePins
-  return (legacy.toList ++ services).map fun pin => (pin.1, pin.2.schedule)
+  return (← settings.providerServicePins).map fun pin => (pin.1, pin.2.schedule)
 
 def Settings.continuityIds (settings : Settings) : Except String (List Nat) := do
-  if settings.providerServices.isSome then
-    return (← settings.providerServicePins).map Prod.fst
-  match settings.continuityProviderResourceId with
-  | some resourceId =>
-      unless resourceId > 0 do throw "provider continuity resource ID must be positive"
-      return [resourceId]
-  | none => return []
+  return (← settings.providerServicePins).map Prod.fst
 
 def checkedLifetimeDispatchServices (services : List AgentLifetimeDispatchFixedSettings) :
     Except String (List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) := do
@@ -759,16 +1002,34 @@ def checkedLifetimeDispatchServices (services : List AgentLifetimeDispatchFixedS
     throw "agentLifetimeDispatchServices contains duplicate full fixed selectors"
   return services.map AgentLifetimeDispatchFixedSettings.selectors
 
+def checkedLifetimeDispatchTargets (targets : List AgentLifetimeDispatchTargetSettings) :
+    Except String (List LifetimeDispatchPin) := do
+  unless 0 < targets.length && targets.length ≤ 8 do
+    throw "agentLifetimeDispatchTargets requires one to eight entries"
+  let selectors := targets.map AgentLifetimeDispatchTargetSettings.selectors
+  unless decide selectors.Nodup do
+    throw "agentLifetimeDispatchTargets contains duplicate fixed resource selectors"
+  return selectors.map LifetimeDispatchPin.targets
+
 def Settings.lifetimeDispatchPins (settings : Settings) : Except String
-    (List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) := do
+    (List LifetimeDispatchPin) := do
+  if let some targets := settings.agentLifetimeDispatchTargets then
+    unless settings.agentLifetimeDispatchFixed.isNone && settings.agentLifetimeDispatchServices.isNone do
+      throw "agentLifetimeDispatchTargets cannot be combined with indexed lifetime pins"
+    return ← checkedLifetimeDispatchTargets targets
   match settings.agentLifetimeDispatchServices with
   | some services =>
       unless settings.agentLifetimeDispatchFixed.isNone do
         throw "agentLifetimeDispatchServices cannot be combined with legacy pin"
-      checkedLifetimeDispatchServices services
+      return (← checkedLifetimeDispatchServices services).map LifetimeDispatchPin.indexed
   | none =>
       return settings.agentLifetimeDispatchFixed.toList.map
-        AgentLifetimeDispatchFixedSettings.selectors
+        (LifetimeDispatchPin.indexed ∘ AgentLifetimeDispatchFixedSettings.selectors)
+
+#guard (checkedLifetimeDispatchTargets []).toOption.isNone
+#guard (checkedLifetimeDispatchTargets [lifetimeTargetProbe, lifetimeTargetProbe]).toOption.isNone
+#guard (checkedLifetimeDispatchTargets (List.replicate 9 lifetimeTargetProbe)).toOption.isNone
+#guard (checkedLifetimeDispatchTargets [lifetimeTargetProbe]).toOption.isSome
 
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
@@ -780,10 +1041,14 @@ def loadSettings (path : System.FilePath) : IO Settings := do
       "residentClaimManagement"] do
     if (json.getObjVal? legacy).toOption.isSome then
       throw (IO.userError s!"legacy single-application lifecycle pin {legacy} is no longer accepted; use lifecycleManagement")
+  -- The scalar provider pins were a second spelling of a one-entry service
+  -- list. A config that still carries one must not load as if it pinned
+  -- nothing (or as if continuity and metering could disagree).
+  for legacy in ["continuityProviderResourceId", "providerMetering"] do
+    if (json.getObjVal? legacy).toOption.isSome then
+      throw (IO.userError s!"legacy scalar provider pin {legacy} is no longer accepted; use providerServices")
   let settings : Settings ← IO.ofExcept (fromJson? json)
-  discard <| IO.ofExcept settings.providerMeteringPin
   discard <| IO.ofExcept settings.providerServicePins
-  discard <| IO.ofExcept settings.continuityIds
   discard <| IO.ofExcept settings.lifetimeDispatchPins
   IO.ofExcept settings.checkDisabledEvaluators
   IO.ofExcept settings.checkJointConsensus
@@ -804,7 +1069,7 @@ def inspectHost (config : NativeHost.Config) (kind : String) (bytes : List UInt8
   else if kind == "application-dispatch-committed" then
     ApplicationDispatchInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v2" then
-    ApplicationLifecycleClaimInspection.inspect config.expectedSeed bytes
+    ApplicationLifecycleClaimInspection.inspect config.storeIdentity bytes
   else if kind == "application-lifecycle-claim-committed-v3" then
     ApplicationLifecycleClaimV3Inspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v4" then
@@ -888,7 +1153,6 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
 this reads neither storage nor protected resource values. Full-width integers
 are decimal strings so clients cannot silently round a digest. -/
 def profileDescription (config : NativeHost.Config)
-    (metering : Option (Nat × Kernel.ProviderMetering.Tariff) := none)
     (services : List (Nat × Kernel.ProviderMetering.Tariff) := []) : Lean.Json :=
   let n := fun value : Nat => toJson (toString value)
   let base :=
@@ -900,9 +1164,10 @@ def profileDescription (config : NativeHost.Config)
      ("domain", n config.deployment.domain.value),
      ("expectedSeed", n config.expectedSeed.value),
      -- The Store's key in physical names (resident units, volumes, slices):
-     -- the SPK host reads it here and never derives its own.
+     -- the tag of the Store identity (`Config.storeIdentity`: the genesis seed at
+     -- this Store's root). The SPK host reads it here and never derives its own.
      ("storeTag", toJson (Minidregg.Kernel.ApplicationLifecycleResidentProfile.storeTag
-       config.expectedSeed)),
+       config.storeIdentity)),
      -- The Store's durable-anchor identity (`Config.anchorIdentity`): a script that
      -- reads the Store's image (`durable-read`) takes it from here.
      ("storeAnchorIdentity", toJson config.anchorIdentity),
@@ -927,19 +1192,21 @@ def profileDescription (config : NativeHost.Config)
           ("model", toJson tariff.model),
           ("routes", ((ProviderUsage.tariffJson tariff).getObjValD "routes")),
           ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)]
-  let meteringFields := match metering with
-    | none => []
-    | some (providerResourceId, tariff) =>
-        [("providerMetering", meteringJson (providerResourceId, tariff))]
   let serviceFields := if services.isEmpty then [] else
     [("providerMeterings", toJson (services.map meteringJson))]
   let grainBirthFields := match config.grainBirthTariff with
     | none => []
     | some tariff => [("grainBirthTariff", Lean.Json.mkObj
         [("base", n tariff.base), ("perBirth", n tariff.perBirth)])]
-  Lean.Json.mkObj (base ++ grainBirthFields ++ meteringFields ++ serviceFields)
+  Lean.Json.mkObj (base ++ grainBirthFields ++ serviceFields)
 
-def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
+/-- The deployment's description on the loaded image. A grain birth is offered while that
+image's platform record prices it (`record.grainBirth`), the same record the grain receiver
+reads (`GrainResourceBirthAdmission.grainTariffAt`). -/
+def descriptionLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config) :
+    Lean.Json := Id.run do
+  let grainBirth := ((PlatformCellDomain.recordOn config.deployment opened.durable.snapshot).bind
+    (·.grainBirth)).isSome
   let n := fun value : Nat => toJson (toString value)
   return Lean.Json.mkObj
     [("runtime", toJson "minidregg-native"),
@@ -953,14 +1220,14 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
        ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "fn-selected-public-release", "application-lifecycle-begin",
           "selected-source-publication"] : List String) ++
-         if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
+         if grainBirth then ["grain-birth"] else [])),
      ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 
 def description (config : NativeHost.Config) : IO Lean.Json := do
-  discard <| IO.ofExcept (← NativeHost.openExisting config)
-  return descriptionLoaded config
+  let opened ← IO.ofExcept (← NativeHost.openExisting config)
+  return descriptionLoaded config opened
 
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
@@ -1021,10 +1288,25 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       for _ in [0:10] do
         if (NativeHost.validateLoadedFrom config opened durable).toOption.isSome then n := n + 1
       pure n
+  -- The light (served) validation a session's refresh runs, whole and against the held state.
+  match ← DurableServed.openHead config.transport ResourceBirthCodec.rootBytes with
+  | .error detail => IO.println s!"light open refused: {detail}"
+  | .ok opening =>
+      discard <| timed "validateServed x10" do
+        let mut n := 0
+        for _ in [0:10] do
+          if (NativeHostServed.validateServed config opening.served).toOption.isSome then n := n + 1
+        pure n
+      if let .ok held := NativeHostServed.validateServed config opening.served then
+        discard <| timed "validateServedFrom (held, same state) x10" do
+          let mut n := 0
+          for _ in [0:10] do
+            if (NativeHostServed.validateServedFrom config held opening.served).toOption.isSome then n := n + 1
+          pure n
   discard <| timed "root rebuild x3" do
     let mut r := 0
     for _ in [0:3] do
-      r := r + (DurableReceiverIO.RootCache.ofEntries
+      r := r + (Minidregg.Kernel.WorldRootCache.RootCache.ofEntries
         (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
     pure r
   let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
@@ -1069,9 +1351,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       discard <| timedPure "open: resume (materialize + replay the suffix)" fun _ =>
         (DurableCheckpoint.resume ResourceBirthCodec.rootBytes durable.image body.height body.state).isSome
   discard <| timedPure "open: root cache build (full evaluation)" fun _ =>
-    (DurableReceiverIO.RootCache.ofEntries
+    (Minidregg.Kernel.WorldRootCache.RootCache.ofEntries
       (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
-  discard <| timedPure "open: cache injectivity check" fun _ => durable.roots.injectiveCheck
   let state ← timedPure "checkpoint: state (ofSnapshot)" fun _ =>
     DurableCheckpoint.State.ofSnapshot durable.image durable.snapshot
   IO.println s!"  state cells {state.cells.length}"
@@ -1079,19 +1360,20 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let indexRoot := Minidregg.Compiler.DurableIndex.emptyDigest
   discard <| timedPure "checkpoint: body encode" fun _ =>
     (DurableCheckpointCodec.bodyStream.encode
-      ⟨key.id, height, durable.chain, frontier, indexRoot, state⟩).length
+      ⟨key.id, height, durable.chain, frontier, indexRoot, state, durable.system,
+        DurableCheckpointCodec.foldSemantics⟩).length
   discard <| timedPure "checkpoint: seal from the cached root (encode + MAC)" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealAt key height durable.chain frontier indexRoot state
-        durable.worldRoot)).length
+        durable.system durable.worldRoot)).length
   discard <| timedPure "checkpoint: seal with the root in full" fun _ =>
     (DurableCheckpointCodec.checkpointFrame.encode
       (DurableCheckpointCodec.sealCheckpoint key ResourceBirthCodec.rootBytes height durable.chain
-        frontier indexRoot state)).length
+        frontier indexRoot state durable.system)).length
   discard <| timedPure "checkpoint: every cell's rootBytes" fun _ =>
     durable.image.cellIds.foldl (fun acc id =>
       acc + (ResourceBirthCodec.rootBytes (durable.snapshot.canonicalBytes id)).value % 7) 0
-  discard <| timedPure "checkpoint: rebase at the head" fun _ => durable.rebase.isSome
+  discard <| timedPure "checkpoint: rebase at the head" fun _ => durable.rebase.base.cells.length
   discard <| timedPure "checkpoint: image.cellIds" fun _ => durable.image.cellIds.length
   discard <| timed "past state: Reader.stateAt (head)" do
     match ← reader.stateAt durable.height with
@@ -1170,7 +1452,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       | .error refusal => throw (IO.userError refusal.message)
       | .ok read =>
         let kept := read.verified.root
-        let spec := NativeHost.worldRoot config ⟨durable.image.seed, log.take (i + 1)⟩
+        let spec := NativeHost.worldRoot config
+          (DurableReceiver.Image.ofAccepted durable.image.seed (log.take (i + 1)))
         checked := checked + 1
         if kept != spec then
           differ := differ + 1
@@ -1306,13 +1589,14 @@ def selectedReleaseSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ =>
-        pure (.refused .operationRejected "selected-release".toUTF8.toList "request refused".toUTF8.toList)
+    | .rejected reason =>
+        pure (.refused .operationRejected "selected-release".toUTF8.toList (reprStr reason).toUTF8.toList)
     | .transactionConflict =>
         pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Lookup never submits missing work. An exact historical retry retains its
@@ -1346,7 +1630,10 @@ def applicationLifecycleRetryBeginV4SubmitSession (config : NativeHost.Config)
     | .confirmed confirmed =>
         sessionSetWalked state confirmed.old confirmed.readback
         return .confirmed confirmed.confirmation confirmed.receipt
-    | .rejected _ =>
+    | .rejected detail =>
+        -- The member's frame stays the bare refusal; the operator's log keeps the reason.
+        NativeHost.logOperatorRefusal <|
+          .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
         return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -1367,7 +1654,10 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     | .confirmed confirmed =>
         sessionSetWalked state confirmed.old confirmed.readback
         return .confirmed confirmed.confirmation confirmed.receipt
-    | .rejected _ =>
+    | .rejected detail =>
+        -- The member's frame stays the bare refusal; the operator's log keeps the reason.
+        NativeHost.logOperatorRefusal <|
+          .refused .operationRejected "application-lifecycle-begin".toUTF8.toList detail.toUTF8.toList
         return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -1531,15 +1821,16 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected _ =>
+  | .rejected reason =>
       pure (.refused .operationRejected "fn-consumer-namespace".toUTF8.toList
-        "request refused".toUTF8.toList)
+        reason.toUTF8.toList)
   | .transactionConflict =>
       pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Op41 is receipt-only. A missing original is never resubmitted. -/
@@ -1565,13 +1856,14 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected _ =>
-      pure (.refused .operationRejected "fn-selected-poll".toUTF8.toList "request refused".toUTF8.toList)
+  | .rejected reason =>
+      pure (.refused .operationRejected "fn-selected-poll".toUTF8.toList reason.toUTF8.toList)
   | .transactionConflict =>
       pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def fnSelectedPollLookupSession (config : NativeHost.Config)
@@ -1595,13 +1887,14 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
-  | .rejected _ =>
-      pure (.refused .operationRejected "fn-empty-poll-v2".toUTF8.toList "request refused".toUTF8.toList)
+  | .rejected reason =>
+      pure (.refused .operationRejected "fn-empty-poll-v2".toUTF8.toList reason.toUTF8.toList)
   | .transactionConflict =>
       pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def fnEmptyPollLookupSession (config : NativeHost.Config)
@@ -1626,13 +1919,14 @@ def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "selected-source-publication".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "selected-source-publication".toUTF8.toList
+        (reprStr reason).toUTF8.toList)
     | .transactionConflict => pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def selectedSourcePublicationLookupSession (config : NativeHost.Config)
@@ -1668,11 +1962,12 @@ def applicationShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
+        reason.toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 def applicationShareIssueLookupSession (config : NativeHost.Config)
@@ -1714,11 +2009,12 @@ def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
-        "request refused".toUTF8.toList)
+    | .rejected reason => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
+        reason.toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Receipt recovery uses the exact event-22 certificate and original receipt
@@ -1759,6 +2055,7 @@ def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  NativeHost.logOperatorRefusal outcome
   return outcome
 
 /-- Historical event28 recovery returns only the verified original receipt. -/
@@ -1790,13 +2087,14 @@ def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     session.verified payload
   let outcome : NativeHostCodec.Outcome := match result with
     | .confirmed kind receipt _ _ => .confirmed kind receipt
-    | .rejected _ => .refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
-        "request refused".toUTF8.toList
+    | .rejected detail => .refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
+        detail.toUTF8.toList
     | .transactionConflict => .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
     | .contention => .contention
     | .unavailable detail => .unavailable detail.toUTF8.toList
     | .uncertain detail => .uncertain detail.toUTF8.toList
+  NativeHost.logOperatorRefusal outcome
   return NativeHost.publicSubmissionOutcome outcome
 
 /-- Grant recovery selects the exact event27 original from a verified walk.
@@ -1895,6 +2193,69 @@ def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
     | throw (RequestRefusal.malformed "native host kind is not UTF-8")
   return (kind, payload.drop (2 + width))
 
+/-! ## The per-subject request rate (`Kernel.SubjectRate`; docs/PD-HOST-RATE-DESIGN.md) -/
+
+/-- The Host's rate gate: the policy, the exempt subjects, and the one table of windows,
+which lives as long as the Host process and holds only subjects that verified. -/
+structure RateGate where
+  policy : SubjectRate.Policy
+  exempt : List Nat
+  table : IO.Ref SubjectRate.Table
+
+def Settings.rateGate (settings : Settings) : IO RateGate := do
+  let policy ← match settings.requestRate with
+    | none => pure SubjectRate.hostDefault
+    | some rate => IO.ofExcept (SubjectRate.Policy.make rate.limit rate.windowMs)
+  let table ← IO.mkRef ([] : SubjectRate.Table)
+  return ⟨policy, (settings.requestRate.bind (·.exempt)).getD [], table⟩
+
+/-- The first half of a pair frame, or none (the pure reading of `splitPair`). -/
+def pairFirst? (payload : List UInt8) : Option (List UInt8) :=
+  if payload.length < 4 then none else
+  let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
+    65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
+  if width ≤ payload.length - 4 then some ((payload.drop 4).take width) else none
+
+def claimOf (bytes : List UInt8) : Option Nat :=
+  (NativeObservationCodec.signedCodec.decode bytes).map (·.challenge.intent.subject.value)
+
+/-- The subjects a rated request claims, read before any Store work: the signed observation's
+intent subject, for authorized prepare (1), authorized query (5; each member of a batch, in
+order) and dry run (130). `none`: the operation is not rated, or its bytes do not decode (its
+receiver refuses it `malformed`, and nothing is charged). Unsigned operations are never rated:
+nothing verifies a subject there. -/
+def ratedClaims (operation : UInt8) (payload : List UInt8) : Option (List Nat) :=
+  -- An if-chain, not a `match` on the operation: `scripts/host-operations.py` reads the request
+  -- arms of the dispatch functions by their `| N =>` headers, and this classifier receives nothing.
+  if operation == 1 then (claimOf payload).map fun subject => [subject]
+  else if operation == 5 then
+    if NativeObservationCodec.isBatch payload then
+      (NativeObservationCodec.batchCodec.decode payload).bind fun members =>
+        if members.isEmpty then none else members.mapM claimOf
+    else (claimOf payload).map fun subject => [subject]
+  else if operation == 130 then
+    (pairFirst? payload).bind fun observation => (claimOf observation).map fun subject => [subject]
+  else none
+
+/-- Check every claimed subject at `now`; the first full window refuses, with its retry time. -/
+def RateGate.check (gate : RateGate) (claims : List Nat) (now : Nat) : IO (Option Nat) := do
+  let table ← gate.table.get
+  for subject in claims do
+    match SubjectRate.check gate.policy (SubjectRate.exemptOf gate.exempt) table subject now with
+    | .limited retryAfterMs => return some retryAfterMs
+    | .admit => pure ()
+  return none
+
+/-- Charge after the receiver answered: every member of a verified reply; on a refusal reached
+after verification, only the first member, the one the receiver verified first (a batch stops at
+its first refusal, and every member before it verified). -/
+def RateGate.charge (gate : RateGate) (claims : List Nat) (operation responseOperation : UInt8)
+    (payload : List UInt8) (now : Nat) : IO Unit := do
+  unless RequestRefusal.chargeable operation responseOperation payload do return
+  let charged := if responseOperation == operation then claims else claims.take 1
+  gate.table.modify fun table => charged.foldl
+    (fun t subject => SubjectRate.charge gate.policy (SubjectRate.exemptOf gate.exempt) t subject now) table
+
 def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   unless payload.length ≥ 4 do throw (RequestRefusal.malformed "short native host pair frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
@@ -1903,7 +2264,7 @@ def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
   return ((payload.drop 4).take width, payload.drop (4 + width))
 
 def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
-  let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+  let signaturesCodec := (StreamCodec.list bytesStream).toLawful
   let some signatures := signaturesCodec.decode bytes
     | throw (RequestRefusal.malformed "noncanonical signature list")
   return signatures
@@ -2039,8 +2400,8 @@ def dispatchSession (config : NativeHost.Config)
   match operation with
   | 0 =>
       unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
-      discard <| sessionOpened config state
-      return (0, (descriptionLoaded config).compress.toUTF8.toList)
+      let opened ← sessionOpened config state
+      return (0, (descriptionLoaded config opened).compress.toUTF8.toList)
   | 1 =>
       let t0 ← IO.monoMsNow
       let session ← sessionCurrent config state
@@ -2102,6 +2463,31 @@ def dispatchSession (config : NativeHost.Config)
       -- law-sat (C-SAT-2): a pure function of the request bytes; reads no Store.
       LawSatWire.lawSatSession payload
   | 151 => fnDispatch operation payload
+  | 156 =>
+      -- Same verifier-selected projection as the detached command. Refresh the
+      -- session's admitted suffix instead of auditing genesis in a new process.
+      let session ← sessionWalked config state
+      let view ← IO.ofExcept <|
+        ApplicationAgentLifetimeGrantInspection.inspectAcceptedVerified session.verified payload
+      let bytes := view.compress.toUTF8.toList
+      unless bytes.length ≤ 2 * 1024 * 1024 do
+        throw (IO.userError "accepted grant inspection exceeds native JSON budget")
+      return (156, bytes)
+  | 155 =>
+      -- The operator socket pins this Host image and complete configuration.
+      -- Refresh the verifier-minted chronology held by op26 rather than
+      -- reopening and replaying genesis in a detached inspection process.
+      -- New suffixes are still authenticated and semantically re-admitted.
+      let (planBytes, committedBytes) ← splitPair payload
+      unless !planBytes.isEmpty && !committedBytes.isEmpty do
+        throw (RequestRefusal.malformed "empty STOP inspection input")
+      let session ← sessionWalked config state
+      let view ← IO.ofExcept <| ApplicationLifecycleStopClaimInspection.inspectVerified
+        session.verified planBytes committedBytes
+      let bytes := view.compress.toUTF8.toList
+      unless bytes.length ≤ 2 * 1024 * 1024 do
+        throw (IO.userError "STOP claim inspection exceeds native JSON budget")
+      return (155, bytes)
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -2224,20 +2610,20 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
 selectors reach source planning; retained plans are checked again before
 detached signatures are assembled. The final native submit re-admits fresh. -/
 def requireOneLifetimeDispatchPin
-    (approved : List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
-    (predicate : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors → Bool) : IO Unit := do
-  unless (approved.filter predicate).length == 1 do
+    (approved : List LifetimeDispatchPin)
+    (actual : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) : IO Unit := do
+  unless (approved.filter (fun pin => pin.matches actual)).length == 1 do
     throw (IO.userError "lifetime dispatch request differs from unique full operator pin")
 
 def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (approved : List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (approved : List LifetimeDispatchPin)
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
   | 80 =>
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
         | throw (RequestRefusal.malformed "noncanonical lifetime reserve request")
-      requireOneLifetimeDispatchPin approved request.matchesFixed
+      requireOneLifetimeDispatchPin approved request.fixedSelectors
       let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveVerified
@@ -2251,7 +2637,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.decode
           planBytes
         | throw (RequestRefusal.malformed "noncanonical lifetime reserve plan")
-      requireOneLifetimeDispatchPin approved plan.request.matchesFixed
+      requireOneLifetimeDispatchPin approved plan.request.fixedSelectors
       let signatures ← decodeSignatures signaturesBytes
       let signed ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.assembleReserve plan signatures
@@ -2269,7 +2655,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec.decode
           payload
         | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch request")
-      requireOneLifetimeDispatchPin approved request.fixed.matchesFixed
+      requireOneLifetimeDispatchPin approved request.fixed.fixedSelectors
       let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidVerified
@@ -2282,7 +2668,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.decode planBytes
         | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch plan")
-      requireOneLifetimeDispatchPin approved plan.request.fixed.matchesFixed
+      requireOneLifetimeDispatchPin approved plan.request.fixed.fixedSelectors
       let (appBytes, grantAndPayer) ← splitPair signaturesBytes
       let (grantSignature, payerBytes) ← splitPair grantAndPayer
       unless grantSignature.length == 64 do
@@ -2297,7 +2683,51 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       return (79, ingress)
   | _ => throw (IO.userError "unsupported lifetime dispatch authoring operation")
 
-def maxFrame : Nat := FnEvidenceCodec.maxHostFrameBytes
+def maxFrame : Nat := Kernel.Bounds.frameBytesMax
+
+/-- The fn consumer route's derived frame (two consumer reports + 256 KiB) is the
+frame bound: `Kernel.Bounds` is the home, this derivation is pinned to it. -/
+theorem fnFrame_eq_bound : FnEvidenceCodec.maxHostFrameBytes = Kernel.Bounds.frameBytesMax :=
+  FnEvidenceCodec.selected_poll_envelope_exact.2.2.2.2
+
+theorem lookupFrame_eq_bound :
+    RetainedSegmentInspection.maxLookupFrame = Kernel.Bounds.lookupFrameBytesMax := rfl
+
+/-- The fn route's own package cap is within the package bound (one cell). -/
+theorem fnPackage_le_bound : FnEvidenceCodec.maxPackageBytes ≤ Kernel.Bounds.packageBytesMax := by
+  decide
+
+/-- The bound a frame is held to before its payload is read (HP-1): carried
+exact-call recovery (operation 153) to `lookupFrameBytesMax`, every other
+operation to `frameBytesMax`. -/
+def frameBound (operation : UInt8) : Kernel.Bounds.Name :=
+  if operation == 153 then .lookupFrameBytes else .frameBytes
+
+/-- **No false refusal at the frame reader**: a frame within `frameBytesMax` passes
+both checks `serveSession` runs, whatever its operation. -/
+theorem frameBound_accepts (operation : UInt8) {length : Nat}
+    (within : length ≤ Kernel.Bounds.frameBytesMax) :
+    Kernel.Bounds.check .lookupFrameBytes length = .ok () ∧
+      Kernel.Bounds.check (frameBound operation) length = .ok () := by
+  have outer : length ≤ Kernel.Bounds.lookupFrameBytesMax :=
+    Nat.le_trans within Kernel.Bounds.frameBytes_le_lookupFrameBytes
+  refine ⟨Kernel.Bounds.check_accepts outer, ?_⟩
+  unfold frameBound
+  split
+  · exact Kernel.Bounds.check_accepts outer
+  · exact Kernel.Bounds.check_accepts within
+
+/-- A frame past `frameBytesMax` of any operation but 153 is refused by that name. -/
+theorem frameBound_refuses {operation : UInt8} (other : operation ≠ 153) {length : Nat}
+    (past : Kernel.Bounds.frameBytesMax < length) :
+    Kernel.Bounds.check (frameBound operation) length =
+      .error (.overBound .frameBytes length Kernel.Bounds.frameBytesMax) := by
+  have : frameBound operation = .frameBytes := by simp [frameBound, other]
+  rw [this]
+  exact Kernel.Bounds.check_refuses past
+
+#assert_axioms fnFrame_eq_bound lookupFrame_eq_bound fnPackage_le_bound
+#assert_axioms frameBound_accepts frameBound_refuses
 
 /-- Inspection repeats the exact frame and full request as hex. A hostd
 consumer must cap this JSON separately from the smaller binary input. -/
@@ -2362,15 +2792,21 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-  | .rejected _ =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+  -- The three outcomes the receiver decides before any permit or append go out under
+  -- NO_RECORD (the grain fence settles the dispatch on this frame); only `uncertain`,
+  -- which follows an attempted append, keeps the op's own frame.
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
+      writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
   | .unavailable detail =>
-      writeSessionFrame output 34 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.noRecordMarker <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.unavailable detail.toUTF8.toList)
   | .uncertain detail =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
@@ -2436,11 +2872,13 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         .confirmed committed.confirmation committed.receipt
       sessionSetWalked state committed.old committed.readback
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-agent-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 46 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-agent-dispatch".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2469,11 +2907,13 @@ def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 76 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-agent-lifetime-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 76 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-agent-lifetime-dispatch".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 76 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2515,11 +2955,13 @@ def dispatchLifecycleRetryClaimV4SubmitSession (config : NativeHost.Config)
           writeSessionFrame output 26 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome
               (.confirmed .replayed reservation.receipt)
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-lifecycle-claim".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 26 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-lifecycle-claim".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2566,11 +3008,13 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
           writeSessionFrame output 26 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome
               (.confirmed .replayed reservation.receipt)
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-lifecycle-claim".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
       writeSessionFrame output 26 <| outcomeCodec.encode <|
-        NativeHost.publicSubmissionOutcome
-          (.refused .operationRejected "application-lifecycle-claim".toUTF8.toList
-            "request refused".toUTF8.toList)
+        NativeHost.publicSubmissionOutcome outcome
   | .contention =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -2590,7 +3034,8 @@ partial def discardExactly (input : IO.FS.Stream) (count : Nat) : IO Unit := do
   discardExactly input (count - chunk.size)
 
 /-- One request. Every frame is answered: by its handler, or — when the handler
-throws — by `RequestRefusal.frame` under operation 255, and the loop goes on.
+throws — by `RequestRefusal.exceptionAnswer` (NO_RECORD 253 for a proven no-append
+refusal, the undecided envelope 255 otherwise), and the loop goes on.
 The process ends only on end of input, a truncated frame (the supervisor's pipe
 closed), a poisoned session (Store integrity: a new process must reopen from the
 MAC'd checkpoint; the request is answered `unavailable` first), or a handler
@@ -2602,6 +3047,7 @@ def serveFrame (config : NativeHost.Config)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
+    (gate : RateGate)
     (operation : UInt8) (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
   let wrote ← IO.mkRef false
   let tracked : IO.FS.Stream :=
@@ -2621,20 +3067,35 @@ def serveFrame (config : NativeHost.Config)
       dispatchLifecycleClaimSubmitSession config state payload tracked
     else
       let started ← IO.monoMsNow
-      let (responseOperation, responsePayload) ←
-        dispatchSession config state meteringProfile providerRoutes fnDispatch operation payload
-      writeSessionFrame tracked responseOperation responsePayload
-      if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
-        IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
+      let claims := (ratedClaims operation payload).getD []
+      match ← gate.check claims started with
+      | some retryAfterMs =>
+          -- A full window: refused by name before any receiver or Store work, under NO_RECORD.
+          writeSessionFrame tracked HostOperations.noRecordMarker
+            (RequestRefusal.rateLimitedFrame operation retryAfterMs)
+      | none =>
+        let (responseOperation, responsePayload) ←
+          dispatchSession config state meteringProfile providerRoutes fnDispatch operation payload
+        -- A refusal returned under 255 is a receiver's decision: it goes out as NO_RECORD
+        -- (`RequestRefusal.returnedMarker`); undecided outcomes keep the 255 envelope.
+        writeSessionFrame tracked (RequestRefusal.returnedMarker responseOperation responsePayload)
+          responsePayload
+        gate.charge claims operation responseOperation responsePayload started
+        if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
+          IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
   catch error =>
     if ← wrote.get then
       throw (IO.userError s!"op {operation} failed after its reply was written: {error}")
     if (← state.get).isNone then
-      writeSessionFrame output 255 <| outcomeCodec.encode <|
+      writeSessionFrame output HostOperations.hostOutcomeMarker <| outcomeCodec.encode <|
         .unavailable "host session reopening".toUTF8.toList
       throw (IO.userError s!"op {operation}: native host session invalidated: {error}")
-    IO.eprintln s!"minidregg-host: op {operation} refused: {error}"
-    writeSessionFrame output 255 (RequestRefusal.frame operation error)
+    -- NO_RECORD for a grammar verdict or an append-free operation; otherwise the
+    -- undecided envelope (`RequestRefusal.exceptionAnswer`): a thrown handler on an
+    -- append operation never masquerades as a refusal.
+    let (marker, answer) := RequestRefusal.exceptionAnswer operation error
+    IO.eprintln s!"minidregg-host: op {operation} {if marker == HostOperations.noRecordMarker then "refused" else "undecided"}: {error}"
+    writeSessionFrame output marker answer
   if (← state.get).isNone then
     throw (IO.userError s!"op {operation}: native host session invalidated")
 
@@ -2644,31 +3105,39 @@ partial def serveSession (config : NativeHost.Config)
     (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (applicationDispatch : Bool → List UInt8 → IO.FS.Stream → IO Unit)
+    (gate : RateGate)
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
-  if first.isEmpty then return
+  if first.isEmpty then
+    -- A clean end of a session that opened its Store seals at the head (HOT-PATH §2(h) item 6);
+    -- a failed seal loses nothing.
+    if (← state.get).isSome then
+      discard <| DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes
+    return
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
   if length == 0 then
-    writeSessionFrame output 255 (RequestRefusal.frame 255
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native host frame"))
-  else if length > RetainedSegmentInspection.maxLookupFrame then
+  else match Kernel.Bounds.check .lookupFrameBytes length with
+  | .error refusal =>
     discardExactly input length
-    writeSessionFrame output 255 (RequestRefusal.frame 255
-      (RequestRefusal.malformed "native host frame exceeds frame bound"))
-  else
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
+      (RequestRefusal.overBound refusal))
+  | .ok () =>
     let opcode ← readExactly input 1
     let operation := opcode[0]!
     -- Only carried exact-call recovery needs the bounded identity-header
     -- overhead. Refuse other oversized operations before allocating payload.
-    if length > maxFrame && operation != 153 then
+    match Kernel.Bounds.check (frameBound operation) length with
+    | .error refusal =>
       discardExactly input (length - 1)
-      writeSessionFrame output 255 (RequestRefusal.frame operation
-        (RequestRefusal.malformed "native host frame exceeds operation bound"))
-    else
+      writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame operation
+        (RequestRefusal.overBound refusal))
+    | .ok () =>
       let payload ← readExactly input (length - 1)
-      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch operation payload.toList output
-  serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch input output
+      serveFrame config state meteringProfile providerRoutes fnDispatch applicationDispatch gate operation payload.toList output
+  serveSession config state meteringProfile providerRoutes fnDispatch applicationDispatch gate input output
 
 /-- The storeless codec loop (`minidregg-host CONFIG codec`): answers only the
 pure codec frames (`pureCodec`) and never opens, admits or reads a Store. A
@@ -2682,39 +3151,28 @@ partial def serveCodec (config : NativeHost.Config)
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
   if length == 0 then
-    writeSessionFrame output 255 (RequestRefusal.frame 255
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
       (RequestRefusal.malformed "empty native codec frame"))
-  else if length > maxFrame then
+  else if let .error refusal := Kernel.Bounds.check .frameBytes length then
     discardExactly input length
-    writeSessionFrame output 255 (RequestRefusal.frame 255
-      (RequestRefusal.malformed "native codec frame exceeds frame bound"))
+    writeSessionFrame output HostOperations.noRecordMarker (RequestRefusal.frame 255
+      (RequestRefusal.overBound refusal))
   else
     let body ← readExactly input length
     let operation := body[0]!
+    -- The codec channel reads no Store: every refusal here is a proven no-append one,
+    -- which is what `exceptionAnswer` answers for these append-free operations.
     let answer ← try pureCodec config providerRoutes operation (body.toList.drop 1)
-      catch error => pure (255, RequestRefusal.frame operation error)
+      catch error => pure (RequestRefusal.exceptionAnswer operation error)
     writeSessionFrame output answer.1 answer.2
   serveCodec config providerRoutes input output
 
-/-- Execute from one private copy throughout this stdio process. The copy is
-the pinned launch artifact; the originally configured pathname may later be
-replaced or have a symlink target swapped without changing the session's
-historical verifier. The OS must protect this private directory from writes
-by other actors for the lifetime of the process. -/
+/-- Run one stdio process with the linked native signature verifier. The
+historical wrapper name and configured artifact path remain for deploy/carry
+pins; live verification copies and launches no executable. -/
 def withPinnedSignature {α : Type} (config : NativeHost.Config)
     (body : NativeHost.Config → IO α) : IO α :=
-  IO.FS.withTempDir fun directory => do
-    let pinned := directory / "credential-verifier"
-    let bytes ← IO.FS.readBinFile config.signature.binary
-    IO.FS.writeBinFile pinned bytes
-    let permission ← IO.Process.output
-      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
-    unless permission.exitCode == 0 do
-      throw (IO.userError "cannot make pinned credential verifier executable")
-    -- A launch failure is detected before the first semantic replay. The
-    -- verifier's usage exit here is expected; it has no arguments yet.
-    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
-    body { config with signature := ⟨pinned⟩ }
+  body config
 
 partial def readOperatorSnapshot (input : IO.FS.Handle) (limit : Nat)
     (acc : ByteArray := ByteArray.empty) : IO ByteArray := do
@@ -3925,6 +4383,11 @@ def sessionCarriedWalked (config : NativeHost.Config)
     state.set none
     throw (IO.userError "carried suffix validation failed")
 
+/-- A carried frame keeps its fixed public text, so no custody detail reaches the
+member; the operator's log (this process's stderr) keeps the receiver's own detail. -/
+def logOperatorWithheld (phase kind detail : String) : IO Unit :=
+  IO.eprintln s!"host: submission {kind} (operator log): {phase}: {detail}"
+
 def carriedEnrollmentSubmit (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (carried : IO.Ref (Option (CarriedNativeHostSession.Walked config)))
@@ -3935,15 +4398,22 @@ def carriedEnrollmentSubmit (config : NativeHost.Config)
       carried.set (some ⟨session.anchor, confirmed.target, confirmed.verified⟩)
       return .confirmed confirmed.confirmation confirmed.receipt
   | .historical receipt => return .confirmed .replayed receipt
-  | .rejected _ =>
+  | .rejected detail =>
+      -- The member's frame keeps its fixed text; the operator's log keeps the reason.
+      NativeHost.logOperatorRefusal <|
+        .refused .operationRejected "application-session-enrollment".toUTF8.toList detail.toUTF8.toList
       return .refused .operationRejected "application-session-enrollment".toUTF8.toList
         "carried enrollment refused".toUTF8.toList
   | .transactionConflict =>
       return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .contention => return .contention
-  | .unavailable _ => return .unavailable "carried enrollment unavailable".toUTF8.toList
-  | .uncertain _ => return .uncertain "carried enrollment readback uncertain".toUTF8.toList
+  | .unavailable detail =>
+      logOperatorWithheld "application-session-enrollment" "unavailable" detail
+      return .unavailable "carried enrollment unavailable".toUTF8.toList
+  | .uncertain detail =>
+      logOperatorWithheld "application-session-enrollment" "uncertain" detail
+      return .uncertain "carried enrollment readback uncertain".toUTF8.toList
 
 def carriedEnrollmentLookup (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -4095,14 +4565,19 @@ def carriedApplicationSubmit (config : NativeHost.Config)
           (.uncertain "dispatch absence tip changed before handoff".toUTF8.toList))
   | .historical receipt =>
       writeSessionFrame output 34 (outcomeCodec.encode (.confirmed .replayed receipt))
-  | .rejected _ => writeSessionFrame output 34 <| outcomeCodec.encode <|
-      NativeHost.publicSubmissionOutcome (.refused .operationRejected
-        "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+  | .rejected detail =>
+      -- The submitter gets the uniform frame; the operator's log keeps the reason.
+      let outcome : NativeHostCodec.Outcome :=
+        .refused .operationRejected "application-dispatch".toUTF8.toList detail.toUTF8.toList
+      NativeHost.logOperatorRefusal outcome
+      writeSessionFrame output 34 <| outcomeCodec.encode <| NativeHost.publicSubmissionOutcome outcome
   | .contention => writeSessionFrame output 34 (outcomeCodec.encode .contention)
-  | .unavailable _ =>
+  | .unavailable detail =>
+      logOperatorWithheld "application-dispatch" "unavailable" detail
       writeSessionFrame output 34 (outcomeCodec.encode
         (.unavailable "carried dispatch unavailable".toUTF8.toList))
-  | .uncertain _ =>
+  | .uncertain detail =>
+      logOperatorWithheld "application-dispatch" "uncertain" detail
       writeSessionFrame output 34 (outcomeCodec.encode
         (.uncertain "carried dispatch readback uncertain".toUTF8.toList))
 
@@ -4195,9 +4670,8 @@ def fnFrontierLocalScope (config : NativeHost.Config)
     FnConsumerOperation.pollControlBinding pin.fnBinary service.controlPath, gateway)
 
 def fnFrontierPlanRequestCodec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN-REQUEST/v2".toUTF8.toList
-      (StreamCodec.option digestStream))
+  NativeHostCodec.framed "DREGG/FN/CONSUMER-FRONTIER-PLAN-REQUEST/v2".toUTF8.toList
+    (StreamCodec.option digestStream)
 
 /-- Op64 polls only the configured local consumer. The optional transaction ID
 selects an already accepted Mini event13; `none` selects a bounded empty page.
@@ -5950,7 +6424,8 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
   match operation with
   | 210 =>
       let opened ← sessionOpened pinnedConfig state
-      let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened payload)
+      let plan ← IO.ofExcept (NativeHost.activityPlanLoaded pinnedConfig opened
+        (← NativeHostHeld.heldFor pinnedConfig opened) payload)
       let bytes := ObjectiveActivityReceiver.signingPlanCodec.encode plan
       unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "activity plan exceeds host frame bound")
@@ -5965,7 +6440,8 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((211 : UInt8), ingress)
   | 212 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig opened payload
+      let outcome ← NativeHost.activitySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened
+        (← NativeHostHeld.heldFor pinnedConfig opened) payload
       return ((212 : UInt8), outcomeCodec.encode outcome)
   | 213 =>
       let opened ← sessionOpened pinnedConfig state
@@ -5997,7 +6473,7 @@ def objectKernelOperation (pinnedConfig : NativeHost.Config)
       return ((216 : UInt8), ingress)
   | 217 =>
       let opened ← sessionOpened pinnedConfig state
-      let outcome ← NativeHost.seatSubmitLoaded pinnedConfig opened payload
+      let outcome ← NativeHost.seatSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
       return ((217 : UInt8), outcomeCodec.encode outcome)
   | 218 =>
       let opened ← sessionOpened pinnedConfig state
@@ -6194,7 +6670,7 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
       return ((68 : UInt8), bytes)
   | 69 =>
       let (planBytes, signaturesBytes) ← splitPair payload
-      if let some routed ← retryLifecycleClaimAssemble pinnedConfig.expectedSeed
+      if let some routed ← retryLifecycleClaimAssemble pinnedConfig.storeIdentity
           planBytes (← decodeSignatures signaturesBytes) then
         return routed
       let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
@@ -6202,7 +6678,7 @@ def launchLifecycleOperatorOp (pinnedConfig : NativeHost.Config)
         | throw (RequestRefusal.malformed "noncanonical launch claim plan")
       let signatures ← decodeSignatures signaturesBytes
       let ingress ← IO.ofExcept <|
-        ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.expectedSeed plan signatures
+        ApplicationLifecycleLaunchClaimAuthoring.assemble pinnedConfig.storeIdentity plan signatures
       unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
         throw (IO.userError "launch claim ingress exceeds host frame bound")
       return ((69 : UInt8), ingress)
@@ -6271,170 +6747,46 @@ def auditBody (settings : Settings) (pinnedConfig : NativeHost.Config)
   IO.println s!"links {(linkIndexJson links).compress}"
   pure 0
 
-def run (arguments : List String) : IO UInt32 := do
-  match arguments with
-  | ["store-epoch"] =>
-      IO.println DurableCheckpointCodec.StoreEpoch.current.label
-      pure 0
-  -- Pure operator authoring before any Store exists: the policy a genesis pins
-  -- and the constants it names do not read the configuration.
-  | [_, "objective-constants"] =>
-      IO.println Minidregg.Host.ObjectiveInvocationQuote.constants.compress
-      pure 0
-  -- The Objective Bend front end (parse/capture/elaborate/preview), the same code
-  -- `lean --run Host/ObjectiveBendFrontEndMain.lean` runs; it reads no configuration.
-  | _ :: "objective-front" :: rest => Minidregg.Host.ObjectiveBendFrontEnd.run rest
-  | [_, "author", "objective-policy", input, output] =>
-      let bytes ← readBoundedBytes input 65536
-      let some text := String.fromUTF8? bytes.toByteArray
-        | throw (IO.userError "Objective policy JSON is not UTF-8")
-      let json ← IO.ofExcept (Lean.Json.parse text)
-      IO.FS.writeFile output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorPolicy json))
-      pure 0
-  | configPath :: command :: rest =>
-      let settings ← loadSettings configPath
-      let config := settings.config
-      match command, rest with
-      | "author", ["objective-request", input, output] =>
+/-- `author` (dispatched by `run`). -/
+def runCommandAuthor (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | ["objective-request", input, output] =>
           let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (IO.userError "Objective request JSON is not UTF-8")
           let json ← IO.ofExcept (Lean.Json.parse text)
           writeBytes output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorRequest json))
           pure 0
-      | "objective-quote", [requestPath, intentNonce, outputPath] =>
-          let bytes ← readBoundedBytes requestPath FnEvidenceCodec.maxHostFrameBytes
-          let some nonce := intentNonce.toNat?
-            | throw (IO.userError "intent nonce must be canonical decimal")
-          unless toString nonce == intentNonce do throw (IO.userError "intent nonce must be canonical decimal")
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
-          writeJson outputPath (← IO.ofExcept
-            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes nonce))
-          pure 0
-      | "objective-publication", [specPath, outputCodec, outputDirectory] =>
-          -- Capture the spec's sources, lower the selected definition with this Host's own
-          -- front end, and author the publication payload (no external typed core).
-          let directory := System.FilePath.mk outputDirectory
-          if ← directory.pathExists then throw (IO.userError "publication output directory already exists")
-          let captured ← match ← (Minidregg.Host.ObjectiveBendFrontEnd.captureSpec specPath false).run with
-            | .ok c => pure c
-            | .error d => throw (IO.userError d.json.compress)
-          let package := Minidregg.Host.ObjectivePackageAuthor.packageOf
-            (captured.modules.toList.zip (captured.bytes.toList.map (·.toList))) captured.entryModule captured.entryDefinition
-          let result ← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.publication package outputCodec)
-          IO.FS.createDirAll directory
-          match ← (Minidregg.Host.ObjectiveBendFrontEnd.writeCapture captured (directory / "capture")).run with
-            | .ok _ => pure ()
-            | .error d => throw (IO.userError d.json.compress)
-          IO.FS.writeBinFile (directory / "package.bin") ⟨result.package.toArray⟩
-          IO.FS.writeBinFile (directory / "artifact.bin") ⟨result.artifact.toArray⟩
-          IO.FS.writeBinFile (directory / "core.canonical.json") ⟨result.core.toArray⟩
-          IO.FS.writeBinFile (directory / "output-codec.bin")
-            ⟨(Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode
-              (← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.outputCodecOf outputCodec))).toArray⟩
-          IO.FS.writeFile (directory / "publication.json") result.json.compress
-          IO.println result.json.compress
-          pure 0
-      | "carry-plan", [requestPath, outputPath] =>
-          let operator ← carryOperator settings
-          let request ← readCarryJson requestPath
-          let result ← IO.ofExcept (← NeutralCarryReceiving.plan config configPath operator request)
-          writeJson outputPath result
-          pure 0
-      | "carry-receive", [requestPath, edgePath, outputPath] =>
-          let operator ← carryOperator settings
-          let request ← readCarryJson requestPath
-          let edge ← readCarryJson edgePath
-          let result ← IO.ofExcept (← NeutralCarryReceiving.receive config configPath operator request edge)
-          writeJson outputPath result
-          pure 0
-      | "carry-edge-verify", [requestPath, outputPath] =>
-          let request ← readJson requestPath
-          let result ← IO.ofExcept (← CarryInspection.verifyRequest config request)
-          writeJson outputPath result
-          pure 0
-      | "continuity-point", [challengePath, outputPath] =>
-          let challenge ← readJson challengePath
-          let result ← IO.ofExcept (ReceiptContinuity.challengePointJson config challenge)
-          writeJson outputPath result
-          pure 0
-      | "continuity-verify", [requestPath, responsePath, outputPath] =>
-          let request ← readJson requestPath
-          let response ← readJson responsePath
-          let result ← IO.ofExcept (ReceiptContinuity.verifyJson config request response)
-          writeJson outputPath result
-          pure 0
-      | "profile", [] =>
-          IO.println (profileDescription config
-            (← IO.ofExcept settings.providerMeteringPin)
-            (← IO.ofExcept settings.providerServicePins)).pretty
-          pure 0
-      | "pay-claim-status", [input, output] =>
-          let bytes ← readBoundedBytes input 4096
-          let some text := String.fromUTF8? bytes.toByteArray
-            | throw (IO.userError "paid status JSON is not UTF-8")
-          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
-          writeJson output (← IO.ofExcept
-            (Minidregg.Host.PayClaims.statusLoadedJson config walked.verified.opened source))
-          pure 0
-      | "pay-claim-audit", [input, output] =>
-          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
-          let requests ← IO.FS.Handle.mk input .read
-          let results ← IO.FS.Handle.mk output .write
-          let header ← IO.ofExcept
-            (Minidregg.Host.PayClaims.auditHeaderJson config walked.verified.opened)
-          results.putStrLn header.compress
-          writePaidAuditRows config walked.verified.opened requests results
-          pure 0
-      | "pay-enrol-v2-context", [input, output] =>
-          let bytes ← readBoundedBytes input 4096
-          let some text := String.fromUTF8? bytes.toByteArray
-            | throw (IO.userError "purchase context JSON is not UTF-8")
-          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
-          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.purchaseContext config source))
-          pure 0
-      | "author", ["pay-claim-rotation", input, output] =>
+  | ["pay-claim-rotation", input, output] =>
           let bytes ← readBoundedBytes input 4096
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (IO.userError "claim rotation JSON is not UTF-8")
           let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
           writeBytes output (← IO.ofExcept (Minidregg.Host.PayClaims.authorRotation source))
           pure 0
-      | "inspect", ["pay-claim-plan", input, output] =>
-          let bytes ← readBoundedBytes input 3072
-          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimPlanJson bytes))
-          pure 0
-      | "inspect", ["pay-claim-command", input, output] =>
-          let bytes ← readBoundedBytes input 2048
-          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimCommandJson bytes))
-          pure 0
-      | "inspect", ["pay-claim-ingress", input, output] =>
-          let bytes ← readBoundedBytes input 4096
-          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimIngressJson config bytes))
-          pure 0
-      | "author", ["application-failed-start-report", input, output] =>
+  | ["application-failed-start-report", input, output] =>
           let bytes ← readBoundedBytes input maxDispatchInspectionJsonBytes
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (RequestRefusal.malformed "failed START report JSON is not UTF-8")
           let source ← IO.ofExcept (Lean.Json.parse text)
           writeBytes output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.authorReport source))
           pure 0
-      | "author", ["application-failed-start-signed-report", input, output] =>
+  | ["application-failed-start-signed-report", input, output] =>
           let bytes ← readBoundedBytes input maxDispatchInspectionJsonBytes
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (RequestRefusal.malformed "failed START report JSON is not UTF-8")
           let source ← IO.ofExcept (Lean.Json.parse text)
           writeBytes output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.authorSignedReport source))
           pure 0
-      | "author", ["application-failed-start-recovery-request", input, output] =>
+  | ["application-failed-start-recovery-request", input, output] =>
           let bytes ← readBoundedBytes input maxDispatchInspectionJsonBytes
           let some text := String.fromUTF8? bytes.toByteArray
             | throw (RequestRefusal.malformed "failed START report JSON is not UTF-8")
           let source ← IO.ofExcept (Lean.Json.parse text)
           writeBytes output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.authorRequest source))
           pure 0
-      | "author", [kind, input, output] =>
+  | [kind, input, output] =>
           let source ← if kind == "application-route-bound-dispatch" ||
               kind == "application-route-admission-request" ||
               kind == "application-route-admission-challenge" ||
@@ -6458,19 +6810,193 @@ def run (arguments : List String) : IO UInt32 := do
           let bytes ← IO.ofExcept (authorHost config (← IO.ofExcept settings.providerRoutes) kind source)
           writeBytes output bytes
           pure 0
-      | "inspect", ["application-failed-start-report", input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `objective-quote` (dispatched by `run`). -/
+def runCommandObjectiveQuote (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [requestPath, intentNonce, outputPath] =>
+          let bytes ← readBoundedBytes requestPath FnEvidenceCodec.maxHostFrameBytes
+          let some nonce := intentNonce.toNat?
+            | throw (IO.userError "intent nonce must be canonical decimal")
+          unless toString nonce == intentNonce do throw (IO.userError "intent nonce must be canonical decimal")
+          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          writeJson outputPath (← IO.ofExcept
+            (← Minidregg.Host.ObjectiveInvocationQuote.quoteBytes config walked.verified.opened bytes nonce))
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `objective-publication` (dispatched by `run`). -/
+def runCommandObjectivePublication (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [specPath, outputCodec, outputDirectory] =>
+          -- Capture the spec's sources, lower the selected definition with this Host's own
+          -- front end, and author the publication payload (no external typed core).
+          let directory := System.FilePath.mk outputDirectory
+          if ← directory.pathExists then throw (IO.userError "publication output directory already exists")
+          let captured ← match ← (Minidregg.Host.ObjectiveBendFrontEnd.captureSpec specPath false).run with
+            | .ok c => pure c
+            | .error d => throw (IO.userError d.json.compress)
+          let package := Minidregg.Host.ObjectivePackageAuthor.packageOf
+            (captured.modules.toList.zip (captured.bytes.toList.map (·.toList))) captured.entryModule captured.entryDefinition
+          let result ← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.publication package outputCodec)
+          IO.FS.createDirAll directory
+          match ← (Minidregg.Host.ObjectiveBendFrontEnd.writeCapture captured (directory / "capture")).run with
+            | .ok _ => pure ()
+            | .error d => throw (IO.userError d.json.compress)
+          IO.FS.writeBinFile (directory / "package.bin") ⟨result.package.toArray⟩
+          IO.FS.writeBinFile (directory / "artifact.bin") ⟨result.artifact.toArray⟩
+          IO.FS.writeBinFile (directory / "core.canonical.json") ⟨result.core.toArray⟩
+          IO.FS.writeBinFile (directory / "output-codec.bin")
+            ⟨(Minidregg.Compiler.Tower256ConcreteBackend.digestStream.encode
+              (← IO.ofExcept (Minidregg.Host.ObjectivePackageAuthor.outputCodecOf outputCodec))).toArray⟩
+          IO.FS.writeFile (directory / "publication.json") result.json.compress
+          IO.println result.json.compress
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `carry-plan` (dispatched by `run`). -/
+def runCommandCarryPlan (_arguments : List String) (configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [requestPath, outputPath] =>
+          let operator ← carryOperator settings
+          let request ← readCarryJson requestPath
+          let result ← IO.ofExcept (← NeutralCarryReceiving.plan config configPath operator request)
+          writeJson outputPath result
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `carry-receive` (dispatched by `run`). -/
+def runCommandCarryReceive (_arguments : List String) (configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [requestPath, edgePath, outputPath] =>
+          let operator ← carryOperator settings
+          let request ← readCarryJson requestPath
+          let edge ← readCarryJson edgePath
+          let result ← IO.ofExcept (← NeutralCarryReceiving.receive config configPath operator request edge)
+          writeJson outputPath result
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `carry-edge-verify` (dispatched by `run`). -/
+def runCommandCarryEdgeVerify (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [requestPath, outputPath] =>
+          let request ← readJson requestPath
+          let result ← IO.ofExcept (← CarryInspection.verifyRequest config request)
+          writeJson outputPath result
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `continuity-point` (dispatched by `run`). -/
+def runCommandContinuityPoint (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [challengePath, outputPath] =>
+          let challenge ← readJson challengePath
+          let result ← IO.ofExcept (ReceiptContinuity.challengePointJson config challenge)
+          writeJson outputPath result
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `continuity-verify` (dispatched by `run`). -/
+def runCommandContinuityVerify (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [requestPath, responsePath, outputPath] =>
+          let request ← readJson requestPath
+          let response ← readJson responsePath
+          let result ← IO.ofExcept (ReceiptContinuity.verifyJson config request response)
+          writeJson outputPath result
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `profile` (dispatched by `run`). -/
+def runCommandProfile (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
+          IO.println (profileDescription config
+            (← IO.ofExcept settings.providerServicePins)).pretty
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `pay-claim-status` (dispatched by `run`). -/
+def runCommandPayClaimStatus (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "paid status JSON is not UTF-8")
+          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          writeJson output (← IO.ofExcept
+            (Minidregg.Host.PayClaims.statusLoadedJson config walked.verified.opened source))
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `pay-claim-audit` (dispatched by `run`). -/
+def runCommandPayClaimAudit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
+          let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
+          let requests ← IO.FS.Handle.mk input .read
+          let results ← IO.FS.Handle.mk output .write
+          let header ← IO.ofExcept
+            (Minidregg.Host.PayClaims.auditHeaderJson config walked.verified.opened)
+          results.putStrLn header.compress
+          writePaidAuditRows config walked.verified.opened requests results
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `pay-enrol-v2-context` (dispatched by `run`). -/
+def runCommandPayEnrolV2Context (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          let some text := String.fromUTF8? bytes.toByteArray
+            | throw (IO.userError "purchase context JSON is not UTF-8")
+          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.purchaseContext config source))
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `inspect` (dispatched by `run`). -/
+def runCommandInspect (_arguments : List String) (_configPath command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | ["pay-claim-plan", input, output] =>
+          let bytes ← readBoundedBytes input 3072
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimPlanJson bytes))
+          pure 0
+  | ["pay-claim-command", input, output] =>
+          let bytes ← readBoundedBytes input 2048
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimCommandJson bytes))
+          pure 0
+  | ["pay-claim-ingress", input, output] =>
+          let bytes ← readBoundedBytes input 4096
+          writeJson output (← IO.ofExcept (Minidregg.Host.PayClaims.claimIngressJson config bytes))
+          pure 0
+  | ["application-failed-start-report", input, output] =>
           let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           writeJson output (← IO.ofExcept (ApplicationFailedStartRecoveryTools.inspectReport bytes))
           pure 0
-      | "inspect", ["application-failed-start-recovery-plan", input, output] =>
+  | ["application-failed-start-recovery-plan", input, output] =>
           let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           writeJson output (← IO.ofExcept (ApplicationFailedStartRecoveryInspection.inspectPlan bytes))
           pure 0
-      | "inspect", ["application-failed-start-recovery-request", input, output] =>
+  | ["application-failed-start-recovery-request", input, output] =>
           let bytes ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           writeJson output (← IO.ofExcept (ApplicationFailedStartRecoveryInspection.inspectRequest bytes))
           pure 0
-      | "inspect", [kind, input, output] =>
+  | [kind, input, output] =>
           let bytes ← if kind == "application-route-admission-attestation" ||
               kind == "application-stream-continuity-attestation" ||
               kind == "fn-inbox-resource" ||
@@ -6556,7 +7082,12 @@ def run (arguments : List String) : IO UInt32 := do
             IO.FS.writeFile output serialized
           else writeJson output value
           pure 0
-      | "inspect-agent-lifetime-paid-ingress", [planPath, ingressPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `inspect-agent-lifetime-paid-ingress` (dispatched by `run`). -/
+def runCommandInspectAgentLifetimePaidIngress (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, ingressPath, output] =>
           let plan ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let ingress ← readBoundedBytes ingressPath FnEvidenceCodec.maxHostFrameBytes
           let view ← IO.ofExcept
@@ -6566,7 +7097,13 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "paid ingress inspection exceeds JSON budget")
           IO.FS.writeFile output serialized
           pure 0
-      | "inspect-accepted-agent-lifetime-grant", [ingressPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `inspect-accepted-agent-lifetime-grant` (dispatched by `run`). -/
+def runCommandInspectAcceptedAgentLifetimeGrant (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [ingressPath, output] =>
           let ingress ← readBoundedBytes ingressPath FnEvidenceCodec.maxHostFrameBytes
           let view ← IO.ofExcept (←
             Minidregg.Host.ApplicationAgentLifetimeGrantInspection.inspectAcceptedCurrent
@@ -6576,7 +7113,13 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "accepted grant inspection exceeds JSON budget")
           IO.FS.writeFile output serialized
           pure 0
-      | "inspect-stop-claim", [planPath, committedPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `inspect-stop-claim` (dispatched by `run`). -/
+def runCommandInspectStopClaim (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [planPath, committedPath, output] =>
           let plan ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let committed ← readBoundedBytes committedPath FnEvidenceCodec.maxHostFrameBytes
           let view ← IO.ofExcept (← inspectStopClaimCurrent config plan committed)
@@ -6585,15 +7128,31 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "STOP claim inspection exceeds JSON budget")
           IO.FS.writeFile output serialized
           pure 0
-      | "derive", [kind, input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `derive` (dispatched by `run`). -/
+def runCommandDerive (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [kind, input, output] =>
           let value ← IO.ofExcept (Minidregg.Host.Json.derive kind (← readJson input))
           writeJson output value
           pure 0
-      | "signatures", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `signatures` (dispatched by `run`). -/
+def runCommandSignatures (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [input, output] =>
           let bytes ← IO.ofExcept (Minidregg.Host.Json.signatures (← readJson input))
           writeBytes output bytes
           pure 0
-      | "genesis", [input, imageOutput, configOutput] =>
+  | _ => throw (IO.userError usage)
+
+/-- `genesis` (dispatched by `run`). -/
+def runCommandGenesis (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, imageOutput, configOutput] =>
           let ⟨source, built⟩ ← IO.ofExcept <|
             (NativeHostGenesis.buildBytes config.profile (← readBytes input)).mapError (fun error => s!"{repr error}")
           unless source.deployment == config.deployment && source.federation == config.federation &&
@@ -6611,11 +7170,35 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes imageOutput genesis
           IO.FS.writeFile configOutput (toJson pinned).pretty
           pure 0
-      | "describe", [] => IO.println (← description config).pretty; pure 0
-      -- The fn archive (FN-DIRECT): posts through the control socket only; the
-      -- fn-facing helpers are this file's, injected so their text decoding stays
-      -- in one place for the M5 decoders to replace.
-      | "fn-archive", pinPath :: archiveArgs =>
+  | _ => throw (IO.userError usage)
+
+/-- `describe` (dispatched by `run`). -/
+def runCommandDescribe (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] => IO.println (← description config).pretty; pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `checkpoint` (dispatched by `run`). -/
+def runCommandCheckpoint (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
+          -- A checkpoint at the head (HOT-PATH §2(h) item 6): a Store restored from it opens with
+          -- nothing to fast-forward.
+          match ← DurableReceiverIO.sealHead config.transport ResourceBirthCodec.rootBytes with
+          | .ok height => IO.println s!"checkpoint sealed at height {height}"; pure 0
+          | .error message => (← IO.getStderr).putStrLn message; pure 1
+  | _ => throw (IO.userError usage)
+
+/-- `fn-archive` (dispatched by `run`). -/
+def runCommandFnArchive (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  -- The fn archive (FN-DIRECT): posts through the control socket only; the
+  -- fn-facing helpers are this file's, injected so their text decoding stays
+  -- in one place for the M5 decoders to replace.
+  | pinPath :: archiveArgs =>
           let pin : FnPortablePin ← IO.ofExcept (fromJson? (← readJson pinPath))
           let ops : FnArchivePublisher.Ops :=
             { runFn := fun args => runFnLocal pin.executable (#["--fn"] ++ args) 4096
@@ -6630,10 +7213,49 @@ def run (arguments : List String) : IO UInt32 := do
                 let (_, verified) ← verifyFnCarrierUnclaimed pin carrierPath
                 pure verified.source }
           FnArchivePublisher.run config ops archiveArgs
-      | "codec", [] =>
+  | _ => throw (IO.userError usage)
+
+/-- `codec` (dispatched by `run`). -/
+def runCommandCodec (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
           serveCodec config (← IO.ofExcept settings.providerRoutes) (← IO.getStdin) (← IO.getStdout)
           pure 0
-      | "stdio", [] =>
+  | _ => throw (IO.userError usage)
+
+/-- The detached `author`, `inspect` and `signatures` verbs as in-session calls (operations 195-197).
+The bytes cross the socket, never paths: the input goes to a private temporary file, the very
+verb the command line runs (`runCommandAuthor`, `runCommandInspect`, `runCommandSignatures`) reads
+it and writes a second temporary file, and that file's bytes are the answer. The first byte of the
+answer says how it went: 0 the output follows, 1 the verb refused and its message follows, 2 the
+output does not fit one frame (the caller runs the detached verb, whose output file has no frame
+bound). A verb that throws is answered, never propagated, so the session goes on. -/
+def runToolSession (settings : Settings) (command : String) (kind : Option String)
+    (input : List UInt8) : IO (List UInt8) :=
+  IO.FS.withTempFile fun _ inPath => IO.FS.withTempFile fun _ outPath => do
+    writeBytes inPath.toString input
+    let rest := kind.toList ++ [inPath.toString, outPath.toString]
+    let outcome : Except String UInt32 ← try
+        let code ← match command with
+          | "author" => runCommandAuthor [] "" command rest settings
+          | "inspect" => runCommandInspect [] "" command rest settings
+          | _ => runCommandSignatures [] "" command rest settings
+        pure (Except.ok code)
+      catch error => pure (Except.error (toString error))
+    match outcome with
+    | .error message => return 1 :: (message.take 4096).toString.toUTF8.toList
+    | .ok 0 =>
+        let output ← readBytes outPath.toString
+        if output.length + 2 > FnEvidenceCodec.maxHostFrameBytes then return [2]
+        else return 0 :: output
+    | .ok code => return 1 :: s!"{command} exited {code}".toUTF8.toList
+
+/-- `stdio` (dispatched by `run`). -/
+def runCommandStdio (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
           withPinnedSignature config fun pinnedConfig => do
             withFnPollService settings fun service => do
               withFnReplyPollService settings fun replyService => do
@@ -6724,9 +7346,8 @@ def run (arguments : List String) : IO UInt32 := do
                                 "retained historical request refused")
                         | 19 =>
                             let services ← IO.ofExcept settings.providerServicePins
-                            let legacy ← IO.ofExcept settings.providerMeteringPin
                             let quoted : Except String Lean.Json :=
-                              match legacy.toList ++ services with
+                              match services with
                               | [] => .error "provider metering is not configured"
                               | pins => ProviderUsage.quotePayload pins payload
                             match quoted with
@@ -6734,6 +7355,12 @@ def run (arguments : List String) : IO UInt32 := do
                                 return ((19 : UInt8), report.compress.toUTF8.toList)
                             | .error reason =>
                                 return ((255 : UInt8), failure .operationRejected "provider-metering" reason)
+                        | 195 | 196 =>
+                            let (kind, source) ← splitKind payload
+                            return (operation, ← runToolSession settings
+                              (if operation == 195 then "author" else "inspect") (some kind) source)
+                        | 197 =>
+                            return (operation, ← runToolSession settings "signatures" none payload)
                         | 28 =>
                             let outcome ← applicationShareIssueSubmitSession
                               pinnedConfig state payload
@@ -6770,8 +7397,8 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((85 : UInt8), outcomeCodec.encode outcome)
                         | 88 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.enrollmentSubmitLoaded
-                              pinnedConfig opened payload
+                            let outcome ← NativeHost.enrollmentSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
                             return ((88 : UInt8), outcomeCodec.encode outcome)
                         | 89 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -6780,8 +7407,8 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((89 : UInt8), outcomeCodec.encode outcome)
                         | 94 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.provisionSubmitLoaded
-                              pinnedConfig opened payload
+                            let outcome ← NativeHost.provisionSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
                             return ((94 : UInt8), outcomeCodec.encode outcome)
                         | 95 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -6904,16 +7531,77 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((104 : UInt8), ingress)
                         | 105 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.paySubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.paySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A pay submission is blind: its refusal (including the
                             -- receiver's pre-signature notOwner/bookExhausted/...) is
-                            -- the uniform `undisclosed` frame (MR's rule).
+                            -- the uniform `undisclosed` frame (MR's rule); the
+                            -- operator's log keeps the reason.
+                            NativeHost.logOperatorRefusal outcome
                             return ((105 : UInt8),
                               outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 106 =>
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 240 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.platformPlanLoaded pinnedConfig opened payload)
+                            let bytes := PlatformCellDomain.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "platform plan exceeds host frame bound")
+                            return ((240 : UInt8), bytes)
+                        | 241 =>
+                            -- plan, then the controller's signature, then the custodian's
+                            -- cosignature (empty when the key does not rotate).
+                            let (planBytes, signed) ← splitPair payload
+                            let (signature, cosign) ← splitPair signed
+                            let some plan := PlatformCellDomain.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical platform plan")
+                            let ingress ← IO.ofExcept (NativeHost.platformAssemble plan signature
+                              (if cosign.isEmpty then none else some cosign))
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "platform ingress exceeds host frame bound")
+                            return ((241 : UInt8), ingress)
+                        | 242 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.platformSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
+                            -- Blind, as the pay submission (105): the operator's log keeps the reason.
+                            NativeHost.logOperatorRefusal outcome
+                            return ((242 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
+                        | 243 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.platformLookupLoaded pinnedConfig opened payload
+                            return ((243 : UInt8), outcomeCodec.encode outcome)
+                        | 244 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.meterRefillPlanLoaded pinnedConfig opened payload)
+                            let bytes := PlatformCellDomain.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "meter refill plan exceeds host frame bound")
+                            return ((244 : UInt8), bytes)
+                        | 245 =>
+                            -- plan, then the controller's signature
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := PlatformCellDomain.signingPlanCodec.decode planBytes
+                              | throw (RequestRefusal.malformed "noncanonical meter refill plan")
+                            let ingress ← IO.ofExcept (NativeHost.meterRefillAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "meter refill ingress exceeds host frame bound")
+                            return ((245 : UInt8), ingress)
+                        | 246 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.meterRefillSubmitLoaded pinnedConfig
+                              (sessionConfirmed pinnedConfig state) opened payload
+                            -- Blind, as the platform install (242): the operator's log keeps the reason.
+                            NativeHost.logOperatorRefusal outcome
+                            return ((246 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
+                        | 247 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.meterRefillLookupLoaded pinnedConfig opened payload
+                            return ((247 : UInt8), outcomeCodec.encode outcome)
                         | 193 =>
                             let (planBytes, signatureBytes) ← splitPair payload
                             let signatures ← decodeSignatures signatureBytes
@@ -6975,6 +7663,9 @@ def run (arguments : List String) : IO UInt32 := do
                                   | none => pure (.uncertain "key commitment suffix receipt unavailable".toUTF8.toList)
                               | other => pure other
                             else pure outcome
+                            -- Blind: the submitter gets the uniform frame; the operator's log
+                            -- keeps the adoption's reason.
+                            if operation == 189 then NativeHost.logOperatorRefusal outcome
                             return (operation, outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 140 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -6996,7 +7687,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((141 : UInt8), ingress)
                         | 142 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.receivingSubmitLoaded pinnedConfig opened
+                            let outcome ← NativeHost.receivingSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened
                               SubjectKeyRotation.family (NativeHostReplay.rotationEnv pinnedConfig)
                               "rotate-key" payload
                             return ((142 : UInt8), outcomeCodec.encode outcome)
@@ -7036,7 +7727,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((124 : UInt8), ingress)
                         | 125 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.wellSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.wellSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- Blind like every submission (MR): the submitter gets
                             -- the uniform refusal, the operator log the reason.
                             NativeHost.logOperatorRefusal outcome
@@ -7061,7 +7752,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((127 : UInt8), ingress)
                         | 128 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.clockSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.clockSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((128 : UInt8), outcomeCodec.encode outcome)
                         | 129 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7085,7 +7776,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((109 : UInt8), ingress)
                         | 110 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payObservationSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payObservationSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((110 : UInt8), outcomeCodec.encode outcome)
                         | 111 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7139,7 +7830,7 @@ def run (arguments : List String) : IO UInt32 := do
                             unless payload.length ≤ 4096 do
                               throw (IO.userError "claim ingress exceeds bound")
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payClaimSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payClaimSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((185 : UInt8), outcomeCodec.encode outcome)
                         | 186 =>
                             unless payload.length ≤ 4096 do
@@ -7164,7 +7855,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((118 : UInt8), ingress)
                         | 119 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payEnrolSubmitCurrentLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payEnrolSubmitCurrentLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((119 : UInt8), outcomeCodec.encode outcome)
                         | 120 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7188,7 +7879,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((161 : UInt8), ingress)
                         | 162 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.jobMoneySubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.jobMoneySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A blind submission like op 115: a refusal is the uniform
                             -- `undisclosed` frame (MR's rule).
                             return ((162 : UInt8),
@@ -7215,7 +7906,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((114 : UInt8), ingress)
                         | 115 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.payRefillSubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.payRefillSubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             -- A refill is a friend's blind submission, like op 105: its
                             -- refusal (notOwner, bookRefused, ...) is the uniform
                             -- `undisclosed` frame (MR's rule).
@@ -7242,7 +7933,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((171 : UInt8), ingress)
                         | 172 =>
                             let opened ← sessionOpened pinnedConfig state
-                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig opened payload
+                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig (sessionConfirmed pinnedConfig state) opened payload
                             return ((172 : UInt8), outcomeCodec.encode outcome)
                         | 173 =>
                             let opened ← sessionOpened pinnedConfig state
@@ -7429,7 +8120,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let json ← IO.ofExcept (Minidregg.Host.Json.parse source)
                             let intent ← IO.ofExcept (←
                               Minidregg.Host.CurrentResourceBirthAuthoring.intentLoadedAuthorized
-                                pinnedConfig opened signedObservationBytes json)
+                                pinnedConfig opened signedObservationBytes json
+                                (← IO.ofExcept settings.providerRoutes))
                             unless intent.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth intent exceeds host frame bound")
                             return ((91 : UInt8), intent)
@@ -7567,7 +8259,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical resident BEGIN plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleBeginOperator.assemble pinnedConfig.expectedSeed plan signatures
+                              ApplicationLifecycleBeginOperator.assemble pinnedConfig.storeIdentity plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resident BEGIN ingress exceeds host frame bound")
                             return ((51 : UInt8), ingress)
@@ -7592,7 +8284,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (RequestRefusal.malformed "noncanonical lifecycle claim plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
-                              ApplicationLifecycleClaimOperator.assemble pinnedConfig.expectedSeed plan signatures
+                              ApplicationLifecycleClaimOperator.assemble pinnedConfig.storeIdentity plan signatures
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
@@ -7765,12 +8457,15 @@ def run (arguments : List String) : IO UInt32 := do
                               custody operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error =>
+                        -- The same discipline as `serveFrame` (`RequestRefusal.exceptionAnswer`):
+                        -- NO_RECORD for a grammar verdict or an append-free operation, the
+                        -- undecided envelope for anything thrown on an append operation. The
+                        -- two read-only history operations keep their uniform wording.
                         if operation == 151 || operation == 153 then
-                          return ((255 : UInt8), failure .operationRejected "carried-history"
-                            "retained historical request refused")
-                        else return ((255 : UInt8), failure .operationRejected "fn-session" s!"{error}")
+                          return (HostOperations.noRecordMarker, failure .operationRejected
+                            "carried-history" "retained historical request refused")
+                        else return (RequestRefusal.exceptionAnswer operation error)
                   let meteringProfile := profileDescription pinnedConfig
-                    (← IO.ofExcept settings.providerMeteringPin)
                     (← IO.ofExcept settings.providerServicePins)
                   let applicationDispatch := fun routeBound payload output =>
                     if settings.carryRegistry.isSome then
@@ -7778,28 +8473,64 @@ def run (arguments : List String) : IO UInt32 := do
                     else dispatchApplicationSubmitSession pinnedConfig state payload output routeBound
                   serveSession pinnedConfig state meteringProfile
                     (← IO.ofExcept settings.providerRoutes) fnDispatch applicationDispatch
-                    (← IO.getStdin) (← IO.getStdout)
+                    (← settings.rateGate) (← IO.getStdin) (← IO.getStdout)
           pure 0
-      | "bootstrap", [path] =>
+  | _ => throw (IO.userError usage)
+
+/-- `bootstrap` (dispatched by `run`). -/
+def runCommandBootstrap (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
           pure 0
-      | "store-bench", [] =>
+  | _ => throw (IO.userError usage)
+
+/-- `store-bench` (dispatched by `run`). -/
+def runCommandStoreBench (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
           storeBench config
           pure 0
-      | "well-ledger", [output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `well-ledger` (dispatched by `run`). -/
+def runCommandWellLedger (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [output] =>
           let ledger ← IO.ofExcept (← NativeHost.wellLedger config)
           writeJson output (Minidregg.Host.Json.wellLedgerJson ledger)
           pure 0
-      | "pay-ledger", [output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pay-ledger` (dispatched by `run`). -/
+def runCommandPayLedger (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [output] =>
           let ledger ← IO.ofExcept (← NativeHost.payLedger config)
           writeJson output (Minidregg.Host.Json.payLedgerJson ledger)
           pure 0
-      | "pay-enrol-ids", [miniKey, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pay-enrol-ids` (dispatched by `run`). -/
+def runCommandPayEnrolIds (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [miniKey, output] =>
           -- PAY P3b-2: the identities a self-enrollment derives from a Mini key.
           writeJson output
             (← IO.ofExcept (Minidregg.Host.Json.payEnrolIdsJson config.deployment.domain miniKey))
           pure 0
-      | "pay-enrol-probe", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pay-enrol-probe` (dispatched by `run`). -/
+def runCommandPayEnrolProbe (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           -- PAY P3b: the whole self-enrollment decision on a JSON-described
           -- pay cell, with both memo signatures checked by the pinned native
           -- verifier (Ed25519 mini-sig, SSHSIG ssh-sig). Reads no Store.
@@ -7820,27 +8551,56 @@ def run (arguments : List String) : IO UInt32 := do
               probe.observation (verified.getD ⟨false, false⟩) probe.subjectTaken
             writeJson output (Minidregg.Host.Json.payEnrolDecisionJson verified decision)
             pure 0
-      | "pay-job", [job, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pay-job` (dispatched by `run`). -/
+def runCommandPayJob (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [job, output] =>
           let some job := job.toNat? | throw (IO.userError "pay-job: JOB must be a natural")
           let view ← IO.ofExcept (← NativeHost.payJob config job)
           writeJson output (Minidregg.Host.Json.payJobJson view)
           pure 0
-      | "job-money-explain", [command] =>
+  | _ => throw (IO.userError usage)
+
+/-- `job-money-explain` (dispatched by `run`). -/
+def runCommandJobMoneyExplain (_arguments : List String) (_configPath command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [command] =>
           -- The operator's local reading of a job-money command: the receiver's own
           -- preparation on the Store as it is, its refusal named (public submissions stay blind).
           let bytes ← IO.FS.readBinFile command
           IO.println (← IO.ofExcept (← NativeHost.jobMoneyExplain config bytes.toList))
           pure 0
-      | "pay-purse", [task, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pay-purse` (dispatched by `run`). -/
+def runCommandPayPurse (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [task, output] =>
           let some task := task.toNat? | throw (IO.userError "pay-purse: TASK must be a natural")
           let purse ← IO.ofExcept (← NativeHost.payPurse config task)
           writeJson output (Minidregg.Host.Json.payPurseJson purse)
           pure 0
-      | "object-roster-inspect", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `object-roster-inspect` (dispatched by `run`). -/
+def runCommandObjectRosterInspect (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [input, output] =>
           let bytes ← readBoundedBytes input maxFrame
           writeJson output (← IO.ofExcept (objectRosterJson bytes))
           pure 0
-      | "object-audience-roster", [sourceObservation, catalogObservation, plannedPath, rosterPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `object-audience-roster` (dispatched by `run`). -/
+def runCommandObjectAudienceRoster (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [sourceObservation, catalogObservation, plannedPath, rosterPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let planned ← IO.ofExcept (Minidregg.Host.Json.audienceState "$" (← readJson plannedPath))
             let rosterBytes ← readBoundedBytes rosterPath maxFrame
@@ -7852,7 +8612,13 @@ def run (arguments : List String) : IO UInt32 := do
               (← readBoundedBytes catalogObservation maxFrame) rosterBytes planned)
             writeJson output (checkedObjectRosterJson audience roster rosterBytes)
             pure 0
-      | "object-audience", [observationPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `object-audience` (dispatched by `run`). -/
+def runCommandObjectAudience (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [observationPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -7864,13 +8630,24 @@ def run (arguments : List String) : IO UInt32 := do
               | .error reason => throw (IO.userError s!"object audience observation refused: {repr reason}")
             writeJson output (objectAudienceJson view)
             pure 0
-      | "audit", options =>
+  | _ => throw (IO.userError usage)
+
+/-- `audit` (dispatched by `run`). -/
+def runCommandAudit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | options =>
           match auditOptions options with
           | none => throw (IO.userError "usage: audit [--receipts FILE]")
           | some receiptsOut =>
               withPinnedSignature config fun pinnedConfig =>
                 auditBody settings pinnedConfig receiptsOut
-      | "store-audit", options =>
+
+/-- `store-audit` (dispatched by `run`). -/
+def runCommandStoreAudit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | options =>
           -- The Store re-derived from genesis (`Compiler.DurableStoreAudit`), then
           -- exactly the `audit` body: every signed ingress re-admitted at its
           -- original prefix. A failure of the first is the verdict; the second
@@ -7888,7 +8665,12 @@ def run (arguments : List String) : IO UInt32 := do
                 | .ok report =>
                     IO.println report.line
                     auditBody settings pinnedConfig receiptsOut
-      | "checkpoint-differential", [height] =>
+
+/-- `checkpoint-differential` (dispatched by `run`). -/
+def runCommandCheckpointDifferential (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [height] =>
           let some h := height.toNat? | throw (IO.userError "checkpoint-differential: HEIGHT must be decimal")
           let (cached, full, stored) ← IO.ofExcept
             (← DurableReceiverIO.checkpointDifferential config.transport ResourceBirthCodec.rootBytes h)
@@ -7897,12 +8679,35 @@ def run (arguments : List String) : IO UInt32 := do
             | some bytes => if bytes == cached then "stored checkpoint equal" else "stored checkpoint DIFFERS"
           IO.println s!"height {h}: cached seal {cached.length} bytes; full seal equal: {cached == full}; {storedVerdict}"
           pure (if cached == full && stored.all (· == cached) then 0 else 1)
-      | "presence-index", [] =>
+  | _ => throw (IO.userError usage)
+
+/-- `link-index` (dispatched by `run`). -/
+def runCommandLinkIndex (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
+          let (base, height, links) ← IO.ofExcept (← NativeHost.linkIndex config)
+          IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
+          IO.println s!"links {(linkIndexJson links).compress}"
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `presence-index` (dispatched by `run`). -/
+def runCommandPresenceIndex (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [] =>
           let (base, height, index) ← IO.ofExcept (← NativeHost.presenceIndex config)
           IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
           IO.println s!"index {(presenceIndexJson index).compress}"
           pure 0
-      | "reserve-birth-plan", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `reserve-birth-plan` (dispatched by `run`). -/
+def runCommandReserveBirthPlan (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let request ← readBoundedBytes input maxFrame
             let opened ← IO.ofExcept (← NativeHost.openExisting pinnedConfig)
@@ -7911,14 +8716,25 @@ def run (arguments : List String) : IO UInt32 := do
               throw (IO.userError "reserve birth plan exceeds host frame bound")
             writeBytes output plan
             pure 0
-      | "reserve-birth-assemble", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `reserve-birth-assemble` (dispatched by `run`). -/
+def runCommandReserveBirthAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [input, output] =>
           let request ← readBoundedBytes input maxFrame
           let call ← IO.ofExcept (NativeHostReserveBirth.assembleWire request)
           unless call.length ≤ maxFrame do
             throw (IO.userError "reserve birth call exceeds host frame bound")
           writeBytes output call
           pure 0
-      | "plan-ungated", ["--test-harness", input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `plan-ungated` (dispatched by `run`). -/
+def runCommandPlanUngated (_arguments : List String) (_configPath command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | ["--test-harness", input, output] =>
           -- Operator-local test tooling: plan the invoke draft of a client intent (`intent.bin`)
           -- against the Store as it is NOW (each target's expected root re-read from its current
           -- cell), WITHOUT the served path's observation and law gates (`NativeHost.prepareLoaded`,
@@ -7944,11 +8760,38 @@ def run (arguments : List String) : IO UInt32 := do
           let plan ← IO.ofExcept (NativeHost.prepareLoaded config opened draft)
           writeBytes output (signingPlanCodec.encode plan)
           pure 0
-      | "prepare", [input, output] =>
-          let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
-          writeBytes output (signingPlanCodec.encode plan)
-          pure 0
-      | "enroll-key-plan", [observationPath, commandPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `prepare` (dispatched by `run`). -/
+def runCommandPrepare (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
+          match ← NativeHost.prepare config (← readBytes input) with
+          | .ok plan =>
+              writeBytes output (signingPlanCodec.encode plan)
+              pure 0
+          | .error refusal =>
+              -- A decided refusal, never an uncertain exit 1: the frame the session writes
+              -- for it (its marker, NO_RECORD for a refusal, then the encoded outcome) on
+              -- stdout, its decoding on stderr, exit 3. The client handles it as the socket
+              -- route does (named refusal, retained frame for `why`).
+              let frame := refusalFrame "prepare" refusal
+              let marker := RequestRefusal.returnedMarker HostOperations.hostOutcomeMarker frame
+              let stdout ← IO.getStdout
+              stdout.write (ByteArray.mk #[marker] ++ frame.toByteArray)
+              stdout.flush
+              match Json.inspect "outcome" frame with
+              | .ok decoded => (← IO.getStderr).putStrLn decoded.compress
+              | .error _ => (← IO.getStderr).putStrLn s!"minidregg-host: {refusal}"
+              pure 3
+  | _ => throw (IO.userError usage)
+
+/-- `enroll-key-plan` (dispatched by `run`). -/
+def runCommandEnrollKeyPlan (_arguments : List String) (_configPath command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [observationPath, commandPath, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let observation ← readBoundedBytes observationPath maxFrame
             let command ← readBoundedBytes commandPath maxFrame
@@ -7959,7 +8802,12 @@ def run (arguments : List String) : IO UInt32 := do
               throw (IO.userError "participant enrollment plan exceeds host frame bound")
             writeBytes output bytes
             pure 0
-      | "enroll-key-assemble", [planPath, sponsorPath, possessionPath, nextPath, nextSignaturePath,
+  | _ => throw (IO.userError usage)
+
+/-- `enroll-key-assemble` (dispatched by `run`). -/
+def runCommandEnrollKeyAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, sponsorPath, possessionPath, nextPath, nextSignaturePath,
           output] =>
           let planBytes ← readBoundedBytes planPath maxFrame
           let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode planBytes
@@ -7974,19 +8822,37 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "participant enrollment ingress exceeds host frame bound")
           writeBytes output ingress
           pure 0
-      | "enroll-key-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `enroll-key-submit` (dispatched by `run`). -/
+def runCommandEnrollKeySubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let ingress ← readBoundedBytes input maxFrame
             writeBytes output (outcomeCodec.encode
               (← NativeHost.enrollmentSubmit pinnedConfig ingress))
             pure 0
-      | "enroll-key-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `enroll-key-lookup` (dispatched by `run`). -/
+def runCommandEnrollKeyLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let ingress ← readBoundedBytes input maxFrame
             writeBytes output (outcomeCodec.encode
               (← NativeHost.enrollmentLookup pinnedConfig ingress))
             pure 0
-      | "application-share-issue-plan", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-share-issue-plan` (dispatched by `run`). -/
+def runCommandApplicationShareIssuePlan (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
           let request ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           let plan ← IO.ofExcept <|
@@ -7996,7 +8862,12 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "share issue plan exceeds host frame bound")
           writeBytes output bytes
           pure 0
-      | "application-share-issue-assemble", [planPath, signaturesPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-share-issue-assemble` (dispatched by `run`). -/
+def runCommandApplicationShareIssueAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, signaturesPath, output] =>
           let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let some plan := ApplicationShareIssueAuthoring.planCodec.decode planBytes
             | throw (RequestRefusal.malformed "noncanonical share issue signing plan")
@@ -8008,7 +8879,13 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "share issue ingress exceeds host frame bound")
           writeBytes output ingress
           pure 0
-      | "application-grain-share-issue-plan", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-grain-share-issue-plan` (dispatched by `run`). -/
+def runCommandApplicationGrainShareIssuePlan (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
           let request ← readBoundedBytes input FnEvidenceCodec.maxHostFrameBytes
           let plan ← IO.ofExcept <|
@@ -8018,7 +8895,12 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "grain share issue plan exceeds host frame bound")
           writeBytes output bytes
           pure 0
-      | "application-grain-share-issue-assemble", [planPath, signaturesPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-grain-share-issue-assemble` (dispatched by `run`). -/
+def runCommandApplicationGrainShareIssueAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, signaturesPath, output] =>
           let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let some plan := ApplicationShareIssueGrainAuthoring.planCodec.decode planBytes
             | throw (RequestRefusal.malformed "noncanonical grain share issue signing plan")
@@ -8030,56 +8912,128 @@ def run (arguments : List String) : IO UInt32 := do
             throw (IO.userError "grain share issue ingress exceeds host frame bound")
           writeBytes output ingress
           pure 0
-      | "challenge-batch", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `challenge-batch` (dispatched by `run`). -/
+def runCommandChallengeBatch (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
           writeBytes output (← IO.ofExcept
             (← NativeHost.challengeBatchLoaded config opened (← readBoundedBytes input maxFrame)))
           pure 0
-      | "query-batch", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `query-batch` (dispatched by `run`). -/
+def runCommandQueryBatch (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
           writeBytes output (← IO.ofExcept
             (← NativeHost.queryBatchLoaded config opened (← readBoundedBytes input maxFrame)))
           pure 0
-      | "challenge", [input, signature, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `challenge` (dispatched by `run`). -/
+def runCommandChallenge (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, signature, output] =>
           let challenge ← IO.ofExcept
             (← NativeHost.challenge config (← readBytes input) (← readBytes signature))
           writeBytes output (NativeObservationCodec.challengeCodec.encode challenge)
           pure 0
-      | "observe-assemble", [challengePath, signaturesPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `observe-assemble` (dispatched by `run`). -/
+def runCommandObserveAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [challengePath, signaturesPath, output] =>
           let some challenge := NativeObservationCodec.challengeCodec.decode (← readBytes challengePath)
             | throw (RequestRefusal.malformed "noncanonical observation challenge")
-          let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+          let signaturesCodec := (StreamCodec.list bytesStream).toLawful
           let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
             | throw (RequestRefusal.malformed "noncanonical signature list")
           let signed ← IO.ofExcept (NativeObservationCodec.assemble challenge signatures)
           writeBytes output (NativeObservationCodec.signedCodec.encode signed)
           pure 0
-      | "query", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `query` (dispatched by `run`). -/
+def runCommandQuery (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           writeBytes output (← IO.ofExcept (← NativeHost.query config (← readBytes input)))
           pure 0
-      | "pin-plan-height", [planPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pin-plan-height` (dispatched by `run`). -/
+def runCommandPinPlanHeight (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, output] =>
           let some plan := signingPlanCodec.decode (← readBytes planPath)
             | throw (RequestRefusal.malformed "noncanonical signing plan")
           let pinned ← IO.ofExcept (NativePlanHeight.pin plan)
           writeBytes output (signingPlanCodec.encode pinned)
           pure 0
-      | "assemble", [planPath, signaturesPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `pin-enrollment-plan-height` (dispatched by `run`). -/
+def runCommandPinEnrollmentPlanHeight (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, heightText, output] =>
+          -- An enrollment plan (op 86) carries no height of its own: the signer pins its
+          -- sponsor deadline to the one a plan authored at its observation's height carries
+          -- (`NativePlanHeight.pinHeaderAt`: that height plus the validity window), the pin
+          -- local consent applies to its own re-derivation (`NativeSpecializedConsent`).
+          let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode (← readBytes planPath)
+            | throw (RequestRefusal.malformed "noncanonical enrollment signing plan")
+          let height ← IO.ofExcept (exactDecimal "pin height" heightText)
+          let pinned ← IO.ofExcept (NativePlanHeight.pinEnrollment height plan)
+          writeBytes output (ParticipantKeyEnrollment.signingPlanCodec.encode pinned)
+          pure 0
+  | _ => throw (IO.userError usage)
+
+/-- `assemble` (dispatched by `run`). -/
+def runCommandAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, signaturesPath, output] =>
           let some plan := signingPlanCodec.decode (← readBytes planPath)
             | throw (RequestRefusal.malformed "noncanonical signing plan")
-          let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
+          let signaturesCodec := (StreamCodec.list bytesStream).toLawful
           let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
             | throw (RequestRefusal.malformed "noncanonical signature list")
           let call ← IO.ofExcept (NativeHost.assemble plan signatures)
           writeBytes output (callCodec.encode call)
           pure 0
-      | "submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `submit` (dispatched by `run`). -/
+def runCommandSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)))
           pure 0
-      | "law-sat", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `law-sat` (dispatched by `run`). -/
+def runCommandLawSat (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [input, output] =>
           let value ← IO.ofExcept (LawSatWire.lawSatReply (← readBytes input))
           writeBytes output value.compress.toUTF8.toList
           pure 0
-      | "dry-run", [observationPath, signaturesPath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `dry-run` (dispatched by `run`). -/
+def runCommandDryRun (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [observationPath, signaturesPath, output] =>
           let signatures ← decodeSignatures (← readBytes signaturesPath)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
           let light ← IO.ofExcept (← NativeHostLight.start config)
@@ -8091,10 +9045,22 @@ def run (arguments : List String) : IO UInt32 := do
               writeBytes output (outcomeCodec.encode outcome)
               IO.eprintln "dry run stopped; the outcome frame is in the output file"
               pure 3
-      | "lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `lookup` (dispatched by `run`). -/
+def runCommandLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.lookup config (← readBytes input)))
           pure 0
-      | "selected-release-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-submit` (dispatched by `run`). -/
+def runCommandSelectedReleaseSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8102,7 +9068,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← selectedReleaseSubmitSession pinnedConfig state ingress))
             pure 0
-      | "selected-release-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-lookup` (dispatched by `run`). -/
+def runCommandSelectedReleaseLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8110,7 +9082,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← selectedReleaseLookupSession pinnedConfig state ingress))
             pure 0
-      | "application-lifecycle-begin-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-lifecycle-begin-submit` (dispatched by `run`). -/
+def runCommandApplicationLifecycleBeginSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8118,7 +9096,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleBeginSubmitSession pinnedConfig state ingress))
             pure 0
-      | "application-lifecycle-begin-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-lifecycle-begin-lookup` (dispatched by `run`). -/
+def runCommandApplicationLifecycleBeginLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8126,7 +9110,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleBeginLookupSession pinnedConfig state ingress))
             pure 0
-      | "application-lifecycle-claim-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-lifecycle-claim-lookup` (dispatched by `run`). -/
+def runCommandApplicationLifecycleClaimLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8134,7 +9124,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleClaimLookupSession pinnedConfig state ingress))
             pure 0
-      | "application-lifecycle-completion-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-lifecycle-completion-submit` (dispatched by `run`). -/
+def runCommandApplicationLifecycleCompletionSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8142,7 +9138,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleCompletionSubmitSession pinnedConfig state ingress))
             pure 0
-      | "application-lifecycle-completion-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-lifecycle-completion-lookup` (dispatched by `run`). -/
+def runCommandApplicationLifecycleCompletionLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8150,7 +9152,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationLifecycleCompletionLookupSession pinnedConfig state ingress))
             pure 0
-      | "diagnose-completion", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `diagnose-completion` (dispatched by `run`). -/
+def runCommandDiagnoseCompletion (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           -- Operator-local admission diagnosis only. This does not derive an
           -- intent, send a CAS, or return a receipt or physical permit.
           withPinnedSignature config fun pinnedConfig => do
@@ -8170,7 +9178,13 @@ def run (arguments : List String) : IO UInt32 := do
                ("detail", toJson detail),
                ("acceptedCount", toJson (toString session.verified.opened.durable.height))])
             pure 0
-      | "selected-source-publication-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-source-publication-submit` (dispatched by `run`). -/
+def runCommandSelectedSourcePublicationSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8178,7 +9192,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← selectedSourcePublicationSubmitSession pinnedConfig state ingress))
             pure 0
-      | "selected-source-publication-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-source-publication-lookup` (dispatched by `run`). -/
+def runCommandSelectedSourcePublicationLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8186,7 +9206,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← selectedSourcePublicationLookupSession pinnedConfig state ingress))
             pure 0
-      | "application-share-issue-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-share-issue-submit` (dispatched by `run`). -/
+def runCommandApplicationShareIssueSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8194,7 +9220,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationShareIssueSubmitSession pinnedConfig state ingress))
             pure 0
-      | "application-share-issue-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-share-issue-lookup` (dispatched by `run`). -/
+def runCommandApplicationShareIssueLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8202,7 +9234,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationShareIssueLookupSession pinnedConfig state ingress))
             pure 0
-      | "application-grain-share-issue-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-grain-share-issue-submit` (dispatched by `run`). -/
+def runCommandApplicationGrainShareIssueSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8210,7 +9248,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationGrainShareIssueSubmitSession pinnedConfig state ingress))
             pure 0
-      | "application-grain-share-issue-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `application-grain-share-issue-lookup` (dispatched by `run`). -/
+def runCommandApplicationGrainShareIssueLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8218,7 +9262,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← applicationGrainShareIssueLookupSession pinnedConfig state ingress))
             pure 0
-      | "selected-release-source-plan", [packetPath, capabilityText, specPath,
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-source-plan` (dispatched by `run`). -/
+def runCommandSelectedReleaseSourcePlan (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [packetPath, capabilityText, specPath,
           headerPath, rootPath] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
@@ -8230,25 +9280,46 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes headerPath plan.headerBytes
             IO.FS.writeFile rootPath (toString plan.sourceRoot.value ++ "\n")
             pure 0
-      | "selected-release-source-assemble", [specPath, headerPath, signaturePath, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-source-assemble` (dispatched by `run`). -/
+def runCommandSelectedReleaseSourceAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [specPath, headerPath, signaturePath, output] =>
           let spec ← readBoundedBytes specPath maxFrame
           let header ← readBoundedBytes headerPath maxFrame
           let signature ← readBoundedBytes signaturePath 64
           let ingress ← IO.ofExcept (FnSelectiveReleaseSourceAuthoring.assemble spec header signature)
           writeBytes output ingress
           pure 0
-      | "selected-release-source-check", [ingressPath, articlePath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-source-check` (dispatched by `run`). -/
+def runCommandSelectedReleaseSourceCheck (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [ingressPath, articlePath] =>
           let ingress ← readBoundedBytes ingressPath maxFrame
           let article ← readBoundedBytes articlePath FnEvidenceCodec.maxSourceBytes
           IO.ofExcept (FnSelectiveReleaseSourceAuthoring.checkIngressArticle ingress article)
           pure 0
-      | "selected-release-check-preimage", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-check-preimage` (dispatched by `run`). -/
+def runCommandSelectedReleaseCheckPreimage (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [input, output] =>
           let preimage ← readBoundedBytes input (FnEvidenceCodec.maxCarrierBytes + 4096)
           let release ← IO.ofExcept (FnSelectiveReleaseAuthoring.checkPreimage preimage)
           writeBytes output (FnSelectiveRelease.signedPreimage release)
           pure 0
-      -- Selection-only: this emits a candidate preimage, not publication authority.
-      | "selected-release-prepare", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-prepare` (dispatched by `run`). -/
+def runCommandSelectedReleasePrepare (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  -- Selection-only: this emits a candidate preimage, not publication authority.
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let sourceBytes ← readBoundedBytes input maxFrame
@@ -8258,7 +9329,12 @@ def run (arguments : List String) : IO UInt32 := do
               (← FnSelectiveReleaseAuthoring.prepareJsonLoaded pinnedConfig session.opened source)
             writeBytes output selected.preimage
             pure 0
-      | "selected-release-assemble", [preimagePath, signaturePath, fromMailbox, date,
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-assemble` (dispatched by `run`). -/
+def runCommandSelectedReleaseAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [preimagePath, signaturePath, fromMailbox, date,
           subject, packetPath, articlePath] =>
           let preimage ← readBoundedBytes preimagePath (FnEvidenceCodec.maxCarrierBytes + 4096)
           let signature ← readBoundedBytes signaturePath 64
@@ -8267,7 +9343,12 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes packetPath packet
           writeBytes articlePath article
           pure 0
-      | "selected-release-ingress", [packetPath, capabilityText,
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-ingress` (dispatched by `run`). -/
+def runCommandSelectedReleaseIngress (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [packetPath, capabilityText,
           targetText, output] =>
           let packet ← readBoundedBytes packetPath maxFrame
           let capability ← IO.ofExcept (exactDecimal "capability" capabilityText)
@@ -8276,39 +9357,62 @@ def run (arguments : List String) : IO UInt32 := do
             (FnSelectiveReleaseAuthoring.assembleIngress packet ⟨capability⟩ ⟨target⟩)
           writeBytes output ingress
           pure 0
-      | "selected-release-fn-poll",
-          [fnBinary, scopePath, controlPath, capabilityText,
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-fn-poll` (dispatched by `run`). -/
+def runCommandSelectedReleaseFnPoll (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [fnBinary, scopePath, controlPath, capabilityText,
            targetText, cursorPath, reportPath, sourcePath, packetPath,
            ingressPath, resultPath] =>
           selectedReleaseFnPoll fnBinary scopePath controlPath capabilityText
             targetText cursorPath reportPath sourcePath packetPath
             ingressPath resultPath
           pure 0
-      | "selected-release-fn-legacy-poll",
-          [fnBinary, scopePath, controlPath, expectedArticlePath,
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-fn-legacy-poll` (dispatched by `run`). -/
+def runCommandSelectedReleaseFnLegacyPoll (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [fnBinary, scopePath, controlPath, expectedArticlePath,
            capabilityText, targetText, cursorPath, reportPath,
            storedPath, packetPath, ingressPath, resultPath] =>
           selectedReleaseFnLegacyPoll fnBinary scopePath controlPath
             expectedArticlePath capabilityText targetText
             cursorPath reportPath storedPath packetPath ingressPath resultPath
           pure 0
-      | "selected-release-fn-ack",
-          [cursorPath, reportPath, transaction, coveragePath, resultPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `selected-release-fn-ack` (dispatched by `run`). -/
+def runCommandSelectedReleaseFnAck (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [cursorPath, reportPath, transaction, coveragePath, resultPath] =>
           withPinnedSignature config fun pinnedConfig =>
             withFnPollService settings fun selected => do
               let some service := selected
                 | throw (IO.userError "selected-release fn service is not configured")
               selectedReleaseFnAck pinnedConfig service cursorPath reportPath
                 transaction coveragePath resultPath
-      | "fn-empty-page-ack",
-          [cursorPath, reportPath, coveragePath, resultPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-empty-page-ack` (dispatched by `run`). -/
+def runCommandFnEmptyPageAck (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [cursorPath, reportPath, coveragePath, resultPath] =>
           withPinnedSignature config fun pinnedConfig =>
             withFnPollService settings fun selected => do
               let some service := selected
                 | throw (IO.userError "empty fn service is not configured")
               selectedEmptyFnAck pinnedConfig service cursorPath reportPath
                 coveragePath resultPath
-      | "fn-frontier-request", [kind, transaction, outputPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-frontier-request` (dispatched by `run`). -/
+def runCommandFnFrontierRequest (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [kind, transaction, outputPath] =>
           let releaseKey ← if kind == "selected" then do
               let id ← IO.ofExcept (exactDecimal "selected Mini transaction" transaction)
               pure (some (⟨id⟩ : Minidregg.Theory.TypedAuthorization.Digest))
@@ -8317,7 +9421,12 @@ def run (arguments : List String) : IO UInt32 := do
           selectedFnNewPaths [outputPath]
           writeBytes outputPath (fnFrontierPlanRequestCodec.encode releaseKey)
           pure 0
-      | "fn-frontier-export", [planPath, cursorPath, reportPath, sourcePath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-frontier-export` (dispatched by `run`). -/
+def runCommandFnFrontierExport (_arguments : List String) (_configPath _command : String) (rest : List String) (_settings : Settings) : IO UInt32 := do
+  match rest with
+  | [planPath, cursorPath, reportPath, sourcePath] =>
           selectedFnNewPaths [cursorPath, reportPath, sourcePath]
           let bytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let some plan := FnConsumerFrontierPlan.planCodec.decode bytes
@@ -8327,8 +9436,13 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes reportPath plan.reportBytes
           writeBytes sourcePath plan.sourceBytes
           pure 0
-      | "fn-frontier-plan",
-          [kind, transaction, planPath, cursorPath, reportPath, sourcePath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-frontier-plan` (dispatched by `run`). -/
+def runCommandFnFrontierPlan (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [kind, transaction, planPath, cursorPath, reportPath, sourcePath] =>
           withPinnedSignature config fun pinnedConfig =>
             withFnPollService settings fun selected => do
               let some service := selected
@@ -8347,7 +9461,13 @@ def run (arguments : List String) : IO UInt32 := do
               writeBytes reportPath plan.reportBytes
               writeBytes sourcePath plan.sourceBytes
               pure 0
-      | "fn-frontier-assemble", [planPath, signaturePath, outputPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-frontier-assemble` (dispatched by `run`). -/
+def runCommandFnFrontierAssemble (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [planPath, signaturePath, outputPath] =>
           withPinnedSignature config fun pinnedConfig =>
             withFnPollService settings fun selected => do
               let some service := selected
@@ -8368,7 +9488,13 @@ def run (arguments : List String) : IO UInt32 := do
               selectedFnNewPaths [outputPath]
               writeBytes outputPath ingress
               pure 0
-      | "fn-selected-poll-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-selected-poll-submit` (dispatched by `run`). -/
+def runCommandFnSelectedPollSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8376,7 +9502,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← fnSelectedPollSubmitSession pinnedConfig state ingress))
             pure 0
-      | "fn-selected-poll-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-selected-poll-lookup` (dispatched by `run`). -/
+def runCommandFnSelectedPollLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8384,7 +9516,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← fnSelectedPollLookupSession pinnedConfig state ingress))
             pure 0
-      | "fn-empty-poll-submit", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-empty-poll-submit` (dispatched by `run`). -/
+def runCommandFnEmptyPollSubmit (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8392,7 +9530,13 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← fnEmptyPollSubmitSession pinnedConfig state ingress))
             pure 0
-      | "fn-empty-poll-lookup", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `fn-empty-poll-lookup` (dispatched by `run`). -/
+def runCommandFnEmptyPollLookup (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           withPinnedSignature config fun pinnedConfig => do
             let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
             let state ← IO.mkRef (some session)
@@ -8400,17 +9544,35 @@ def run (arguments : List String) : IO UInt32 := do
             writeBytes output (outcomeCodec.encode
               (← fnEmptyPollLookupSession pinnedConfig state ingress))
             pure 0
-      | "export-evidence", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `export-evidence` (dispatched by `run`). -/
+def runCommandExportEvidence (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           let call ← readBoundedBytes input FnEvidenceCodec.maxCallBytes
           let package ← IO.ofExcept (← FnEvidence.exportPackage config call)
           writeBytes output package
           pure 0
-      | "verify-evidence", [input, output] =>
+  | _ => throw (IO.userError usage)
+
+/-- `verify-evidence` (dispatched by `run`). -/
+def runCommandVerifyEvidence (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [input, output] =>
           let package ← readBoundedBytes input FnEvidenceCodec.maxPackageBytes
           let receipt ← IO.ofExcept (← FnEvidence.verify config package)
           writeJson output (evidenceReceiptJson receipt)
           pure 0
-      | "grain-origin-prepare", [requestPath, packagePath, outputRoot] =>
+  | _ => throw (IO.userError usage)
+
+/-- `grain-origin-prepare` (dispatched by `run`). -/
+def runCommandGrainOriginPrepare (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [requestPath, packagePath, outputRoot] =>
           let requestBytes ← readBoundedBytes requestPath 8192
           let some requestText := String.fromUTF8? requestBytes.toByteArray
             | throw (IO.userError "grain origin request is not UTF-8")
@@ -8442,7 +9604,13 @@ def run (arguments : List String) : IO UInt32 := do
                 (← IO.FS.readFile scopePath) == scope do
               throw (IO.userError "grain origin preparation output changed before exact readback")
             pure 0
-      | "portable-verify-fn", [pinPath, claimPath, carrierPath, sourcePath, packagePath, resultPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `portable-verify-fn` (dispatched by `run`). -/
+def runCommandPortableVerifyFn (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [pinPath, claimPath, carrierPath, sourcePath, packagePath, resultPath] =>
           let pinJson ← readJson pinPath
           let claimJson ← readJson claimPath
           IO.ofExcept (requireExactFields "fn pin"
@@ -8467,8 +9635,13 @@ def run (arguments : List String) : IO UInt32 := do
              ("storeAdmission", toJson "unestablished"),
              ("miniOrigin", evidenceReceiptJson receipt)]
           pure 0
-      | "consumer-verify-poll-files",
-          [pinPath, scopePath, claimPath, cursorPath, reportPath,
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-verify-poll-files` (dispatched by `run`). -/
+def runCommandConsumerVerifyPollFiles (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [pinPath, scopePath, claimPath, cursorPath, reportPath,
            carrierPath, resultPath] =>
           let pinJson ← readJson pinPath
           let scopeJson ← readJson scopePath
@@ -8498,8 +9671,13 @@ def run (arguments : List String) : IO UInt32 := do
              ("storeAdmission", toJson "unestablished-from-files"),
              ("miniOrigin", evidenceReceiptJson receipt)]
           pure 0
-      | "portable-consumer-decide",
-          [originPath, pinPath, claimPath, policyPath,
+  | _ => throw (IO.userError usage)
+
+/-- `portable-consumer-decide` (dispatched by `run`). -/
+def runCommandPortableConsumerDecide (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [originPath, pinPath, claimPath, policyPath,
            carrierPath, intentPath, resultPath] =>
           let origin := (← loadSettings originPath).config
           let pinJson ← readJson pinPath
@@ -8568,13 +9746,23 @@ def run (arguments : List String) : IO UInt32 := do
               match decision with
               | .refused _ => pure 1
               | _ => pure 0
-      | "poll-consumer-decide",
-          [originPath, pinPath, scopePath, claimPath, policyPath,
+  | _ => throw (IO.userError usage)
+
+/-- `poll-consumer-decide` (dispatched by `run`). -/
+def runCommandPollConsumerDecide (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [originPath, pinPath, scopePath, claimPath, policyPath,
            cursorPath, reportPath, carrierPath, intentPath, resultPath] =>
           runPollConsumerDecision config none originPath pinPath scopePath
             claimPath policyPath cursorPath reportPath carrierPath intentPath resultPath
-      | "consumer-poll-decide",
-          [originPath, pinPath, scopePath, claimPath, policyPath,
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-poll-decide` (dispatched by `run`). -/
+def runCommandConsumerPollDecide (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [originPath, pinPath, scopePath, claimPath, policyPath,
            controlPath, cursorPath, reportPath, carrierPath,
            intentPath, resultPath] =>
           let pinJson ← readJson pinPath
@@ -8598,15 +9786,25 @@ def run (arguments : List String) : IO UInt32 := do
               sameBytes polledCarrier (← readBoundedBytes carrierPath FnEvidenceCodec.maxCarrierBytes) do
             throw (IO.userError "fn poll output changed before Mini decision completed")
           pure exitCode
-      | "reply-consumer-poll-decide",
-          [originPath, rPinPath, rClaimPath, rCarrierPath,
+  | _ => throw (IO.userError usage)
+
+/-- `reply-consumer-poll-decide` (dispatched by `run`). -/
+def runCommandReplyConsumerPollDecide (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [originPath, rPinPath, rClaimPath, rCarrierPath,
            qPinPath, scopePath, qClaimPath, policyPath, controlPath,
            cursorPath, reportPath, carrierPath, intentPath, resultPath] =>
           runReplyConsumerPollDecision config originPath rPinPath rClaimPath
             rCarrierPath qPinPath scopePath qClaimPath policyPath controlPath
             cursorPath reportPath carrierPath intentPath resultPath
-      | "reply-consumer-export-result",
-          [transaction, resultPath, inboxPath, cursorPath, reportPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `reply-consumer-export-result` (dispatched by `run`). -/
+def runCommandReplyConsumerExportResult (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [transaction, resultPath, inboxPath, cursorPath, reportPath] =>
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
@@ -8623,8 +9821,13 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes cursorPath inbox.storePoll.cursor
           writeBytes reportPath inbox.storePoll.event
           pure 0
-      | "reply-consumer-ack-poll",
-          [pinPath, scopePath, controlPath, transaction,
+  | _ => throw (IO.userError usage)
+
+/-- `reply-consumer-ack-poll` (dispatched by `run`). -/
+def runCommandReplyConsumerAckPoll (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [pinPath, scopePath, controlPath, transaction,
            cursorPath, eventPath, resultPath] =>
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
@@ -8691,7 +9894,13 @@ def run (arguments : List String) : IO UInt32 := do
           else if status == "refused" then pure 2
           else if status == "uncertain" then pure 3
           else pure 4
-      | "consumer-export-inbox", [transaction, inboxPath, carrierPath, resultPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-export-inbox` (dispatched by `run`). -/
+def runCommandConsumerExportInbox (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [transaction, inboxPath, carrierPath, resultPath] =>
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let (inbox, kind, atomId) ← IO.ofExcept
             (← exportConsumerInbox config transactionId)
@@ -8705,7 +9914,13 @@ def run (arguments : List String) : IO UInt32 := do
              ("sourceIdentity", toJson (Minidregg.Host.Json.encodeHex inbox.sourceIdentity)),
              ("storeAdmission", toJson "unestablished")]
           pure 0
-      | "consumer-export-poll", [transaction, cursorPath, eventPath, resultPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-export-poll` (dispatched by `run`). -/
+def runCommandConsumerExportPoll (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [transaction, cursorPath, eventPath, resultPath] =>
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let (poll, kind, atomId) ← IO.ofExcept
             (← exportConsumerPoll config transactionId)
@@ -8725,8 +9940,13 @@ def run (arguments : List String) : IO UInt32 := do
                (Minidregg.Host.Json.encodeHex poll.controlBinding)),
              ("fnStoreAttribution", toJson "unestablished-from-files")]
           pure 0
-      | "consumer-ack-poll",
-          [pinPath, scopePath, controlPath, transaction,
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-ack-poll` (dispatched by `run`). -/
+def runCommandConsumerAckPoll (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [pinPath, scopePath, controlPath, transaction,
            cursorPath, eventPath, resultPath] =>
           let transactionId ← IO.ofExcept (exactDecimal "Mini transaction ID" transaction)
           unless controlPath.startsWith "/" && cursorPath.startsWith "/" &&
@@ -8795,7 +10015,13 @@ def run (arguments : List String) : IO UInt32 := do
           else if status == "refused" then pure 2
           else if status == "uncertain" then pure 3
           else pure 4
-      | "consumer-export-reply", [transaction, replyPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-export-reply` (dispatched by `run`). -/
+def runCommandConsumerExportReply (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [transaction, replyPath] =>
           let gateway ← requireGateway config
           let transactionId ← IO.ofExcept (exactDecimal "transaction ID" transaction)
           let opened ← IO.ofExcept (← NativeHost.openExisting config)
@@ -8807,8 +10033,13 @@ def run (arguments : List String) : IO UInt32 := do
             | throw (IO.userError "transaction has no canonical portable Q")
           writeBytes replyPath (FnConsumerOperation.replyCodec.encode binding.reply)
           pure 0
-      | "consumer-stage-reply-plan",
-          [signerPath, transaction, outboxRoot, candidatePath,
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-stage-reply-plan` (dispatched by `run`). -/
+def runCommandConsumerStageReplyPlan (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [signerPath, transaction, outboxRoot, candidatePath,
            readbackPath, sourcePath, resultPath] =>
           let gateway ← requireGateway config
           unless [outboxRoot, candidatePath, readbackPath, sourcePath,
@@ -8899,8 +10130,13 @@ def run (arguments : List String) : IO UInt32 := do
                ("miniTransactionId", toJson transaction),
                ("messageId", toJson retained.selection.messageId)]
             pure (if accepted then 0 else 2)
-      | "consumer-stage-reply-sign",
-          [fnPinPath, principalPath, edPublicPath, edSecretPath,
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-stage-reply-sign` (dispatched by `run`). -/
+def runCommandConsumerStageReplySign (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [fnPinPath, principalPath, edPublicPath, edSecretPath,
            mlSecretPath, transaction, preparedRoot, signedRoot,
            planPath, sourcePath, carrierPath, signedCandidatePath,
            signedReadbackPath, edSignaturePath, mlSignaturePath, resultPath] =>
@@ -9104,7 +10340,13 @@ def run (arguments : List String) : IO UInt32 := do
                ("sourceIdentity", toJson
                  (Minidregg.Host.Json.encodeHex retained.sourceIdentity))]
             pure 0
-      | "consumer-decide-test", [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
+  | _ => throw (IO.userError usage)
+
+/-- `consumer-decide-test` (dispatched by `run`). -/
+def runCommandConsumerDecideTest (_arguments : List String) (_configPath _command : String) (rest : List String) (settings : Settings) : IO UInt32 := do
+  let config := settings.config
+  match rest with
+  | [originPath, policyPath, reportPath, packagePath, intentPath, resultPath] =>
           let gateway ← requireGateway config
           let origin := (← loadSettings originPath).config
           let policySource : ConsumerPolicySource ← IO.ofExcept (fromJson? (← readJson policyPath))
@@ -9122,7 +10364,148 @@ def run (arguments : List String) : IO UInt32 := do
               match decision with
               | .refused _ => pure 1
               | _ => pure 0
-      | _, _ => throw (IO.userError usage)
+  | _ => throw (IO.userError usage)
+
+def run (arguments : List String) : IO UInt32 := do
+  match arguments with
+  | ["store-epoch"] =>
+      IO.println DurableCheckpointCodec.StoreEpoch.current.label
+      pure 0
+  -- Pure operator authoring before any Store exists: the policy a genesis pins
+  -- and the constants it names do not read the configuration.
+  | [_, "objective-constants"] =>
+      IO.println Minidregg.Host.ObjectiveInvocationQuote.constants.compress
+      pure 0
+  -- The Objective Bend front end (parse/capture/elaborate/preview), the same code
+  -- `lean --run Host/ObjectiveBendFrontEndMain.lean` runs; it reads no configuration.
+  | _ :: "objective-front" :: rest => Minidregg.Host.ObjectiveBendFrontEnd.run rest
+  | [_, "author", "objective-policy", input, output] =>
+      let bytes ← readBoundedBytes input 65536
+      let some text := String.fromUTF8? bytes.toByteArray
+        | throw (IO.userError "Objective policy JSON is not UTF-8")
+      let json ← IO.ofExcept (Lean.Json.parse text)
+      IO.FS.writeFile output (← IO.ofExcept (Minidregg.Host.ObjectiveInvocationQuote.authorPolicy json))
+      pure 0
+  | configPath :: command :: rest =>
+      let settings ← loadSettings configPath
+      match command with
+      | "author" => runCommandAuthor arguments configPath command rest settings
+      | "objective-quote" => runCommandObjectiveQuote arguments configPath command rest settings
+      | "objective-publication" => runCommandObjectivePublication arguments configPath command rest settings
+      | "carry-plan" => runCommandCarryPlan arguments configPath command rest settings
+      | "carry-receive" => runCommandCarryReceive arguments configPath command rest settings
+      | "carry-edge-verify" => runCommandCarryEdgeVerify arguments configPath command rest settings
+      | "continuity-point" => runCommandContinuityPoint arguments configPath command rest settings
+      | "continuity-verify" => runCommandContinuityVerify arguments configPath command rest settings
+      | "profile" => runCommandProfile arguments configPath command rest settings
+      | "pay-claim-status" => runCommandPayClaimStatus arguments configPath command rest settings
+      | "pay-claim-audit" => runCommandPayClaimAudit arguments configPath command rest settings
+      | "pay-enrol-v2-context" => runCommandPayEnrolV2Context arguments configPath command rest settings
+      | "inspect" => runCommandInspect arguments configPath command rest settings
+      | "inspect-agent-lifetime-paid-ingress" => runCommandInspectAgentLifetimePaidIngress arguments configPath command rest settings
+      | "inspect-accepted-agent-lifetime-grant" => runCommandInspectAcceptedAgentLifetimeGrant arguments configPath command rest settings
+      | "inspect-stop-claim" => runCommandInspectStopClaim arguments configPath command rest settings
+      | "derive" => runCommandDerive arguments configPath command rest settings
+      | "signatures" => runCommandSignatures arguments configPath command rest settings
+      | "genesis" => runCommandGenesis arguments configPath command rest settings
+      | "describe" => runCommandDescribe arguments configPath command rest settings
+      | "checkpoint" => runCommandCheckpoint arguments configPath command rest settings
+      | "fn-archive" => runCommandFnArchive arguments configPath command rest settings
+      | "codec" => runCommandCodec arguments configPath command rest settings
+      | "stdio" => runCommandStdio arguments configPath command rest settings
+      | "bootstrap" => runCommandBootstrap arguments configPath command rest settings
+      | "store-bench" => runCommandStoreBench arguments configPath command rest settings
+      | "well-ledger" => runCommandWellLedger arguments configPath command rest settings
+      | "pay-ledger" => runCommandPayLedger arguments configPath command rest settings
+      | "pay-enrol-ids" => runCommandPayEnrolIds arguments configPath command rest settings
+      | "pay-enrol-probe" => runCommandPayEnrolProbe arguments configPath command rest settings
+      | "pay-job" => runCommandPayJob arguments configPath command rest settings
+      | "job-money-explain" => runCommandJobMoneyExplain arguments configPath command rest settings
+      | "pay-purse" => runCommandPayPurse arguments configPath command rest settings
+      | "object-roster-inspect" => runCommandObjectRosterInspect arguments configPath command rest settings
+      | "object-audience-roster" => runCommandObjectAudienceRoster arguments configPath command rest settings
+      | "object-audience" => runCommandObjectAudience arguments configPath command rest settings
+      | "audit" => runCommandAudit arguments configPath command rest settings
+      | "store-audit" => runCommandStoreAudit arguments configPath command rest settings
+      | "checkpoint-differential" => runCommandCheckpointDifferential arguments configPath command rest settings
+      | "link-index" => runCommandLinkIndex arguments configPath command rest settings
+      | "presence-index" => runCommandPresenceIndex arguments configPath command rest settings
+      | "reserve-birth-plan" => runCommandReserveBirthPlan arguments configPath command rest settings
+      | "reserve-birth-assemble" => runCommandReserveBirthAssemble arguments configPath command rest settings
+      | "plan-ungated" => runCommandPlanUngated arguments configPath command rest settings
+      | "prepare" => runCommandPrepare arguments configPath command rest settings
+      | "enroll-key-plan" => runCommandEnrollKeyPlan arguments configPath command rest settings
+      | "enroll-key-assemble" => runCommandEnrollKeyAssemble arguments configPath command rest settings
+      | "enroll-key-submit" => runCommandEnrollKeySubmit arguments configPath command rest settings
+      | "enroll-key-lookup" => runCommandEnrollKeyLookup arguments configPath command rest settings
+      | "application-share-issue-plan" => runCommandApplicationShareIssuePlan arguments configPath command rest settings
+      | "application-share-issue-assemble" => runCommandApplicationShareIssueAssemble arguments configPath command rest settings
+      | "application-grain-share-issue-plan" => runCommandApplicationGrainShareIssuePlan arguments configPath command rest settings
+      | "application-grain-share-issue-assemble" => runCommandApplicationGrainShareIssueAssemble arguments configPath command rest settings
+      | "challenge-batch" => runCommandChallengeBatch arguments configPath command rest settings
+      | "query-batch" => runCommandQueryBatch arguments configPath command rest settings
+      | "challenge" => runCommandChallenge arguments configPath command rest settings
+      | "observe-assemble" => runCommandObserveAssemble arguments configPath command rest settings
+      | "query" => runCommandQuery arguments configPath command rest settings
+      | "pin-plan-height" => runCommandPinPlanHeight arguments configPath command rest settings
+      | "pin-enrollment-plan-height" => runCommandPinEnrollmentPlanHeight arguments configPath command rest settings
+      | "assemble" => runCommandAssemble arguments configPath command rest settings
+      | "submit" => runCommandSubmit arguments configPath command rest settings
+      | "law-sat" => runCommandLawSat arguments configPath command rest settings
+      | "dry-run" => runCommandDryRun arguments configPath command rest settings
+      | "lookup" => runCommandLookup arguments configPath command rest settings
+      | "selected-release-submit" => runCommandSelectedReleaseSubmit arguments configPath command rest settings
+      | "selected-release-lookup" => runCommandSelectedReleaseLookup arguments configPath command rest settings
+      | "application-lifecycle-begin-submit" => runCommandApplicationLifecycleBeginSubmit arguments configPath command rest settings
+      | "application-lifecycle-begin-lookup" => runCommandApplicationLifecycleBeginLookup arguments configPath command rest settings
+      | "application-lifecycle-claim-lookup" => runCommandApplicationLifecycleClaimLookup arguments configPath command rest settings
+      | "application-lifecycle-completion-submit" => runCommandApplicationLifecycleCompletionSubmit arguments configPath command rest settings
+      | "application-lifecycle-completion-lookup" => runCommandApplicationLifecycleCompletionLookup arguments configPath command rest settings
+      | "diagnose-completion" => runCommandDiagnoseCompletion arguments configPath command rest settings
+      | "selected-source-publication-submit" => runCommandSelectedSourcePublicationSubmit arguments configPath command rest settings
+      | "selected-source-publication-lookup" => runCommandSelectedSourcePublicationLookup arguments configPath command rest settings
+      | "application-share-issue-submit" => runCommandApplicationShareIssueSubmit arguments configPath command rest settings
+      | "application-share-issue-lookup" => runCommandApplicationShareIssueLookup arguments configPath command rest settings
+      | "application-grain-share-issue-submit" => runCommandApplicationGrainShareIssueSubmit arguments configPath command rest settings
+      | "application-grain-share-issue-lookup" => runCommandApplicationGrainShareIssueLookup arguments configPath command rest settings
+      | "selected-release-source-plan" => runCommandSelectedReleaseSourcePlan arguments configPath command rest settings
+      | "selected-release-source-assemble" => runCommandSelectedReleaseSourceAssemble arguments configPath command rest settings
+      | "selected-release-source-check" => runCommandSelectedReleaseSourceCheck arguments configPath command rest settings
+      | "selected-release-check-preimage" => runCommandSelectedReleaseCheckPreimage arguments configPath command rest settings
+      | "selected-release-prepare" => runCommandSelectedReleasePrepare arguments configPath command rest settings
+      | "selected-release-assemble" => runCommandSelectedReleaseAssemble arguments configPath command rest settings
+      | "selected-release-ingress" => runCommandSelectedReleaseIngress arguments configPath command rest settings
+      | "selected-release-fn-poll" => runCommandSelectedReleaseFnPoll arguments configPath command rest settings
+      | "selected-release-fn-legacy-poll" => runCommandSelectedReleaseFnLegacyPoll arguments configPath command rest settings
+      | "selected-release-fn-ack" => runCommandSelectedReleaseFnAck arguments configPath command rest settings
+      | "fn-empty-page-ack" => runCommandFnEmptyPageAck arguments configPath command rest settings
+      | "fn-frontier-request" => runCommandFnFrontierRequest arguments configPath command rest settings
+      | "fn-frontier-export" => runCommandFnFrontierExport arguments configPath command rest settings
+      | "fn-frontier-plan" => runCommandFnFrontierPlan arguments configPath command rest settings
+      | "fn-frontier-assemble" => runCommandFnFrontierAssemble arguments configPath command rest settings
+      | "fn-selected-poll-submit" => runCommandFnSelectedPollSubmit arguments configPath command rest settings
+      | "fn-selected-poll-lookup" => runCommandFnSelectedPollLookup arguments configPath command rest settings
+      | "fn-empty-poll-submit" => runCommandFnEmptyPollSubmit arguments configPath command rest settings
+      | "fn-empty-poll-lookup" => runCommandFnEmptyPollLookup arguments configPath command rest settings
+      | "export-evidence" => runCommandExportEvidence arguments configPath command rest settings
+      | "verify-evidence" => runCommandVerifyEvidence arguments configPath command rest settings
+      | "grain-origin-prepare" => runCommandGrainOriginPrepare arguments configPath command rest settings
+      | "portable-verify-fn" => runCommandPortableVerifyFn arguments configPath command rest settings
+      | "consumer-verify-poll-files" => runCommandConsumerVerifyPollFiles arguments configPath command rest settings
+      | "portable-consumer-decide" => runCommandPortableConsumerDecide arguments configPath command rest settings
+      | "poll-consumer-decide" => runCommandPollConsumerDecide arguments configPath command rest settings
+      | "consumer-poll-decide" => runCommandConsumerPollDecide arguments configPath command rest settings
+      | "reply-consumer-poll-decide" => runCommandReplyConsumerPollDecide arguments configPath command rest settings
+      | "reply-consumer-export-result" => runCommandReplyConsumerExportResult arguments configPath command rest settings
+      | "reply-consumer-ack-poll" => runCommandReplyConsumerAckPoll arguments configPath command rest settings
+      | "consumer-export-inbox" => runCommandConsumerExportInbox arguments configPath command rest settings
+      | "consumer-export-poll" => runCommandConsumerExportPoll arguments configPath command rest settings
+      | "consumer-ack-poll" => runCommandConsumerAckPoll arguments configPath command rest settings
+      | "consumer-export-reply" => runCommandConsumerExportReply arguments configPath command rest settings
+      | "consumer-stage-reply-plan" => runCommandConsumerStageReplyPlan arguments configPath command rest settings
+      | "consumer-stage-reply-sign" => runCommandConsumerStageReplySign arguments configPath command rest settings
+      | "consumer-decide-test" => runCommandConsumerDecideTest arguments configPath command rest settings
+      | _ => throw (IO.userError usage)
   | _ => throw (IO.userError usage)
 
 end Minidregg.Host

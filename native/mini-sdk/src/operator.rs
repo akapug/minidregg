@@ -54,19 +54,21 @@ pub const SSH_PREFIX: &str = "ssh:";
 
 /// Operator-socket operations the SDK drives (`main.rs` `socket_process`).
 pub mod op {
-    pub const PREPARE: u8 = 1;
-    pub const SUBMIT: u8 = 2;
-    pub const LOOKUP: u8 = 3;
-    pub const CHALLENGE: u8 = 4;
-    pub const QUERY: u8 = 5;
+    pub use crate::host_operations::{
+        AUTHORIZED_PREPARE as PREPARE, AUTHORIZED_QUERY as QUERY, LOOKUP, OBSERVATION_CHALLENGE as CHALLENGE, SUBMIT,
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
     /// The Host answered `op` with this body.
     Answer(Vec<u8>),
-    /// The Host refused; the body is its encoded outcome (decode with `inspect outcome`).
-    Refused(Vec<u8>),
+    /// `NO_RECORD` (253): the Host decided before any append (refused, contention or unavailable;
+    /// never uncertain); a fresh attempt is safe. The body is its encoded outcome.
+    NoRecord(Vec<u8>),
+    /// `HOST_OUTCOME` (255): an outcome the Host has not proven no-append, so UNDECIDED whatever
+    /// it decodes to: look the exact call up. The body is its encoded outcome.
+    Outcome(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +77,17 @@ pub enum Failure {
     Unsent(String),
     /// The request may have reached the Host; its decision is unknown.
     Uncertain(String),
+}
+
+/// The environment switch of the lost-reply fault: its value names the operation byte (decimal) whose
+/// next exchange writes and does not read. Consumed on first use.
+pub const LOSE_REPLY_ENV: &str = "MINI_FAULT_LOSE_REPLY_ONCE";
+
+/// Whether the lost-reply fault is armed for this operation byte (`MINI_FAULT_LOSE_REPLY_ONCE`
+/// holds the byte). Every socket path a client sends a Host call on honours it: the SDK's own
+/// below, and the resource client's `transport::invoke_pinned_deadline`.
+pub fn lose_reply_armed(operation: u8) -> bool {
+    std::env::var(LOSE_REPLY_ENV).ok().and_then(|v| v.trim().parse::<u8>().ok()) == Some(operation)
 }
 
 /// Where operator requests go.
@@ -347,13 +360,14 @@ pub fn open_stream(ssh: &Ssh) -> std::result::Result<SshStream, Failure> {
 pub struct Operator {
     pub route: Route,
     config: Vec<u8>,
-    host_sha256: Option<[u8; 32]>,
+    host_sha256: [u8; 32],
     pub read_deadline: Duration,
     channel: Option<SshChannel>,
 }
 
 /// Build the request frame body (without the outer length prefix).
-pub fn request(config: &[u8], host_sha256: Option<&[u8; 32]>, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
+/// Envelope v2 only: the Host image pin is mandatory (the service refuses v1 by name).
+pub fn request(config: &[u8], host_sha256: &[u8; 32], operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     if config.len() > MAX_CONFIG {
         return Err("host config exceeds socket pin bound".into());
     }
@@ -361,12 +375,10 @@ pub fn request(config: &[u8], host_sha256: Option<&[u8; 32]>, operation: u8, pay
         return Err("host request exceeds frame bound before transmission".into());
     }
     let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
-    frame.push(if host_sha256.is_some() { 2 } else { 1 });
+    frame.push(2);
     frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
     frame.extend_from_slice(config);
-    if let Some(sha) = host_sha256 {
-        frame.extend_from_slice(sha);
-    }
+    frame.extend_from_slice(host_sha256);
     frame.push(operation);
     frame.extend_from_slice(payload);
     Ok(frame)
@@ -388,9 +400,9 @@ fn read_frame<R: Read>(stream: &mut R) -> std::io::Result<Vec<u8>> {
 }
 
 impl Operator {
-    /// `config` is the deployment config file the socket pins; `host_sha256`, when given,
-    /// requires the image serving the socket to be exactly that Host (version 2).
-    pub fn new(route: Route, config: &Path, host_sha256: Option<[u8; 32]>) -> Result<Self> {
+    /// `config` is the deployment config file the socket pins; `host_sha256` requires the image
+    /// serving the socket to be exactly that Host (envelope v2; v1 is retired).
+    pub fn new(route: Route, config: &Path, host_sha256: [u8; 32]) -> Result<Self> {
         let config = std::fs::read(config).map_err(|e| format!("host config {}: {e}", config.display()))?;
         let channel = match &route {
             Route::Ssh(ssh) => Some(SshChannel::new(ssh.clone())),
@@ -400,8 +412,27 @@ impl Operator {
     }
 
     pub fn call(&self, operation: u8, payload: &[u8]) -> std::result::Result<Reply, Failure> {
-        let frame = request(&self.config, self.host_sha256.as_ref(), operation, payload)
+        let frame = request(&self.config, &self.host_sha256, operation, payload)
             .map_err(|e| Failure::Unsent(e.0))?;
+        // The lost-reply switch (`submit ID --lose-reply-once`; DEMO-EXPERIENCE A11): a client-side
+        // fault, armed once by the client's own environment, that writes the exact call and then
+        // deliberately never reads the answer. The Host decides as it would; the custody record
+        // holds the call as uncertain; `lookup`/`retry` ask for the same decided outcome.
+        if lose_reply_armed(operation) {
+            std::env::remove_var(LOSE_REPLY_ENV);
+            if let Route::Unix(socket) = &self.route {
+                let mut stream = UnixStream::connect(socket)
+                    .map_err(|e| Failure::Unsent(format!("cannot connect to {}: {e}", socket.display())))?;
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+                stream
+                    .write_all(&(frame.len() as u32).to_le_bytes())
+                    .and_then(|_| stream.write_all(frame.as_slice()))
+                    .and_then(|_| stream.flush())
+                    .map_err(|e| Failure::Uncertain(format!("uncertain host request write: {e}")))?;
+                drop(stream);
+            }
+            return Err(Failure::Uncertain("reply deliberately not read (--lose-reply-once): the Host decided as it would; this exact call is looked up or retried, never re-sent as a second write".into()));
+        }
         let reply = match &self.route {
             Route::Unix(socket) => self.call_unix(socket, &frame)?,
             Route::Ssh(_) => self.channel.as_ref().expect("an ssh route has its channel").exchange(&frame, self.read_deadline)?,
@@ -410,6 +441,7 @@ impl Operator {
     }
 
     fn call_unix(&self, socket: &Path, frame: &[u8]) -> std::result::Result<Vec<u8>, Failure> {
+        let _ = LOSE_REPLY_ENV;
         let mut stream = UnixStream::connect(socket)
             .map_err(|e| Failure::Unsent(format!("cannot connect to {}: {e}", socket.display())))?;
         let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
@@ -421,7 +453,7 @@ impl Operator {
             // Only the socket's own 254 makes a failed write certain.
             let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
             if let Ok(reply) = read_frame(&mut stream) {
-                if reply.first() == Some(&254) {
+                if reply.first() == Some(&crate::host_operations::RESPONSE_NEVER_FORWARDED) {
                     return Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..]))));
                 }
             }
@@ -555,11 +587,16 @@ impl Default for SshPool {
 
 /// Classify a reply frame for `operation`.
 pub fn classify_reply(operation: u8, mut reply: Vec<u8>) -> std::result::Result<Reply, Failure> {
+    use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NEVER_FORWARDED, RESPONSE_NO_RECORD};
     match reply.first().copied() {
-        Some(254) => Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..])))),
-        Some(255) => {
+        Some(RESPONSE_NEVER_FORWARDED) => Err(Failure::Unsent(format!("socket rejected request: {}", String::from_utf8_lossy(&reply[1..])))),
+        Some(RESPONSE_NO_RECORD) => {
             reply.remove(0);
-            Ok(Reply::Refused(reply))
+            Ok(Reply::NoRecord(reply))
+        }
+        Some(RESPONSE_HOST_OUTCOME) => {
+            reply.remove(0);
+            Ok(Reply::Outcome(reply))
         }
         Some(tag) if tag == operation => {
             reply.remove(0);
@@ -577,19 +614,18 @@ mod tests {
 
     #[test]
     fn request_frames_are_transport_rs_frames() {
-        let v1 = request(b"cfg", None, 3, b"call").unwrap();
-        assert_eq!(v1, [&[1u8][..], &3u32.to_le_bytes(), b"cfg", &[3], b"call"].concat());
-        let v2 = request(b"cfg", Some(&[7; 32]), 2, b"c").unwrap();
+        let v2 = request(b"cfg", &[7; 32], crate::host_operations::SUBMIT, b"c").unwrap();
         assert_eq!(v2, [&[2u8][..], &3u32.to_le_bytes(), b"cfg", &[7; 32], &[2], b"c"].concat());
-        assert!(request(&vec![0; MAX_CONFIG + 1], None, 2, b"").is_err());
+        assert!(request(&vec![0; MAX_CONFIG + 1], &[0; 32], crate::host_operations::SUBMIT, b"").is_err());
     }
 
     #[test]
     fn replies_classify_into_answer_refusal_unsent_uncertain() {
-        assert_eq!(classify_reply(2, vec![2, 9]), Ok(Reply::Answer(vec![9])));
-        assert_eq!(classify_reply(2, vec![255, 9]), Ok(Reply::Refused(vec![9])));
-        assert!(matches!(classify_reply(2, vec![254, b'b']), Err(Failure::Unsent(_))));
-        assert!(matches!(classify_reply(2, vec![3]), Err(Failure::Uncertain(_))));
+        assert_eq!(classify_reply(crate::host_operations::SUBMIT, vec![2, 9]), Ok(Reply::Answer(vec![9])));
+        assert_eq!(classify_reply(crate::host_operations::SUBMIT, vec![255, 9]), Ok(Reply::Outcome(vec![9])));
+        assert_eq!(classify_reply(crate::host_operations::SUBMIT, vec![253, 9]), Ok(Reply::NoRecord(vec![9])));
+        assert!(matches!(classify_reply(crate::host_operations::SUBMIT, vec![254, b'b']), Err(Failure::Unsent(_))));
+        assert!(matches!(classify_reply(crate::host_operations::SUBMIT, vec![3]), Err(Failure::Uncertain(_))));
     }
 
     #[test]
@@ -599,8 +635,8 @@ mod tests {
         std::fs::write(dir.join("config.json"), b"{}").unwrap();
         let sock = dir.join("world.sock");
         let _ = std::fs::remove_file(&sock);
-        let op = Operator::new(Route::Unix(sock.clone()), &dir.join("config.json"), None).unwrap();
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Unsent(_))));
+        let op = Operator::new(Route::Unix(sock.clone()), &dir.join("config.json"), [0; 32]).unwrap();
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Unsent(_))));
         let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
         let server = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
@@ -610,16 +646,16 @@ mod tests {
             s.read_exact(&mut body).unwrap();
             body // drop the stream: the Host may have the call, the client has no answer
         });
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
         let seen = server.join().unwrap();
-        assert_eq!(seen, request(b"{}", None, 2, b"call").unwrap());
+        assert_eq!(seen, request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"call").unwrap());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ---- the ssh route, against the `ssh` stand-in (`frame::fake::SSH_STANDIN`) ----
+    // ---- the ssh route, against the `ssh` stand-in (`local::fake::SSH_STANDIN`) ----
 
     fn standin(dest: &str) -> (Operator, PathBuf) {
-        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let (sh, script) = crate::local::fake::script("ssh", crate::local::fake::SSH_STANDIN);
         let dir = std::env::temp_dir().join(format!("mini-sdk-ssh-cfg-{}-{dest}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("config.json"), b"{}").unwrap();
@@ -627,7 +663,7 @@ mod tests {
         ssh.command = vec![sh.into(), script.into()];
         ssh.connect_timeout = Duration::from_secs(2);
         ssh.write_deadline = Duration::from_secs(5);
-        let mut op = Operator::new(Route::Ssh(ssh), &dir.join("config.json"), None).unwrap();
+        let mut op = Operator::new(Route::Ssh(ssh), &dir.join("config.json"), [0; 32]).unwrap();
         op.read_deadline = Duration::from_secs(2);
         let req = std::env::temp_dir().join(format!("mini-sdk-ssh-{dest}.req"));
         let _ = std::fs::remove_file(&req);
@@ -667,19 +703,19 @@ mod tests {
         for (dest, named) in [("hostkey", "host key verification failed"), ("denied", "authentication refused"),
             ("refused", "destination unreachable"), ("garbled", "session not established")] {
             let (op, req) = standin(dest);
-            let said = unsent(op.call(2, b"call"));
+            let said = unsent(op.call(crate::host_operations::SUBMIT, b"call"));
             assert!(said.contains(named), "{dest}: {said}");
             assert!(!req.exists(), "{dest}: a request reached the stand-in");
         }
         let (op, _) = standin("hostkey");
-        assert!(unsent(op.call(2, b"call")).contains("known_hosts"), "the host-key refusal says what to do");
+        assert!(unsent(op.call(crate::host_operations::SUBMIT, b"call")).contains("known_hosts"), "the host-key refusal says what to do");
     }
 
     #[test]
     fn a_session_that_never_opens_times_out_as_certainly_unsent() {
         let (op, req) = standin("silent");
         let started = std::time::Instant::now();
-        let said = unsent(op.call(2, b"call"));
+        let said = unsent(op.call(crate::host_operations::SUBMIT, b"call"));
         assert!(said.contains("not within 2s"), "{said}");
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(!req.exists());
@@ -688,12 +724,12 @@ mod tests {
     #[test]
     fn requests_round_trip_over_one_reused_ssh_session_with_the_unix_frames() {
         let (op, req) = standin("serve-answer");
-        assert_eq!(op.call(2, b"first"), Ok(Reply::Answer(b"ok".to_vec())));
-        assert_eq!(op.call(2, b"second"), Ok(Reply::Answer(b"ok".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"first"), Ok(Reply::Answer(b"ok".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"second"), Ok(Reply::Answer(b"ok".to_vec())));
         // Both requests arrived, byte-for-byte the frames the unix socket would carry, length-prefixed
         // by the transport (the stand-in strips the length), over ONE session.
         let seen = std::fs::read(&req).unwrap();
-        let expect = [request(b"{}", None, 2, b"first").unwrap(), request(b"{}", None, 2, b"second").unwrap()].concat();
+        let expect = [request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"first").unwrap(), request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"second").unwrap()].concat();
         assert_eq!(seen, expect);
         assert!(op.channel.as_ref().unwrap().is_open(), "the session is kept for the next request");
     }
@@ -701,34 +737,34 @@ mod tests {
     #[test]
     fn an_ssh_refusal_and_a_socket_rejection_classify_like_the_unix_socket() {
         let (op, _) = standin("serve-refuse");
-        assert_eq!(op.call(2, b"c"), Ok(Reply::Refused(b"no".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"c"), Ok(Reply::Outcome(b"no".to_vec())));
         let (op, _) = standin("serve-reject");
-        assert!(matches!(op.call(2, b"c"), Err(Failure::Unsent(d)) if d.contains("socket rejected request")));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"c"), Err(Failure::Unsent(d)) if d.contains("socket rejected request")));
     }
 
     #[test]
     fn a_hangup_after_the_write_is_uncertain_closes_the_session_and_is_never_resent() {
         let (op, req) = standin("serve-hangup");
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
         assert!(!op.channel.as_ref().unwrap().is_open(), "the dead session is closed");
         // The stand-in saw the request exactly once: the SDK did not resend it on a new session.
-        assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", None, 2, b"call").unwrap());
+        assert_eq!(std::fs::read(&req).unwrap(), request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"call").unwrap());
         // A later, explicit call opens a NEW session (and is itself a new request).
-        assert!(matches!(op.call(2, b"call"), Err(Failure::Uncertain(_))));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"call"), Err(Failure::Uncertain(_))));
     }
 
     #[test]
     fn a_garbled_or_missing_reply_is_uncertain_not_unsent() {
         let (op, _) = standin("serve-garbage");
-        assert!(matches!(op.call(2, b"c"), Err(Failure::Uncertain(d)) if d.contains("response read")));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"c"), Err(Failure::Uncertain(d)) if d.contains("response read")));
         let (op, _) = standin("serve-mute");
         let started = std::time::Instant::now();
-        assert!(matches!(op.call(2, b"c"), Err(Failure::Uncertain(d)) if d.contains("none within 2s")));
+        assert!(matches!(op.call(crate::host_operations::SUBMIT, b"c"), Err(Failure::Uncertain(d)) if d.contains("none within 2s")));
         assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     fn standin_ssh(dest: &str, remote_command: Option<&str>) -> Ssh {
-        let (sh, script) = crate::frame::fake::script("ssh", crate::frame::fake::SSH_STANDIN);
+        let (sh, script) = crate::local::fake::script("ssh", crate::local::fake::SSH_STANDIN);
         let mut ssh = Ssh::new(dest).unwrap();
         ssh.command = vec![sh.into(), script.into()];
         ssh.connect_timeout = Duration::from_secs(2);
@@ -801,10 +837,10 @@ mod tests {
     #[test]
     fn a_session_that_ended_between_requests_is_replaced_before_anything_is_written() {
         let (op, req) = standin("serve-oneshot");
-        assert_eq!(op.call(2, b"one"), Ok(Reply::Answer(b"ok".to_vec())));
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"one"), Ok(Reply::Answer(b"ok".to_vec())));
         std::thread::sleep(Duration::from_millis(300)); // the stand-in has exited; its pipe is closed
-        assert_eq!(op.call(2, b"two"), Ok(Reply::Answer(b"ok".to_vec())), "a fresh session served the second request");
-        let expect = [request(b"{}", None, 2, b"one").unwrap(), request(b"{}", None, 2, b"two").unwrap()].concat();
+        assert_eq!(op.call(crate::host_operations::SUBMIT, b"two"), Ok(Reply::Answer(b"ok".to_vec())), "a fresh session served the second request");
+        let expect = [request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"one").unwrap(), request(b"{}", &[0; 32], crate::host_operations::SUBMIT, b"two").unwrap()].concat();
         assert_eq!(std::fs::read(&req).unwrap(), expect, "each request was written exactly once");
     }
 }

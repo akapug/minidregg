@@ -17,7 +17,27 @@ This is integer/natural-number representation theory.  It does not claim that
 casting a packed value into a smaller field is injective, and it emits no
 circuit constraints.  Those realization obligations belong above `Theory`.
 -/
-import Mathlib.Tactic
+module
+
+public import Mathlib.Tactic
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.Bignum
 
@@ -37,6 +57,34 @@ theorem ValidRadix.pos {base : Nat} (hbase : ValidRadix base) : 0 < base := by
 def denoteNat (base : Nat) : List Nat → Nat
   | [] => 0
   | d :: ds => d + base * denoteNat base ds
+
+/-- `denoteNat` seven limbs at a time: for byte limbs a seven-limb chunk is below
+`2^56`, so it is assembled in unboxed arithmetic and only one big multiply-add per
+chunk touches the bignum (the world root's every node hash runs this on 32 bytes:
+5 big steps instead of 32). Proved equal (`denoteNat_eq_fast`) and attached by
+`@[csimp]`. -/
+def denoteNatFast (base : Nat) : List Nat → Nat
+  | d0 :: d1 :: d2 :: d3 :: d4 :: d5 :: d6 :: ds =>
+      (d0 + base * (d1 + base * (d2 + base * (d3 + base * (d4 + base * (d5 + base * d6)))))) +
+        base ^ 7 * denoteNatFast base ds
+  | ds => denoteNat base ds
+
+theorem denoteNatFast_eq (base : Nat) : ∀ limbs : List Nat, denoteNatFast base limbs = denoteNat base limbs
+  | d0 :: d1 :: d2 :: d3 :: d4 :: d5 :: d6 :: ds => by
+      rw [denoteNatFast, denoteNatFast_eq base ds]
+      simp only [denoteNat]
+      ring
+  | [] => rfl
+  | [_] => rfl
+  | [_, _] => rfl
+  | [_, _, _] => rfl
+  | [_, _, _, _] => rfl
+  | [_, _, _, _, _] => rfl
+  | [_, _, _, _, _, _] => rfl
+
+@[csimp] theorem denoteNat_eq_fast : @denoteNat = @denoteNatFast := by
+  funext base limbs
+  exact (denoteNatFast_eq base limbs).symm
 
 /-- Integer denotation of the same natural limbs, without field reduction. -/
 def denoteInt (base : Nat) : List Nat → Int
@@ -373,5 +421,14 @@ example (value : Fin ((2 : Nat) ^ 248)) :
 #guard_msgs (whitespace := lax) in #print axioms Limbs.toNat_ofBounded
 /-- info: 'Minidregg.Theory.Bignum.bits_248_fit_nine_radix_2013265921_limbs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms bits_248_fit_nine_radix_2013265921_limbs
+
+/-! ## Poles of `ValidRadix`
+
+The radix premise is satisfied by the byte radix and refuted by a unary "radix". -/
+
+theorem validRadix_byte : ValidRadix 256 := by unfold ValidRadix; decide
+theorem not_validRadix_unary : ¬ ValidRadix 1 := by unfold ValidRadix; decide
+
+#assert_axioms validRadix_byte not_validRadix_unary
 
 end Minidregg.Theory.Bignum

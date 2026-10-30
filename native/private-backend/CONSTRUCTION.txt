@@ -57,6 +57,21 @@ digest-only progress bound to the original semantic commitment. Private outbox
 bodies also need recipient sealing. Old decryption keys are retained for actual
 committed obligations; key rotation cannot reinterpret or erase old material.
 
+Recipient key custody (recipient_seal.rs): seeds are wrapped at rest under a custody
+wrap key kept beside the journal, and a capsule opens only under custody's CURRENT
+epoch (open_current: stale and future epochs refuse by name, and the capsule's key
+digest must equal the digest of custody's current public key bytes). The current epoch
+is set only by adopt_current, which takes a VerifiedCurrentRecipient: the Host's
+`inspect current-recipient` readback (Host/CurrentRecipientVerifier.lean) parsed by
+current_recipient.rs and re-checked against the operator-pinned domain, semantics,
+member, room and keys cell. Its one production caller is native_worker::
+adopt_current_recipient, reached by the CLI verb `adopt-current-recipient`. The readback
+is a claim: the caller must take it from the pinned local inspect operation under the
+client custody lock. The record binds the epoch and the 32-byte Suite1 X25519 key,
+which must equal the X25519 half of custody's 1216-byte hybrid key; the 1184-byte
+ML-KEM half is not in the Lean record and is bound only by the capsule's key digest.
+OPEN (Lean owner): a record that carries the hybrid key or its digest.
+
 Packet identity uses one canonical CommitteeParty/Generation/epoch/session/
 party/recipient/role/key-purpose record and sequence/body. A mix slot never
 becomes protocol sender authority. The source-native owner selects actual
@@ -404,3 +419,21 @@ rebuilds a basis from a retained receipt verified against the exact manifest and
 allocates nothing; reserve_new is manifest + burn_preparation + extract. Executed: a kill -9 mid-King recovers
 with one dealer event per instance, no new anchor allocation, complete exact checked triples. Cost and what
 leaks: docs/MPC-PROFILE-P2.md. The component limits above are unchanged.
+
+Research demonstration door (2026-10-27): `cargo build --release --features demo --bin
+mini-private-compute` builds a binary that runs the width-8 private adder among four holders in
+ONE process (the executed ACSS-Id + dZK + Sh2t-Id + King + LayerEngine + private_output path, driven
+through an in-memory queue) and prints the output, one curious holder's per-phase transcript and its
+frame-by-frame comparison with a constructed alternate input pair of the same sum. Label, verbatim
+and on the first line of every report: "single process, n = 4, static f = 1, no simulator, no GOD".
+It is research: no transport, no release admission, no service, never deployed as one; the
+comparison is the private_view check, not a simulator proof, and says nothing about the King's view,
+a malicious party or a coalition. `mini private-compute --left L --right R` (native/resource-client)
+runs this binary as a child process and refuses a report whose first line is not the banner; the
+feature `demo` compiles the test fixtures the path is built from into the binary and is off by
+default.
+
+Open (P6, lost reply on reserve and burn): an anchor request "return my existing
+allocation for (generation, ids)" is not built. Its verifier exists and is tested
+on a live anchor: allocation_receipt::verify_anchor_receipt with
+VerifiedAnchorReceipt and the bounded SourceAllocationReceipt projection.

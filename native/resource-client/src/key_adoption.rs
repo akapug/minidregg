@@ -45,7 +45,7 @@ impl Source for Connection {
 fn reply(frame: &[u8], opcode: u8) -> Result<Vec<u8>> {
     match frame {
         [actual, body @ ..] if *actual == opcode && !body.is_empty() => Ok(body.to_vec()),
-        [254 | 255, ..] => Err(format!(
+        [crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED, ..] => Err(format!(
             "Host refused adopt-next-key op{opcode}; retained attempt is unchanged"
         )),
         _ => Err(format!("invalid adoption op{opcode} response")),
@@ -58,7 +58,7 @@ fn inspect(source: &mut impl Source, kind: &str, bytes: &[u8]) -> Result<Value> 
     let mut payload = (kind.len() as u16).to_le_bytes().to_vec();
     payload.extend_from_slice(kind.as_bytes());
     payload.extend_from_slice(bytes);
-    serde_json::from_slice(&call(source, 8, &payload)?)
+    serde_json::from_slice(&call(source, mini_sdk::host_operations::INSPECT, &payload)?)
         .map_err(|e| format!("invalid adoption inspection: {e}"))
 }
 fn json_call(source: &mut impl Source, opcode: u8, value: &Value) -> Result<Value> {
@@ -74,7 +74,7 @@ fn hex_bytes(value: &Value, name: &str, length: Option<usize>) -> Result<Vec<u8>
     {
         return Err(format!("adoption {name} is not bounded lowercase hex"));
     }
-    let bytes = crate::decode_hex(text)?;
+    let bytes = mini_sdk::hex::decode(text).map_err(|e| e.0)?;
     if length.is_some_and(|length| bytes.len() != length) {
         return Err(format!("adoption {name} has the wrong length"));
     }
@@ -86,7 +86,7 @@ fn public(value: &Value, name: &str) -> Result<[u8; 32]> {
         .map_err(|_| "invalid public key".into())
 }
 fn status(source: &mut impl Source, subject: &Value, public: &Value) -> Result<Value> {
-    json_call(source, 144, &json!({"subject":subject,"publicKey":public}))
+    json_call(source, mini_sdk::host_operations::KEY_ROTATION_STATUS, &json!({"subject":subject,"publicKey":public}))
 }
 fn current(view: &Value, subject: &Value) -> Result<()> {
     if view["type"] != "subject-key-status-v1"
@@ -194,7 +194,7 @@ fn seal(
 ) -> Result<Vec<u8>> {
     let request = &pin["request"];
     let bytes = serde_json::to_vec(request).map_err(|e| e.to_string())?;
-    let plan = stored_call(source, attempt, "plan", 187, &bytes)?;
+    let plan = stored_call(source, attempt, "plan", mini_sdk::host_operations::NEXT_KEY_ADOPTION_PLAN, &bytes)?;
     let view = source.inspect_signed("subject-key-adoption-plan", &plan)?;
     check_plan(&view, request, &pin["initialStatus"], &pin["profile"])?;
     save_json_staged(&attempt.join("plan.json"), &view)?;
@@ -240,7 +240,7 @@ fn seal(
         source,
         attempt,
         "ingress",
-        188,
+        mini_sdk::host_operations::NEXT_KEY_ADOPTION_ASSEMBLE,
         &pair(&plan, &pair(&signatures[0], &signatures[1])?)?,
     )?;
     let decoded = source.inspect_signed("subject-key-adoption-ingress", &ingress)?;
@@ -295,14 +295,14 @@ fn resolve(
         return Err("adoption has no submitted or uncertain attempt".into());
     } else {
         save_json_staged(&marker, &expected)?;
-        if let Ok(value) = outcome(source, attempt, "submit", 189, ingress) {
+        if let Ok(value) = outcome(source, attempt, "submit", mini_sdk::host_operations::NEXT_KEY_ADOPTION_SUBMIT, ingress) {
             if value["type"] == "confirmed" {
                 return Ok(value);
             }
         }
     }
     let stem = format!("lookup-{}", crate::fsio::random_nonce()?);
-    outcome(source, attempt, &stem, 190, ingress)
+    outcome(source, attempt, &stem, mini_sdk::host_operations::NEXT_KEY_ADOPTION_LOOKUP, ingress)
 }
 fn uncommitted_manifest(manifest: &Value) -> bool {
     manifest["prerotation"] == false
@@ -401,7 +401,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         trusted: Some((root.clone(), ws.clone(), identity.clone())),
     };
     let profile: Value =
-        serde_json::from_slice(&call(&mut source, 6, &[])?).map_err(|e| e.to_string())?;
+        serde_json::from_slice(&call(&mut source, mini_sdk::host_operations::PROFILE, &[])?).map_err(|e| e.to_string())?;
     let profile = json!({"domain":profile["domain"],"semantics":profile["semantics"],"expectedSeed":profile["expectedSeed"]});
     for name in ["domain", "semantics", "expectedSeed"] {
         if profile[name] != identity[name] {
@@ -678,7 +678,7 @@ def serve():
         fn invoke(&mut self, opcode: u8, payload: &[u8]) -> Result<Vec<u8>> {
             self.calls.push((opcode, payload.to_vec()));
             let body = match opcode {
-                187 => {
+                mini_sdk::host_operations::NEXT_KEY_ADOPTION_PLAN => {
                     let request: Value = serde_json::from_slice(payload).unwrap();
                     assert_eq!(
                         request["currentPublicKey"],
@@ -686,20 +686,20 @@ def serve():
                     );
                     serde_json::to_vec(&self.plan).unwrap()
                 }
-                188 => {
+                mini_sdk::host_operations::NEXT_KEY_ADOPTION_ASSEMBLE => {
                     let (plan, signatures) = split(payload);
                     let plan: Value = serde_json::from_slice(plan).unwrap();
                     let (current, next) = split(signatures);
                     serde_json::to_vec(&json!({"type":"subject-key-adoption-ingress-v1","command":plan["command"],
                         "commandBytes":plan["commandBytes"],"currentSignature":hex(current),"nextPossessionSignature":hex(next)})).unwrap()
                 }
-                8 => {
+                mini_sdk::host_operations::INSPECT => {
                     let length = u16::from_le_bytes(payload[..2].try_into().unwrap()) as usize;
                     payload[2 + length..].to_vec()
                 }
-                189 if self.uncertain => return Err("fixture lost reply after accepting".into()),
-                189 | 190 => serde_json::to_vec(&self.receipt).unwrap(),
-                144 => serde_json::to_vec(&self.statuses.remove(0)).unwrap(),
+                mini_sdk::host_operations::NEXT_KEY_ADOPTION_SUBMIT if self.uncertain => return Err("fixture lost reply after accepting".into()),
+                mini_sdk::host_operations::NEXT_KEY_ADOPTION_SUBMIT | mini_sdk::host_operations::NEXT_KEY_ADOPTION_LOOKUP => serde_json::to_vec(&self.receipt).unwrap(),
+                mini_sdk::host_operations::KEY_ROTATION_STATUS => serde_json::to_vec(&self.statuses.remove(0)).unwrap(),
                 _ => panic!("unexpected opcode {opcode}"),
             };
             Ok([vec![opcode], body].concat())
@@ -929,7 +929,7 @@ def serve():
         crate::create_private(
             &host,
             format!(
-                "#!/usr/bin/env python3\nimport sys\nassert sys.argv[2] == 'stdio'\n{LOCAL_CODEC_SERVE}serve()\n"
+                "#!/usr/bin/env python3\nimport sys\nassert sys.argv[2] == 'codec'\n{LOCAL_CODEC_SERVE}serve()\n"
             )
             .as_bytes(),
         )
@@ -1058,7 +1058,7 @@ def serve():
                 "#!/usr/bin/env python3\nimport json, sys\n",
                 LOCAL_CODEC_SERVE,
                 r#"
-if sys.argv[2] == 'stdio':
+if sys.argv[2] == 'codec':
     serve()
 elif sys.argv[2] == 'profile':
     print('{"domain":"1","semantics":"2","expectedSeed":"3"}')

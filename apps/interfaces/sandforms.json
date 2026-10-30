@@ -1,0 +1,335 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "sandforms",
+  "interfaceVersion": 1,
+  "appId": "ztxnreej8a0pqn97ccfhuckswjkrmsaavn85n5sgzk30tv2k4y9h",
+  "packageId": "f53e839658cba5d1783670890eeb8352",
+  "appVersion": "0.4.0",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "questions.create": {
+      "description": "Add an ordered short-answer question to the form.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "required"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 128
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "Prompts.create",
+        "params": [
+          {
+            "arg": "text"
+          },
+          {
+            "arg": "required"
+          }
+        ],
+        "result": "json"
+      }
+    },
+    "questions.list": {
+      "description": "Read the structured prompt collection, including ordering and required state.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "order": {
+              "type": "number"
+            },
+            "selectedPromptType": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "option": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "id",
+            "text",
+            "required",
+            "order"
+          ],
+          "additionalProperties": true
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "snapshot",
+        "publication": "prompts",
+        "params": [],
+        "collections": [
+          "prompts"
+        ]
+      },
+      "projection": {
+        "collection": "prompts",
+        "where": {}
+      }
+    },
+    "responses.submit": {
+      "description": "Submit structured answers to this form; the app checks all required questions.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "responses": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "promptId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "response": {
+                  "type": "string",
+                  "maxLength": 16384
+                }
+              },
+              "required": [
+                "promptId",
+                "response"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "responses"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "/submissions/insert",
+        "params": [
+          {
+            "_id": {
+              "context": "operationId"
+            },
+            "responses": {
+              "arg": "responses"
+            }
+          }
+        ],
+        "result": "insert-id"
+      }
+    },
+    "responses.list": {
+      "description": "Read form submissions visible to the member; the package restricts this publication to its owner.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "responses": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "promptId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "response": {
+                    "type": "string",
+                    "maxLength": 16384
+                  }
+                },
+                "required": [
+                  "promptId",
+                  "response"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "id",
+            "responses"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "snapshot",
+        "publication": "submissions",
+        "params": [],
+        "collections": [
+          "submissions"
+        ]
+      },
+      "projection": {
+        "collection": "submissions",
+        "where": {}
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "question",
+      "op": "questions.create",
+      "args": {
+        "text": {
+          "context": "runId"
+        },
+        "required": true
+      }
+    },
+    {
+      "id": "questions",
+      "op": "questions.list",
+      "args": {},
+      "assert": [
+        {
+          "contains": {
+            "id": {
+              "result": [
+                "question"
+              ]
+            },
+            "text": {
+              "context": "runId"
+            },
+            "required": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "submit",
+      "op": "responses.submit",
+      "args": {
+        "responses": [
+          {
+            "promptId": {
+              "result": [
+                "question"
+              ]
+            },
+            "response": "Typed answer"
+          }
+        ]
+      }
+    },
+    {
+      "id": "submissions",
+      "op": "responses.list",
+      "args": {},
+      "assert": [
+        {
+          "contains": {
+            "id": {
+              "result": [
+                "submit",
+                "id"
+              ]
+            },
+            "responses": [
+              {
+                "promptId": {
+                  "result": [
+                    "question"
+                  ]
+                },
+                "response": "Typed answer"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "credential-resume",
+    "websocket": "/websocket",
+    "credentialsPath": "/.sandstorm-credentials",
+    "tokenField": "token",
+    "userIdField": "id",
+    "method": "login"
+  },
+  "sources": [
+    "https://github.com/sandforms/sandforms/blob/master/prompts/prompts.js",
+    "https://github.com/sandforms/sandforms/blob/master/packages/accounts-sandstorm/server.js",
+    "https://github.com/sandforms/sandforms/blob/master/submit/submissions.js",
+    "https://github.com/sandforms/sandforms/blob/master/submit/client/submit.js"
+  ],
+  "$defs": {}
+}

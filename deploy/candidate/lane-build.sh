@@ -5,6 +5,8 @@
 #
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh host    [build-native-host.sh args: --incremental-suffix-from ...]
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh consent                      (after host: a companion of that build)
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh umbrellas                    (after host: the libraries no shipped root imports)
+#   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust-check                   (no Lean needed: `cargo check` of every rust role)
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh rust
 #   LANE_DIR=/abs/lane  deploy/candidate/lane-build.sh pack OUT_DIR
 #
@@ -23,7 +25,7 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 . "$here/lib.sh"
 LANE_DIR=${LANE_DIR:?LANE_DIR=/abs/path/of/the/lane}
 [[ $LANE_DIR = /* ]] || { echo "lane-build: LANE_DIR must be absolute" >&2; exit 64; }
-step=${1:?host|consent|rust|pack}; shift
+step=${1:?host|consent|umbrellas|rust-check|rust|pack}; shift
 src=$LANE_DIR/src
 [ -d "$src/.git" ] || { echo "lane-build: $src is not a clone" >&2; exit 64; }
 mkdir -p "$LANE_DIR/artifacts" "$LANE_DIR/cycle" "$LANE_DIR/logs"
@@ -38,7 +40,8 @@ native() {  # OUTPUT_DIR BINARY [builder args...]
 # move what a build at an earlier commit produced; one that changes any of them does.
 compiled=(':(glob)**/*.lean' lakefile.toml lake-manifest.json lean-toolchain rust-toolchain.toml Cargo.toml Cargo.lock ':(glob).cargo/**'
           ':(glob)native/*/Cargo.toml' ':(glob)native/*/Cargo.lock' ':(glob)native/*/build.rs'
-          ':(glob)native/*/src/**' ':(glob)protocol/**' scripts/build-native-host.sh)
+          ':(glob)native/*/src/**' ':(glob)protocol/**' scripts/build-native-host.sh
+          deploy/grain-host/launch-gate.rs)  # native/launch-gate's [[bin]] source
 unchanged_since() {  # BUILD (host|rust): refuse unless HEAD's compiled inputs equal that build's commit
   local b=$1 at changed
   [ -f "$LANE_DIR/logs/$b-build.commit" ] || { echo "lane-build: no $b build recorded; run $b" >&2; exit 1; }
@@ -58,6 +61,31 @@ case $step in
     unchanged_since host
     native "$LANE_DIR/consent-out" "$LANE_DIR/artifacts/minidregg-client-consent" \
       --root Host.ClientConsentSession --usage-prefix 'minidregg-client-consent:' --companion-of "$LANE_DIR/native-out" ;;
+  umbrellas)
+    # Fixtures, ObjectiveProofs and CensusChecks: no shipped root imports them, so the host and consent
+    # stages never elaborate them, and a red there sat unseen on main (NativeDocWriteFixture, stale since
+    # 3315a908). Seated like the host stage; a red here reds the candidate.
+    [ -f "$LANE_DIR/native-out/manifest.txt" ] || { echo "lane-build: run host first (umbrellas reuse its closure)" >&2; exit 1; }
+    unchanged_since host
+    u="$LANE_DIR/umbrellas-out/$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$LANE_DIR/umbrellas-out"
+    targets=(); for t in $(bash scripts/pipeline/umbrella-targets --unshipped); do targets+=(--umbrella-target "$t"); done
+    native "$u" "$u.no-binary" --umbrella --umbrella-only "${targets[@]}" ;;
+  rust-check)
+    # The rust step's exact role list, features included, as `cargo check --release`: a cfg or
+    # feature red shows here in minutes, before the host stage, instead of after it.
+    rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+    [ -n "$rust" ] || { echo "lane-build: no Rust channel in rust-toolchain.toml" >&2; exit 1; }
+    export CARGO_TARGET_DIR=$LANE_DIR/rust-check-target
+    { python3 deploy/candidate/package.py --rust-roles
+      if grep -q -- '--fixture-roles' deploy/candidate/package.py; then python3 deploy/candidate/package.py --fixture-roles; fi
+    } >"$LANE_DIR/logs/rust-check-roles.txt"
+    while read -r _ crate bin features; do
+      (cd "$src" && cargo "+$rust" check --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin" ${features:+--features "$features"}) </dev/null >"$LANE_DIR/logs/check-$crate-$bin.log" 2>&1 \
+        || { echo "FAIL check $crate/$bin${features:+ --features $features}"; grep -m5 -A6 '^error' "$LANE_DIR/logs/check-$crate-$bin.log"; exit 1; }
+    done <"$LANE_DIR/logs/rust-check-roles.txt"
+    echo "rust-check done $(date -u +%H:%M:%S)" ;;
   rust)
     rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
     [ -n "$rust" ] || { echo "lane-build: no Rust channel in rust-toolchain.toml" >&2; exit 1; }
@@ -73,13 +101,27 @@ case $step in
     printf '%s\n' "$src" >"$LANE_DIR/logs/rust-build.root"
     git rev-parse HEAD >"$LANE_DIR/logs/rust-build.commit"
     python3 deploy/candidate/package.py --rust-roles >"$LANE_DIR/logs/rust-roles.txt"
-    while read -r _ crate bin; do
+    while read -r _ crate bin features; do
       echo "== $crate/$bin $(date -u +%H:%M:%S)"
       (cd "$src" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
-        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin") </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin" ${features:+--features "$features"}) </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
         || { echo "FAIL $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
       install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/artifacts/$bin"
     done <"$LANE_DIR/logs/rust-roles.txt"
+    # Journey fixtures (package.py --fixture-roles): same tree, same flags, never candidate outputs.
+    # (This builder also packs older tips, whose package.py still ships them as roles: an empty list.)
+    rm -rf "$LANE_DIR/fixtures"; mkdir -p "$LANE_DIR/fixtures"
+    : >"$LANE_DIR/logs/fixture-roles.txt"
+    if grep -q -- '--fixture-roles' deploy/candidate/package.py; then
+      python3 deploy/candidate/package.py --fixture-roles >"$LANE_DIR/logs/fixture-roles.txt"
+    fi
+    while read -r _ crate bin; do
+      echo "== fixture $crate/$bin $(date -u +%H:%M:%S)"
+      (cd "$src" && cargo "+$rust" build --release --offline --locked -j "${MINI_CANDIDATE_CARGO_JOBS:-4}" \
+        --manifest-path "$src/native/$crate/Cargo.toml" --bin "$bin") </dev/null >"$LANE_DIR/logs/cargo-$crate-$bin.log" 2>&1 \
+        || { echo "FAIL fixture $crate/$bin"; tail -30 "$LANE_DIR/logs/cargo-$crate-$bin.log"; exit 1; }
+      install -m 0555 "$CARGO_TARGET_DIR/release/$bin" "$LANE_DIR/fixtures/$bin"
+    done <"$LANE_DIR/logs/fixture-roles.txt"
     echo "rust done $(date -u +%H:%M:%S)" ;;
   pack)
     OUT=${1:?OUT_DIR}
@@ -110,6 +152,15 @@ case $step in
         nativeHost: "scripts/build-native-host.sh via lane-build.sh (incremental or full), consent as its companion"}' \
       >"$LANE_DIR/logs/toolchains-$head.json"
     python3 deploy/candidate/package.py --roles "$LANE_DIR/logs/roles-$head.json" --source-archive "$LANE_DIR/logs/source-$head.tar" \
-      --out "$OUT" --toolchains "$LANE_DIR/logs/toolchains-$head.json" --host-build-manifest "$LANE_DIR/native-out/manifest.txt" ;;
+      --out "$OUT" --toolchains "$LANE_DIR/logs/toolchains-$head.json" --host-build-manifest "$LANE_DIR/native-out/manifest.txt"
+    # Journey fixtures ride beside the candidate, outside bin/, the manifest and SHA256SUMS.
+    if grep -q -- '--fixture-roles' deploy/candidate/package.py; then
+      mkdir "$OUT/fixtures"
+      while read -r _ _ bin; do
+        [ -f "$LANE_DIR/fixtures/$bin" ] || { echo "lane-build: missing fixture $bin; run rust" >&2; exit 1; }
+        install -m 0555 "$LANE_DIR/fixtures/$bin" "$OUT/fixtures/$bin"
+      done < <(python3 deploy/candidate/package.py --fixture-roles)
+      (cd "$OUT/fixtures" && sha256sum -- * >SHA256SUMS)
+    fi ;;
   *) echo "lane-build: unknown step $step" >&2; exit 64 ;;
 esac

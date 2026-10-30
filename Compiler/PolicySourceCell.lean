@@ -12,8 +12,27 @@ identity, version zero, absent predecessor, deployment domain and the actual
 receiving compiler profile. It cannot obtain its profile from the submitted
 record. There is no policy interpreter or mutation operation in this module.
 -/
-import Compiler.PolicyRecordCodec
-import Theory.ResourceBirth
+module
+
+public import Compiler.PolicyRecordCodec
+public import Theory.ResourceBirth
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.PolicySourceCell
 
@@ -40,6 +59,19 @@ def recordStream : StreamCodec PolicyRecord where
   decodePrefix_encode := by
     intro record suffix
     simp [bytesStream.decodePrefix_encode, PolicyRecordCodec.decode_encode]
+  encode_decodePrefix := by
+    intro bytes record suffix decoded
+    cases framed : bytesStream.decodePrefix bytes with
+    | none => simp [framed] at decoded
+    | some pair =>
+      obtain ⟨source, rest⟩ := pair
+      cases inner : PolicyRecordCodec.decode source with
+      | none => simp [framed, inner] at decoded
+      | some decodedRecord =>
+        simp only [framed, inner, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PolicyRecordCodec.decode_canonical inner]
+        exact bytesStream.encode_decodePrefix _ _ _ framed
 
 /-- One ROM address holding the source record.  The record is installed when
 the cell is born (`stateOfOption`, through the lifecycle allocator); no guarded
@@ -84,45 +116,43 @@ def wireFrame : List UInt8 := "DREGG/POLICY/SOURCE".toUTF8.toList
 def encode (state : Store layout) : List UInt8 :=
   wireFrame ++ payloadStream.encode (wireVersion, recordAt state)
 
-def decodeRaw (bytes : List UInt8) : Option (Store layout) :=
+/-- The frame is checked, `payloadStream` is canonical, and the version is
+pinned, so the decoder accepts exactly the encodings (`decode_canonical`):
+`recordAt (stateOfOption record) = record`. -/
+def decode (bytes : List UInt8) : Option (Store layout) :=
   if bytes.take wireFrame.length = wireFrame then do
     let (version, record) ← payloadStream.toLawful.decode (bytes.drop wireFrame.length)
     if version = wireVersion then some (stateOfOption record) else none
   else none
 
-@[simp] theorem decodeRaw_encode (state : Store layout) :
-    decodeRaw (encode state) = some state := by
+@[simp] theorem decode_encode (state : Store layout) : decode (encode state) = some state := by
   have decoded := payloadStream.toLawful.decode_encode (wireVersion, recordAt state)
   change payloadStream.toLawful.decode
     (payloadStream.encode (wireVersion, recordAt state)) =
       some (wireVersion, recordAt state) at decoded
-  simp [decodeRaw, encode, decoded, ← state_ext state]
-
-def decode (bytes : List UInt8) : Option (Store layout) := do
-  let state ← decodeRaw bytes
-  if encode state = bytes then some state else none
-
-@[simp] theorem decode_encode (state : Store layout) :
-    decode (encode state) = some state := by
-  simp [decode]
+  simp [decode, encode, decoded, ← state_ext state]
 
 theorem decode_canonical {bytes : List UInt8} {state : Store layout}
     (accepted : decode bytes = some state) : encode state = bytes := by
   unfold decode at accepted
-  cases raw : decodeRaw bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
+  split at accepted
+  · rename_i framed
+    cases payload : payloadStream.toLawful.decode (bytes.drop wireFrame.length) with
+    | none => simp [payload] at accepted
+    | some pair =>
+      obtain ⟨version, record⟩ := pair
+      simp only [payload, bind, Option.bind] at accepted
       split at accepted
-      next canonical =>
+      · rename_i current
         cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
-
-theorem encode_injective : Function.Injective encode := by
-  intro left right same
-  have decoded := congrArg decode same
-  simpa using decoded
+        subst current
+        have exact := payloadStream.toLawful_canonical _ _ payload
+        simp only [encode, recordAt_stateOfOption]
+        rw [exact]
+        conv => rhs; rw [← List.take_append_drop wireFrame.length bytes]
+        rw [framed]
+      · cases accepted
+  · cases accepted
 
 theorem wrong_version_refused (version : Nat) (record : Option PolicyRecord)
     (different : version ≠ wireVersion) :
@@ -130,7 +160,7 @@ theorem wrong_version_refused (version : Nat) (record : Option PolicyRecord)
   have decoded := payloadStream.toLawful.decode_encode (version, record)
   change payloadStream.toLawful.decode (payloadStream.encode (version, record)) =
     some (version, record) at decoded
-  simp [decode, decodeRaw, decoded, different]
+  simp [decode, decoded, different]
 
 def stateCodec : LawfulCodec (Store layout) where
   encode := encode

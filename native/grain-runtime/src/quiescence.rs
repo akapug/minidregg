@@ -459,6 +459,8 @@ impl ResidentGuard {
         })
     }
 
+    pub(crate) fn evidence(&self) -> ResidentEvidence { self.evidence }
+
     pub(crate) fn path(&self) -> Result<&Path> {
         self.path
             .as_deref()
@@ -544,9 +546,10 @@ impl Runtime {
     }
 
     fn quiescence_physical_stop_proof(&self) -> Result<()> {
-        // Fresh, not the cached startup boolean. Includes custody clients in
-        // the controller cgroup; a missing journal child alone proves nothing.
-        prove_prior_run_stopped(&self.config.task)?;
+        // Fresh, not the cached startup boolean. Effect-capable custody
+        // clients still refuse; only the exact pinned stateless codec pair may
+        // remain. A missing journal child alone proves nothing.
+        cgroup_stop::prove_quiescent_controller(&self.config)?;
         if self.current_pgid.load(Ordering::SeqCst) != 0 {
             return Err("controller retains an owned process group".into());
         }
@@ -616,13 +619,6 @@ impl Runtime {
     /// The caller may retain this guard through a narrowly typed resident
     /// reconciliation. Never drop/reacquire between inspection and mutation.
     pub(crate) fn inspect_quiescence_locked(&mut self, resident: &ResidentGuard) -> Result<Status> {
-        self.inspect_quiescence_locked_via(resident, None)
-    }
-
-    /// Same complete inspection and original binding; a root-attested token
-    /// changes only signed-query routing and annotates every observation.
-    pub(crate) fn inspect_quiescence_locked_via(&mut self, resident: &ResidentGuard,
-        transport: Option<&crate::quiescence_transport::AuthorizedTransport>) -> Result<Status> {
         resident.assert_config(&self.config)?;
         let resident_path = resident.path.as_deref();
         if let Err(error) = self.quiescence_stop_proof() {
@@ -641,12 +637,8 @@ impl Runtime {
         let mut observations = Vec::new();
         let mut errors = Vec::new();
         for (slot, authority) in authorities {
-            match self.query_as_via(&authority, transport) {
-                Ok(state) => {
-                    let mut observation = json!({"slot":slot,"task":authority.task,"state":state});
-                    if let Some(via) = transport { observation["transportEvidence"] = via.evidence(); }
-                    observations.push(observation)
-                }
+            match self.query_as(&authority) {
+                Ok(state) => observations.push(json!({"slot":slot,"task":authority.task,"state":state})),
                 Err(error) => errors.push(format!("{slot} signed boundary: {error}")),
             }
         }

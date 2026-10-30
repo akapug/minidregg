@@ -4,10 +4,31 @@ special event 11 committed by CAS and confirmed against the exact complete
 post-image bytes. Historical receipt recovery, generic DRC event 3, a
 concurrent suffix, and an uncertain CAS response are not delivery permits.
 -/
-import Compiler.ApplicationReceivingDomain
-import Kernel.ApplicationDispatchProjection
-import Kernel.ApplicationDispatchLookup
-import Kernel.ApplicationRouteAdmission
+module
+
+public import Compiler.ApplicationReceivingDomain
+public import Kernel.ApplicationDispatchProjection
+public import Kernel.ApplicationDispatchLookup
+public import Kernel.ApplicationRouteAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchReceiver
 
@@ -43,12 +64,12 @@ def Committed.projection {config : Config} (permit : Committed config) :
 def Committed.verified {config : Config} (permit : Committed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) :=
+        permit.readback.derived permit.readback.ready permit.readback.tag) :=
   NativeHostReplay.extendExact permit.reader permit.old permit.readback
 
 def Committed.receipt {config : Config} (permit : Committed config) : NativeHostCodec.Receipt :=
   let old := permit.old
-  let candidate := NativeHostReplay.exactCandidate old permit.readback.derived permit.readback.ready
+  let candidate := NativeHostReplay.exactCandidate old permit.readback.derived permit.readback.ready permit.readback.tag
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     old.opened.durable.height + 1,
@@ -68,6 +89,14 @@ theorem Committed.postRecord_exact {config : Config} (permit : Committed config)
         (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
 
+/-- The exact readback installs the intent admitted at `old.opened`, and the
+post-CAS image is the `config`-validated successor of `old` extended by it. -/
+theorem Committed.validated_successor {config : Config} (permit : Committed config) :
+    permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
+  ⟨permit.derivedExact, permit.readback.validated⟩
+
 /-- Receipt evidence alone cannot construct physical delivery authority. -/
 structure Permit (config : Config) extends Committed config where
   private mk ::
@@ -80,7 +109,7 @@ def Permit.projection {config : Config} (permit : Permit config) :
 def Permit.verified {config : Config} (permit : Permit config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate permit.old
-        permit.readback.derived permit.readback.ready) := permit.toCommitted.verified
+        permit.readback.derived permit.readback.ready permit.readback.tag) := permit.toCommitted.verified
 
 def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.Receipt :=
   permit.toCommitted.receipt
@@ -98,6 +127,15 @@ theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
 theorem Permit.won_fresh_installed {config : Config} (permit : Permit config) :
     permit.freshCasWinner = true ∧ permit.confirmation = .installed :=
   ⟨permit.fresh, permit.installed⟩
+
+/-- Delivery authority: this attempt freshly won and installed the CAS whose
+post-image is the `config`-validated successor carrying the admitted intent. -/
+theorem Permit.installed_validated_successor {config : Config} (permit : Permit config) :
+    permit.freshCasWinner = true ∧ permit.confirmation = .installed ∧
+      permit.readback.derived.intent = permit.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate permit.old
+        permit.readback.derived permit.readback.ready permit.readback.tag) = .ok permit.readback.after :=
+  ⟨permit.fresh, permit.installed, permit.toCommitted.validated_successor⟩
 
 /-- A distinct wire frame ensures the physical host cannot confuse a checked
 candidate with an actually committed dispatch permit. The host accepts this
@@ -164,11 +202,12 @@ def refusalAtTip? {config : Config} {target : Durable}
   match selected : ApplicationDispatchAdmission.selectCommand ingress with
   | none => none
   | some selection =>
-      if absent : old.opened.durable.image.accepted.findIdx? (fun record =>
-          record.transactionId == DeclaredResourceController.transactionId ingress.dispatch.domain
-            ingress.dispatch.semantics
-            (ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent)) = none then
-        some ⟨selection, selected, absent⟩
+      -- The call's transaction id once, then the Store's cached first-index
+      -- table (`Loaded.firstIndex_eq`), never a re-derivation per accepted record.
+      let transactionId := DeclaredResourceController.transactionId ingress.dispatch.domain
+        ingress.dispatch.semantics (ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent)
+      if absent : old.opened.durable.firstIndex transactionId = none then
+        some ⟨selection, selected, by rw [← DurableReceiverIO.Loaded.firstIndex_eq]; exact absent⟩
       else none
 
 def RefusalAtTip.withFreshTip {config : Config} {target : Durable}
@@ -213,6 +252,8 @@ theorem recovered_receipt_only {config : Config} (committed : Committed config)
 #assert_axioms nonwinner_receipt_only
 #assert_axioms recovered_receipt_only
 #assert_axioms Permit.won_fresh_installed
+#assert_axioms Committed.validated_successor
+#assert_axioms Permit.installed_validated_successor
 
 /-- A private resident's immutable route constraint. This grants no authority;
 current signed dispatch admission remains mandatory. The distinct envelope
@@ -277,7 +318,7 @@ def receiveAdmitted (config : Config) {target : Durable}
       match ordinary with
       | .confirmed _ _ =>
           return .uncertain "dispatch confirmation lacks exact fresh post-CAS readback"
-      | .rejected _ => return .rejected "durable dispatch refused"
+      | .rejected reason => return .rejected s!"durable dispatch refused: {repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail

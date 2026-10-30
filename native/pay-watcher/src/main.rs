@@ -1,7 +1,7 @@
 //! pay-watcher --config FILE --out DIR [--rpc-fixture DIR]... [--spool DIR]
 //!
 //! Live mode (no `--rpc-fixture`): endpoints come from `PAY_RPC_ENDPOINTS` (whitespace- or
-//! comma-separated URLs; PAY.md §3.5 keeps them in `/etc/mini/pay/rpc.env`), each reached with
+//! comma-separated URLs; docs/PAY.md §3.5 keeps them in `/etc/mini/pay/rpc.env`), each reached with
 //! `/usr/bin/curl` through a private spool (`--spool`, default `--out`). Fixture mode: each
 //! `--rpc-fixture DIR` is one endpoint answered from files (see `transport::fixture_key`).
 //!
@@ -14,6 +14,8 @@
 //! that were emitted are still sound); 2 = nothing written (usage, config, receipts, or no
 //! agreed tip). With --durable-ticks, errors may leave a recovery record; never delete it.
 //! --ack-tick ID archives a settled pending tick; see README.md.
+//! --quarantine-tick ID --reason TEXT moves an undecidable pending tick aside (the operator's
+//! verb when `mini pay observe` cannot settle it); nothing it held is lost, see README.md.
 
 use std::io::Write;
 use std::os::fd::AsRawFd;
@@ -32,6 +34,7 @@ struct Args {
     spool: Option<PathBuf>,
     durable: bool,
     ack_tick: Option<String>,
+    quarantine: Option<(String, String)>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -41,6 +44,8 @@ fn parse_args() -> Result<Args, String> {
     let mut spool = None;
     let mut durable = false;
     let mut ack_tick = None;
+    let mut quarantine_tick = None;
+    let mut reason = None;
     let mut it = std::env::args_os().skip(1);
     while let Some(arg) = it.next() {
         let mut value = || {
@@ -55,10 +60,26 @@ fn parse_args() -> Result<Args, String> {
             Some("--spool") => spool = Some(value()?),
             Some("--durable-ticks") => durable = true,
             Some("--ack-tick") => ack_tick = Some(value()?.to_str().ok_or("tick ID must be UTF-8")?.to_owned()),
+            Some("--quarantine-tick") => quarantine_tick = Some(value()?.to_str().ok_or("tick ID must be UTF-8")?.to_owned()),
+            Some("--reason") => reason = Some(value()?.to_str().ok_or("--reason must be UTF-8")?.to_owned()),
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
+    let quarantine = match (quarantine_tick, reason) {
+        (Some(id), Some(reason)) => {
+            if reason.is_empty() || reason.len() > 200 || reason.chars().any(char::is_control) {
+                return Err("--reason is 1..200 characters with no control character".into());
+            }
+            Some((id, reason))
+        }
+        (None, None) => None,
+        _ => return Err("--quarantine-tick and --reason go together".into()),
+    };
+    if quarantine.is_some() && ack_tick.is_some() {
+        return Err("--ack-tick and --quarantine-tick are separate acts".into());
+    }
     Ok(Args {
+        quarantine,
         config: config.ok_or("--config is required")?,
         out: out.ok_or("--out is required")?,
         fixtures,
@@ -136,10 +157,14 @@ fn next_tick_id(out: &Path) -> Result<String, String> {
     std::fs::create_dir_all(&archive).map_err(|e| e.to_string())?;
     sync_dir(out)?;
     let mut highest = 0;
-    for entry in std::fs::read_dir(archive).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name().into_string().map_err(|_| "invalid tick archive name")?;
-        if let Some(id) = name.strip_suffix(".json") { highest = highest.max(tick_id(id)?); }
+    // A quarantined tick keeps its ID: the next one never reuses it.
+    for dir in [archive, out.join("quarantine")] {
+        if !dir.exists() { continue; }
+        for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().into_string().map_err(|_| "invalid tick archive name")?;
+            if let Some(id) = name.strip_suffix(".json") { highest = highest.max(tick_id(id)?); }
+        }
     }
     Ok(format!("{:020}", highest.checked_add(1).ok_or("tick ID exhausted")?))
 }
@@ -198,6 +223,32 @@ fn acknowledge_tick(out: &Path, id: &str) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// The operator's way out of a pending tick `mini pay observe` cannot settle (it exits 4, or
+/// anything outside 0/3, every tick, and every later payment waits behind it). The bundle is
+/// moved whole to `quarantine/ID.json` with the operator's reason and the time; nothing is
+/// deleted. Nothing is lost either: the enrollment cursor (written when the tick was
+/// published) only ever passes settled listings, and every unreceipted transfer of the
+/// quarantined tick is listed and emitted again by the next tick, at a fresh tip.
+fn quarantine_tick(out: &Path, id: &str, reason: &str) -> Result<ExitCode, String> {
+    tick_id(id)?;
+    let pending = out.join("pending.json");
+    if !pending.exists() { return Err("no pending tick to quarantine".into()); }
+    let value = read_tick(&pending)?;
+    if value["id"] != id { return Err("quarantine names a different pending tick".into()); }
+    let dir = out.join("quarantine");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = format!("{id}.json");
+    if dir.join(&name).exists() { return Err("quarantine collision; preserving both records".into()); }
+    let record = json!({"type":"minidregg-pay-watcher-quarantine-v1","id":id,"reason":reason,
+        "at":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        "tick":value});
+    write_atomic(&dir, &name, &serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?)?;
+    std::fs::remove_file(&pending).map_err(|e| e.to_string())?;
+    sync_dir(out)?;
+    println!("quarantined tick={id}");
+    Ok(ExitCode::SUCCESS)
+}
+
 fn split_path(path: &Path) -> Result<(&Path, &str), String> {
     let name = path
         .file_name()
@@ -218,8 +269,9 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<ExitCode, String> {
     let args = parse_args()?;
-    let _lock = if args.durable || args.ack_tick.is_some() { Some(durable_lock(&args.out)?) } else { None };
+    let _lock = if args.durable || args.ack_tick.is_some() || args.quarantine.is_some() { Some(durable_lock(&args.out)?) } else { None };
     if let Some(id) = &args.ack_tick { return acknowledge_tick(&args.out, id); }
+    if let Some((id, reason)) = &args.quarantine { return quarantine_tick(&args.out, id, reason); }
     let cfg = Config::load(&args.config)?;
     if args.durable && args.out.join("pending.json").exists() {
         return publish_tick(&args.out, &cfg, &read_tick(&args.out.join("pending.json"))?);

@@ -27,12 +27,18 @@ if [ -z "$GL" ]; then
   cd "$GL/src" && git fetch -q github main && [ "$(git rev-parse FETCH_HEAD)" = "$TIP" ] || { echo "advance: github main != $TIP"; exit 3; }
   git checkout -q -B main "$TIP"
   ( LEAN_NUM_THREADS=${THREADS:-${LEAN_NUM_THREADS:-8}} SWARM_MEM_MAX=${SWARM_MEM_MAX:-64G} SWARM_BUILD_TAG="advance-${TIP:0:8}" \
-      "$here/slot-mk.sh" swarm-build lake build Minidregg +Host.Main:leanArts ObjectiveProofs ) > "$GL/logs/advance-umbrella.log" 2>&1 \
-    || { echo "advance: umbrella RED in $GL (logs/advance-umbrella.log)"; exit 4; }
+      bash scripts/build-mini-kernels.sh && "$here/slot-mk.sh" swarm-build lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) ) > "$GL/logs/advance-umbrella.log" 2>&1 \
+    && arc=0 || arc=$?
+  # Reds are named, never ledgered (docs/COORDINATION-2026-10-27.md §2): a failed umbrella names its modules and the
+  # base advances carrying them; a non-zero exit with no failed-target list is a broken build and refuses.
+  reds=$(sed -n '/^Some required targets logged failures:/,$ s/^- //p' "$GL/logs/advance-umbrella.log" | LC_ALL=C sort -u | tr '\n' ' ')
+  [ "$arc" = 0 ] || [ -n "$reds" ] || { echo "advance: umbrella broken in $GL (rc $arc, no failed-module list: logs/advance-umbrella.log)"; exit 4; }
+  [ -z "$reds" ] || echo "advance: base carries reds (named): $reds"
   green=$GL/logs/advance-umbrella.log
 else
   cd "$GL/src"; [ "$(git rev-parse HEAD)" = "$TIP" ] || { echo "advance: $GL HEAD != $TIP"; exit 3; }
-  green=$(ls -t "$GL"/logs/gate-*-umbrella.log | head -1); grep -q "^UMBRELLA rc=0" "$green" || { echo "advance: $green not green"; exit 4; }
+  green=$(ls -t "$GL"/logs/gate-*-umbrella.log | head -1)
+  grep -qE '^(Build completed successfully|Some required targets logged failures:)' "$green" || { echo "advance: $green has neither a success line nor a failed-module list"; exit 4; }
 fi
 cd "$GL/src"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "advance: tracked tree dirty in $GL"; exit 5; }

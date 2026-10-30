@@ -10,15 +10,28 @@ Group=mini
 Slice=mini.slice
 EnvironmentFile=/etc/mini/pay/watcher.env
 EnvironmentFile=/etc/mini/pay/rpc.env
-ExecStart=/opt/mini/bin/mini-pay-watcher
+ExecStart=/usr/local/lib/mini/mini-pay-watcher
 StateDirectory=mini/pay
 StateDirectoryMode=0700
+# Re-plan timing lines, if written at all, land in the state directory; the
+# env files cannot point them elsewhere (ReadWritePaths bounds the rest).
+Environment=MINI_REPLAN_LOG=/var/lib/mini/pay/replan.log
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/mini
+# Its own state only (the tick journal and the observer workspace live under it).
+# The Store's operator socket is connect()ed, which needs no write access to the
+# socket's directory.
+ReadWritePaths=/var/lib/mini/pay
 ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Solana RPC over TCP, the Store over a Unix socket; nothing else.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 LimitCORE=0
 TasksMax=32
 MemoryMax=512M

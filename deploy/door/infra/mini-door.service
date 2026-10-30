@@ -1,0 +1,54 @@
+# /etc/systemd/system/mini-door.service — the door's /join form (minidregg deploy/door/README.md).
+# Unprivileged uid mini-door, loopback only (Caddy routes /join* here). It writes one bounded
+# request file per POST into its own queue and reads the status files the root processor
+# writes; it holds no key, reaches no Mini socket and has no sudo.
+[Unit]
+Description=Mini door: the /join form
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mini-door
+Group=mini-door
+Slice=mini.slice
+UMask=0077
+ExecStart=/var/lib/mini/candidate/current/bin/mini-door
+Environment=MINI_DOOR_LISTEN=127.0.0.1:8795 MINI_DOOR_QUEUE=/var/lib/mini-door/queue MINI_DOOR_STATUS=/var/lib/mini-door-status MINI_DOOR_TRUSTED_PROXY=127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictAddressFamilies=AF_INET AF_INET6
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/mini-door/queue
+InaccessiblePaths=-/run/user -/run/dbus -/etc/mini -/var/lib/mini-keys -/var/lib/mini/sessions -/var/lib/mini/store -/var/lib/mini/credentials -/var/lib/mini-backups -/var/lib/mini-door-process -/var/lib/mini-discord -/var/lib/mini-core
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

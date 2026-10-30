@@ -26,9 +26,9 @@ def boxenv():
     if os.environ.get("PIPELINE_SLOTS") or not os.path.exists(f"{ROOT}/box.env"):
         return
     try:
-        out = subprocess.run(["bash", "-c", f'. "{ROOT}/box.env"; printf "%s\\0%s\\0%s" "$PIPELINE_SLOTS" "${{PIPELINE_SMALL_SLOTS:-}}" "${{PIPELINE_PEER:-}}"'],
+        out = subprocess.run(["bash", "-c", f'. "{ROOT}/box.env"; printf "%s\\0%s\\0%s\\0%s\\0%s" "$PIPELINE_SLOTS" "${{PIPELINE_SMALL_SLOTS:-}}" "${{PIPELINE_PEER:-}}" "${{PIPELINE_GATE_SLOTS:-}}" "${{PIPELINE_LANES:-}}"'],
                              capture_output=True, text=True, timeout=10).stdout.split("\0")
-        for k, v in zip(("PIPELINE_SLOTS", "PIPELINE_SMALL_SLOTS", "PIPELINE_PEER"), out):
+        for k, v in zip(("PIPELINE_SLOTS", "PIPELINE_SMALL_SLOTS", "PIPELINE_PEER", "PIPELINE_GATE_SLOTS", "PIPELINE_LANES"), out):
             if v and not os.environ.get(k):
                 os.environ[k] = v
     except Exception:
@@ -39,6 +39,11 @@ IDLE_CPU = 0.02            # fraction of one CPU
 TICK = os.sysconf("SC_CLK_TCK")
 BOOT = time.time() - float(open("/proc/uptime").read().split()[0])
 GATE = set(os.environ.get("PIPELINE_GATE_SLOTS", "/srv/build-slot-mk").split())   # never reclaimed
+LANES = os.environ.get("PIPELINE_LANES", "/srv/lanes")
+# Every slot this box declares (box.env), wherever its layout puts them (/srv, hbox's /tank/..., a no-root
+# host's $HOME/...); a stray file that box.env does not name is not a slot (burst-check: slots-no-strays).
+ALL_SLOTS = sorted(set(os.environ.get("PIPELINE_SLOTS", "").split() + os.environ.get("PIPELINE_SMALL_SLOTS", "").split()) | GATE) \
+    or sorted(glob.glob("/srv/build-slot-*"))
 
 def stat(pid):
     try:
@@ -63,8 +68,8 @@ def cwd(pid):
         return "?"
 
 def lane_of(path):
-    p = path.split("/")
-    return p[3] if len(p) > 3 and p[1] == "srv" and p[2] == "lanes" else path
+    pre = LANES.rstrip("/") + "/"
+    return path[len(pre):].split("/")[0] if path.startswith(pre) else path
 
 def tree_cpu():
     kids, cpu = {}, {}
@@ -86,7 +91,7 @@ def locks():
     held, waiting = {}, {}
     for line in r.stdout.splitlines():
         f = line.split()
-        if len(f) < 3 or not f[-1].startswith("/srv/build-slot-"):
+        if len(f) < 3 or f[-1] not in ALL_SLOTS:
             continue
         pid, mode, path = int(f[0]), f[1], f[-1]
         if mode.endswith("*"):
@@ -99,7 +104,7 @@ def snapshot(sample=3.0):
     held, waiting = locks()
     k0, c0 = tree_cpu(); time.sleep(sample); k1, c1 = tree_cpu()
     now, rows = time.time(), []
-    for path in sorted(glob.glob("/srv/build-slot-*")):
+    for path in ALL_SLOTS:
         row = {"slot": path, "gate": path in GATE, "waiters": []}
         pid = held.get(path)
         if pid and stat(pid):
@@ -182,9 +187,9 @@ def reclaim(rows):
         open(f"{ROOT}/slots.log", "a").write(msg)
         if r["lane"] and not r["lane"].startswith("/"):
             try:
-                open(f"/srv/lanes/{r['lane']}/SLOT-RECLAIMED.txt", "a").write(
+                open(f"{LANES}/{r['lane']}/SLOT-RECLAIMED.txt", "a").write(
                     msg + "  A build slot is for a running build. Hold it only while compiling; take it with "
-                    "/srv/pipeline/scripts/slot.sh CMD (any free slot) and author while it runs.\n")
+                    f"{ROOT}/scripts/slot.sh CMD (any free slot) and author while it runs.\n")
             except OSError:
                 pass
         k, _ = tree_cpu()
@@ -211,7 +216,7 @@ def main():
             pass
         if "--reclaim" in a or "--watch" in a:
             reclaim(rows)
-        if "--watch" in a:      # second guard beside the lake shim's: purge poisoned cache entries
+        if "--watch" in a:      # second guard beside lib.sh pipeline_cache_audit: purge poisoned cache entries
             audit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lake-cache-audit")
             if os.path.exists(audit) and os.path.isdir(os.environ.get("PIPELINE_LAKE_CACHE", "/srv/lake-cache")):
                 subprocess.run([audit, "--since", "--purge", "--quiet"], capture_output=True)

@@ -111,7 +111,7 @@ pub struct Backlink {
 #[derive(Clone, Debug)]
 pub struct Rendered {
     /// Explicit shared names from signed index links, not outbound URLs.
-    pub shared_names: Vec<crate::workspace::shared_names::Binding>,
+    pub shared_names: Vec<SharedName>,
     pub root: Value,
     pub root_revision: Value,
     pub lines: Vec<RenderedLine>,
@@ -119,6 +119,18 @@ pub struct Rendered {
     pub document_annotations: Vec<Annotation>,
     pub outline: Vec<OutlineEntry>,
     pub backlinks: Vec<Backlink>,
+}
+
+/// One link in the reserved `mini-name` scheme as it renders. Lean admits any
+/// link with that scheme (`sharedNameAt` checks scheme and liveness only), so
+/// a co-editor can write one the strict decoder refuses; it renders as an
+/// invalid link with the decoder's reason, and the rest of the document still
+/// renders for every reader. Name resolution (`shared_names::bindings`) stays
+/// strict: an index holding a malformed binding resolves nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SharedName {
+    Bound(crate::workspace::shared_names::Binding),
+    Invalid { link: String, reason: String },
 }
 
 /// The name this reader knows cell/document `id` by, else `doc:<id>`.
@@ -167,7 +179,7 @@ pub fn decos(names: &BTreeMap<String, String>, marks: &Value, depth: usize) -> V
 }
 
 fn decode_hex(value: &str) -> Vec<u8> {
-    crate::decode_hex(value).unwrap_or_default()
+    mini_sdk::hex::decode(value).unwrap_or_default()
 }
 
 /// `12 B`, `3 KB`, `2 MB`: an embed's size, to the unit a reader thinks in.
@@ -427,13 +439,21 @@ pub fn render(view: &View) -> Result<Rendered, String> {
             Some(OutlineEntry { line: n, level, text: line.plain() })
         })
         .collect();
-    let mut shared_names = Vec::new();
+    let mut bound = Vec::new();
+    let mut invalid = Vec::new();
     for entry in view.entries {
-        if let Some(binding) = crate::workspace::shared_names::binding(entry)? {
-            shared_names.push(binding);
+        match crate::workspace::shared_names::binding(entry) {
+            Ok(Some(binding)) => bound.push(binding),
+            Ok(None) => {}
+            Err(reason) => invalid.push(SharedName::Invalid {
+                link: entry["id"].as_str().unwrap_or("?").to_owned(),
+                reason,
+            }),
         }
     }
-    shared_names.sort_by(|a,b| a.name.cmp(&b.name).then(a.link.cmp(&b.link)));
+    bound.sort_by(|a,b| a.name.cmp(&b.name).then(a.link.cmp(&b.link)));
+    let mut shared_names: Vec<SharedName> = bound.into_iter().map(SharedName::Bound).collect();
+    shared_names.extend(invalid);
     Ok(Rendered {
         shared_names,
         root: document["root"].clone(),
@@ -505,8 +525,14 @@ impl Rendered {
             .collect();
         json!({"type":"document","host":host,"root":self.root,"rootRevision":self.root_revision,
             "lines":lines,
-            "sharedNames":self.shared_names.iter().map(|b|json!({"name":b.name,"kind":b.kind,
-                "target":b.target,"link":b.link})).collect::<Vec<_>>(),
+            "sharedNames":self.shared_names.iter().filter_map(|n| match n {
+                SharedName::Bound(b) => Some(json!({"name":b.name,"kind":b.kind,"target":b.target,"link":b.link})),
+                SharedName::Invalid { .. } => None,
+            }).collect::<Vec<_>>(),
+            "invalidSharedNames":self.shared_names.iter().filter_map(|n| match n {
+                SharedName::Invalid { link, reason } => Some(json!({"link":link,"reason":reason})),
+                SharedName::Bound(_) => None,
+            }).collect::<Vec<_>>(),
             "documentAnnotations":self.document_annotations.iter().map(annotation_json).collect::<Vec<_>>(),
             "outline":self.outline.iter().map(|o| json!({"line":o.line,"level":o.level,"text":o.text})).collect::<Vec<_>>(),
             "backlinks":self.backlinks.iter().map(|b| json!({"source":b.source,"link":b.link,
@@ -548,7 +574,7 @@ mod tests;
 
 #[test]
 fn decode_hex_malformed_payload_retains_empty_fallback() {
-    for invalid in ["0é0", "😀", "a", "zz"] {
+    for invalid in ["0é0", "😀", "a", "zz", "AB"] {
         assert!(decode_hex(invalid).is_empty());
     }
     assert_eq!(decode_hex("4869"), b"Hi");

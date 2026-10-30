@@ -2,10 +2,29 @@
 After-core construction: not activated by the frozen native runtime profile.
 Methods select immutable existing programs; they confer no mutation authority.
 -/
-import Compiler.WorldExecutionContract
-import Compiler.WorldKindCell
-import Compiler.NockProgramCodec
-import Theory.Eval
+module
+
+public import Compiler.WorldExecutionContract
+public import Compiler.WorldKindCell
+public import Compiler.NockProgramCodec
+public import Theory.Eval
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.WorldKindMethods
 
@@ -84,7 +103,7 @@ def tableOf (value : Instance) : Option Table := do
   if field.codec != .bytes || field.discipline != .rom then none else do
     let raw ← value.store ⟨space, (0 : Nat)⟩
     -- Reuse the declared scalar codec rather than casting a dependent value.
-    let bytes ← (ResourceBirthCodec.strictCodec bytesStream.toLawful).decode
+    let bytes ← bytesStream.toLawful.decode
       (field.codec.stream.encode raw)
     let table ← decode bytes
     if valid value.descriptor table then some table else none
@@ -95,8 +114,8 @@ def resolve (value : Instance) (program : Digest) : Option Method := do
 
 def numeric (codec : ScalarCodec) (bytes : List UInt8) : Option Int :=
   match codec with
-  | .natural => ((ResourceBirthCodec.strictCodec StreamCodec.nat.toLawful).decode bytes).map Int.ofNat
-  | .integer => (ResourceBirthCodec.strictCodec IntStream.intStream.toLawful).decode bytes
+  | .natural => (StreamCodec.nat.toLawful.decode bytes).map Int.ofNat
+  | .integer => IntStream.intStream.toLawful.decode bytes
   | .bytes => none
 
 /-- Exact writes only: no erasure, byte payload or read is represented as an

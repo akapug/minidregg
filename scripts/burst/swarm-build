@@ -13,7 +13,7 @@
 set -euo pipefail
 if [ -n "${SWARM_BUILD_INNER:-}" ]; then
   echo 0 > /proc/self/oom_score_adj 2>/dev/null || true
-  exec nice -n 10 "$@"
+  exec nice -n "${SWARM_NICE:-10}" "$@"   # SWARM_NICE: a host that is not ours (persvati) sets 15 in box.env
 fi
 export SWARM_BUILD_INNER=1
 tag=${SWARM_BUILD_TAG:-}

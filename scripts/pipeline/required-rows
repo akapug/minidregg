@@ -10,16 +10,20 @@
 # yet; landing.sh prints them on every landing and does not count them (they are DEPLOYABLE-1 work).
 # A pending row FLIPS TO REQUIRED AUTOMATICALLY the first time results.tsv has a line with its id (NAME or
 # NAME/*): from then on it must PASS like any other line here (decision: ROOT, 2026-10-14).
+# `pending NAME when-green-at-main note` (ROOT, 2026-10-14, births): the row exists and runs on every landing, but
+# flips to required only once main's own baseline run has it PASS (every line NAME, NAME/*). Until then landing.sh
+# prints its status and does not count it; the baseline-relative rule (b) still applies to it like any line.
 #
-# BASELINE-RELATIVE RULE (ROOT, 2026-10-14). A candidate lands when:
+# BASELINE-RELATIVE RULE (ROOT 2026-10-14; reds named, never ledgered: docs/COORDINATION-2026-10-27.md §2, 2026-10-27).
+# A candidate lands when:
 #   (a) its static gate is red=0, AND
 #   (b) its standing run on this box has NO line non-PASS (or missing) that was PASS in main's own most recent
 #       standing run on the same box ($ARTIFACT_ROOT/main -> $JOURNEY_ROOT/<main>/results.tsv), AND
-#   (c) every required line is PASS or declared absent by name ($PIPELINE_ROOT/absent-inputs.tsv), EXCEPT lines
-#       already non-PASS at main's baseline that are listed below as `known-red ROW CV-TASK note`: those block
-#       nothing until fixed. A pre-existing red WITHOUT a known-red line still blocks (open the cv task first).
+#   (c) every required line is PASS, or declared absent by name ($PIPELINE_ROOT/absent-inputs.tsv), or was ALREADY
+#       non-PASS at main's baseline: such a line prints as PRE-RED by name and blocks nothing. There is no list of
+#       accepted reds to maintain: the run's output names them, and a lane's brief names which one it owns.
 # landing.sh prints "new reds vs baseline: N" and "required unmet: [...] (of which pre-existing at main: [...])";
-# exit 0 iff new reds = 0 and nothing required is unmet beyond the known-red list.
+# exit 0 iff new reds = 0 and nothing required is unmet beyond the pre-existing ones.
 activity
 seats
 call
@@ -62,8 +66,12 @@ jpay/JPAY6
 jpay
 exchange
 hostupgrade
-# known red at main's hbox baseline 7dea0626 (2026-10-14); remove the line when the row is fixed
-known-red fleetsign 01a13985-48ef interleaved turns refused 'remote challenge differs from locally prepared intent' (Kernel/NativeClientConsent.lean:55); 3/3 on hbox, PASS on burst3 timing
-pending BIRTHS the bar (1000 records: write <= 5 s, cold reopen <= 60 s) measured on BIRTHS; growth measures updates (MATURATION-MAP 1, cv 01a11e1b-0adc)
+# The journey split (DEMO-PREFIX L9; journey.sh SPINE/DEMO_STEPS/KERNEL_STEPS). Every line above stays required.
+# `demo` is new: the demo journey's steps no other row runs (documents, web, rooms, chat, Hermes in a room, PAY
+# enrollment, keys over the proxy, disclosure). It becomes required the first time main runs it green. The
+# kernel journey (`kernel`) and growth (`growth`) run only in the nightly (PIPELINE_NIGHTLY=1), so a landing has
+# no line for them and they cannot be listed here; their reds go to the morning queue (docs/PIPELINE-HBOX.md).
+pending demo when-green-at-main the demo journey (journey.sh JOURNEY_SET=demo minus the steps rows m3-m8, jpay, jserve and journey run)
+pending births when-green-at-main required when green at main. THE BAR (cv 01a0f9c0-521b): write p99 <= 5 s, cold reopen <= 60 s, judged per landing on 64 creates (journey-rows row_births); the nightly runs 1000 (docs/PIPELINE-HBOX.md Nightly); growth (updates) is nightly-only
 pending HERMES-LIVE real inference + BYOK; needs Ember's providers.json (MATURATION-MAP 2.6)
 pending jcertify certifier unit; 320 records PASS on dregg-infra edge/mini-certify (MATURATION-MAP 1)

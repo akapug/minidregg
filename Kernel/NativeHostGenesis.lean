@@ -12,11 +12,30 @@ same canonical cell laws and the one-cell authority loader used by turns.
 Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
-import Compiler.WorldExecutionContract
-import Kernel.ResourceBirthPolicyController
-import Kernel.PayClaimLaw
-import Kernel.ClockLaw
-import Theory.AssertAxioms
+module
+
+public import Compiler.WorldExecutionContract
+public import Kernel.ResourceBirthPolicyController
+public import Kernel.PayClaimLaw
+public import Kernel.ClockLaw
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostGenesis
 
@@ -63,13 +82,12 @@ capability, and the identifier of the factory controller's control
 capability on the pay cell (`payControlCapability`), through which the
 observer is replaced at runtime (`observer_replaceable`), and the identifier
 of the observer's self-enrollment capability on the factory
-(`enrolCapability`, `C_enrol` of PAY §11.4), exercised only through
+(`enrolCapability`, `C_enrol` of docs/PAY.md §11.4), exercised only through
 `PayEnrolReceiver` under the clause `authority/operation/pay-self-enrol` of
 the confined factory law (`factoryLaw`, `observer_control_confined`). -/
 structure PayObserver where
   subject : SubjectId
   capabilityId : CapabilityId
-  controlCapabilityId : CapabilityId
   enrolCapabilityId : CapabilityId
 /-- A subject that advances the deployment's one clock cell, and the
 identifier of its `C_tick`: a root capability on the clock cell
@@ -96,9 +114,21 @@ structure Config where
   enrollments : List Enrollment
   factoryController : FactoryController
   meterAllowance : ResourceCost.Charge
-  /-- The payment observer.  When present, genesis installs the pay cell's law
-  (`payPredicate`) and the observer's capability on the pay cell; when absent,
-  no report is admissible (the pay law is not installed). -/
+  /-- The factory controller's control capability on the pay cell (delegate, install
+  the law, revoke): installed at EVERY genesis, observer or not, so that an observer is
+  an admitted runtime transition on any world (`observer_replaceable`,
+  `pay_control_present`; GENESIS-COUPLING S1, 2026-10-27). -/
+  payControlCapabilityId : CapabilityId
+  /-- The factory controller's control capability on the clock cell (O61): read, install
+  the law, delegate, revoke; never `tickClock` (`clock_control_present`,
+  `clock_control_cannot_tick`). The clock law admits that management
+  (`ClockLaw.controlClause`), so a law naming a new ticker is a runtime install. -/
+  clockControlCapabilityId : CapabilityId
+  /-- The payment observer.  The pay cell's law (`payPredicate`) is installed at every
+  genesis; when an observer is named it also admits that observer's reports and
+  self-enrollment and genesis installs the observer's capabilities; when absent, the
+  law admits only the controller's management, so no report is admissible until the
+  controller installs a law naming one. -/
   payObserver : Option PayObserver := none
   /-- Every subject that may tick the clock.  Empty means the clock stays at
   genesis for the life of the deployment: the clock law admits no one. -/
@@ -109,6 +139,20 @@ structure Config where
   tailBound : Nat
   clockGenesisNow : Nat
   clockMaxStepSeconds : Nat
+  /-- `C`: the issuance cap of the tariff asset, installed as its issuer
+  well's floor in the genesis Book. Every mint of the asset (initial funds and
+  later paid credit) nets against it; burns restore headroom. -/
+  issuanceCap : Nat
+  /-- The genesis platform record (`genesisRecord`, version 0, creation tariff `tariff`),
+  seeded in the platform cell (`platformCell`) with the factory controller: the grain-birth
+  tariff, the completion custodian's key, and the factory template's owner budget and
+  lifetime. An invalid record (a zero grain-birth base or lifetime, a custodian key that is
+  not 32 bytes) refuses genesis by the platform cell's law (`Error.cellLaws`). -/
+  platformGrainBirth : Option Kernel.PlatformCellLayout.GrainBirthTariffPin
+  platformCustodianKey : Option (List UInt8)
+  platformOwnerBudget : Nat
+  platformLifetime : Nat
+
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -123,6 +167,20 @@ def predicateStream : StreamCodec Minidregg.Pred.Pred where
     intro predicate suffix
     simp [(StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix_encode,
       PolicyRecordCodec.decodePred_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases ok : (StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix bytes with
+    | none => simp [ok] at decoded
+    | some pair =>
+      obtain ⟨tokens, rest⟩ := pair
+      cases predicateOk : PolicyRecordCodec.decodePred tokens with
+      | none => simp [ok, predicateOk] at decoded
+      | some predicate =>
+        simp only [ok, predicateOk, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show (StreamCodec.list PolicyRecordCodec.tokenStream).encode (PolicyRecordCodec.encodePred _) ++ _ = _
+        rw [PolicyRecordCodec.encodePred_decodePred predicateOk]
+        exact (StreamCodec.list PolicyRecordCodec.tokenStream).encode_decodePrefix _ _ _ ok
 
 def enrollmentStream : StreamCodec Enrollment :=
   StreamCodec.xmap
@@ -143,14 +201,17 @@ def enrollmentStream : StreamCodec Enrollment :=
 codecs. Exact scalar arity is required, and the outer codec requires canonical
 re-encoding; no optional coordinate acquires an implicit default. -/
 abbrev ConfigWire :=
-  List Nat × List PolicyRecordCodec.Token × List Enrollment × ResourceCost.Charge × List (Nat × Nat)
+  List Nat × List PolicyRecordCodec.Token × List Enrollment × ResourceCost.Charge × List (Nat × Nat) ×
+    Option (Nat × Nat) × Option (List UInt8)
 
 def configWireStream : StreamCodec ConfigWire :=
   StreamCodec.product (StreamCodec.list StreamCodec.nat)
     (StreamCodec.product (StreamCodec.list PolicyRecordCodec.tokenStream)
       (StreamCodec.product (StreamCodec.list enrollmentStream)
         (StreamCodec.product DurableReceiverCodec.chargeStream
-          (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+          (StreamCodec.product (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+            (StreamCodec.product (StreamCodec.option (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+              (StreamCodec.option bytesStream))))))
 
 def tickerWire (ticker : ClockTicker) : Nat × Nat := (ticker.subject.value, ticker.capabilityId.value)
 
@@ -167,33 +228,41 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value, config.tailBound, config.clockGenesisNow, config.clockMaxStepSeconds] ++
+    config.factoryController.capabilityId.value, config.tailBound, config.clockGenesisNow, config.clockMaxStepSeconds,
+    config.issuanceCap, config.payControlCapabilityId.value, config.clockControlCapabilityId.value,
+    config.platformOwnerBudget, config.platformLifetime] ++
     (match config.payObserver with
      | none => []
      | some observer => [observer.subject.value, observer.capabilityId.value,
-         observer.controlCapabilityId.value, observer.enrolCapabilityId.value]),
+         observer.enrolCapabilityId.value]),
    PolicyRecordCodec.encodePred config.factoryPredicate,
-   config.enrollments, config.meterAllowance, config.clockTickers.map tickerWire)
+   config.enrollments, config.meterAllowance, config.clockTickers.map tickerWire,
+   config.platformGrainBirth.map (fun pin => (pin.base, pin.perBirth)), config.platformCustodianKey)
 
 def Config.ofWire (wire : ConfigWire) : Option Config := do
   let (coordinates, payObserver) ← match wire.1 with
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl,
+        clockControl, ownerBudget, lifetime] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds), none)
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl,
+          clockControl, ownerBudget, lifetime), none)
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, observer, observerCapability, payControl, enrolCapability] =>
+        controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl,
+        clockControl, ownerBudget, lifetime, observer, observerCapability, enrolCapability] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds),
-          some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨payControl⟩, ⟨enrolCapability⟩⟩ : PayObserver))
+          controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl,
+          clockControl, ownerBudget, lifetime),
+          some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨enrolCapability⟩⟩ : PayObserver))
     | _ => none
   let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds) := coordinates
+      controlCapability, tailBound, clockGenesisNow, clockMaxStepSeconds, issuanceCap, payControl,
+      clockControl, ownerBudget, lifetime) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -206,25 +275,39 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       enrollments := wire.2.2.1
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
       meterAllowance := wire.2.2.2.1
+      payControlCapabilityId := ⟨payControl⟩
+      clockControlCapabilityId := ⟨clockControl⟩
       payObserver := payObserver
-      clockTickers := wire.2.2.2.2.map tickerOfWire
+      clockTickers := wire.2.2.2.2.1.map tickerOfWire
       tailBound := tailBound
       clockGenesisNow := clockGenesisNow
-      clockMaxStepSeconds := clockMaxStepSeconds }
+      clockMaxStepSeconds := clockMaxStepSeconds
+      issuanceCap := issuanceCap
+      platformGrainBirth := wire.2.2.2.2.2.1.map (fun pin => ⟨pin.1, pin.2⟩)
+      platformCustodianKey := wire.2.2.2.2.2.2
+      platformOwnerBudget := ownerBudget
+      platformLifetime := lifetime }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _, _, _⟩
-  cases observer <;> simp [Config.ofWire, Config.toWire]
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, _, _, observer, _, _, _, _, _, grain, _, _, _⟩
+  cases observer <;> rcases grain with _ | ⟨_, _⟩ <;> simp [Config.ofWire, Config.toWire]
 
-/-- Version 5 (CLOCK-BOUND) adds mandatory initial clock time and step bound.
+/-- Version 8 (PLATFORM) adds the factory controller's clock control capability (O61)
+after the pay control, the genesis platform record's owner budget and lifetime after it, and
+its grain-birth tariff and completion custodian key as two trailing options; a version-7
+source, which had none of them, refuses (`v7_config_refused`).
+Version 7 (S1) made the pay control capability mandatory.
+Version 6 (FLOORS) adds the mandatory issuance cap `C` after the clock
+bound; a version-5 source, which had none, refuses (`v5_config_refused`).
+Version 5 (CLOCK-BOUND) adds mandatory initial clock time and step bound.
 Version 4 (BRAID-COMPUTE): ONE source for the two version-3 shapes that met at
 the merge: CLOCK-SUBJECT's (the clock tickers, from which the clock cell's law and
 each ticker's `C_tick` are derived, beside the optional payment observer) and C14's
 (the scalar list carries the tail bound `L` after the factory controller).  Every
 version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
 as the fourth deployment coordinate. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v9".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -275,6 +358,34 @@ theorem v4_config_refused (payload : List UInt8) :
 
 #assert_axioms v4_config_refused
 
+/-- A version-5 source has no issuance cap and refuses; it is never read as an
+uncapped or zero-capped deployment. -/
+theorem v5_config_refused (payload : List UInt8) :
+    configCodec.decode ("DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList ++ payload) = none := by
+  let retired := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v5".toUTF8.toList
+  have sameLength : configFrame.length = retired.length := by decide +kernel
+  have different : retired ≠ configFrame := by decide +kernel
+  have raw : configRawCodec.decode (retired ++ payload) = none := by
+    simp [configRawCodec, sameLength, different]
+  change configCodec.decode (retired ++ payload) = none
+  simp [configCodec, ResourceBirthCodec.strictCodec, raw]
+
+#assert_axioms v5_config_refused
+
+/-- A version-7 source has no clock control and no platform record and refuses; it is never
+read as a world without them. -/
+theorem v7_config_refused (payload : List UInt8) :
+    configCodec.decode ("DREGG/NATIVE-HOST/GENESIS-SOURCE/v7".toUTF8.toList ++ payload) = none := by
+  let retired := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v7".toUTF8.toList
+  have sameLength : configFrame.length = retired.length := by decide +kernel
+  have different : retired ≠ configFrame := by decide +kernel
+  have raw : configRawCodec.decode (retired ++ payload) = none := by
+    simp [configRawCodec, sameLength, different]
+  change configCodec.decode (retired ++ payload) = none
+  simp [configCodec, ResourceBirthCodec.strictCodec, raw]
+
+#assert_axioms v7_config_refused
+
 /-- The authority clock at genesis: no record has been accepted
 (`genesis_revision` below). Key activation uses this clock (the durable
 height, `CredentialAuthorityDomainReceiver.clockOf`), not a key epoch. -/
@@ -297,8 +408,8 @@ def Config.Valid {F : Type} [Field F]
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
        enrollment.factoryObserveCapabilityId]) ++
+    config.payControlCapabilityId ::
     (config.payObserver.map (·.capabilityId)).toList ++
-    (config.payObserver.map (·.controlCapabilityId)).toList ++
     (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup ∧
   config.factoryController.subject.value ∈ config.enrollments.map (·.key.subject) ∧
   (∀ observer ∈ config.payObserver,
@@ -320,9 +431,10 @@ def Config.Valid {F : Type} [Field F]
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
        enrollment.factoryObserveCapabilityId]) ++
+    config.payControlCapabilityId ::
     (config.payObserver.map (·.capabilityId)).toList ++
-    (config.payObserver.map (·.controlCapabilityId)).toList ++
-    (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup
+    (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup ∧
+  (config.enrollments.map (·.initialBalance)).sum ≤ config.issuanceCap
 
 instance configValidDecidable {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
@@ -364,8 +476,14 @@ theorem fund_conserves (asset : Nat) (book : Book) (enrollments : List Enrollmen
       exact Book.applyPosting_conserves book _ issuerPresent
         (recipientsPresent enrollment (List.mem_cons_self)) selectedAsset
 
+/-- The genesis Book before funding: every account at zero, and the tariff
+asset's issuer well with floor `issuanceCap`. -/
+def Config.unfundedBook (config : Config) : Book :=
+  ⟨config.accounts, 0, 0,
+    DFinsupp.single (config.tariff.asset, config.tariff.asset) config.issuanceCap⟩
+
 def Config.initialBook (config : Config) : Book :=
-  fund config.tariff.asset ⟨config.accounts, 0, 0⟩ config.enrollments
+  fund config.tariff.asset config.unfundedBook config.enrollments
 
 /-- Every asset, including the explicit issuer well, starts with total zero.
 This holds for all configurations, not just one allocation fixture. -/
@@ -373,11 +491,83 @@ theorem initialBook_conserved (config : Config) (asset : Nat) :
     config.initialBook.totalAsset asset = 0 := by
   unfold Config.initialBook
   rw [fund_conserves]
-  · simp [Book.totalAsset, Book.balance]
-  · simp [Config.accounts]
+  · simp [Book.totalAsset, Book.balance, Config.unfundedBook]
+  · simp [Config.accounts, Config.unfundedBook]
   · intro enrollment member
-    simp only [Config.accounts, List.mem_toFinset, List.mem_append]
+    simp only [Config.unfundedBook, Config.accounts, List.mem_toFinset, List.mem_append]
     exact Or.inl (List.mem_map.mpr ⟨enrollment, member, rfl⟩)
+
+/-- Each funding step is the admitted mint it names: while the well has
+headroom for the remaining initial balances, funding preserves the floor law. -/
+theorem fund_withinFloors (asset : Nat) (book : Book) (enrollments : List Enrollment)
+    (target : AssetId) (within : book.WithinFloors target)
+    (issuerPresent : asset ∈ book.accounts)
+    (recipientsPresent : ∀ enrollment ∈ enrollments, enrollment.accountId ∈ book.accounts)
+    (notWell : ∀ enrollment ∈ enrollments, enrollment.accountId ≠ asset)
+    (headroom : Int.ofNat (enrollments.map (·.initialBalance)).sum ≤
+      book.balance asset asset + Int.ofNat (book.floor asset asset)) :
+    (fund asset book enrollments).WithinFloors target := by
+  induction enrollments generalizing book with
+  | nil => exact within
+  | cons enrollment rest ih =>
+      have step : book.applyPosting ⟨asset, enrollment.accountId, asset, enrollment.initialBalance⟩ =
+          (Operation.mint asset enrollment.accountId enrollment.initialBalance).apply book := rfl
+      have sum : Int.ofNat ((enrollment :: rest).map (·.initialBalance)).sum =
+          Int.ofNat enrollment.initialBalance + Int.ofNat (rest.map (·.initialBalance)).sum := by
+        simp only [List.map_cons, List.sum_cons, Int.ofNat_eq_natCast]
+        push_cast; ring
+      rw [sum] at headroom
+      have restNonneg : (0 : Int) ≤ Int.ofNat (rest.map (·.initialBalance)).sum :=
+        Int.natCast_nonneg _
+      have admitted : Admission book (.mint asset enrollment.accountId enrollment.initialBalance) :=
+        { sourcePresent := issuerPresent
+          destinationPresent := recipientsPresent enrollment (List.mem_cons_self)
+          sourceWithinFloor := by
+            show Int.ofNat enrollment.initialBalance ≤
+              book.balance asset asset + Int.ofNat (book.floor asset asset)
+            linarith
+          wellFormed := trivial }
+      change (fund asset (book.applyPosting
+        ⟨asset, enrollment.accountId, asset, enrollment.initialBalance⟩) rest).WithinFloors target
+      rw [step]
+      apply ih _ (admitted_preserves_floors book _ target within admitted)
+      · exact issuerPresent
+      · exact fun selected member => recipientsPresent selected (List.mem_cons_of_mem _ member)
+      · exact fun selected member => notWell selected (List.mem_cons_of_mem _ member)
+      · have different : enrollment.accountId ≠ asset := notWell enrollment (List.mem_cons_self)
+        have wellAfter :
+            ((Operation.mint asset enrollment.accountId enrollment.initialBalance).apply book).balance
+              asset asset = book.balance asset asset - Int.ofNat enrollment.initialBalance := by
+          rw [Operation.apply_balance]
+          simp [Operation.posting, different]
+        rw [wellAfter, Operation.apply_floor_of_not_setFloor _ _ _ _ (by intros; exact nofun)]
+        linarith
+
+/-- **The genesis Book satisfies the floor law** in every asset, so every
+Book reached from it by admitted batches does (`Batch.apply_withinFloors`),
+and the tariff asset's outstanding balances never exceed the issuance cap plus
+the credit limits (`outstanding_le_sum_floors`). -/
+theorem initialBook_withinFloors (config : Config)
+    (capped : (config.enrollments.map (·.initialBalance)).sum ≤ config.issuanceCap)
+    (notWell : config.tariff.asset ∉ config.enrollments.map (·.accountId))
+    (target : AssetId) :
+    config.initialBook.WithinFloors target := by
+  unfold Config.initialBook
+  apply fund_withinFloors
+  · intro account
+    simp only [Config.unfundedBook, Book.balance, Book.floor, DFinsupp.coe_zero, Pi.zero_apply]
+    exact neg_nonpos.mpr (Int.natCast_nonneg _)
+  · simp [Config.accounts, Config.unfundedBook]
+  · intro enrollment member
+    simp only [Config.unfundedBook, Config.accounts, List.mem_toFinset, List.mem_append]
+    exact Or.inl (List.mem_map.mpr ⟨enrollment, member, rfl⟩)
+  · intro enrollment member same
+    exact notWell (same ▸ List.mem_map.mpr ⟨enrollment, member, rfl⟩)
+  · simp only [Config.unfundedBook, Book.balance, Book.floor, DFinsupp.coe_zero, Pi.zero_apply,
+      DFinsupp.single_eq_same, zero_add, Int.ofNat_eq_natCast]
+    exact_mod_cast capped
+
+#assert_axioms initialBook_withinFloors
 
 def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (identifier : Nat) (predicate : Minidregg.Pred.Pred) : PolicyRecord where
@@ -393,7 +583,7 @@ def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
   audience := none
   objectDescriptor := none
 
-/-- The factory law with the payment observer confined (PAY §11.4): the
+/-- The factory law with the payment observer confined (docs/PAY.md §11.4): the
 observer is admitted only on a self-enrollment request (the receiver projects
 `ClockLaw.paySelfEnrolSlot = 1`), and every clause of the deployment's own factory law is
 reached only by a request that is neither the observer's nor a
@@ -434,7 +624,8 @@ goes back; it advances by a ticker's `tickClock`, and, when the deployment has
 a payment observer, by a payment observation or a self-enrollment, which write
 it beside their own cells and are judged by it (`ReceivingLaw.judgeWrite`). -/
 def clockPredicate (config : Config) : Minidregg.Pred.Pred :=
-  ClockLaw.clockPredicate (config.clockTickers.map (·.subject)) config.payObserver.isSome
+  ClockLaw.clockPredicate config.factoryController.subject (config.clockTickers.map (·.subject))
+    config.payObserver.isSome
 
 def clockTarget (config : Config) : Nat := Kernel.ClockCell.physicalId config.deployment.domain
 
@@ -498,27 +689,35 @@ def payControlVerbTags : List Int :=
    Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.installPolicy : Verb .program)),
    Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.revokeCapability : Verb .program))]
 
-/-- The pay cell's law: the configured observer may `observePayment`, and may
-record a SELF-ENROLLMENT (its `installPolicy` request on the factory, with
-`ClockLaw.paySelfEnrolSlot = 1`, the slot only the pay-enrol receivers project);
-the factory controller may only manage (delegate, install the law, revoke).
-Neither can do the other's part. -/
-def payPredicate (controller : SubjectId) (observer : PayObserver) : Minidregg.Pred.Pred :=
-  .any [
-    .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
+/-- The pay cell's law: the configured observer (when one is named) may `observePayment`,
+and may record a SELF-ENROLLMENT (its `installPolicy` request on the factory, with
+`ClockLaw.paySelfEnrolSlot = 1`, the slot only the pay-enrol receivers project); the
+factory controller may only manage (delegate, install the law, revoke). Neither can do
+the other's part. The controller's clause is the one every pay law carries. -/
+def payControlClause (controller : SubjectId) : Minidregg.Pred.Pred :=
+  .all [.eq "request/subject" (Int.ofNat controller.value),
+    .memberOf "request/verb" payControlVerbTags]
+
+/-- The observer's two clauses: its reports and its self-enrollment. -/
+def payObserverClauses (observer : PayObserver) : List Minidregg.Pred.Pred :=
+  [.all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
         (Verb.observePayment : Verb .program))),
       .eq "request/subject" (Int.ofNat observer.subject.value)],
     .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
         (Verb.installPolicy : Verb .program))),
       .eq "request/subject" (Int.ofNat observer.subject.value),
-      .eq ClockLaw.paySelfEnrolSlot 1],
-    .all [.eq "request/subject" (Int.ofNat controller.value),
-      .memberOf "request/verb" payControlVerbTags]]
+      .eq ClockLaw.paySelfEnrolSlot 1]]
+
+/-- The pay cell's genesis law. With an observer: its reports, its self-enrollment and
+the controller's management; without one: the controller's management alone, so no
+report is admissible until the controller installs a law naming an observer. -/
+def payPredicate (controller : SubjectId) (observer : Option PayObserver) : Minidregg.Pred.Pred :=
+  .any ((observer.map payObserverClauses).getD [] ++ [payControlClause controller])
 
 def payPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
-    (config : Config) (observer : PayObserver) : PolicyRecord :=
+    (config : Config) : PolicyRecord :=
   policy profile config (Kernel.PayCell.physicalId config.deployment.domain)
-    (payPredicate config.factoryController.subject observer)
+    (payPredicate config.factoryController.subject config.payObserver)
 
 /-- The observer's capability: target and policy the pay cell, verb
 `observePayment` only. -/
@@ -536,13 +735,24 @@ parent lacks, and `observeProgram`, because every management plan reads the
 target's root under an observation grant.  The pay law (`payPredicate`)
 refuses the controller's own reports. -/
 def payControlCapability {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     Capability .program :=
-  rootCapability profile config .program observer.controlCapabilityId
+  rootCapability profile config .program config.payControlCapabilityId
     config.factoryController.subject (Kernel.PayCell.physicalId config.deployment.domain)
     {.observeProgram, .installPolicy, .revokeCapability, .delegateProgram, .observePayment}
 
-/-- `C_enrol` (PAY §11.4): the observer's capability on the factory, verb
+/-- The factory controller's control of the clock cell (O61), the mirror of the pay control:
+`observeProgram` (every management plan reads the root), `installPolicy` (a law naming new
+tickers), `revokeCapability` and `delegateProgram`. Never `tickClock`: the controller
+cannot tick (`clock_control_cannot_tick`). -/
+def clockControlCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
+    Capability .program :=
+  rootCapability profile config .program config.clockControlCapabilityId
+    config.factoryController.subject (clockTarget config)
+    {.observeProgram, .installPolicy, .revokeCapability, .delegateProgram}
+
+/-- `C_enrol` (docs/PAY.md §11.4): the observer's capability on the factory, verb
 `installPolicy` only.  The scope alone would be the whole factory control;
 the confined factory law (`factoryLaw`) narrows it to self-enrollment. -/
 def enrolCapability {F : Type} [Field F]
@@ -561,8 +771,7 @@ def tickCapability {F : Type} [Field F]
 def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
   factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config) ++
-    (config.payObserver.map (payPolicy profile config)).toList ++
-    [clockPolicy profile config]
+    [payPolicy profile config, clockPolicy profile config]
 
 def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
@@ -602,8 +811,8 @@ def entries {F : Type} [Field F]
     capabilityEntries (factoryObserveCapability profile config enrollment)) ++
   config.payObserver.toList.flatMap (fun observer =>
     capabilityEntries (observerCapability profile config observer)) ++
-  config.payObserver.toList.flatMap (fun observer =>
-    capabilityEntries (payControlCapability profile config observer)) ++
+  capabilityEntries (payControlCapability profile config) ++
+  capabilityEntries (clockControlCapability profile config) ++
   config.payObserver.toList.flatMap (fun observer =>
     capabilityEntries (enrolCapability profile config observer)) ++
   config.clockTickers.flatMap (fun ticker => capabilityEntries (tickCapability profile config ticker))
@@ -666,6 +875,18 @@ operator's tail bound (`SystemCell.genesisStore`). -/
 def systemCell (config : Config) : PackedCell CanonicalCellRegistry.registry :=
   ⟨.system, materialize Kernel.SystemCell.materializer (Kernel.SystemCell.genesisStore config.tailBound)⟩
 
+/-- The genesis platform record: version 0, the deployment's creation tariff and the
+genesis source's platform fields. -/
+def genesisRecord (config : Config) : Kernel.PlatformCellLayout.Platform :=
+  ⟨0, config.tariff, config.platformGrainBirth, config.platformCustodianKey,
+    config.platformOwnerBudget, config.platformLifetime⟩
+
+/-- The genesis platform cell: the genesis record and the factory controller, which no writer
+changes afterwards (`PlatformCellLayout.Reachable.controller_stays`). -/
+def platformCell (config : Config) : PackedCell CanonicalCellRegistry.registry :=
+  ⟨.platform, materialize Kernel.PlatformCellLayout.materializer
+    (Kernel.PlatformCellLayout.genesisStore config.factoryController.subject (genesisRecord config))⟩
+
 def baseCells {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     List (Nat × PackedCell CanonicalCellRegistry.registry) :=
@@ -681,7 +902,21 @@ def baseCells {F : Type} [Field F]
       CanonicalCellRegistry.policySourceCell record)) ++
   [(Kernel.PayCell.physicalId config.deployment.domain, payCell profile config),
    (Kernel.ClockCell.physicalId config.deployment.domain, clockCell config),
-   (Kernel.SystemCell.physicalId config.deployment.domain, systemCell config)]
+   (Kernel.SystemCell.physicalId config.deployment.domain, systemCell config),
+   (Kernel.PlatformCellLayout.physicalId config.deployment.domain, platformCell config)]
+
+/-- **The platform cell is seeded at genesis** (the genesis half of "a loaded platform cell
+is `Reachable`"): every genesis cell list holds it at its physical identifier, and its store
+is `Reachable` under the factory controller; afterwards only the install family writes it
+(`PlatformInstallReceiver.platform_written_only_by_install`). -/
+theorem platform_seeded {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) :
+    (Kernel.PlatformCellLayout.physicalId config.deployment.domain, platformCell config) ∈
+        baseCells profile config ∧
+      Kernel.PlatformCellLayout.Reachable config.factoryController.subject
+        (Kernel.PlatformCellLayout.genesisStore config.factoryController.subject
+          (genesisRecord config)) :=
+  ⟨by simp [baseCells], .genesis _⟩
 
 def physicalCells (cells : List (Nat × PackedCell CanonicalCellRegistry.registry)) :
     List (Digest × List UInt8) :=
@@ -717,7 +952,7 @@ structure Built {F : Type} [Field F]
 
 def Built.image {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
     {config : Config} (built : Built profile config) : DurableReceiver.Image :=
-  ⟨built.seed, []⟩
+  DurableReceiver.Image.ofAccepted built.seed []
 
 @[simp] theorem Built.no_history {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {config : Config}
@@ -832,8 +1067,18 @@ theorem clock_law_refuses_nonticker_tick (config : Config) (old new : Minidregg.
     (ticking : new.get "request/verb" = some (Int.ofNat ClockLaw.tickVerbTag))
     (other : subject ∉ config.clockTickers.map (·.subject.value)) :
     Minidregg.Pred.eval (clockPredicate config) old new = false :=
-  ClockLaw.clock_refuses_nonticker_tick _ _ old new subject named ticking
+  ClockLaw.clock_refuses_nonticker_tick _ _ _ old new subject named ticking
     (by simpa [List.map_map, Function.comp_def] using other)
+
+/-- **The controller cannot tick** (O61): when the factory controller is not among the
+genesis tickers, its `tickClock` is refused by the genesis clock law, its management clause
+notwithstanding (`ClockLaw.clock_refuses_nonticker_tick`). -/
+theorem clock_control_cannot_tick (config : Config) (old new : Minidregg.Pred.State)
+    (other : config.factoryController.subject.value ∉ config.clockTickers.map (·.subject.value))
+    (named : new.get "request/subject" = some (Int.ofNat config.factoryController.subject.value))
+    (ticking : new.get "request/verb" = some (Int.ofNat ClockLaw.tickVerbTag)) :
+    Minidregg.Pred.eval (clockPredicate config) old new = false :=
+  clock_law_refuses_nonticker_tick config old new _ named ticking other
 
 /-- **`factory_refuses_ticker`**: under the confined factory law a ticker's
 request is refused, whatever the deployment's own law says: no birth, no key
@@ -947,7 +1192,7 @@ theorem sponsor_factory_admitted :
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.v3_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_config_refused
 
-/-! ## The pay cell's control (PAY §11.4, observer replacement) -/
+/-! ## The pay cell's control (docs/PAY.md §11.4, observer replacement) -/
 
 /-- **The pay law, exactly**: on any request naming a subject and a verb, it
 admits the observer's `observePayment` (6), the observer's self-enrollment
@@ -958,17 +1203,97 @@ theorem payLaw_eval (controller : SubjectId) (observer : PayObserver)
     (old new : Minidregg.Pred.State) (subject verb : Nat)
     (named : new.get "request/subject" = some (Int.ofNat subject))
     (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = true ↔
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = true ↔
       (verb = 6 ∧ subject = observer.subject.value) ∨
         (verb = 4 ∧ subject = observer.subject.value ∧ new.get ClockLaw.paySelfEnrolSlot = some 1) ∨
         (subject = controller.value ∧ (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)) := by
-  simp only [Minidregg.Pred.eval, payPredicate, Minidregg.Pred.evalWith_any,
+  simp only [Minidregg.Pred.eval, payPredicate, payObserverClauses, payControlClause,
+    Option.map_some, Option.getD_some, List.cons_append, List.nil_append,
+    Minidregg.Pred.evalWith_any,
     Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
     Minidregg.Pred.evalWith, named, verbed, payControlVerbTags,
     CredentialAuthorityEntryCodec.verbTag, Bool.and_true, Bool.or_false, Bool.or_eq_true,
     Bool.and_eq_true, decide_eq_true_eq, Option.some.injEq, List.contains_cons,
     List.contains_nil, beq_iff_eq]
   simp only [Int.ofNat.injEq]
+
+/-- The pay law of a world born without an observer admits exactly the controller's
+management: no subject's report (verb 6) and no self-enrollment. -/
+theorem payLaw_eval_none (controller : SubjectId)
+    (old new : Minidregg.Pred.State) (subject verb : Nat)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
+    Minidregg.Pred.eval (payPredicate controller none) old new = true ↔
+      (subject = controller.value ∧ (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)) := by
+  simp only [Minidregg.Pred.eval, payPredicate, payControlClause, Option.map_none,
+    Option.getD_none, List.nil_append, Minidregg.Pred.evalWith_any,
+    Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
+    Minidregg.Pred.evalWith, named, verbed, payControlVerbTags,
+    CredentialAuthorityEntryCodec.verbTag, Bool.and_true, Bool.or_false, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_eq, Option.some.injEq, List.contains_cons,
+    List.contains_nil, beq_iff_eq]
+  simp only [Int.ofNat.injEq]
+
+/-- **The pay law and the controller's pay control are present at every genesis**
+(GENESIS-COUPLING S1): no `present` hypothesis. The controller holds delegate, install
+the law and revoke on the pay cell whether or not an observer was named, so naming a
+first observer on a world born without one is the `observer_replaceable` runtime
+sequence, not a re-genesis. -/
+theorem pay_control_present {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) :
+    capabilityEntry (payControlCapability profile config) ∈ entries profile config ∧
+      payPolicy profile config ∈ policies profile config ∧
+      (payControlCapability profile config).holder = .subject config.factoryController.subject ∧
+      (payControlCapability profile config).scope.targets =
+        .explicit {⟨Kernel.PayCell.physicalId config.deployment.domain⟩} ∧
+      Verb.installPolicy ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.revokeCapability ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.delegateProgram ∈ (payControlCapability profile config).scope.verbs := by
+  refine ⟨?_, ?_, rfl, rfl, by simp [payControlCapability, rootCapability],
+    by simp [payControlCapability, rootCapability], by simp [payControlCapability, rootCapability]⟩
+  · simp [entries, capabilityEntries]
+  · simp [policies]
+
+/-- **The controller's clock control is present at every genesis** (O61), the mirror of
+`pay_control_present`: held by the factory controller, targeting exactly the clock cell,
+carrying install, revoke and delegate, and never `tickClock`. -/
+theorem clock_control_present {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) :
+    capabilityEntry (clockControlCapability profile config) ∈ entries profile config ∧
+      (clockControlCapability profile config).holder = .subject config.factoryController.subject ∧
+      (clockControlCapability profile config).scope.targets =
+        .explicit {⟨clockTarget config⟩} ∧
+      Verb.installPolicy ∈ (clockControlCapability profile config).scope.verbs ∧
+      Verb.revokeCapability ∈ (clockControlCapability profile config).scope.verbs ∧
+      Verb.delegateProgram ∈ (clockControlCapability profile config).scope.verbs ∧
+      Verb.tickClock ∉ (clockControlCapability profile config).scope.verbs := by
+  refine ⟨?_, rfl, rfl, by simp [clockControlCapability, rootCapability],
+    by simp [clockControlCapability, rootCapability],
+    by simp [clockControlCapability, rootCapability],
+    by simp [clockControlCapability, rootCapability]⟩
+  simp [entries, capabilityEntries]
+
+/-- Teeth: on a world born without an observer, every report is refused, whoever asks,
+the controller included. -/
+theorem pole_observe_without_observer_refused (controller : SubjectId) (old new : Minidregg.Pred.State)
+    (subject : Nat) (named : new.get "request/subject" = some (Int.ofNat subject))
+    (verbed : new.get "request/verb" = some (Int.ofNat 6)) :
+    Minidregg.Pred.eval (payPredicate controller none) old new = false := by
+  have := (payLaw_eval_none controller old new subject 6 named verbed).not
+  simp only [Bool.not_eq_true] at this
+  refine this.mpr ?_
+  rintro ⟨-, management⟩
+  omega
+
+/-- Satisfiable pole: on a world born WITHOUT an observer the controller's `installPolicy`
+on the pay cell is admitted by the genesis pay law, so the first observer is installed at
+runtime (the J-PAY-E2 sequence: enroll, delegate to and name the observer), never by a
+re-genesis. -/
+theorem first_observer_installable (controller : SubjectId) (old new : Minidregg.Pred.State)
+    (named : new.get "request/subject" = some (Int.ofNat controller.value))
+    (verbed : new.get "request/verb" = some (Int.ofNat 4)) :
+    Minidregg.Pred.eval (payPredicate controller none) old new = true :=
+  (payLaw_eval_none controller old new controller.value 4 named verbed).mpr ⟨rfl, by simp⟩
 
 /-- **The observer is replaceable at runtime** (ember, 2026-09-30 20:45): every
 genesis with an observer also holds the factory controller's control
@@ -978,18 +1303,18 @@ The runtime sequence (revoke the old grant; enroll, delegate to and name the
 new observer) is the J-PAY-E2 probe's. -/
 theorem observer_replaceable {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (observer : PayObserver) (present : config.payObserver = some observer) :
-    capabilityEntry (payControlCapability profile config observer) ∈ entries profile config ∧
-      (payControlCapability profile config observer).holder =
+    capabilityEntry (payControlCapability profile config) ∈ entries profile config ∧
+      (payControlCapability profile config).holder =
         .subject config.factoryController.subject ∧
-      (payControlCapability profile config observer).scope.targets =
+      (payControlCapability profile config).scope.targets =
         .explicit {⟨Kernel.PayCell.physicalId config.deployment.domain⟩} ∧
-      Verb.installPolicy ∈ (payControlCapability profile config observer).scope.verbs ∧
-      Verb.revokeCapability ∈ (payControlCapability profile config observer).scope.verbs ∧
-      Verb.delegateProgram ∈ (payControlCapability profile config observer).scope.verbs ∧
+      Verb.installPolicy ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.revokeCapability ∈ (payControlCapability profile config).scope.verbs ∧
+      Verb.delegateProgram ∈ (payControlCapability profile config).scope.verbs ∧
       (∀ old new subject verb,
         new.get "request/subject" = some (Int.ofNat subject) →
         new.get "request/verb" = some (Int.ofNat verb) →
-        (Minidregg.Pred.eval (payPredicate config.factoryController.subject observer) old new = true ↔
+        (Minidregg.Pred.eval (payPredicate config.factoryController.subject config.payObserver) old new = true ↔
           (verb = 6 ∧ subject = observer.subject.value) ∨
             (verb = 4 ∧ subject = observer.subject.value ∧
               new.get ClockLaw.paySelfEnrolSlot = some 1) ∨
@@ -997,8 +1322,9 @@ theorem observer_replaceable {F : Type} [Field F] (profile : CanonicalRuntimePro
               (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)))) := by
   refine ⟨?_, rfl, rfl, by simp [payControlCapability, rootCapability],
     by simp [payControlCapability, rootCapability], by simp [payControlCapability, rootCapability],
-    fun old new subject verb named verbed => payLaw_eval _ _ old new subject verb named verbed⟩
-  simp [entries, present, capabilityEntries]
+    fun old new subject verb named verbed => by
+      rw [present]; exact payLaw_eval _ _ old new subject verb named verbed⟩
+  simp [entries, capabilityEntries]
 
 /-- Refuting pole: the controller's own report is refused by the law when it
 is not the observer. -/
@@ -1006,7 +1332,7 @@ theorem controller_cannot_report (controller : SubjectId) (observer : PayObserve
     (other : controller.value ≠ observer.subject.value) (old new : Minidregg.Pred.State)
     (named : new.get "request/subject" = some (Int.ofNat controller.value))
     (verbed : new.get "request/verb" = some (Int.ofNat 6)) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = false := by
   have := (payLaw_eval controller observer old new controller.value 6 named verbed).not
   simp only [Bool.not_eq_true] at this
   refine this.mpr ?_
@@ -1024,7 +1350,7 @@ theorem observer_cannot_manage (controller : SubjectId) (observer : PayObserver)
     (notEnrol : new.get ClockLaw.paySelfEnrolSlot ≠ some 1)
     (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
     (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = false := by
   have := (payLaw_eval controller observer old new observer.subject.value verb named verbed).not
   simp only [Bool.not_eq_true] at this
   refine this.mpr ?_
@@ -1041,11 +1367,11 @@ theorem observer_self_enrol (controller : SubjectId) (observer : PayObserver)
     (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
     (verbed : new.get "request/verb" = some 4)
     (enrol : new.get ClockLaw.paySelfEnrolSlot = some 1) :
-    Minidregg.Pred.eval (payPredicate controller observer) old new = true :=
+    Minidregg.Pred.eval (payPredicate controller (some observer)) old new = true :=
   (payLaw_eval controller observer old new observer.subject.value 4 named verbed).mpr
     (Or.inr (Or.inl ⟨rfl, rfl, enrol⟩))
 
-/-! ## The confined factory law (PAY §11.4, P3b-2) -/
+/-! ## The confined factory law (docs/PAY.md §11.4, P3b-2) -/
 
 /-- **`observer_control_confined`**: under the confined factory law, every
 admitted request whose subject is the observer is a self-enrollment
@@ -1204,6 +1530,13 @@ theorem factory_ordinary_preserved (config : Config) (old new : Minidregg.Pred.S
 #assert_axioms controller_self_enrol_refused
 #assert_axioms genesis_confines_observer
 #assert_axioms payLaw_eval
+#assert_axioms payLaw_eval_none
+#assert_axioms pay_control_present
+#assert_axioms clock_control_present
+#assert_axioms clock_control_cannot_tick
+#assert_axioms platform_seeded
+#assert_axioms pole_observe_without_observer_refused
+#assert_axioms first_observer_installable
 #assert_axioms observer_replaceable
 #assert_axioms controller_cannot_report
 #assert_axioms observer_cannot_manage

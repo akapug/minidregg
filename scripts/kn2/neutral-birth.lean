@@ -83,6 +83,13 @@ def genesis (creatorKey : List UInt8) (factory : Minidregg.Pred.Pred) : NativeHo
   tailBound := 1000
   clockGenesisNow := 0
   clockMaxStepSeconds := 300
+  issuanceCap := 1000000000000000
+  payControlCapabilityId := ⟨47⟩
+  clockControlCapabilityId := ⟨48⟩
+  platformGrainBirth := none
+  platformCustodianKey := none
+  platformOwnerBudget := 100000
+  platformLifetime := 10000
 
 /-- The newborn: one empty content cell at 7001, owner 7; neutral (no room, no kind). -/
 def born : Minidregg.Verify.ResourceReserveBirthFixture.Born :=
@@ -113,7 +120,7 @@ def submit (verifier signer storeBinary : System.FilePath) (factory : Minidregg.
       {height : Height} →
       ResourceBirthPolicyController.Concrete.AcceptedBirth profile hostTemplate.deployment pins
         durable height → IO Unit) :
-    IO String := do
+    IO (String × Bool) := do
   let (creatorPublic, _) ← sign signer 7 []
   let cfg := genesis creatorPublic factory
   let built ← match NativeHostGenesis.build profile cfg with
@@ -141,6 +148,12 @@ def submit (verifier signer storeBinary : System.FilePath) (factory : Minidregg.
           (List.replicate descriptor.resourceBatch.operations.length ⟨41⟩)) with
       | .error reason => throw (IO.userError s!"birth plan: {reason}")
       | .ok value => pure value
+    -- The plan-time verdict on the same image (`NativeHost.birthRefusal`): with
+    -- `planRefusalSound`/`lawRefusalDisclosed` it must agree with the admission below.
+    let planRefused := (NativeHost.birthRefusal host opened []
+      (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor)
+        (List.replicate descriptor.resourceBatch.operations.length ⟨41⟩))).isSome
+    IO.println s!"plan verdict: {if planRefused then "refused" else "passes"}"
     let signatures ← plan.slots.mapM fun slot => do
       let (_, signature) ← sign signer 7 slot.header
       pure signature
@@ -157,7 +170,7 @@ def submit (verifier signer storeBinary : System.FilePath) (factory : Minidregg.
     | .error _ => pure ()
     let result ← ResourceBirthReceiver.receiveLoaded profile host.deployment opened.pins
       host.signature transport opened.durable height bytes
-    pure (describe result)
+    pure (describe result, planRefused)
 
 /-- The receiver's naming check over a patch, by name. -/
 def named (step : CanonicalPolicyAdmission.PolicyStepContext) (writes : List DataWrite) : String :=
@@ -166,7 +179,7 @@ def named (step : CanonicalPolicyAdmission.PolicyStepContext) (writes : List Dat
   | .error cell => s!"neutralBirthUnjudged {cell}"
 
 def run (verifier signer storeBinary : System.FilePath) (mode : String) : IO Unit := do
-  let control ← submit verifier signer storeBinary (.all []) fun accepted => do
+  let (control, controlPlanRefused) ← submit verifier signer storeBinary (.all []) fun accepted => do
     let writes := accepted.prepared.writes
     let births := writes.filter ResourceBirthController.Concrete.bornIn
     IO.println s!"control: {births.length} birth writes {births.map (·.cellId.value)}, named: {named accepted.factoryStep writes}"
@@ -185,15 +198,18 @@ def run (verifier signer storeBinary : System.FilePath) (mode : String) : IO Uni
       require "extra birth refused by name" (verdict == "neutralBirthUnjudged 7501")
   IO.println s!"control submission: {control}"
   require s!"control commits (got {control})" (control == "committed")
+  require "the control's plan passes" (!controlPlanRefused)
   if mode == "all" then
     let slot := ReceivingLaw.birthSlot 7001
-    let sees ← submit verifier signer storeBinary (.eq slot (Int.ofNat bornRoot)) fun _ => pure ()
+    let (sees, seesPlanRefused) ← submit verifier signer storeBinary (.eq slot (Int.ofNat bornRoot)) fun _ => pure ()
     IO.println s!"factory law birth/7001 = exact root: {sees}"
     require "a factory law reading birth/7001 = exact root admits" (sees == "committed")
-    let refuses ← submit verifier signer storeBinary (.eq slot (Int.ofNat bornRoot + 1)) fun _ => pure ()
+    let (refuses, refusesPlanRefused) ← submit verifier signer storeBinary (.eq slot (Int.ofNat bornRoot + 1)) fun _ => pure ()
     IO.println s!"factory law birth/7001 = root + 1: {refuses}"
     require "a factory law reading birth/7001 = another root refuses"
       (refuses == "refused admission Minidregg.Kernel.ResourceBirthPolicyController.Reject.policyRejected")
+    require "the plan passes the law admission admits" (!seesPlanRefused)
+    require "the plan refuses the law admission refuses policyRejected" refusesPlanRefused
   IO.println s!"PASS neutral birth ({mode})"
 
 end NeutralBirthProbe

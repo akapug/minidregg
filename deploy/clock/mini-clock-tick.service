@@ -8,7 +8,8 @@
 # nothing but tick (the factory law refuses it every birth, enrollment and install).
 #
 # Genesis fixes .clock.maxStepSeconds in the one clock cell and seeds now from
-# the mandatory .clock.genesisNow param (replace the example's zero placeholder).
+# the mandatory .clock.genesisNow param (the example carries null; `deploy/candidate/params.sh
+# fill-genesis` fills it at genesis time, and 0 is refused).
 # After downtime mini clock catches up with successive proposals of at most the
 # loaded bound; Lean alone admits each step and refuses clockStepExceeded.
 # The Host refuses a tick that does not advance the clock, so a delayed or doubled run
@@ -17,6 +18,10 @@
 # whose reply was lost is resubmitted byte-for-byte by the next run (it resolves as
 # `replayed`). What stays is one line per tick in the rotating journal
 # /var/lib/mini/clock/clock-journal.tsv (1 MiB, one rotated generation).
+# A tick refused staleAuthority/staleClock (another turn moved a root it pinned between
+# the view and the submit) is re-observed within the run (`--replan-max`). A run slower
+# than the minute is not killed: a timer elapse while it is active starts nothing, and
+# TimeoutStartSec is only a hang ceiling.
 #
 # One-time setup, as the mini user, after genesis (genesis.sh made the clock key's
 # public half part of genesis; params .clock.subject and .clock.tickCapabilityId):
@@ -44,10 +49,10 @@ Group=mini
 Slice=mini.slice
 Nice=10
 UMask=0077
-Environment=MINI=/usr/local/bin/mini
+Environment=MINI=/var/lib/mini/candidate/current/bin/mini
 Environment=MINI_CLOCK_WORKSPACE=/var/lib/mini/clock
 ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE"'
-TimeoutStartSec=50
+TimeoutStartSec=10min
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict

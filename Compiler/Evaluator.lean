@@ -46,19 +46,38 @@ record's `params` bytes and decoded only here (`decodeParams`, canonical by
 the generic record `Kernel.NockProgramCell.Sample` (`sampleRecord`: context, targets,
 `(key, value)` per ABI slot) encoded under the ABI's layout (`encodeSample`, injective under
 one layout: `encodeSample_injective`); `Machine.sampleOf` is the composite, and
-`Evaluator.sampleOf_injective` is EVAL §1.1's corollary. A record is admitted at birth by
+`Evaluator.sampleOf_injective` is docs/EVAL.md §1.1's corollary. A record is admitted at birth by
 `admitRecord`: its evaluator resolves against the registry (`resolve`: `unknownEvaluator`,
 `evaluatorDisabled`) and the record passes that evaluator's `admit` (code, ABI, names
 without NUL, params).
 
 **Doors (E4).** `door : Option EvalDoor`: boot+poke, peek, load, the state's encoding as a
-field value, and the event a claim carries — EVAL §4. Nock's is N11's (`nockDoor`, from
+field value, and the event a claim carries — docs/EVAL.md §4. Nock's is N11's (`nockDoor`, from
 `Kernel.NockEntry`); the referee is `Kernel.Door`, generic.
 -/
-import Kernel.NockEntry
-import Theory.TypedAuthorization
-import Compiler.Sp800185Cshake256
-import Theory.AssertAxioms
+module
+
+public import Kernel.NockEntry
+public import Theory.TypedAuthorization
+public import Compiler.Sp800185Cshake256
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 
@@ -71,7 +90,7 @@ open Minidregg.Kernel.NockProgramCell (Context Sample sampleRecord)
 
 set_option autoImplicit false
 
-/-- EVAL §4's door, evaluator-generic: a program whose state lives in a cell (N11). Data
+/-- docs/EVAL.md §4's door, evaluator-generic: a program whose state lives in a cell (N11). Data
 only; the facts are `Evaluator`'s. The ABI's door record (`NockProgramCodec.Door`: the peek
 arm, the state and event fields) says WHERE the state lives; this says how the evaluator
 boots, pokes and peeks it. -/
@@ -161,7 +180,7 @@ structure Machine where
   /-- Which named slot a stale claim's sample missed (K-RUN-PIN), when it can say. -/
   staleField : Abi → Input → List UInt8 → Option String
   -- Doors (E4)
-  /-- The evaluator's doors, if it has them (EVAL §4). -/
+  /-- The evaluator's doors, if it has them (docs/EVAL.md §4). -/
   door : Option (EvalDoor Params Code Input Output Term)
 
 /-- **The kernel's sample** on any evaluator: the generic record (`sampleRecord`, which
@@ -254,7 +273,7 @@ structure Evaluator extends Machine where
     (∀ x ∈ abi.sample, x ≠ slot → read x.target x.slot = read' x.target x.slot) →
     s ≠ s' ∧ staleField abi s' (encodeInput s) = some slot.key
   -- Doors (E4)
-  /-- **The door's state codec round-trips** (EVAL §4's `decode_encode`): a stored state always
+  /-- **The door's state codec round-trips** (docs/EVAL.md §4's `decode_encode`): a stored state always
   reads back, so `stateMalformed` refuses only bytes no poke wrote. -/
   door_decode_encode : ∀ d ∈ door, ∀ state, d.decodeState (d.encodeState state) = some state
   /-- A poke's sample carries its event, recoverable from the bytes. -/
@@ -294,7 +313,7 @@ def nockDecodeTerm (bs : List UInt8) : Option (Noun × Noun) :=
   | some (.cell s f) => some (s, f)
   | _ => none
 
-/-- N11's door, as EVAL §4's three fields (and the state codec): boot `[9 2 0 1]`, poke by
+/-- N11's door, as docs/EVAL.md §4's three fields (and the state codec): boot `[9 2 0 1]`, poke by
 slamming the params' arm on `[ustate job]`, peek by slamming the ABI's peek arm on a path;
 the state stored as its jam atom. Every piece is `Kernel.NockEntry`'s. -/
 def nockDoor : EvalDoor Kernel.NockEntry.Params Noun Noun Noun (Noun × Noun) where
@@ -411,7 +430,7 @@ def nock : Evaluator where
 
 theorem nock_toMachine : nock.toMachine = Machine.nock := rfl
 
-/-- **`sampleOf_injective`** (EVAL §1.1's corollary, on any evaluator): the generic record
+/-- **`sampleOf_injective`** (docs/EVAL.md §1.1's corollary, on any evaluator): the generic record
 is injective in what it reads (`sampleRecord_injective`), and the evaluator's encoding is
 injective under the layout (`encodeSample_injective`). -/
 theorem sampleOf_injective (E : Evaluator) {abi : Abi} {ctx ctx' : Context}

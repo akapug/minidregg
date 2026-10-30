@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# K-CLOCK (MUD.md item 3) + CLOCK-SUBJECT: the deployment's one clock, on the
+# K-CLOCK (docs/MUD.md §5 item 3) + CLOCK-SUBJECT: the deployment's one clock, on the
 # journey's Store, ticked by its dedicated clock subject.
 #
 # Journey hook contract (journey.sh header): executed with MINI, SPONSOR_WS,
@@ -30,6 +30,8 @@
 # tick; a tick whose reply is lost resolves as `replayed` on the next run; 200
 # ephemeral ticks leave no attempt dir and 200 journal lines; 20 ephemeral reads
 # leave no attempt dir and 20 journal lines.
+# Ticks raced against 30 sponsor births (which move the authority root a tick pins) all
+# confirm: a stale pin is re-observed within the run, and counted in staleRefusals.
 # K-ORDER-WIDE rows (after the wall-clock tick, so clock/now is real unix time,
 # about 1.79e9): 20 signed reads of the same positive clock law answered; a write
 # at or below the clock admitted and one ahead of it refused naming the clock
@@ -42,6 +44,7 @@
 # next strike is refused by clause 10 (bal <= now) and admitted once the clock
 # passes the balance.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 for name in MINI SPONSOR_WS NEWCOMER_WS JOURNEY_WORLD JOURNEY_STEP_DIR; do
   if [ -z "${!name:-}" ]; then echo "jclock: $name is required" >&2; exit 2; fi
@@ -85,7 +88,7 @@ reason() { jq -r '.detail // empty' "$D/$1.out" 2>/dev/null | xxd -r -p 2>/dev/n
 refusal() {
   local a=$SPONSOR_WS/attempts/clock-$1
   if [ -f "$a/outcome.json" ]; then
-    printf '%s: %s' "$(jq -r '.phase // empty' "$a/outcome.json" | xxd -r -p)" "$(jq -r '.detail // empty' "$a/outcome.json" | xxd -r -p)"
+    printf '%s: %s' "$(attempt_answer "$a/outcome.json" | jq -r '.phase // empty' | xxd -r -p)" "$(attempt_answer "$a/outcome.json" | jq -r '.detail // empty' | xxd -r -p)"
   elif [ -f "$a/pre-submit-refusal.json" ]; then
     printf '%s: %s' "$(jq -r '.stage // empty' "$a/pre-submit-refusal.json")" "$(grep -m1 '^refused:' "$D/$1-submit.err" 2>/dev/null)"
   fi
@@ -115,7 +118,7 @@ attempt_write() {  # attempt_write ID VALUE -> rc 0 iff admitted and installed
   [ "$(rc "$1-propose")" = 0 ] || return 1
   run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
     --intent "$SPONSOR_WS/proposals/clock-$1/intent.json" --attempt "$SPONSOR_WS/attempts/clock-$1"
-  [ "$(rc "$1-submit")" = 0 ] && jq -e '.type == "confirmed"' "$SPONSOR_WS/attempts/clock-$1/outcome.json" >/dev/null 2>&1
+  [ "$(rc "$1-submit")" = 0 ] && attempt_answer "$SPONSOR_WS/attempts/clock-$1/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 started=$(date +%s)
 
@@ -266,6 +269,26 @@ row "200 ephemeral ticks by the clock subject" "200 confirmed; at most 1 attempt
   "failed=$failed maxHeld=$maxheld left=$(attempt_dirs "$CLOCK_WS") journal=+$lines now=$(now_of v6) ($(( $(date +%s) - t0 )) s)" \
   "$([ $failed = 0 ] && [ "$maxheld" -le 1 ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ] && [ $lines = 200 ] && [ "$(now_of v6)" = $((base + 201)) ]; echo $?)"
 
+# A tick pins the authority root it observed; births move that root. Ticks run while the
+# sponsor births resources: each tick re-observes on staleAuthority/staleClock within its run
+# (clock.rs, the client re-plan loop), so every tick confirms; staleRefusals counts the races it met.
+view vr0; aroot0=$(jq -r .authorityRoot "$D/vr0.out" 2>/dev/null)
+( for i in $(seq 1 30); do
+    "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "race$i" --storage declared --predicate "$REQ/permit.json" >/dev/null 2>&1
+  done ) &
+echo $! >"$D/race-births.pid"
+rfailed=0; stale=0; i=0; rbase=$(now_of v6)
+while kill -0 "$(cat "$D/race-births.pid")" 2>/dev/null && [ $i -lt 200 ]; do
+  i=$((i + 1))
+  "$MINI" clock --action tick --workspace "$CLOCK_WS" --now $((rbase + i)) >"$D/trace.out" 2>"$D/trace.err" || { rfailed=$((rfailed + 1)); cp "$D/trace.out" "$D/trace-failed-$i.out"; }
+  stale=$((stale + $(jq -r '.staleRefusals // [] | length' "$D/trace.out" 2>/dev/null || echo 0)))
+done
+wait "$(cat "$D/race-births.pid")"
+view vr1; aroot1=$(jq -r .authorityRoot "$D/vr1.out" 2>/dev/null)
+row "ticks while the sponsor births 30 resources" "every tick confirmed (stale pins re-observed within the run); authority root moved; 0 attempts left" \
+  "ticks=$i failed=$rfailed staleRefusals=$stale authorityMoved=$([ "$aroot0" != "$aroot1" ] && echo yes || echo no) now=$(now_of vr1) left=$(attempt_dirs "$CLOCK_WS") [$(reason trace)]" \
+  "$([ $i -gt 0 ] && [ $rfailed = 0 ] && [ "$aroot0" != "$aroot1" ] && [ "$(now_of vr1)" = $((rbase + i)) ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ]; echo $?)"
+
 # --- K-ORDER-WIDE: laws over clock/now at real unix time -------------------------------
 # turn WS ID REQUEST -> rc 0 iff installed; the Host's refusal line is in $D/ID-submit.err
 turn() {
@@ -274,7 +297,7 @@ turn() {
   [ "$(rc "$id-propose")" = 0 ] || return 1
   run "$id-submit" "$MINI" workspace --action submit --dir "$ws" \
     --intent "$ws/proposals/clock-$id/intent.json" --attempt "$ws/attempts/clock-$id"
-  [ "$(rc "$id-submit")" = 0 ] && jq -e '.type == "confirmed"' "$ws/attempts/clock-$id/outcome.json" >/dev/null 2>&1
+  [ "$(rc "$id-submit")" = 0 ] && attempt_answer "$ws/attempts/clock-$id/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 refused_line() { cat "$D/$1-submit.err" "$D/$1-propose.err" 2>/dev/null | grep -m1 '^refused:'; }
 writes() {  # writes NAME FIELD:EXPECTED:VALUE... : one invoke of guarded writes
@@ -337,9 +360,9 @@ row "signed read of field 1 = 2^125 + 2^40 under any[verb 2, field 1 <= clock/no
   "stamp=$fs law=$fl read rc=$(rc rfar) [$why]" \
   "$([ $fs = 0 ] && [ $fl = 0 ] && [ "$(rc rfar)" != 0 ] && [[ "$why" == 'refused: law-input-range: '*'clock/now'*"left $FARR"*"right $NOW"* ]]; echo $?)"
 
-# A MUD sheet (deploy/shell/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
+# A MUD sheet (native/resource-client/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
 # founder; the newcomer is the referee {REF}. Every timestamp field (bal 3, eq 4, respawn 9) starts at 0.
-MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/shell/templates/mud" && pwd)
+MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../templates/mud" && pwd)
 S=$(jq -r .subject "$SPONSOR_WS/workspace.json"); REF=$(jq -r .subject "$NEWCOMER_WS/workspace.json")
 SHEET=tidewrack-sheet-$S
 subst() {

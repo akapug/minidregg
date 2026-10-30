@@ -1,5 +1,4 @@
 //! Source-authored STOP Plan-v2, detached BEGIN, and one-shot event23 receipt.
-#![allow(dead_code)] // Awaiting the callable STOP supervisor cut.
 
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
@@ -18,7 +17,7 @@ use std::path::Path;
 const MAX_FRAME: usize = 12_102_760;
 const STOP_PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-STOP-OPERATOR-PLAN/v2";
 const BEGIN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -54,7 +53,6 @@ pub(crate) struct AcceptedStopBegin {
     receipt: ExactReceipt,
     client_operation_id: String,
     authorization_operation_id: String,
-    process_generation: String,
     volume_id_hex: String,
 }
 
@@ -74,11 +72,39 @@ impl AcceptedStopBegin {
     pub(crate) fn authorization_operation_id(&self) -> &str {
         &self.authorization_operation_id
     }
-    pub(crate) fn process_generation(&self) -> &str {
-        &self.process_generation
-    }
     pub(crate) fn volume_id_hex(&self) -> &str {
         &self.volume_id_hex
+    }
+}
+
+impl AcceptedStopBegin {
+    /// Rebuild an accepted BEGIN from its retained attempt after Lean's
+    /// op23 lookup returned the original receipt (`confirmed replayed`). The
+    /// plan, its inspection, the ingress and the client operation ID are the
+    /// exact retained bytes of the one submit; only the receipt is new, and it
+    /// is Lean's. The CLAIM that follows is still checked by Lean.
+    pub(crate) fn recovered(attempt_dir: &Path, receipt: ExactReceipt) -> io::Result<Self> {
+        use crate::lifecycle_receipt_lookup::retained;
+        let plan = retained(&attempt_dir.join("stop-plan-v2.bin"), MAX_FRAME as u64)?;
+        let view: Value =
+            serde_json::from_slice(&retained(&attempt_dir.join("stop-plan-v2.json"), 2 * 1024 * 1024)?)?;
+        let ingress = retained(&attempt_dir.join("begin-v3.bin"), MAX_FRAME as u64)?;
+        let requested: Value =
+            serde_json::from_slice(&retained(&attempt_dir.join("op66-requested.json"), 4096)?)?;
+        if text(&view, "canonicalPlanHex")? != hex(&plan) || !ingress.starts_with(BEGIN_TAG) {
+            return Err(invalid("STOP retained BEGIN artifacts disagree"));
+        }
+        let base = view
+            .get("basePlan")
+            .ok_or_else(|| invalid("STOP retained BEGIN base plan absent"))?;
+        Ok(Self {
+            stop_plan: plan,
+            ingress,
+            receipt,
+            client_operation_id: text(&requested, "clientOperationId")?.to_owned(),
+            authorization_operation_id: text(base, "authorizationOperationId")?.to_owned(),
+            volume_id_hex: text(base, "volumeIdHex")?.to_owned(),
+        })
     }
 }
 
@@ -168,9 +194,9 @@ pub(crate) fn submit_once(
     let active_bytes = serde_json::to_vec(&active)?;
     write_new(attempt_dir, "op66-requested.json", &active_bytes)?;
     write_new(parent, "lifecycle-stop-begin-v3-active.json", &active_bytes)?;
-    let reply = operator.invoke(66, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 66, STOP_PLAN_TAG)?.to_vec();
+    let plan = framed_payload("launch begin plan", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_PLAN, STOP_PLAN_TAG)?.to_vec();
     let plan_path = write_new(attempt_dir, "stop-plan-v2.bin", &plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -197,9 +223,9 @@ pub(crate) fn submit_once(
     pair.extend_from_slice(&plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op67-requested.bin", &pair)?;
-    let reply = operator.invoke(67, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op67-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 67, BEGIN_TAG)?.to_vec();
+    let ingress = framed_payload("launch begin assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_BEGIN_ASSEMBLE, BEGIN_TAG)?.to_vec();
     write_new(attempt_dir, "begin-v3.bin", &ingress)?;
     let base = view
         .get("basePlan")
@@ -215,9 +241,9 @@ pub(crate) fn submit_once(
         "op22-requested.json",
         &serde_json::to_vec(&submit_marker)?,
     )?;
-    let reply = operator.invoke(22, &ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 22, OUTCOME_TAG)?;
+    let outcome = framed_payload("lifecycle begin submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_BEGIN_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let result = operator.tool(
         "inspect",
@@ -241,7 +267,6 @@ pub(crate) fn submit_once(
         receipt,
         client_operation_id,
         authorization_operation_id: text(base, "authorizationOperationId")?.to_owned(),
-        process_generation: text(base, "processGeneration")?.to_owned(),
         volume_id_hex: text(base, "volumeIdHex")?.to_owned(),
     })
 }

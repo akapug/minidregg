@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """render-enrol, run for real (no Lean, no Rust, no network). usage: python3 deploy/pay/test-render-enrol.py
 
-Pins the operator ruling (50 DREGG per week, receiving address 5N2u...) to the integers the tariff
-carries: the tariff's unit is the week, so the week is exactly 50.000000 DREGG (cv 01a105c0-0292: the
+Pins the operator ruling (50 DREGG per week) to the integers the tariff carries, and the receiving
+address to the deployment's own key (--enrol-address-file), never a literal in the repo: the tariff's unit is the week, so the week is exactly 50.000000 DREGG (cv 01a105c0-0292: the
 hourly unit made it 49.999992). A tariff at 49.999992, or one still carrying an hourly rate, is refused.
 Every refusal is by name.
 """
@@ -24,10 +24,16 @@ from importlib.machinery import SourceFileLoader  # noqa: E402
 render_module = SourceFileLoader("render_enrol", str(RENDER)).load_module()
 
 
-def run(out, terms=TERMS, version="1", extra=()):
-    return subprocess.run([sys.executable, str(RENDER), "--terms", str(terms), "--out", str(out), "--version", version,
-                           "--control", "53", "--observer-capability", "4030", "--enrol-capability", "4032", *extra],
-                          capture_output=True, text=True)
+ADDRESS_FILE = Path(tempfile.mkdtemp(prefix="render-enrol-key-")) / "enrol.pub"
+ADDRESS_FILE.write_bytes(render_module.b58_decode32(ADDRESS, "test address"))
+
+
+def run(out, terms=TERMS, version="1", extra=(), network=("--network", "mainnet"), address=ADDRESS_FILE):
+    head = [sys.executable, str(RENDER), "--terms", str(terms), "--out", str(out), "--version", version,
+            "--control", "53", "--observer-capability", "4030", "--enrol-capability", "4032", *network]
+    if address is not None:
+        head += ["--enrol-address-file", str(address)]
+    return subprocess.run([*head, *extra], capture_output=True, text=True)
 
 
 class Rendered(unittest.TestCase):
@@ -84,8 +90,9 @@ class Rendered(unittest.TestCase):
     def test_the_tick_env_carries_the_enrollment_quartet_and_no_address_or_rate(self):
         env = (self.out / "watcher.env").read_text()
         lines = dict(l.split("=", 1) for l in env.splitlines() if l and not l.startswith("#"))
-        self.assertEqual(lines["PAY_ENROL_INDEX"], "0")
-        self.assertEqual(lines["PAY_JOURNAL_FLOOR"], "1000000")
+        self.assertEqual(lines["PAY_WATCH_ENROL"], "yes")
+        self.assertNotIn("PAY_ENROL_INDEX", lines)
+        self.assertNotIn("PAY_JOURNAL_FLOOR", lines)
         self.assertEqual(lines["PAY_ENROL_CAPABILITY"], "4032")
         self.assertEqual(lines["PAY_OPERATOR_SOCKET"], "/var/lib/mini/store/node/operator/mini.sock")
         self.assertNotIn(ADDRESS, env)
@@ -94,10 +101,10 @@ class Rendered(unittest.TestCase):
     def test_base58_round_trip_and_one_source(self):
         for raw in (bytes(range(1, 33)), b"\0" + bytes(range(1, 32))):
             self.assertEqual(render_module.b58_decode32(render_module.b58_encode(raw), "k"), raw)
-        # the address and the rate are stated in the terms file and in prose docs, in no script or config
+        # the rate is stated in the terms file and prose docs only; no address is stated anywhere in deploy/
         repo = HERE.parents[1]
         for path in [p for p in (repo / "deploy").rglob("*") if p.is_file() and p.suffix in {".sh", ".json", ".py", ".service", ".timer", ".env", ""}]:
-            if path.name in {"enrol-terms.json", "test-render-enrol.py"}:
+            if path.name in {"test-render-enrol.py"}:
                 continue
             try:
                 text = path.read_text()
@@ -121,9 +128,7 @@ class Refusals(unittest.TestCase):
             self.assertFalse((Path(tmp) / "out").exists(), "left an output directory behind")
 
     def test_refusals(self):
-        self.refuse(lambda t: t.update(enrolAddress=ADDRESS[:-3]), "is not a 32-byte")  # a 31-byte key
-        self.refuse(lambda t: t.update(enrolAddress="1" * 32), "non-zero")  # the all-zero key
-        self.refuse(lambda t: t.update(enrolAddress="EMBER_ENROL_ADDRESS"), "not base58")  # the old placeholder
+        self.refuse(lambda t: t.update(enrolAddress=ADDRESS), "fields differ")  # an address in the terms
         self.refuse(lambda t: t.update(weekPriceAtomic="0"), "must be positive")
         self.refuse(lambda t: t.update(weekPriceAtomic="05000000"), "canonical decimal")
         self.refuse(lambda t: t.update(journalFloor="60000000"), "journalFloor above the week price")
@@ -131,6 +136,27 @@ class Refusals(unittest.TestCase):
         self.refuse(lambda t: t.update(extra="x"), "fields differ")
         self.refuse(lambda t: t.update(operatorSocket="mini.sock"), "absolute path")
         self.refuse(lambda t: t.update(enrolIndex="1"), "enrolIndex must be 0")
+
+    def test_the_address_comes_from_the_deployment_key_and_devnet_needs_its_mint(self):
+        with tempfile.TemporaryDirectory(prefix="render-enrol-n-") as tmp:
+            done = run(Path(tmp) / "a", address=None)
+            self.assertIn("--enrol-address-file", done.stderr)
+            short = Path(tmp) / "short.pub"
+            short.write_bytes(b"\1" * 31)
+            self.assertIn("32-byte", run(Path(tmp) / "b", address=short).stderr)
+            zero = Path(tmp) / "zero.pub"
+            zero.write_bytes(b"\0" * 32)
+            self.assertIn("non-zero", run(Path(tmp) / "c", address=zero).stderr)
+            done = run(Path(tmp) / "d", network=("--network", "devnet"))
+            self.assertIn("devnet has no DREGG mint", done.stderr)
+            self.assertFalse((Path(tmp) / "d").exists())
+            devmint = render_module.b58_encode(bytes(range(1, 33)))
+            program = render_module.b58_encode(bytes(range(2, 34)))
+            done = run(Path(tmp) / "e", network=("--network", "devnet"), extra=("--mint", devmint, "--token-program", program))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            pin = json.loads((Path(tmp) / "e" / "enrol-v2.json").read_text())
+            self.assertEqual((pin["enrolAddress"], pin["mint"]), (ADDRESS, devmint))
+            self.assertIn("network             devnet", (Path(tmp) / "e" / "report.txt").read_text())
 
     def test_existing_output_and_duplicate_rows_are_refused(self):
         with tempfile.TemporaryDirectory(prefix="render-enrol-e-") as tmp:

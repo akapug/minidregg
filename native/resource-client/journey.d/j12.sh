@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J12 (PLACE §2.2, §2.4, §5 item 1): two friends co-write a document through
+# J12 (docs/PLACE.md §2.2, §2.4, §5 item 1): two friends co-write a document through
 # `mini shell`, on this journey's live Store.
 #
 # Every friend is enrolled and provisioned the way OPERATOR.md does it (the
@@ -193,7 +193,8 @@ ok J12 bob "submit l1"
 ok J12 alice "doc show paper --json"
 check J12 "blame: line 1 created by alice, line 2 created by bob" blame_ok "$OUT"
 ok J12 alice "doc links index"
-check J12 "index links to paper (the Host's link index)" grep -q "^link .* -> document paper relation 0 " "$OUT"
+check J12 "index links to paper (the Host's link index)" \
+  grep -qE "^link [0-9]+ -> document paper \(target [0-9]+\) relation 0 " "$OUT"
 ok J12 alice "read index"
 check J12 "index's link record was created by bob" \
   jq -e --arg b "$B" '[.cell.entries[] | select(.type == "link") | .createdBy.subject] == [$b]' "$OUT"
@@ -256,7 +257,7 @@ check J12 "task 0 is done (field 2 = 2) and owned by bob (field 3)" \
 # (control: the forward moves m1 and m2 were admitted)
 ok J12 bob "board move m3 tasks 0 done todo"
 refused J12 bob "submit m3" law-denied "$LAWPLAN"
-# a declared cell is one unbounded store (DATAMODEL B1): task 1's owner
+# a declared cell is one unbounded store (docs/DATAMODEL.md §5 B1): task 1's owner
 # (field 5) is a fifth entry and is admitted (the page era refused it, overflow)
 ok J12 alice "board add t1 tasks 1"
 ok J12 alice "submit t1"

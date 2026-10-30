@@ -2,7 +2,7 @@
 
 *Read-only audit, 2026-09-04. Method: full read of `ATLAS.md`; full read of the (A) files
 (`Kernel/State.lean`, `Verbs.lean`, `Gate.lean`, `Receipt.lean`, `Turn.lean`) and of
-`Kernel/MultiCellHyperedge.lean`, `Kernel/DeclaredHyperedge.lean`,
+`Kernel/MultiCellHyperedge.lean`, `Kernel.DeclaredHyperedge [deleted fcb02f57]`,
 `Theory/CanonicalTransition.lean`, `Theory/DeclaredTurn.lean`, the three anti-vacuity witness
 files, and targeted regions of every other file quoted below; the import graph was built with
 `grep -rn "^import Kernel\.\|^import Theory\." --include='*.lean'` (387 edges). Headers of all
@@ -28,10 +28,10 @@ picture and are covered there. All other sections describe the snapshot.
    original `KernelState`" and re-proves its conservation law over a new `Book`). Fail-closed,
    no-TOCTOU, conservation, frame, and receipt binding are each stated a second time over
    (B)'s carriers (§2 table).
-2. **`Kernel/Gate.lean` (638 lines) has zero importers** besides the `Kernel.lean` umbrella, its
+2. **`Kernel.Gate [deleted e5e66049]` (638 lines) has zero importers** besides the `Kernel.lean` umbrella, its
    `@[export minidregg_gate_ok]` has no caller in `prover/` or `native/`, and the
    `[ADMISSION-kernel-bridge]` that was to identify it with `Compiler/AdmissionAir` was never
-   started (AdmissionAir imports only `Compiler.NoteSpend`). `Kernel/Camera.lean` (637 lines) is
+   started (AdmissionAir imports only `Compiler.NoteSpend`). `Kernel.Camera [deleted e5e66049]` (637 lines) is
    imported by `State.lean` but no identifier from it is used anywhere (only two doc-comments).
 3. **None of Gate.lean's residuals were closed by (B).** `[GATE-hyperedge]` is re-expressed
    (three joint gates over `CellState`), not connected; `[N-TURN-a]`/`[N-TURN-b]` have no
@@ -39,10 +39,10 @@ picture and are covered there. All other sections describe the snapshot.
    the only consumer stores it as a structure field (`Assurance/GrainForkSettlement.lean:333-335,
    445-459`); no theorem from `Turn.lean` (`legs_agree`, `binary_balanced`, N2a/N2b) is ever
    applied to a (B) hyperedge. The bridge is decorative.
-4. **(B) contains its own internal twin pair**: `Kernel/DeclaredHyperedge.lean` is self-labelled
+4. **(B) contains its own internal twin pair**: `Kernel.DeclaredHyperedge [deleted fcb02f57]` is self-labelled
    "the legacy integer-field, empty-resource schema" / "a migration surface, not the canonical
    runtime" (`TypedCellHyperedge.lean:5-6`, `DeclaredHyperedgeWitness.lean:3-4`), yet it is the
-   ONLY hyperedge carrier `Compiler/` consumes (`Compiler/DeclaredHyperedgeArtifact.lean:15`).
+   ONLY hyperedge carrier `Compiler/` consumes (`Compiler.DeclaredHyperedgeArtifact [deleted fcb02f57]:15`).
    `TypedCellHyperedge`/`MultiCellHyperedge` — the D-0002 "semantic kernel" — are consumed by
    no `Compiler/` or `Effects/` file.
 5. **10,393 of Kernel's 23,802 lines are application code** by ATLAS's own carve (escrow market,
@@ -53,7 +53,7 @@ picture and are covered there. All other sections describe the snapshot.
 6. **`Assurance/` is hand-written Lean, not generated.** All eight sampled files are
    hand-authored (one is a 1,430-line hand-maintained re-export manifest, two are application
    modules). No script in `scripts/` writes into `Assurance/`; `scripts/CarrierCensus.lean` is a
-   read-only query. `Assurance/Placeholder.lean` still says "No hand-maintained ledger anywhere."
+   read-only query. `Assurance.Placeholder [deleted 529d93c4]` still says "No hand-maintained ledger anywhere."
 7. **Vacuity spot-check (6 headlines):** 2 have both poles built at closed data
    (CanonicalTransition delta laws; Hyperdocument merge), 3 have the satisfiable pole only
    (MultiCell `no_commit_of_nonzero_balance`; DurableCommitProtocol on its stale-root/nullifier
@@ -89,12 +89,12 @@ picture and are covered there. All other sections describe the snapshot.
 
 | (A) file | lines | importers (all libs; umbrella `Kernel.lean` excluded) |
 |---|---|---|
-| `Kernel/Camera.lean` | 637 | `Kernel/State.lean` (import only — no identifier used; see §5) |
+| `Kernel.Camera [deleted e5e66049]` | 637 | `Kernel/State.lean` (import only — no identifier used; see §5) |
 | `Kernel/State.lean` | 258 | `Effects/EffectSpec.lean`, `Kernel/Receipt.lean` |
 | `Kernel/Receipt.lean` | 130 | `Assurance/ReceiptClaim.lean`, `Kernel/Verbs.lean` |
-| `Kernel/Verbs.lean` | 304 | `Assurance/SelvageV0Manifest.lean`, `Kernel/Gate.lean` |
-| `Kernel/Gate.lean` | 638 | **none** |
-| `Kernel/Turn.lean` | 120 | `Kernel/DeclaredHyperedge.lean`, `Kernel/MultiCellHyperedge.lean`, `Kernel/PrivateTurn.lean`, `Kernel/TurnLimit.lean` |
+| `Kernel/Verbs.lean` | 304 | `Assurance/SelvageV0Manifest.lean`, `Kernel.Gate [deleted e5e66049]` |
+| `Kernel.Gate [deleted e5e66049]` | 638 | **none** |
+| `Kernel/Turn.lean` | 120 | `Kernel.DeclaredHyperedge [deleted fcb02f57]`, `Kernel/MultiCellHyperedge.lean`, `Kernel/PrivateTurn.lean`, `Kernel/TurnLimit.lean` |
 | `Kernel/TurnLimit.lean` | 172 | `Kernel/TurnBalancedLimit.lean` |
 | `Kernel/TurnBalancedLimit.lean` | 277 | `Assurance/SelvageV0Manifest.lean` |
 | `Kernel/PrivateTurn.lean` | 287 | `Assurance/SelvageV0Manifest.lean` (`Assurance/PrivateTurn.lean` does NOT import it; it imports only `Assurance.PrivateReceipt`) |
@@ -109,15 +109,15 @@ picture and are covered there. All other sections describe the snapshot.
 | `Theory/AcceptedCellEffect.lean` | 792 | 5 Assurance files | `MultiCellHyperedge`, `TypedCellHyperedge` |
 | `Theory/CanonicalTransition.lean` | 424 | — | `DeclaredHyperedge` |
 | `Theory/DeclaredTurn.lean` | 411 | `Assurance/DeclaredTurnReceipt` | — (via Theory) |
-| `Theory/TurnTransition.lean` | 404 | **none** (only `Theory.lean`) | — |
-| `Kernel/DeclaredHyperedge.lean` | 760 | `Assurance/DeclaredHyperedgeReceipt`, `Compiler/DeclaredHyperedgeArtifact` | `DeclaredHyperedgeCost`, `TypedCellHyperedge` |
+| `Theory.TurnTransition [deleted 0d72e19f]` | 404 | **none** (only `Theory.lean`) | — |
+| `Kernel.DeclaredHyperedge [deleted fcb02f57]` | 760 | `Assurance/DeclaredHyperedgeReceipt`, `Compiler/DeclaredHyperedgeArtifact` | `DeclaredHyperedgeCost`, `TypedCellHyperedge` |
 | `Kernel/TypedCellHyperedge.lean` | 561 | `Assurance/GrainForkSettlement`, `Assurance/ReactiveLifecycleHistory` | `CanonicalResourceEffect`, `DeclaredHyperedgeWitness`, `DurableCommitProtocol`, `TypedCellHyperedgeWitness` |
 | `Kernel/MultiCellHyperedge.lean` | 447 | **none** | `CanonicalResourceEffect`, `DurableCommitProtocol`, `HyperdocumentMergePublication`, `HyperdocumentPublication`, `MultiCellHyperedgeWitness` |
-| `Kernel/DeclaredActionExecution.lean` | 468 | **none** | **none** |
+| `Kernel.DeclaredActionExecution [deleted 1855ece6]` | 468 | **none** | **none** |
 
 ### 1.3 What (B) imports from (A)
 
-Exactly `Kernel.Turn` — from `Kernel/DeclaredHyperedge.lean:17` and
+Exactly `Kernel.Turn` — from `Kernel.DeclaredHyperedge [deleted fcb02f57]:17` and
 `Kernel/MultiCellHyperedge.lean:20` (and `TypedCellHyperedge` transitively). No (B) file imports
 `Kernel.State`, `Kernel.Verbs`, `Kernel.Gate`, `Kernel.Receipt`, or `Kernel.Camera`.
 `docs/decisions/D-0002-canonical-hyperedge-kernel.md` lists `Kernel/Turn.lean` and
@@ -127,7 +127,7 @@ Exactly `Kernel.Turn` — from `Kernel/DeclaredHyperedge.lean:17` and
 
 `Kernel/` → `Compiler/`: `Kernel/CanonicalPolicyRegistry.lean:26` (`import
 Compiler.CanonicalPolicyAdmission`), `Kernel/CredentialSignedEnvelopeController.lean:20`
-(`import Compiler.Tower256ConcreteBackend`), `Kernel/DeclaredActionExecution.lean:15` (`import
+(`import Compiler.Tower256ConcreteBackend`), `Kernel.DeclaredActionExecution [deleted 1855ece6]:15` (`import
 Compiler.DeclaredActionBytes`). `Compiler/` → `Kernel/`: nine files
 (`CredentialAuthorityPolicyRegistry`, `DeclaredEffectPageMaterializer`,
 `DeclaredHyperedgeArtifact`, `DeployedCellRegistry`, `FiniteSparseMaterializerAudit`,
@@ -173,17 +173,17 @@ structure Hyperedge
 
 **Fail-closed.**
 
-(A) `Kernel/Gate.lean:341-343`
+(A) `Kernel.Gate [deleted e5e66049]:341-343`
 ```lean
 theorem admit_fail_closed [Theory.Verifiable CellId W] {k : KernelState} {t : TurnReq W}
     (fp : Footprint) (h : gateOK k t = false) : admit k (gatedVerb fp) t = none :=
 ```
-with `Kernel/Gate.lean:233-234`
+with `Kernel.Gate [deleted e5e66049]:233-234`
 ```lean
 def gateOK [Theory.Verifiable CellId W] (k : KernelState) (t : TurnReq W) : Bool :=
   credOK t && capOK k t && cavOK t && revOK k t
 ```
-and `Kernel/Gate.lean:313-316`
+and `Kernel.Gate [deleted e5e66049]:313-316`
 ```lean
 def admit (k : KernelState) (v : Verb W) (t : TurnReq W) : Option KernelState :=
   if v.admission k t && t.act.wf k && t.act.touched.within v.footprint
@@ -191,7 +191,7 @@ def admit (k : KernelState) (v : Verb W) (t : TurnReq W) : Option KernelState :=
   else none
 ```
 
-(B) `Kernel/DeclaredHyperedge.lean:499-514` (the joint gate)
+(B) `Kernel.DeclaredHyperedge [deleted fcb02f57]:499-514` (the joint gate)
 ```lean
 def execute
     (projection : AuthorizationProjection materializer)
@@ -210,7 +210,7 @@ def execute
     else .rejected .authorization
   else .rejected .shape
 ```
-`Kernel/DeclaredHyperedge.lean:529-536`
+`Kernel.DeclaredHyperedge [deleted fcb02f57]:529-536`
 ```lean
 theorem execute_rejected_unchanged
     (projection : AuthorizationProjection materializer)
@@ -247,20 +247,20 @@ Shape note: (A) states "gate predicate false ⇒ deny" (plus four per-leg denial
 `Gate.lean:346-365`). (B) states "rejected ⇒ post = pre" (rejection atomicity). The only (B)
 theorem of the (A) shape *check false ⇒ execute rejects* is the balance leg,
 `DeclaredHyperedge.lean:738-750` (quoted under Conservation). Per-leg denials in (B) exist at
-built data only (`Kernel/DeclaredHyperedgeWitness.lean:290-291, 304-305`). I did not find, and
+built data only (`Kernel.DeclaredHyperedgeWitness [deleted fcb02f57]:290-291, 304-305`). I did not find, and
 do not claim the absence of, a general per-leg denial theorem for the authorization/shape/guard
 legs in (B).
 
 **No-TOCTOU (check-equals-use).**
 
-(A) `Kernel/Gate.lean:382-384`
+(A) `Kernel.Gate [deleted e5e66049]:382-384`
 ```lean
 theorem admit_check_eq_use [Theory.Verifiable CellId W] {k k' : KernelState}
     {fp : Footprint} {t : TurnReq W} (h : admit k (gatedVerb fp) t = some k') :
     gateOK k t = true ∧ k' = t.act.apply k :=
 ```
 
-(B) `Kernel/DeclaredHyperedge.lean:690-695`
+(B) `Kernel.DeclaredHyperedge [deleted fcb02f57]:690-695`
 ```lean
 theorem execute_committed_hyperedge_sound
     (projection : AuthorizationProjection materializer)
@@ -269,10 +269,10 @@ theorem execute_committed_hyperedge_sound
     (committed : execute projection declaration = .committed postStore) :
     Nonempty (CommittedHyperedge projection declaration postStore) := by
 ```
-where `CommittedHyperedge` (`Kernel/DeclaredHyperedge.lean:568-581`) carries
+where `CommittedHyperedge` (`Kernel.DeclaredHyperedge [deleted fcb02f57]:568-581`) carries
 `authorizations : forall incidence, Nonempty (Authorized portal (declaration.authState projection) (declaration.legs incidence).request)`
 and `evaluated : applyPatch declaration.patch declaration.preStore = postStore`, and the
-same-pre-state binding is `Kernel/DeclaredHyperedge.lean:166-169`
+same-pre-state binding is `Kernel.DeclaredHyperedge [deleted fcb02f57]:166-169`
 ```lean
 @[simp] theorem Declaration.authState_same_pre
     (projection : AuthorizationProjection materializer)
@@ -303,7 +303,7 @@ theorem mint_breaks_conservation (k : KernelState) (dst : CellId) (a : AssetId) 
     (hdst : dst ∈ k.accounts) (hδ : δ ≠ 0) :
     totalAsset (mint k dst a δ) a ≠ totalAsset k a := by
 ```
-and at the gate, `Kernel/Gate.lean:406-409`
+and at the gate, `Kernel.Gate [deleted e5e66049]:406-409`
 ```lean
 theorem admit_conserves {k k' : KernelState} {v : Verb W} {t : TurnReq W}
     (a : AssetId) (h : admit k v t = some k')
@@ -339,7 +339,7 @@ theorem no_commit_of_nonzero_balance
       aggregateDelta law accepted coordinate ≠ 0) :
     IsEmpty (AdmittedCommit law boundary) :=
 ```
-and `Kernel/DeclaredHyperedge.lean:738-750`
+and `Kernel.DeclaredHyperedge [deleted fcb02f57]:738-750`
 ```lean
 theorem execute_rejects_agreeing_nonzero_balance
     (projection : AuthorizationProjection materializer)
@@ -358,7 +358,7 @@ theorem execute_rejects_agreeing_nonzero_balance
 
 **Frame.**
 
-(A) `Kernel/Gate.lean:426-431`
+(A) `Kernel.Gate [deleted e5e66049]:426-431`
 ```lean
 theorem admit_footprint {k k' : KernelState} {v : Verb W} {t : TurnReq W}
     (h : admit k v t = some k') :
@@ -447,7 +447,7 @@ theorem Materialized.root_encoding_coherent
 and the receipt object `Theory/AcceptedCellEffect.lean:206-229` (`structure ReceiptEvent`, with
 fields `preRoot postRoot : Digest`, `requestPreRootBound : request.preStateRoot = preRoot`),
 projected by `AcceptedCellEffect.toReceiptEvent` (`232-256`, `postRoot := accepted.prepared.postRoot`);
-`Kernel/DeclaredHyperedge.lean:591-602` `CommittedHyperedge.receipt : ReactiveReceipt.ReceiptDelta declaration.preStore postStore`.
+`Kernel.DeclaredHyperedge [deleted fcb02f57]:591-602` `CommittedHyperedge.receipt : ReactiveReceipt.ReceiptDelta declaration.preStore postStore`.
 Whether `M.rootBytes` is injective is nowhere assumed in (B) (D-0002: "Digest equality reflects
 arguments only under an explicit binding/CR premise"). So receipt binding is split: (A) proves
 faithfulness of an observation word; (B) proves root-derivation and carries CR as a premise.
@@ -458,7 +458,7 @@ claims on (B)'s `TypedCellHyperedge`.
 
 | carrier | lines | self-description | consumed by |
 |---|---|---|---|
-| `Kernel/DeclaredHyperedge.lean` (+Cost 291, +Witness 604) | 760 | "the legacy integer-field, empty-resource schema" (`TypedCellHyperedge.lean:5-6`); "a migration surface, not the canonical runtime" (`DeclaredHyperedgeWitness.lean:3-4`) | `Compiler/DeclaredHyperedgeArtifact.lean:15`; `Compiler/DeclaredEffectPageMaterializer`, `Compiler/FiniteSparseMaterializerAudit` (via Witness); `Assurance/DeclaredHyperedgeReceipt` |
+| `Kernel.DeclaredHyperedge [deleted fcb02f57]` (+Cost 291, +Witness 604) | 760 | "the legacy integer-field, empty-resource schema" (`TypedCellHyperedge.lean:5-6`); "a migration surface, not the canonical runtime" (`DeclaredHyperedgeWitness.lean:3-4`) | `Compiler.DeclaredHyperedgeArtifact [deleted fcb02f57]:15`; `Compiler/DeclaredEffectPageMaterializer`, `Compiler/FiniteSparseMaterializerAudit` (via Witness); `Assurance/DeclaredHyperedgeReceipt` |
 | `Kernel/TypedCellHyperedge.lean` (+Witness 126) | 561 | "the generic flat joint-transition nucleus" (line 4) | `Assurance/GrainForkSettlement`, `Assurance/ReactiveLifecycleHistory`; Kernel-internal |
 | `Kernel/MultiCellHyperedge.lean` (+Witness 160) | 447 | "genuinely heterogeneous incidence-indexed cells" | Kernel-internal only |
 
@@ -472,7 +472,7 @@ Additionally `Kernel/SparseAuthenticatedState.lean:4-5` opens with "The old univ
 demonstrates that many side tables fit in one address space, but it fixes keys and payloads to
 a handful of constructors and `Int`" — i.e. it is the (B) replacement of (A)'s
 `umap : UKey → Option ℤ` (`Kernel/State.lean:129`), again landed beside it. And
-`Theory/TurnTransition.lean` (404 lines, a `Mode := ordinary | resumed` sum over
+`Theory.TurnTransition [deleted 0d72e19f]` (404 lines, a `Mode := ordinary | resumed` sum over
 `DeclaredTurn`/`ReactiveCellTransition`) is imported by nothing but `Theory.lean`; D-0002
 "Alternatives rejected" names it ("Add private/reactive branches to `TurnTransition.Mode`").
 Neither `DurableDataIntent.execute` (`Kernel/DurableDataIntent.lean:342-357`) calls
@@ -483,7 +483,7 @@ the same `match` over `DataSnapshot` with a `.durable` reason wrapper.
 
 ## 3. Q2 — which of Gate.lean's residuals did (B) close?
 
-`Kernel/Gate.lean:57-60`, verbatim and unchanged since its single
+`Kernel.Gate [deleted e5e66049]:57-60`, verbatim and unchanged since its single
 commit (2026-08-08):
 ```
   [GATE-hyperedge] `admit` takes a single-incidence request — the `ι = 1`
@@ -500,7 +500,7 @@ commit (2026-08-08):
 | `[GATE-fpu]` (footprint as camera `Fpu`) | **open** | `Camera.Fpu` is referenced by no file outside `Camera.lean` (grep `Fpu\b`, `conservation_is_fpu`: only doc-comments in `State.lean:27,170` and `Gate.lean:27,61-62,296`). |
 | `[GATE-grant]` (authority-producing verbs) | **realized on the (B) side only** | `Theory/CredentialAuthorityEffects.lean` (issuance, strict attenuation, revocation, epoch rotation as `AcceptedCellEffect` families — per `Theory.lean:47`; UNVERIFIED by reading that file). Nothing connects it to Gate's `caps`. |
 
-**Is `toHyperedge` a genuine bridge?** There are three (`Kernel/DeclaredHyperedge.lean:649-654`,
+**Is `toHyperedge` a genuine bridge?** There are three (`Kernel.DeclaredHyperedge [deleted fcb02f57]:649-654`,
 `Kernel/TypedCellHyperedge.lean:383-384`, `Kernel/MultiCellHyperedge.lean:302-303`), each a
 well-typed `Hyperedge` instance whose `agree`/`balanced` proofs are real (e.g.
 `MultiCellHyperedge.lean:310-320` derives `balanced` from `commit.aggregateBalanced`). Consumers
@@ -624,9 +624,9 @@ MultiCellHyperedge, Turn, TurnLimit.
 are legitimately consumer-less. The other three are parallel-tower candidates under ATLAS law 5.
 
 **Parallel-tower list (my reading):**
-- `Kernel/Gate.lean` — 638 lines, zero importers, export `minidregg_gate_ok` (`Gate.lean:615-617`)
+- `Kernel.Gate [deleted e5e66049]` — 638 lines, zero importers, export `minidregg_gate_ok` (`Gate.lean:615-617`)
   has no caller in `prover/` or `native/` (grep `gate_ok` over `*.rs *.c *.h *.toml`: none).
-- `Kernel/Camera.lean` — 637 lines; imported by `State.lean:40` but no identifier used
+- `Kernel.Camera [deleted e5e66049]` — 637 lines; imported by `State.lean:40` but no identifier used
   (`ResourceAlgebra`, `Fpu`, `Auth`, `Excl`, `conservation_is_fpu`, `Substances` appear outside
   `Camera.lean` only in doc-comments). Boundary-clean (imports only Mathlib) — it is Theory-shaped.
 - `Kernel/TurnLimit.lean` + `TurnBalancedLimit.lean` — 449 lines; proved about the abstract
@@ -634,9 +634,9 @@ are legitimately consumer-less. The other three are parallel-tower candidates un
   is the manifest.
 - `Kernel/PrivateTurn.lean` — 287 lines; sole external consumer is the manifest; the (B) private
   story is sealed `AcceptedCellEffect` families (D-0002).
-- `Kernel/DeclaredActionExecution.lean` — 468 lines; zero importers; imports `Compiler`.
-- `Kernel/DeclaredHyperedgeCost.lean` — 291 lines; zero importers; meters the legacy carrier.
-- `Theory/TurnTransition.lean` — 404 lines; imported by nothing but `Theory.lean`.
+- `Kernel.DeclaredActionExecution [deleted 1855ece6]` — 468 lines; zero importers; imports `Compiler`.
+- `Kernel.DeclaredHyperedgeCost [deleted fcb02f57]` — 291 lines; zero importers; meters the legacy carrier.
+- `Theory.TurnTransition [deleted 0d72e19f]` — 404 lines; imported by nothing but `Theory.lean`.
 
 ---
 
@@ -661,7 +661,7 @@ Sampled: the four largest plus `ErrorBudget`, `ReceiptClaim`, `NoteSpendCoreAcce
 scripts/CarrierCensus.lean`) over unwitnessed carriers — the law-1 "query, never a hand-count"
 shape, but it produces a report, not the ledger. `scripts/local-check.sh` builds
 `Theory Kernel Compiler Assurance`. The five files matching "generated" are prose mentions.
-`Assurance/Placeholder.lean:4-6` still reads "Generated: namespace
+`Assurance.Placeholder [deleted 529d93c4]:4-6` still reads "Generated: namespace
 pins, keystone audit (satisfiable + teeth + premise), the carrier registry with realizer slots,
 Bound/Forced types, and the floor doc with both soundness numbers. No hand-maintained ledger
 anywhere." — contradicted by the directory around it.
@@ -697,7 +697,7 @@ the carrier with no instance.
 | # | headline theorem | satisfiable pole | teeth pole | verdict |
 |---|---|---|---|---|
 | 1 | `MultiCellHyperedge.no_commit_of_nonzero_balance` (`Kernel/MultiCellHyperedge.lean:415-420`, quoted §2) | **BUILT**: `Kernel/MultiCellHyperedgeWitness.lean:111` `def commit : Commit law acceptedLegs boundary where`; `:131` `theorem commit_nonempty : Nonempty (Commit law acceptedLegs boundary) := ⟨commit⟩`; the law cancels `+1/−1` (`:101-102`), two schemas (`schemas_heterogeneous`, `:127-129`) | **NOT built for this theorem**: `no_commit_of_nonzero_balance` and `AdmittedCommit` have zero uses outside the defining file; no built law with a nonzero coordinate. The witness file's tooth is the *apex* equation: `:140-142` `theorem no_commit_with_wrong_apex (other : Commit law acceptedLegs boundary) (wrong : other.jointInput.jointCommit = ⟨99⟩) : False` | one pole (+ a different tooth). Note `Kernel.lean:21` still says "Cross-SCHEMA heterogeneity is still untested"; the witness proves two schemas — stale comment. |
-| 2 | `DeclaredTurn.execute_committed_sound` (`Theory/DeclaredTurn.lean:251-257`, quoted §2) | **NOT built**: no `DeclaredTurn.Declaration` is constructed at data anywhere (grep for `DeclaredTurn.Declaration` constructions: none; the only `Declaration ... where` at data is `DeclaredHyperedge.Declaration` in `DeclaredHyperedgeWitness.lean:178`). Consumers are generic (`Assurance/DeclaredTurnReceipt.lean:201,323`, `Theory/TurnTransition.lean:312`) | **NOT built**: `execute_rejected_unchanged` (`:314-322`) is generic; no `.rejected` at data | **neither pole at data**. (The sibling `DeclaredHyperedge.execute` has both: `DeclaredHyperedgeWitness.lean:232-233` `theorem executes_committed : execute projection declaration = .committed postStore`, `:290-291` `theorem rejects_wrong_apex : execute projection wrongApexDeclaration = .rejected .apex`, `:304-305` `theorem rejects_stale_authority : execute staleProjection declaration = .rejected .authorization`.) |
+| 2 | `DeclaredTurn.execute_committed_sound` (`Theory/DeclaredTurn.lean:251-257`, quoted §2) | **NOT built**: no `DeclaredTurn.Declaration` is constructed at data anywhere (grep for `DeclaredTurn.Declaration` constructions: none; the only `Declaration ... where` at data is `DeclaredHyperedge.Declaration` in `DeclaredHyperedgeWitness.lean:178`). Consumers are generic (`Assurance/DeclaredTurnReceipt.lean:201,323`, `Theory.TurnTransition [deleted 0d72e19f]:312`) | **NOT built**: `execute_rejected_unchanged` (`:314-322`) is generic; no `.rejected` at data | **neither pole at data**. (The sibling `DeclaredHyperedge.execute` has both: `DeclaredHyperedgeWitness.lean:232-233` `theorem executes_committed : execute projection declaration = .committed postStore`, `:290-291` `theorem rejects_wrong_apex : execute projection wrongApexDeclaration = .rejected .apex`, `:304-305` `theorem rejects_stale_authority : execute staleProjection declaration = .rejected .authorization`.) |
 | 3 | CanonicalTransition delta laws (`CellDelta.field_changed_only_declared` `:55-62`; `PreparedTurn.postRoot_derived` `:149-155`, quoted §2) | **BUILT**: `Theory/CanonicalTransitionWitness.lean:38-39` `noncomputable def preparedTurn : PreparedTurn materializer cell Unit := PreparedTurn.ofValidatedPatch (Nullifier := Unit) validated`; `:55` `theorem preparedTurn_moves : preparedTurn.preRoot ≠ preparedTurn.postRoot` | **BUILT at the validator**: `Theory/CellStateWitness.lean:292-294` `theorem stalePatch_rejected : validate materializer cell stalePatch = ValidationOutcome.rejected RejectReason.stalePreRoot := rfl`; `:300-302` `overDeclaredPatch_rejected ... = ValidationOutcome.rejected RejectReason.fieldFootprintMismatch`; `:314-316` `underDeclaredPatch_rejected` (same) | both poles (the delta law is the one-line contrapositive of `fieldFrame`; its teeth live at `validate`, which is where they belong) |
 | 4 | `DurableCommitProtocol.execute_no_partial_commit` (`Kernel/DurableCommitProtocol.lean:354-362`) `(execute schedule before intent).storeAfter before = before \/ (execute schedule before intent).storeAfter before = Snapshot.install before intent`; `physical_step_no_partial_commit` (`:880-903`) | **BUILT** at closed data: `Kernel/DurableWalHandler.lean:313-330` `ClosedInstance.device`/`intent` (Nat ids, cell 0 digest 0→1, nullifier 7); `:338-339` `theorem preflighted : intent.preflight device.recovered = .ok () := by decide`; `:343-347` `def committedStep : WalStep ...`; `:366-368` `theorem retry_replays : execute .complete afterCommit.recovered intent = Outcome.replayed intent`. `ImplementationRefinement` (`:861-874`) is inhabited by the WAL handler (`DurableWalHandler.lean:229`). A built `.accepted` exists one adapter up: `Kernel/DurableDataIntent.lean:505-507` `theorem positive_install : execute .complete before intent = .accepted (DataSnapshot.install before intent)` — but that is `DurableDataIntent.execute`, a separate definition (§2.2). | **PARTIAL**: no built `.rejected .stalePreRoot`, `.alreadyConsumed`, `.duplicateCell`, or `.insufficientBudget` anywhere (grep: none) — the fail-closed preflight legs (`:282-297`) have no data-level refutation. Built negatives are the journal branch only: `DurableDataIntent.lean:570-572` `theorem byte_tamper_rejected_after_install : execute .complete (DataSnapshot.install before intent) tamperedIntent = .rejected (.durable .transactionConflict) := by rfl`, and the guard branch `Assurance/HyperdocumentGuardedDurable.lean:249-262` `stale_authority_execute_rejected` (quantified over `current` with a stale hypothesis — not closed data). | satisfiable built; teeth built for 1 of 7 reject reasons |
 | 5 | `ReplicatedSettlementFinality.no_conflicting_finalized_transactions` (`Kernel/ReplicatedSettlementFinality.lean:193-201`) `(discipline : PrefixDiscipline book) ... (leftFinal : Finalized quorums book left) (rightFinal : Finalized quorums book right) : ¬ ConflictsAtSlot left right` | **BUILT**: `:401-404` `def certificate : Finalized quorums book candidate where voters := core ...`; `:393-399` `discipline`; `:407-411` `theorem closed_no_conflicting_finalization {other : Candidate Nat Nat Nat Nat} (otherFinal : Finalized quorums book other) : ¬ ConflictsAtSlot candidate other`; failover/retry at `:437-447` | **NOT built**: `:348-356` `theorem no_finality_without_any_quorum ... (none : forall voters, ¬ quorums.isQuorum voters) : ¬ Nonempty (Finalized quorums book candidate)` has zero instances/consumers; there is no built vote book violating `PrefixDiscipline` that exhibits a fork (i.e. nothing shows the `discipline` premise is load-bearing at data) | one pole |
@@ -728,18 +728,18 @@ the carrier with no instance.
 ### 8.2 What to delete, move, or re-point — and what is NOT safe
 
 **Phase 1 — safe now (zero importers):**
-- Delete `Kernel/Gate.lean` (−638). Re-home its still-open labels: `[GATE-fpu]` to `Camera`,
+- Delete `Kernel.Gate [deleted e5e66049]` (−638). Re-home its still-open labels: `[GATE-fpu]` to `Camera`,
   `[ADMISSION-kernel-bridge]` re-targeted in `Compiler/AdmissionAir.lean:92,691` at
   `DeclaredHyperedge.authorizationCheck` (or whichever (B) gate the owner designates) — this
   bridge is the real remaining work and deleting Gate makes its current target text false.
   Content unique to Gate not present in (B): the closed caveat AST (`Caveat`, `Gate.lean:161-172`)
   — (B) routes policy through `Pred` via `Compiler.CanonicalPolicyAdmission` (UNVERIFIED by
   reading that file), which is where ATLAS wanted it.
-- Move `Kernel/Camera.lean` → `Theory/Camera.lean` (0 lines; boundary-clean; it is the ATLAS §7
+- Move `Kernel.Camera [deleted e5e66049]` → `Theory.Camera [not in tree]` (0 lines; boundary-clean; it is the ATLAS §7
   "product camera" that was supposed to live in Theory) and drop `Kernel/State.lean:40`'s
   import. Or delete (−637) if `[GATE-fpu]` is abandoned.
-- Owner decision, not safe by default: `Kernel/DeclaredActionExecution.lean` (468, zero
-  importers, Kernel→Compiler edge) and `Kernel/DeclaredHyperedgeCost.lean` (291, zero
+- Owner decision, not safe by default: `Kernel.DeclaredActionExecution [deleted 1855ece6]` (468, zero
+  importers, Kernel→Compiler edge) and `Kernel.DeclaredHyperedgeCost [deleted fcb02f57]` (291, zero
   importers, meters the legacy carrier).
 
 **Phase 2 — re-point the two live (A) consumers, then delete:**
@@ -755,15 +755,15 @@ the carrier with no instance.
   with its two manifest entries (`:1179-1207`) — its only consumer.
 
 **Phase 3 — cash the (B)-internal twin:**
-- Re-point `Compiler/DeclaredHyperedgeArtifact.lean` (155), `Compiler/DeclaredEffectPageMaterializer.lean`
-  (770), `Compiler/FiniteSparseMaterializerAudit.lean` (238), `Assurance/DeclaredHyperedgeReceipt.lean`
-  (293), `Assurance/DeclaredHyperedgeHistoryBinding.lean` (147) at `TypedCellHyperedge` /
+- Re-point `Compiler.DeclaredHyperedgeArtifact [deleted fcb02f57]` (155), `Compiler.DeclaredEffectPageMaterializer [deleted e75f7b25]`
+  (770), `Compiler.FiniteSparseMaterializerAudit [deleted fcb02f57]` (238), `Assurance.DeclaredHyperedgeReceipt [deleted fcb02f57]`
+  (293), `Assurance/TypedCellHyperedgeHistoryBinding.lean` (147) at `TypedCellHyperedge` /
   `MultiCellHyperedge`, then delete `DeclaredHyperedge` + `Cost` + `Witness` (−1,655) and the
   `LegacyAdapter` section of `TypedCellHyperedge.lean:419-530` (≈−110). Cost: ~1,600 lines of
   consumers to rewrite (sizes verified; effort UNVERIFIED). This is the single largest honest
   deletion available and it is exactly the move D-0002's own text ("Supersedes: Mina-derived
   call-forest execution") implies.
-- Delete `Theory/TurnTransition.lean` (−404; zero importers; the D-0002-rejected alternative).
+- Delete `Theory.TurnTransition [deleted 0d72e19f]` (−404; zero importers; the D-0002-rejected alternative).
 
 **Moves (no line delta, but they make the carve true):**
 - `Apps/` (new lib): Kernel App class (10,393) + `Assurance/HyperdocumentFinalizedDomainCrawler`,
@@ -811,7 +811,7 @@ first two lists. In particular `Kernel/State.lean` (Effects), `Kernel/Receipt.le
 - App-shaped Assurance beyond the two files read (`Hyperdocument*` 11,897 by name).
 - `git` history: file-level dates verified (`Gate.lean` one commit 2026-08-08; `MultiCellHyperedge`
   2026-08-09/10; `TypedCellHyperedge` 8 commits to 2026-08-11); no `Kernel/` file has ever been
-  deleted (`git log --diff-filter=D`: only `Kernel/Placeholder.lean`).
+  deleted (`git log --diff-filter=D`: only `Kernel.Placeholder [deleted 166acbd6]`).
 
 ---
 
@@ -851,24 +851,24 @@ Kernel.CanonicalPolicyRegistry <- Assurance/DeployedCredentialLifecycle.lean Com
 Kernel.CanonicalResourceEffect <- Kernel/AuthorizedResourceCharge.lean
 Kernel.CredentialSignedEnvelopeController <- Assurance/CredentialSignedEnvelopeEndpoint.lean
 Kernel.DeclaredActionExecution <-
-Kernel.DeclaredHyperedge <- Assurance/DeclaredHyperedgeReceipt.lean Compiler/DeclaredHyperedgeArtifact.lean Kernel/DeclaredHyperedgeCost.lean Kernel/TypedCellHyperedge.lean
+Kernel.DeclaredHyperedge <- Assurance.DeclaredHyperedgeReceipt [deleted fcb02f57] Compiler.DeclaredHyperedgeArtifact [deleted fcb02f57] Kernel.DeclaredHyperedgeCost [deleted fcb02f57] Kernel/TypedCellHyperedge.lean
 Kernel.DeclaredHyperedgeCost <-
-Kernel.DeclaredHyperedgeWitness <- Compiler/DeclaredEffectPageMaterializer.lean Compiler/FiniteSparseMaterializerAudit.lean Kernel/DeclaredActionExecution.lean
+Kernel.DeclaredHyperedgeWitness <- Compiler.DeclaredEffectPageMaterializer [deleted e75f7b25] Compiler.FiniteSparseMaterializerAudit [deleted fcb02f57] Kernel.DeclaredActionExecution [deleted 1855ece6]
 Kernel.DeployedMaterializerWitness <- Assurance/HyperdocumentLinkPublicationWitness.lean Compiler/DeployedCellRegistry.lean Kernel/HyperdocumentTwoParentWitness.lean
-Kernel.DurableCommitProtocol <- Assurance/HyperdocumentAgentOperation.lean Kernel/DeclaredActionExecution.lean Kernel/DurableDataIntent.lean Kernel/DurableWalHandler.lean
+Kernel.DurableCommitProtocol <- Assurance/HyperdocumentAgentOperation.lean Kernel.DeclaredActionExecution [deleted 1855ece6] Kernel/DurableDataIntent.lean Kernel/DurableWalHandler.lean
 Kernel.DurableDataIntent <- Assurance/HyperdocumentLinkPageDurableWeld.lean Assurance/ZkmlMatmulAuditTurn.lean Compiler/FramedWalRecoveryController.lean Kernel/AdmissionPrologue.lean Kernel/CanonicalPolicyRegistry.lean Kernel/GuardedDurableCommit.lean Kernel/HyperdocumentTwoParentWitness.lean Kernel/ReactiveTerminalCell.lean Kernel/ReplicatedSettlementFinality.lean
 Kernel.DurableWalHandler <- Assurance/HyperdocumentDurableInstallation.lean Kernel/FramedWalRefinement.lean
 Kernel.EventLogMaterializerLimit <-
 Kernel.FramedWalRefinement <- Assurance/HyperdocumentLinkFramedRecovery.lean Assurance/HyperdocumentMergeDurableFinalityWitness.lean Assurance/ZkmlMatmulFramedWal.lean Compiler/FramedWalRecoveryController.lean Kernel/ReplicatedSettlementFinality.lean
 Kernel.Gate <-
 Kernel.GuardedDurableCommit <- Assurance/HyperdocumentGuardedDurable.lean Assurance/HyperdocumentMergeDurableFinalityWitness.lean
-Kernel.HyperdocumentEventLog <- Compiler/HyperdocumentEventPageMaterializer.lean Kernel/DeployedMaterializerWitness.lean Kernel/EventLogMaterializerLimit.lean Kernel/HyperdocumentVersionEffects.lean
-Kernel.HyperdocumentIndexSync <- Assurance/HyperdocumentFinalizedDomainCrawler.lean Compiler/HyperdocumentIndexPageMaterializer.lean
+Kernel.HyperdocumentEventLog <- Compiler.HyperdocumentEventPageMaterializer [deleted 23cf3c29] Kernel/DeployedMaterializerWitness.lean Kernel/EventLogMaterializerLimit.lean Kernel/HyperdocumentVersionEffects.lean
+Kernel.HyperdocumentIndexSync <- Assurance/HyperdocumentFinalizedDomainCrawler.lean Compiler.HyperdocumentIndexPageMaterializer [deleted 23cf3c29]
 Kernel.HyperdocumentMerge <- Kernel/HyperdocumentMergePublication.lean
 Kernel.HyperdocumentMergeAncestry <- Kernel/HyperdocumentTwoParentWitness.lean
 Kernel.HyperdocumentMergePublication <- Kernel/HyperdocumentMergeAncestry.lean
 Kernel.HyperdocumentPublication <- Assurance/HyperdocumentAgentOperation.lean Assurance/HyperdocumentLinkPublicationWitness.lean Kernel/GuardedDurableCommit.lean
-Kernel.HyperdocumentTwoParentWitness <- Assurance/HyperdocumentTwoParentHistoryWitness.lean Compiler/FiniteSparseMaterializerAudit.lean
+Kernel.HyperdocumentTwoParentWitness <- Assurance/HyperdocumentTwoParentHistoryWitness.lean Compiler.FiniteSparseMaterializerAudit [deleted fcb02f57]
 Kernel.HyperdocumentVersionEffects <- Kernel/HyperdocumentMerge.lean Kernel/HyperdocumentPublication.lean
 Kernel.IrreversibleEffectSettlement <- Kernel/ProviderExecutionLease.lean
 Kernel.MultiCellHyperedge <- Kernel/CanonicalResourceEffect.lean Kernel/DurableCommitProtocol.lean Kernel/HyperdocumentMergePublication.lean Kernel/HyperdocumentPublication.lean Kernel/MultiCellHyperedgeWitness.lean
@@ -880,15 +880,15 @@ Kernel.ProviderExecutionLease <- Assurance/DreggNetProviderConsumer.lean Assuran
 Kernel.QuotaGcSettlement <- Assurance/QuotaGcSettlementWitness.lean
 Kernel.ReactiveTerminalCell <- Assurance/ReactiveDurableSettlement.lean Kernel/OutboxDelivery.lean Kernel/ProviderExecutionLease.lean
 Kernel.Receipt <- Assurance/ReceiptClaim.lean Kernel/Verbs.lean
-Kernel.ReplicatedSettlementFinality <- Assurance/BoundedPageSchemaUpgradeCutover.lean Assurance/DreggNetProviderConsumer.lean Assurance/HyperdocumentMergeDurableFinalityWitness.lean Kernel/AuthenticatedSettlementFinality.lean
+Kernel.ReplicatedSettlementFinality <- Assurance.BoundedPageSchemaUpgradeCutover [deleted 23cf3c29] Assurance/DreggNetProviderConsumer.lean Assurance/HyperdocumentMergeDurableFinalityWitness.lean Kernel/AuthenticatedSettlementFinality.lean
 Kernel.SparseAuthenticatedState <- Assurance/GrainForkSettlement.lean Compiler/SparseAuthenticatedStateLogupBridge.lean Kernel/HyperdocumentEventLog.lean
 Kernel.State <- Effects/EffectSpec.lean Kernel/Receipt.lean
-Kernel.Turn <- Kernel/DeclaredHyperedge.lean Kernel/MultiCellHyperedge.lean Kernel/PrivateTurn.lean Kernel/TurnLimit.lean
+Kernel.Turn <- Kernel.DeclaredHyperedge [deleted fcb02f57] Kernel/MultiCellHyperedge.lean Kernel/PrivateTurn.lean Kernel/TurnLimit.lean
 Kernel.TurnBalancedLimit <- Assurance/SelvageV0Manifest.lean
 Kernel.TurnLimit <- Kernel/TurnBalancedLimit.lean
-Kernel.TypedCellHyperedge <- Assurance/GrainForkSettlement.lean Assurance/ReactiveLifecycleHistory.lean Kernel/CanonicalResourceEffect.lean Kernel/DeclaredHyperedgeWitness.lean Kernel/DurableCommitProtocol.lean Kernel/TypedCellHyperedgeWitness.lean
+Kernel.TypedCellHyperedge <- Assurance/GrainForkSettlement.lean Assurance/ReactiveLifecycleHistory.lean Kernel/CanonicalResourceEffect.lean Kernel.DeclaredHyperedgeWitness [deleted fcb02f57] Kernel/DurableCommitProtocol.lean Kernel/TypedCellHyperedgeWitness.lean
 Kernel.TypedCellHyperedgeWitness <-
-Kernel.Verbs <- Assurance/SelvageV0Manifest.lean Kernel/Gate.lean
+Kernel.Verbs <- Assurance/SelvageV0Manifest.lean Kernel.Gate [deleted e5e66049]
 ```
 
 ---
@@ -915,7 +915,7 @@ things the audit's §8 criterion under-weights, for the decision:
    welds. That keeps (A)'s discipline (both poles built, everywhere) and (B)'s vocabulary.
 
 Safe regardless of the decision, for a later wave: the Apps/ move (10.4K), the three
-Kernel→Compiler layering inversions, `Theory/TurnTransition.lean` (zero importers), and
+Kernel→Compiler layering inversions, `Theory.TurnTransition [deleted 0d72e19f]` (zero importers), and
 extending `scripts/check-import-boundary.sh` to refuse Kernel→Compiler edges.
 
 Tonight's wave was kept model-neutral after this audit landed: `Kernel/HyperedgeTier.lean`

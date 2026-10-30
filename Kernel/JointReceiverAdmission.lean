@@ -2,8 +2,28 @@
 PENDING preparation and private repair envelopes form ONE existing DataIntent record.
 The constructor consumes current ordinary AND purpose-specific permission and
 a separately source-admitted control edit on the SAME actual Durable image. -/
-import Kernel.JointPromiseAuthorization
-import Compiler.JointControlFrame
+module
+
+public import Kernel.JointPromiseAuthorization
+public import Compiler.JointControlFrame
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointReceiverAdmission
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -41,25 +61,31 @@ def decisionValue (candidate : List UInt8) (participant : Nat) (yes : Bool) : Li
 def dependencies {rootBytes : List UInt8 → Digest} (effect : DataIntent rootBytes) : List ReadGuard :=
   effect.readGuards ++ effect.writes.map (fun w => ⟨w.cellId,w.expectedPre⟩)
 
-/-- All ten lanes come from the actual new source record. Selected effect
-charges stay in the reservation and will be debited at installation. Maintenance
-is funded separately, not represented by a traffic priority bit. -/
+/-- The lanes the actual new source record adds. Selected effect charges stay in
+the reservation and will be debited at installation. Maintenance is funded
+separately, not represented by a traffic priority bit.  Storage is not an
+overhead: the reserve's storage lane is the World's storage of its own turn
+(`reserveCharge`). -/
 def reserveOverhead {rootBytes : List UInt8 → Digest} (bytes : List UInt8)
     (effect : DataIntent rootBytes) (guards : List ReadGuard) : Charge
   | .incidences => effect.exactCharge .incidences * 2
   | .turnBytes => bytes.length
   | .memoryTouches => guards.length
-  | .storageBytes => 0
   | .proofWork => effect.exactCharge .proofWork
-  | .feeDebit | .networkBytes | .witnessBytes | .sideEffectCount | .leaseByteBlocks => 0
+  | .storageBytes | .feeDebit | .networkBytes | .witnessBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-/-- The current control method's entire exact charge survives. The additional
-source operation counts the selected admission and explicit promise admission,
-the retained source envelope and extra guard inspection. It does not replace
-feeDebit or any other lane with an invented cheaper receipt. -/
+/-- The current control method's exact charge survives on every lane but
+storage. The additional source operation counts the selected admission and
+explicit promise admission, the retained source envelope and extra guard
+inspection. It does not replace feeDebit or any other lane with an invented
+cheaper receipt.  The storage lane is `storage`: the World's storage of the
+reserve turn (its writes, guards and retained source event), never the control
+method's storage plus an overhead. -/
 def reserveCharge {rootBytes : List UInt8 → Digest} (bytes : List UInt8)
-    (control effect : DataIntent rootBytes) (guards : List ReadGuard) : Charge :=
-  control.exactCharge + reserveOverhead bytes effect guards
+    (control effect : DataIntent rootBytes) (guards : List ReadGuard) (storage : Nat) : Charge :=
+  fun lane =>
+    if lane = .storageBytes then storage
+    else control.exactCharge lane + reserveOverhead bytes effect guards lane
 
 /-- PENDING preparation is not a YES certificate. Physical allocation and
 actual privateRecovery qualification precede a separate terminal YES record.
@@ -96,6 +122,8 @@ structure Reserved {F : Type} [Field F] [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient ground command),
     ∃ accepted : JointPromiseAuthorization.Accepted prepared selected source.promise,
       IntentRecord.ofIntent original = IntentRecord.ofIntent (accepted.ordinary.dataIntent accepted.shape)
+  /-- A reservation credits no meter (M2: only the refill family carries credit). -/
+  uncredited : intent.credit = 0
 
 variable {Custody F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
@@ -164,7 +192,10 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                   if disjoint : ∀ g ∈ guards, g.cellId ∉ control.writes.map DataWrite.cellId then
                     let source : ReserveSource := ⟨exact,i.val,promise,signedBytes deployment.domain profile.semantics controlSigned⟩
                     let bytes := reserveSourceBytes source
+                    let event : StableEvent := ⟨60,deployment.domain,
+                      JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration,bytes⟩
                     let charge := reserveCharge bytes control effect guards
+                      (DeployedCharge.storageCharge ground.view control.writes event)
                     let intent : DataIntent ResourceBirthCodec.rootBytes :=
                       { control with
                         readGuards := guards
@@ -172,8 +203,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                         nullifiers := control.nullifiers ++
                           [invocationNullifier deployment.domain
                             (JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration).value]
-                        event := ⟨60,deployment.domain,
-                          JointPromiseAuthorization.commitment deployment.domain profile.semantics promise.declaration,bytes⟩
+                        event := event
                         guardsReadOnly := disjoint }
                     if funded : Charge.fundedCheck
                         (heldCharge held.domain after.reservations + after.maintenanceReserve + intent.exactCharge)
@@ -191,7 +221,7 @@ def buildReserve (codec : StreamCodec Custody) (pin : JointControlFrame.Pin)
                       some ⟨intent,effect,installation,rfl,rfl,rfl,rfl,rfl,held,pin,before,after,source,accepted.sourceExact,
                         rfl,by intro g hg; exact List.mem_append_right _ hg,
                         beforeExact,controlPost,funded,
-                        ⟨command,selected,prepared,accepted,rfl⟩⟩
+                        ⟨command,selected,prepared,accepted,rfl⟩, rfl⟩
                     else none
                   else none
                 else none

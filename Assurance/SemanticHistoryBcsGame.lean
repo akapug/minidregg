@@ -695,7 +695,12 @@ structure HistoryBcsMath (deltaStar : Real) where
 
 namespace HistoryBcsMath
 
-variable {head : HistoryHead} {historyHasLink : 0 < head.foldRounds}
+-- The `HistoryHead` local notation is not used in a `variable` binder: there it
+-- elaborates to `sorry` without an error, and every declaration over that
+-- variable is then dropped silently (`knowledgeSoundness`, `fiatShamirSoundness`,
+-- `ofNotBad` and `deployedSoundness` were absent from the environment).
+variable {head : VerifiedHistoryHead (n := n) (F := F) (Op := Op) manifest registry
+  clauseEvidence family headerCells C S} {historyHasLink : 0 < head.foldRounds}
 variable {deltaStar : Real} {deltaStarPositive : 0 < deltaStar}
 variable {deltaStarLeOne : deltaStar ≤ 1}
 variable {domain : BoundReceiptIx n ↪ F} {degree openedCount : Nat}
@@ -750,22 +755,41 @@ noncomputable def fiatShamirSoundness
 
 end HistoryBcsMath
 
-/-- Admission of one trace-derived BCS instance to the shared deployment
-game.  The constructor is private so `ofNotBad` below is the sole way this
-module manufactures the three exact good events on a common coin.  The
-mathematical payload remains visibly separate. -/
+/-- Admission of the history BCS lane to the shared deployment game: the
+three exact good events on one common coin, beside the code-level mathematics
+for `deltaStar` over the reindexed code of `C`.  The constructor is private so
+`ofNotBad` below is the sole way this module manufactures the good events.
+
+It is indexed by exactly what its fields constrain.  No field mentions a head,
+evaluation domain, degree, opened count or opening set (the ledger's events
+are predicates on `Omega` alone), so the type is not indexed by them: binding
+the admission to one trace-derived instance is `DeployedHistoryBcsSoundness`'s
+job, whose ideal Fiat--Shamir theorem is stated at that instance. -/
 structure HistoryBcsGameSecurity
     {Omega : Type} [Fintype Omega]
-    (ledger : FailureLedger Omega) (omega : Omega)
-    (head : HistoryHead) (historyHasLink : 0 < head.foldRounds)
-    (deltaStar : Real) (domain : BoundReceiptIx n ↪ F)
-    (degree openedCount : Nat)
-    (openings : HistoryBcsOpenings (S := S) head domain degree openedCount) where
+    (ledger : FailureLedger Omega) (omega : Omega) (deltaStar : Real) where
   private mk ::
   math : HistoryBcsMath (C := C) deltaStar
   historyPcs : ledger.Good .historyPcs omega
   commitmentBinding : ledger.Good .commitmentBinding omega
   oracleTransport : ledger.Good .oracleTransport omega
+
+/-- **What the admission guarantees about its indices**: the coin `omega` lies in
+`ledger`'s good events for the history PCS, commitment binding and oracle
+transport, and `deltaStar` is below both the mutual-correlated-agreement bound
+and half the minimum distance of the reindexed code of `C`, whose distinct
+codewords are at least that distance apart. -/
+theorem HistoryBcsGameSecurity.sound {Omega : Type} [Fintype Omega]
+    {ledger : FailureLedger Omega} {omega : Omega} {deltaStar : Real}
+    (security : HistoryBcsGameSecurity (C := C) ledger omega deltaStar) :
+    ledger.Good .historyPcs omega ∧ ledger.Good .commitmentBinding omega ∧
+      ledger.Good .oracleTransport omega ∧
+      deltaStar ≤ 1 - security.math.Bstar ∧ deltaStar ≤ security.math.dC / 2 ∧
+      ∀ u ∈ reindexCode C, ∀ v ∈ reindexCode C, u ≠ v →
+        security.math.dC ≤ relDist u v :=
+  ⟨security.historyPcs, security.commitmentBinding, security.oracleTransport,
+    security.math.deltaBelowAgreement, security.math.deltaBelowHalfDistance,
+    security.math.minimumDistance⟩
 
 /-- A proof-relevant conditional deployment record: it retains the exact
 three common-coin good events beside (rather than pretending they imply) the
@@ -780,8 +804,7 @@ structure DeployedHistoryBcsSoundness
     (openings : HistoryBcsOpenings (S := S) head domain degree openedCount)
     (Z : Set (Stmt (historyBcsReduction head historyHasLink deltaStar
       deltaStarPositive deltaStarLeOne domain degree openedCount openings))) where
-  admission : HistoryBcsGameSecurity ledger omega head historyHasLink
-    deltaStar domain degree openedCount openings
+  admission : HistoryBcsGameSecurity (C := C) ledger omega deltaStar
   idealFiatShamir : FsStraightlineKnowledgeSoundness
     (historyBcsReduction head historyHasLink deltaStar deltaStarPositive
       deltaStarLeOne domain degree openedCount openings) Z
@@ -791,7 +814,12 @@ namespace HistoryBcsGameSecurity
 
 variable {Omega : Type} [Fintype Omega]
 variable {ledger : FailureLedger Omega} {omega : Omega}
-variable {head : HistoryHead} {historyHasLink : 0 < head.foldRounds}
+-- The `HistoryHead` local notation is not used in a `variable` binder: there it
+-- elaborates to `sorry` without an error, and every declaration over that
+-- variable is then dropped silently (`knowledgeSoundness`, `fiatShamirSoundness`,
+-- `ofNotBad` and `deployedSoundness` were absent from the environment).
+variable {head : VerifiedHistoryHead (n := n) (F := F) (Op := Op) manifest registry
+  clauseEvidence family headerCells C S} {historyHasLink : 0 < head.foldRounds}
 variable {deltaStar : Real} {deltaStarPositive : 0 < deltaStar}
 variable {deltaStarLeOne : deltaStar ≤ 1}
 variable {domain : BoundReceiptIx n ↪ F} {degree openedCount : Nat}
@@ -804,8 +832,7 @@ ledger tag. -/
 def ofNotBad
     (notBad : ¬ledger.Bad omega)
     (math : HistoryBcsMath (C := C) deltaStar) :
-    HistoryBcsGameSecurity ledger omega head historyHasLink deltaStar
-      domain degree openedCount openings where
+    HistoryBcsGameSecurity (C := C) ledger omega deltaStar where
   math := math
   historyPcs := ledger.good_of_not_bad notBad .historyPcs
   commitmentBinding := ledger.good_of_not_bad notBad .commitmentBinding
@@ -814,8 +841,7 @@ def ofNotBad
 /-- Attach the ideal theorem to the admitted deployment coin without erasing
 the proof-relevant PCS/CR/ROM good events. -/
 noncomputable def deployedSoundness
-    (security : HistoryBcsGameSecurity ledger omega head historyHasLink
-      deltaStar domain degree openedCount openings)
+    (security : HistoryBcsGameSecurity (C := C) ledger omega deltaStar)
     (Z : Set (Stmt (historyBcsReduction head historyHasLink deltaStar
       deltaStarPositive deltaStarLeOne domain degree openedCount openings))) :
     DeployedHistoryBcsSoundness ledger omega head historyHasLink deltaStar

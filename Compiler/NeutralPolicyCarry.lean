@@ -10,10 +10,29 @@ Only the tuple-hashEq legacy v4 source is accepted. Every retained live source
 is converted, including historical revisions. A foreign v4 predecessor is
 resolved through the checked old chain to its freshly derived v6 counterpart.
 -/
-import Compiler.PolicyRecordCodec
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.LegacyStoreCarry
-import Compiler.LegacyContentCarry
+module
+
+public import Compiler.PolicyRecordCodec
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.LegacyStoreCarry
+public import Compiler.LegacyContentCarry
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NeutralPolicyCarry
 
@@ -46,6 +65,19 @@ private def legacyRecordStream : StreamCodec LegacyRecord where
   decodePrefix_encode := by
     intro record suffix
     simp [bytesStream.decodePrefix_encode, PolicyRecordCodec.LegacyV4.decode_encode]
+  encode_decodePrefix := by
+    intro bytes record suffix decoded
+    cases framed : bytesStream.decodePrefix bytes with
+    | none => simp [framed] at decoded
+    | some pair =>
+      obtain ⟨source, rest⟩ := pair
+      cases inner : PolicyRecordCodec.LegacyV4.decode source with
+      | none => simp [framed, inner] at decoded
+      | some decodedRecord =>
+        simp only [framed, inner, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        rw [PolicyRecordCodec.LegacyV4.decode_canonical inner]
+        exact bytesStream.encode_decodePrefix _ _ _ framed
 
 private def legacyPayloadStream :=
   StreamCodec.product StreamCodec.nat (StreamCodec.option legacyRecordStream)

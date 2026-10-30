@@ -3,7 +3,28 @@ One durable candidate intent for a special app-authorized ticket issue. This
 is not wired to the native receiver or semantic replay yet. In particular a
 bare resource birth with identical ticket bytes never implies this event.
 -/
-import Kernel.ApplicationShareIssueAdmission
+module
+
+public import Kernel.ApplicationShareIssueAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueReceiver
 open Minidregg.Compiler
@@ -81,9 +102,10 @@ theorem composite_roots_bound
   accepted.birth.prepared.write_roots_bound write member
 
 /-- Charge: the resource birth's own (its descriptor carries the whole initialized
-ticket cell, so turn and storage bytes count it), the extra signed app authority
-check, the complete outer ingress and the app read guard.  The accepted birth fee
-remains the only Book debit. -/
+ticket cell, so turn bytes count it), the extra signed app authority check, the
+complete outer ingress and the app read guard; storage is the World's storage of
+this intent (its writes and its retained event).  The accepted birth fee remains
+the only Book debit. -/
 def charge (accepted : Accepted profile config pins durable height ingress) : Charge
   | .incidences => ResourceBirthReceiver.charge accepted.birth .incidences + 1
   | .turnBytes => ResourceBirthReceiver.charge accepted.birth .turnBytes +
@@ -92,8 +114,7 @@ def charge (accepted : Accepted profile config pins durable height ingress) : Ch
   | .witnessBytes => ResourceBirthReceiver.charge accepted.birth .witnessBytes +
       ingress.appEnvelope.length
   | .proofWork => ResourceBirthReceiver.charge accepted.birth .proofWork + 1
-  | .storageBytes => ResourceBirthReceiver.charge accepted.birth .storageBytes +
-      (ingressCodec.encode ingress).length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot (writes accepted) (event config.deployment.domain ingress)
   | .sideEffectCount => ResourceBirthReceiver.charge accepted.birth .sideEffectCount + 1
   | .feeDebit => ResourceBirthReceiver.charge accepted.birth .feeDebit
   | .networkBytes | .leaseByteBlocks => 0
@@ -102,7 +123,8 @@ theorem charge_fee_exact (accepted : Accepted profile config pins durable height
     charge accepted .feeDebit = accepted.birth.descriptor.fee.amount := rfl
 
 theorem charge_fee_source_quoted (accepted : Accepted profile config pins durable height ingress) :
-    charge accepted .feeDebit = accepted.birth.descriptor.quotedFee config.tariff := by
+    charge accepted .feeDebit =
+      accepted.birth.descriptor.quotedFee accepted.birth.pending.record.creation := by
   rw [charge_fee_exact]
   exact accepted.special_fee_bound
 
@@ -120,11 +142,16 @@ def intent (accepted : Accepted profile config pins durable height ingress) :
   nullifiers := ResourceBirthReceiver.birthNullifier config.deployment.domain
       accepted.birth.descriptor.authorityNullifier ::
     [issueNullifier config.deployment.domain ingress accepted.birth.descriptor]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event config.deployment.domain ingress
   subject := some accepted.birth.descriptor.creator
   postRootsBound := composite_roots_bound accepted
   guardsReadOnly := compositeGuards_readonly accepted
+
+/-- The retained finite charge is exactly the specified charge, lane by lane. -/
+theorem intent_exactCharge (accepted : Accepted profile config pins durable height ingress) :
+    (intent accepted).exactCharge = charge accepted :=
+  Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed births are named**: every write of the intent that creates
 its cell -- the initialized content cell included -- is named by the step the

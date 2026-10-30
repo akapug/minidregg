@@ -11,6 +11,7 @@
 //! makes the STOP receipt a checked fact on the importing Store; until then
 //! the binding is the exporter's signature over the receipt bytes.
 
+use crate::io_context::IoContext;
 use ed25519_dalek::{Signature, Signer, VerifyingKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -18,6 +19,7 @@ use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::Path;
+use crate::canonical::hex;
 
 const MAX_MANIFEST: u64 = 64 * 1024;
 
@@ -25,25 +27,12 @@ fn invalid(reason: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason.into())
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 fn unhex<const N: usize>(text: &str) -> io::Result<[u8; N]> {
-    let text = text.trim();
-    if text.len() != N * 2 {
-        return Err(invalid("hex length refused"));
-    }
-    let mut out = [0u8; N];
-    for (index, byte) in out.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16)
-            .map_err(|_| invalid("hex refused"))?;
-    }
-    Ok(out)
+    crate::canonical::unhex_array(text.trim()).ok_or_else(|| invalid("hex refused"))
 }
 
 fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    let mut file = File::open(&path).ctx("open", &path)?;
     let mut digest = Sha256::new();
     let mut chunk = vec![0u8; 1 << 20];
     loop {
@@ -58,7 +47,7 @@ fn sha256_file(path: &Path) -> io::Result<String> {
 
 fn bounded(path: &Path, max: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)?.take(max + 1).read_to_end(&mut bytes)?;
+    File::open(&path).ctx("open", &path)?.take(max + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > max {
         return Err(invalid(format!("{} exceeds its bound", path.display())));
     }
@@ -70,7 +59,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     file.write_all(bytes)?;
     file.sync_all()
 }
@@ -97,8 +86,8 @@ pub(crate) fn write_export(
     DirBuilder::new().mode(0o700).create(out)?;
     let image = out.join("var.ext4");
     if fs::rename(source, &image).is_err() {
-        fs::copy(source, &image)?;
-        fs::remove_file(source)?;
+        fs::copy(source, &image).ctx("copy", &source)?;
+        fs::remove_file(&source).ctx("remove", &source)?;
     }
     if sha256_file(&image)? != sha {
         return Err(invalid("exported image differs from the broker's digest"));
@@ -106,7 +95,7 @@ pub(crate) fn write_export(
     let mut manifest = base.clone();
     manifest["protocol"] = json!("mini-spk-grain-export-v1");
     manifest["image"] = json!({"file":"var.ext4","sha256":sha,
-        "bytes":fs::metadata(&image)?.len().to_string()});
+        "bytes":fs::metadata(&image).ctx("inspect", &image)?.len().to_string()});
     manifest["stopReceipt"] = receipt;
     manifest["stopReceiptSha256"] = json!(format!("{:x}", Sha256::digest(stop_receipt)));
     let bytes = serde_json::to_vec_pretty(&manifest)?;
@@ -190,10 +179,10 @@ pub(crate) fn verify_import(
     let staged = imports.join(format!("{image_sha}.ext4"));
     if !staged.exists() {
         let temp = imports.join(format!(".{image_sha}.tmp"));
-        let _ = fs::remove_file(&temp);
-        fs::copy(dir.join("var.ext4"), &temp)?;
-        File::open(&temp)?.sync_all()?;
-        fs::rename(&temp, &staged)?;
+        let _ = fs::remove_file(&temp).ctx("remove", &temp);
+        fs::copy(dir.join("var.ext4"), &temp).ctx("copy", &(dir.join("var.ext4")))?;
+        File::open(&temp).ctx("open", &temp)?.sync_all()?;
+        fs::rename(&temp, &staged).ctx("rename", &temp)?;
     }
     if sha256_file(&staged)? != image_sha {
         return Err(invalid("staged import differs from the signed manifest"));
@@ -232,11 +221,11 @@ fn recovery_read(path: &Path, max: u64) -> io::Result<Vec<u8>> {
         path.parent()
             .ok_or_else(|| invalid("recovery parent absent"))?,
     )?;
-    let named = fs::symlink_metadata(path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let before = file.metadata()?;
     if !before.is_file()
         || before.uid() != unsafe { libc::geteuid() }
@@ -279,7 +268,7 @@ fn retain_exact(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<std::path::P
         }
         Err(e) => return Err(e),
     }
-    File::open(dir)?.sync_all()?;
+    File::open(&dir).ctx("open", &dir)?.sync_all()?;
     Ok(path)
 }
 
@@ -325,8 +314,9 @@ pub(crate) fn reconcile_failed_start(
     const MAX: u64 = 32 * 1024 * 1024;
     const PLAN: &[u8] = b"DREGG/APPLICATION/FAILED-START-RECOVERY-PLAN/v1";
     const INGRESS: &[u8] = b"DREGG/APPLICATION/FAILED-START-RECOVERY-INGRESS/v1";
-    const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
-    let config: Value = serde_json::from_slice(&recovery_read(resident_config, MAX_MANIFEST)?)?;
+    const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
+    let config: Value = serde_json::from_slice(&recovery_read(
+        resident_config, crate::agent_route_profile::MAX_RESIDENT_CONFIG)?)?;
     if text(&config, "protocol")? != "mini-spk-resident-start-v3" {
         return Err(invalid("recovery resident protocol refused"));
     }
@@ -336,7 +326,7 @@ pub(crate) fn reconcile_failed_start(
     }
     let directory = journal.join("failed-start-recovery-v1");
     match DirBuilder::new().mode(0o700).create(&directory) {
-        Ok(()) => File::open(&journal)?.sync_all()?,
+        Ok(()) => File::open(&journal).ctx("open", &journal)?.sync_all()?,
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             crate::dispatch_native::private_dir(&directory)?
         }
@@ -348,7 +338,7 @@ pub(crate) fn reconcile_failed_start(
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(directory.join(".recovery.lock"))?;
+        .open(directory.join(".recovery.lock")).ctx("open", &(directory.join(".recovery.lock")))?;
     if lock.metadata()?.uid() != unsafe { libc::geteuid() } || lock.metadata()?.nlink() != 1 {
         return Err(invalid("recovery lock identity refused"));
     }
@@ -359,7 +349,7 @@ pub(crate) fn reconcile_failed_start(
     // Every Host reply is retained under its own observation name and read
     // back through the pinned Host's own outcome inspector.
     let observe = |reply: &[u8], opcode: u8| -> io::Result<Value> {
-        let outcome = framed_payload(reply, opcode, OUTCOME)?;
+        let outcome = framed_payload("grain export submit", reply, opcode, OUTCOME)?;
         let observation = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| invalid("recovery clock before epoch"))?
@@ -452,11 +442,14 @@ pub(crate) fn reconcile_failed_start(
         let view = observe(&operator.invoke(routes.submit, &ingress)?, routes.submit)?;
         return finish(view, routes.submit);
     }
+    // The retained START's lane (v3, or the governed repeat CREATE v4) picks
+    // its admitted marker and artifact names; the stage schema is shared.
+    let lane = crate::resident_service::StartLane::of_journal(&journal)?;
     let stage: Value = serde_json::from_slice(&recovery_read(
-        &journal.join("start-admitted-v3.json"),
+        &journal.join(lane.admitted_name()),
         MAX_MANIFEST,
     )?)?;
-    if text(&stage, "protocol")? != "mini-spk-resident-start-admitted-v3" {
+    if text(&stage, "protocol")? != lane.admitted_protocol() {
         return Err(invalid("original START admission absent"));
     }
     let physical: crate::hostd::VerifiedBegin = serde_json::from_value(
@@ -475,9 +468,11 @@ pub(crate) fn reconcile_failed_start(
     {
         return Err(invalid("recovery original attempt outside journal"));
     }
-    let begin = recovery_read(&begin_dir.join("begin-v3.bin"), MAX)?;
-    let claim = recovery_read(&claim_dir.join("claim-v3.bin"), MAX)?;
-    let committed = recovery_read(&claim_dir.join("committed-v3.bin"), MAX)?;
+    let [begin_path, claim_path, committed_path] =
+        lane.recovery_artifacts(&journal, &begin_dir, &claim_dir);
+    let begin = recovery_read(&begin_path, MAX)?;
+    let claim = recovery_read(&claim_path, MAX)?;
+    let committed = recovery_read(&committed_path, MAX)?;
     for (name, bytes) in [
         ("beginSha256", &begin),
         ("claimIngressSha256", &claim),
@@ -568,7 +563,7 @@ pub(crate) fn reconcile_failed_start(
         &directory.join("request.bin"),
     )?;
     let reply = operator.invoke(routes.prepare, &custody.selector.framed(&request)?)?;
-    let plan = framed_payload(&reply, routes.prepare, PLAN)?;
+    let plan = framed_payload("grain export plan", &reply, routes.prepare, PLAN)?;
     let plan_path = retain_exact(&directory, "plan.bin", plan)?;
     let view: Value = serde_json::from_slice(&recovery_tool(
         operator,
@@ -618,7 +613,7 @@ pub(crate) fn reconcile_failed_start(
     pair.extend_from_slice(&sigs);
     retain_exact(&directory, "assemble-request.bin", &pair)?;
     let reply = operator.invoke(routes.assemble, &pair)?;
-    let ingress = framed_payload(&reply, routes.assemble, INGRESS)?;
+    let ingress = framed_payload("grain export assemble", &reply, routes.assemble, INGRESS)?;
     retain_exact(&directory, "ingress.bin", ingress)?;
     retain_exact(
         &directory,
@@ -631,7 +626,7 @@ pub(crate) fn reconcile_failed_start(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
 
@@ -667,9 +662,9 @@ mod tests {
     /// A pinned "Host" that is /bin/sh running the config file as its
     /// outcome inspector, and an operator socket that answers each request
     /// with a scripted outcome. The served opcodes and payloads are returned.
-    struct FakeHost {
-        root: std::path::PathBuf,
-        operator: crate::dispatch_native::PrivateOperator,
+    pub(crate) struct FakeHost {
+        pub(crate) root: std::path::PathBuf,
+        pub(crate) operator: crate::dispatch_native::PrivateOperator,
     }
 
     const INSPECTOR: &str = "#!/bin/sh\n\
@@ -681,10 +676,13 @@ mod tests {
           fi\n\
         done\n\
         if grep -q absent \"$3\"; then printf '{\"type\":\"absent\"}' >\"$4\"; exit 0; fi\n\
+        if grep -q contention \"$3\"; then printf '{\"type\":\"contention\"}' >\"$4\"; exit 0; fi\n\
+        if grep -q unavailable \"$3\"; then printf '{\"type\":\"unavailable\"}' >\"$4\"; exit 0; fi\n\
+        if grep -q uncertain \"$3\"; then printf '{\"type\":\"uncertain\"}' >\"$4\"; exit 0; fi\n\
         printf '{\"type\":\"refused\",\"reason\":\"operationRejected\"}' >\"$4\"\n";
 
     impl FakeHost {
-        fn new(name: &str) -> Self {
+        pub(crate) fn new(name: &str) -> Self {
             let root = scratch(name);
             let host = root.join("host");
             fs::copy("/bin/sh", &host).unwrap();
@@ -706,12 +704,26 @@ mod tests {
 
         /// Serve one connection per scripted reply; each reply is OUTCOME/v4
         /// followed by the word the inspector maps to a JSON view.
-        fn serve(&self, replies: Vec<&'static str>) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
+        pub(crate) fn serve(&self, replies: Vec<&'static str>) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
+            self.serve_marked(replies.into_iter().map(|word| (None, word)).collect())
+        }
+
+        /// `serve` with each reply's first byte chosen: `None` echoes the
+        /// request's opcode, `Some(marker)` answers under a response marker
+        /// (NO_RECORD 253, HOST_OUTCOME 255) or a stray byte.
+        pub(crate) fn serve_marked(
+            &self,
+            replies: Vec<(Option<u8>, &'static str)>,
+        ) -> std::thread::JoinHandle<Vec<(u8, Vec<u8>)>> {
             let listener = std::os::unix::net::UnixListener::bind(&self.operator.socket).unwrap();
             fs::set_permissions(&self.operator.socket, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+            let scratch = self.root.clone();
+            let inspector = self.operator.config.clone();
             std::thread::spawn(move || {
                 let mut seen = Vec::new();
-                for word in replies {
+                let mut replies = replies.into_iter();
+                let mut tool_calls = 0u32;
+                while replies.len() > 0 {
                     let (mut stream, _) = listener.accept().unwrap();
                     let mut prefix = [0u8; 4];
                     stream.read_exact(&mut prefix).unwrap();
@@ -720,9 +732,40 @@ mod tests {
                     let config_len = u32::from_le_bytes(request[1..5].try_into().unwrap()) as usize;
                     let at = 5 + config_len + 32;
                     let opcode = request[at];
+                    if (crate::host_operations::TOOL_AUTHOR..=crate::host_operations::TOOL_SIGNATURES).contains(&opcode) {
+                        // The Host's in-session tool verbs: `inspect KIND` runs the inspector script
+                        // exactly as the detached verb does; anything else is "run the detached verb".
+                        let payload = &request[at + 1..];
+                        let mut answer = vec![opcode, 2];
+                        if opcode == crate::host_operations::TOOL_INSPECT {
+                            let width = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+                            let kind = std::str::from_utf8(&payload[2..2 + width]).unwrap();
+                            tool_calls += 1;
+                            let input = scratch.join(format!("tool-in-{tool_calls}"));
+                            let output = scratch.join(format!("tool-out-{tool_calls}"));
+                            fs::write(&input, &payload[2 + width..]).unwrap();
+                            let status = std::process::Command::new("/bin/sh")
+                                .arg(&inspector).arg("inspect").arg(kind).arg(&input).arg(&output)
+                                .status().unwrap();
+                            answer = if status.success() {
+                                let mut ok = vec![opcode, 0];
+                                ok.extend_from_slice(&fs::read(&output).unwrap());
+                                ok
+                            } else {
+                                let mut refused = vec![opcode, 1];
+                                refused.extend_from_slice(b"inspector refused");
+                                refused
+                            };
+                        }
+                        let mut frame = (answer.len() as u32).to_le_bytes().to_vec();
+                        frame.extend_from_slice(&answer);
+                        stream.write_all(&frame).unwrap();
+                        continue;
+                    }
+                    let (marker, word) = replies.next().unwrap();
                     seen.push((opcode, request[at + 1..].to_vec()));
-                    let mut body = vec![opcode];
-                    body.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v5");
+                    let mut body = vec![marker.unwrap_or(opcode)];
+                    body.extend_from_slice(b"DREGG/NATIVE-HOST/OUTCOME/v8");
                     body.extend_from_slice(word.as_bytes());
                     let mut frame = (body.len() as u32).to_le_bytes().to_vec();
                     frame.extend_from_slice(&body);
@@ -752,6 +795,73 @@ mod tests {
     fn reconcile(fake: &FakeHost, journal: &Path, app: &str, generation: u64) -> io::Result<Value> {
         reconcile_failed_start(&fake.operator, &journal.join("resident.json"), app, generation,
             FAILED_START_RECOVERY_ROUTES)
+    }
+
+    /// A journal whose START was admitted on `lane` (v3 or the governed
+    /// repeat CREATE v4) and failed: the admitted marker binds the digests of
+    /// the lane's own retained BEGIN, CLAIM and committed CLAIM.
+    fn admitted_journal(root: &Path, lane: crate::resident_service::StartLane, tamper: bool) -> std::path::PathBuf {
+        let journal = root.join(format!("{lane:?}"));
+        DirBuilder::new().mode(0o700).create(&journal).unwrap();
+        let begin_dir = journal.join("begin-attempt");
+        let claim_dir = journal.join("claim-author-attempt");
+        let config = json!({"protocol":"mini-spk-resident-start-v3","journalDir":journal,
+            "beginAttemptDir":begin_dir,"claimAuthorAttemptDir":claim_dir,"completionSemantics":"1"});
+        write_new(&journal.join("resident.json"), &serde_json::to_vec(&config).unwrap()).unwrap();
+        let paths = lane.recovery_artifacts(&journal, &begin_dir, &claim_dir);
+        let mut digests = Vec::new();
+        for (index, path) in paths.iter().enumerate() {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::set_permissions(path.parent().unwrap(), std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+            let bytes = format!("{lane:?} artifact {index}").into_bytes();
+            write_new(path, &bytes).unwrap();
+            digests.push(hex(&Sha256::digest(&bytes)));
+        }
+        if tamper {
+            digests[2] = "0".repeat(64);
+        }
+        let marker = json!({"protocol":lane.admitted_protocol(),
+            "beginSha256":digests[0],"claimIngressSha256":digests[1],"committedClaimSha256":digests[2],
+            "claim":{"physicalBegin":{"app":7101,"generation":3,"operation_id":"5","transaction_id":"6",
+                "event_id":"7","package_sha256":"a".repeat(64),"image_identity":"i","process_identity":"p",
+                "unit":"u"}}});
+        write_new(&journal.join(lane.admitted_name()), &serde_json::to_vec(&marker).unwrap()).unwrap();
+        journal
+    }
+
+    /// The failed-START reader takes the retained START's own lane: a v4
+    /// (governed repeat CREATE) journal is read from its v4 marker and
+    /// artifacts, whose digests are checked exactly as v3's are. Both runs
+    /// pass the admission and digest checks and stop only at the physical
+    /// audit (this fixture has no hostd journal), before any Host call.
+    #[test]
+    fn failed_start_recovery_reads_the_retained_lane_v3_or_v4() {
+        use crate::resident_service::StartLane;
+        let root = scratch("recovery-lane");
+        let operator = crate::dispatch_native::PrivateOperator {
+            host: root.join("absent-host"),
+            config: root.join("absent-config"),
+            socket: root.join("absent-socket"),
+            host_sha256: "00".repeat(32),
+            config_sha256: "00".repeat(32),
+        };
+        for lane in [StartLane::V3, StartLane::RetryV4] {
+            let journal = admitted_journal(&root, lane, false);
+            assert_eq!(StartLane::of_journal(&journal).unwrap(), lane);
+            let error = reconcile_failed_start(&operator, &journal.join("resident.json"), "7101", 3,
+                FAILED_START_RECOVERY_ROUTES).unwrap_err().to_string();
+            for refused in ["original START admission absent", "recovery retained original digest mismatch",
+                "recovery target differs", "No such file", "missing field", "unknown field"] {
+                assert!(!error.contains(refused), "{lane:?}: {error}");
+            }
+            assert!(!journal.join("failed-start-recovery-v1").join("report-source.json").exists());
+        }
+        let root = scratch("recovery-lane-tamper");
+        let journal = admitted_journal(&root, StartLane::RetryV4, true);
+        let error = reconcile_failed_start(&operator, &journal.join("resident.json"), "7101", 3,
+            FAILED_START_RECOVERY_ROUTES).unwrap_err().to_string();
+        assert_eq!(error, "recovery retained original digest mismatch");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -5,8 +5,12 @@ issue certificate and receipt from the same native verifier walk. Both require
 exact source bytes and full IntentRecord equality, never event-shaped journal
 bytes alone.
 -/
-import Kernel.ApplicationShareIssueGrainReceiver
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.ApplicationShareIssueGrainReceiver
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainLookup
 
@@ -39,7 +43,7 @@ def lookupVerified {config : Config} {target : Durable}
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | .error .nativeHistoryUnavailable
   let some issue := verified.issues.find? (fun issue => issue.index == index)
     | .error .transactionConflict

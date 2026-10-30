@@ -1,7 +1,7 @@
 /- KN2 PORT-B executed probe: the lifecycle modules refuse a key the light basis did not
 declare, BY NAME, on a REAL deployment Store (never read as absent / unconsumed).
 
-The Store is the deployment's pinned genesis (`Assurance.NativeAcceptedFixtureData`: the
+The Store is the deployment's pinned genesis (`Fixtures.NativeAcceptedFixtureData`: the
 accepted-fixture seed under its pinned config), bootstrapped and opened as `Light.start`
 opens a served Store, so every `Basis` below is a validated served state with a verified
 footprint. Then, at the SAME height and head:
@@ -15,7 +15,7 @@ footprint. Then, at the SAME height and head:
     nullifiers declared a first create finds them unconsumed (true); with an empty
     footprint `markersDeclaredOf` and `markersCurrentOf` are false.
 Usage: lake env lean --run scripts/kn2/port-b-undeclared.lean STORE-HELPER -/
-import Assurance.NativeAcceptedFixtureData
+import Fixtures.NativeAcceptedFixtureData
 import Kernel.NativeHostLight
 import Kernel.ApplicationLifecycleBeginReceiver
 import Kernel.ApplicationLifecycleBeginV3Admission
@@ -26,7 +26,7 @@ open Minidregg.Kernel
 open Minidregg.Kernel.NativeHost
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableCheckpointCodec
-open Minidregg.Assurance.NativeAcceptedFixtureData
+open Minidregg.Fixtures.NativeAcceptedFixtureData
 
 namespace UndeclaredProbe
 

@@ -191,6 +191,14 @@ impl AcpCapture {
     }
 }
 
+/// The ACP-streamed final and the settled provider final are the same text
+/// up to surrounding whitespace: upstream Hermes streams a "\n\n" separator
+/// chunk before the final segment that follows its tool calls. The delivered
+/// text is always the provider's; any other difference refuses.
+fn acp_final_matches(captured: &str, provider: &str) -> bool {
+    captured.trim() == provider.trim()
+}
+
 fn assignment(request: &Value, origin: &Value) -> Result<Value> {
     let messages = request["messages"]
         .as_array()
@@ -278,6 +286,20 @@ fn source_entry(assignment: &Value, room: &str, subject: &str) -> Result<Option<
 }
 
 impl FinalRecord {
+    /// The review plan names the requester's text and the final only by
+    /// digest and length (H14): any member could make the requester text
+    /// 12 KB, and the final is retained in `resident-final-N.json`, which the
+    /// deliver receiver re-reads and re-hashes against `planSha256`.
+    fn review_projection(&self) -> Result<Value> {
+        let mut plan = serde_json::to_value(self).map_err(|e| e.to_string())?;
+        let source_text = self.source_entry["text"].as_str().unwrap_or("");
+        plan["sourceEntry"]["text"] = Value::Null;
+        plan["sourceEntry"]["textSha256"] = json!(sha256_bytes(source_text.as_bytes())?);
+        plan["sourceEntry"]["textBytes"] = json!(source_text.len());
+        plan["finalText"] = Value::Null;
+        plan["finalTextBytes"] = json!(self.final_text.len());
+        Ok(plan)
+    }
     fn arguments(&self, reply_entry_number: u64) -> Value {
         json!({"text":self.final_text,"to":self.source_entry["author"],
             "re":reply_entry_number.to_string()})
@@ -517,7 +539,7 @@ impl Runtime {
             &replay.response_sha256,
             Some(replay.response_bytes),
         )?)?;
-        if acp.is_some_and(|captured| captured != text) {
+        if acp.is_some_and(|captured| !acp_final_matches(captured, &text)) {
             return Err("source ACP final differs from settled provider final".into());
         }
         let record = FinalRecord {
@@ -654,8 +676,8 @@ impl Runtime {
         } else { self.delivery_reply_number(&record)? };
         Ok(
             json!({"type":"mini-resident-delivery-plan-v1","status":if done.as_ref().is_some_and(|r|r["type"]=="mini-resident-final-refused-v1") {"refused"} else if done.is_some(){"delivered"}else{"pending"},
-            "plan":record,"planSha256":hash(&record)?,"residentState":state,"residentSha256":sha256_bytes(guard.bytes()?)?,
-            "receipt":done,"replyEntryNumber":reply_entry_number,"arguments":record.arguments(reply_entry_number),"modelRequests":0}),
+            "plan":record.review_projection()?,"planSha256":hash(&record)?,"residentState":state,"residentSha256":sha256_bytes(guard.bytes()?)?,
+            "receipt":done,"replyEntryNumber":reply_entry_number,"argumentsSha256":hash(&record.arguments(reply_entry_number))?,"modelRequests":0}),
         )
     }
 
@@ -842,19 +864,7 @@ impl Runtime {
             self.recover_room()?;
         }
         let status = self.inspect_quiescence_locked(&guard)?;
-        if !status.active.is_empty()
-            || !status.evidence_required.is_empty()
-            || !status.session_integrity_errors.is_empty()
-            || !status.exact_recovery.is_empty()
-            || status.retained.iter().any(|m| *m != "resident_delivery")
-            || status.observations.is_empty()
-            || !status
-                .observations
-                .iter()
-                .all(|o| quiescence::signed_unreserved_boundary(&o["state"]))
-        {
-            return Err("delivery requires fresh closed native/process/session boundary".into());
-        }
+        delivery_boundary(&status)?;
         if let Some(resolution) = self.retained_final_resolution(&record)? {
             guard.assert_unchanged()?;
             let saved_arguments=resolution["arguments"].clone();
@@ -934,6 +944,125 @@ impl Runtime {
     }
 }
 
+/// Verify a retained native final and its definite delivery outcome without
+/// another room write. Both performed and refused writes are terminal; the
+/// latter is never described as a delivered answer.
+pub(crate) fn consumed_delivery(
+    config: &Config,
+    journal: &Journal,
+    origin: &Value,
+    binding: &str,
+    final_text: &str,
+    guard: &ResidentGuard,
+) -> Result<Value> {
+    let op = origin["promptOperationId"]
+        .as_u64()
+        .ok_or("delivery origin absent")?;
+    let final_path = config
+        .state_dir
+        .join(format!("resident-final-{op:016}.json"));
+    let record: FinalRecord = serde_json::from_slice(&bounded_regular_file(&final_path, LIMIT)?)
+        .map_err(|e| e.to_string())?;
+    record.validate()?;
+    let tool = config
+        .tool_task
+        .as_ref()
+        .ok_or("consumed final ToolTask absent")?;
+    let room = tool.room.as_ref().ok_or("consumed final room absent")?;
+    if record.room != room.room || record.subject != tool.subject {
+        return Err("consumed final belongs to another room or subject".into());
+    }
+    let replay = journal
+        .provider_replays
+        .last()
+        .ok_or("consumed final has no provider response")?;
+    if record.request_sha256 != replay.request_sha256
+        || record.response_sha256 != replay.response_sha256
+        || replay.meter_report_sha256.as_deref() != Some(record.meter_report_sha256.as_str())
+    {
+        return Err("consumed final differs from exact settled provider response".into());
+    }
+    if record.origin != *origin
+        || record.binding_sha256 != binding
+        || !acp_final_matches(final_text, &record.final_text)
+    {
+        return Err("consumed delivery differs from source completed turn".into());
+    }
+    let mut terminal = None;
+    for (prefix, kind, resolution) in [
+        (
+            "resident-delivered",
+            "mini-resident-delivered-v1",
+            "performed",
+        ),
+        (
+            "resident-final-refused",
+            "mini-resident-final-refused-v1",
+            "refused",
+        ),
+    ] {
+        let path = config.state_dir.join(format!("{prefix}-{op:016}.json"));
+        if !path.try_exists().map_err(|e| e.to_string())? {
+            continue;
+        }
+        let bytes = bounded_regular_file(&path, LIMIT)?;
+        let receipt: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if terminal.is_some()
+            || receipt["type"] != kind
+            || receipt["origin"] != record.origin
+            || receipt["planSha256"] != hash(&record)?
+            || receipt["result"]["result"]["resolution"] != resolution
+            || !journal
+                .room_resolutions
+                .iter()
+                .any(|v| v == &receipt["result"])
+        {
+            return Err("consumed delivery lacks one exact retained native result".into());
+        }
+        validate_terminal_resolution(&record, &receipt["result"])?;
+        let request = resident_requests::consumed_delivery_receipt(
+            guard.path()?,
+            guard.request_bytes().ok_or("request custody absent")?,
+            &record.source_entry,
+            &record.subject,
+            &path,
+            &receipt,
+        )?;
+        terminal = Some(
+            json!({"path":path,"sha256":sha256_bytes(&bytes)?,"resolution":resolution,"request":request}),
+        );
+    }
+    let terminal = terminal.ok_or("completed turn has no definite final delivery receipt")?;
+    Ok(
+        json!({"final":{"path":final_path,"sha256":sha256_bytes(&bounded_regular_file(&final_path,LIMIT)?)?},"terminal":terminal}),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_consume_final(rt:&mut Runtime,state:&Path,refused:bool)->Result<()> {
+    let origin=serde_json::to_value(&rt.journal.resident_prompt_origin).map_err(|e|e.to_string())?;
+    let replay=rt.journal.provider_replays.last().ok_or("fixture replay absent")?;
+    let entry=json!({"author":"20","to":"8","cell":"20","n":7,"sequence":1,"height":53,"text":"question","kind":"say"});
+    let record=FinalRecord {kind:"mini-resident-final-v1".into(),origin:origin.clone(),binding_sha256:hash(&rt.journal.binding)?,
+        request_sha256:replay.request_sha256.clone(),response_sha256:replay.response_sha256.clone(),
+        meter_report_sha256:replay.meter_report_sha256.clone().unwrap(),source_entry:entry.clone(),room:"lab".into(),subject:"8".into(),
+        final_text:"the answer".into(),final_text_sha256:sha256_bytes(b"the answer")?,provenance:"source-acp-and-settled-provider-final".into()};
+    let prepared=json!({"requestBinding":{"world":{"domain":"1","expectedSeed":"2"},"roomCell":"99","assignment":"1","task":rt.config.task},
+        "sourceRoom":{"entries":1,"selectedEntries":1,"members":[{"subject":"20","stream":"20"}]},
+        "sourceRequests":[entry],"acceptedHeight":"0","me":"8","recentMemberEntries":[]});
+    resident_requests::select(&prepared,state,resident_requests::Limits::default())?;
+    resident_requests::started(state,origin["residentPromptId"].as_str().unwrap(),"input")?;
+    rt.install_final(record.clone())?;
+    rt.journal.resident_delivery.as_mut().unwrap().operation_id=Some(45);
+    let resolution=json!({"operationId":"45","tool":"mini_say","arguments":record.arguments(7),
+        "residentOrigin":origin,"expectedReply":[record.source_entry["cell"],record.source_entry["sequence"]],
+        "payment":{"confirmed":true},"toolCharge":"1","result":{"resolution":if refused {"refused"} else {"performed"},"basis":"fixture-native-resolution"}});
+    rt.journal.room_resolutions.push(resolution.clone());
+    rt.finish_delivery(&record,&record.arguments(7),resolution)?;
+    let resident:Value=serde_json::from_slice(&fs::read(state.join("resident.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    resident_requests::reconcile(state,&rt.config.state_dir,Some(&resident["lastCompletion"]))
+}
+
 /// The resident driver owns its flock across model work. A source final is
 /// already pending in the controller before completion arrives. Temporarily
 /// transfer the flock to the no-model admin receiver, then reload driver state
@@ -981,7 +1110,6 @@ pub(crate) fn drain_completed(config: &Config, state: &Path, lock: &File) -> Res
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("resident lock changed while final delivery was draining; reload under its current owner".into());
     }
-    config_migration::ensure_resident_current(config)?;
     result
 }
 
@@ -1001,6 +1129,51 @@ pub(crate) fn client(args: &[std::ffi::OsString]) -> Result<()> {
     if value["type"]!=kind && !(action=="deliver" && value["type"]=="mini-resident-final-refused-v1") { return Err("delivery response type differs from requested operation".into()); }
     println!("{response}");
     Ok(())
+}
+
+/// The boundary a reply is delivered at: nothing native in flight, no session
+/// integrity error, every observed grain signed-unreserved, and nothing
+/// retained but this delivery and the request it answers. The started request
+/// (and any unstarted queued ones behind it) close only when this delivery is
+/// received (resident_requests::reconcile), so they cannot bar it.
+pub(crate) fn delivery_boundary(status: &quiescence::Status) -> Result<()> {
+    let mut open: Vec<String> = Vec::new();
+    open.extend(status.active.iter().map(|m| format!("active {m}")));
+    open.extend(status.evidence_required.iter().map(|m| format!("evidence {m}")));
+    open.extend(status.session_integrity_errors.iter().map(|m| format!("session {m}")));
+    if !status.exact_recovery.is_empty() {
+        open.push(format!("{} exact recoveries", status.exact_recovery.len()));
+    }
+    open.extend(
+        status
+            .retained
+            .iter()
+            .filter(|m| {
+                !matches!(
+                    **m,
+                    "resident_delivery" | "resident_started_request" | "resident_queued_requests"
+                )
+            })
+            .map(|m| format!("retained {m}")),
+    );
+    if status.observations.is_empty() {
+        open.push("no grain observation".into());
+    }
+    if !status
+        .observations
+        .iter()
+        .all(|o| quiescence::signed_unreserved_boundary(&o["state"]))
+    {
+        open.push("a grain is not at a signed unreserved boundary".into());
+    }
+    if open.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "delivery requires fresh closed native/process/session boundary; open: {}",
+            open.join(", ")
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1072,6 +1245,15 @@ mod tests {
         assert!(assignment(&request, &origin).is_err());
     }
     #[test]
+    fn acp_final_matches_provider_final_up_to_surrounding_whitespace_only() {
+        assert!(acp_final_matches("\n\nAttach done: 2 writes.", "Attach done: 2 writes."));
+        assert!(acp_final_matches("the answer", "the answer\n"));
+        assert!(!acp_final_matches("the  answer", "the answer"));
+        assert!(!acp_final_matches("the answer, edited", "the answer"));
+        assert!(!acp_final_matches("", "the answer"));
+    }
+
+    #[test]
     fn acp_capture_ignores_display_and_refuses_session_changes() {
         let mut c = AcpCapture::default();
         c.observe(&json!({"type":"output","text":"fake"}), Some("s"));
@@ -1124,6 +1306,22 @@ mod tests {
         json!({"operationId":id.to_string(),"tool":"mini_say","arguments":record.arguments(7),
             "residentOrigin":record.origin,"expectedReply":[record.source_entry["cell"],record.source_entry["sequence"]],"payment":{"confirmed":true},"toolCharge":"1",
             "result":{"resolution":"performed","basis":"exact-operation-record","value":{"transaction":"123"}}})
+    }
+
+    #[test]
+    fn delivery_plan_carries_requester_text_only_by_digest_and_length() {
+        let (root, _rt, mut record) = receiving_fixture("delivery-plan-redact");
+        let long = "q".repeat(12_000);
+        record.source_entry["text"] = json!(long);
+        let plan = record.review_projection().unwrap();
+        let text = plan.to_string();
+        assert!(!text.contains(&long), "requester text must not enter the admin reply");
+        assert!(!text.contains("exact final"), "the final is re-read from its retained file");
+        assert_eq!(plan["sourceEntry"]["textBytes"], 12_000);
+        assert_eq!(plan["sourceEntry"]["textSha256"], json!(sha256_bytes(long.as_bytes()).unwrap()));
+        assert_eq!(plan["finalTextSha256"], json!(record.final_text_sha256));
+        assert!(text.len() < 4_096, "plan stays small whatever a member writes: {}", text.len());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1338,4 +1536,38 @@ mod tests {
         assert_eq!(room_origin(&rt.journal, true, None), Some(record.origin));
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn delivery_boundary_admits_the_request_it_answers_and_names_what_blocks() {
+        let mut status = quiescence::Status {
+            disposition: quiescence::Disposition::RestartWithRetainedUncertainty,
+            can_restart_retaining_state: true,
+            closed_checkpoint: false,
+            full_resume_ready: false,
+            retained: vec!["resident_delivery", "resident_started_request", "resident_queued_requests"],
+            active: vec![],
+            evidence_required: vec![],
+            observations: vec![json!({"slot":"parent","task":"7",
+                "state":{"grain":{"status":"2","reserved":"0"},"nativeRead":{"height":"87","root":"r"}}})],
+            journal_sha256: "e".repeat(64),
+            next_operation_id: 80,
+            binding_sha256: "b".repeat(64),
+            config_sha256: None,
+            controller_pid: std::process::id(),
+            worker_unit: None,
+            exact_recovery: vec![],
+            resident_state: None,
+            resident_requests_sha256: None,
+            resume_evidence_required: vec![],
+            session_integrity_errors: vec![],
+            snapshot_only: true,
+        };
+        delivery_boundary(&status).unwrap();
+        status.retained.push("resident_return_pending");
+        let error = delivery_boundary(&status).unwrap_err();
+        assert!(error.contains("retained resident_return_pending"), "{error}");
+        status.retained.pop();
+        status.observations.clear();
+        assert!(delivery_boundary(&status).unwrap_err().contains("no grain observation"));
+    }
+
 }

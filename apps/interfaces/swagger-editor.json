@@ -1,0 +1,120 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "swagger-editor",
+  "interfaceVersion": 1,
+  "appId": "xm16d84ksseg44ef58z7n2aw7qt1n6psk0cewzr0e0arfjk5r4fh",
+  "packageId": "c8ae9b8ea081ad5b31701cd6b11292cc",
+  "appVersion": "5.10.0-2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "spec.put": {
+      "description": "Replace the YAML specification used by the browser editor.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "yaml": {
+            "type": "string",
+            "maxLength": 1048576
+          }
+        },
+        "required": [
+          "yaml"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 599
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "editor/spec"
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          201,
+          204
+        ],
+        "text": {
+          "arg": "yaml"
+        },
+        "headers": {
+          "content-type": "application/yaml"
+        }
+      }
+    },
+    "spec.get": {
+      "description": "Read the exact YAML specification stored by the browser editor.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "editor/spec"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "save",
+      "op": "spec.put",
+      "args": {
+        "yaml": "swagger: \"2.0\"\ninfo:\n  title: Mini typed tool\n  version: \"1.0\"\npaths: {}\n"
+      }
+    },
+    {
+      "id": "read",
+      "op": "spec.get",
+      "args": {},
+      "assert": [
+        {
+          "path": [],
+          "equals": "swagger: \"2.0\"\ninfo:\n  title: Mini typed tool\n  version: \"1.0\"\npaths: {}\n"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-session"
+  },
+  "sources": [
+    "https://github.com/swagger-api/swagger-editor/releases/tag/v5.10.0",
+    "package:c8ae9b8ea081ad5b31701cd6b11292cc/opt/app/static-server.js"
+  ],
+  "$defs": {}
+}

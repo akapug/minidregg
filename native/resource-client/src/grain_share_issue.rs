@@ -129,7 +129,7 @@ fn reinspect(directory: &Path, state: &Retained, stem: &str) -> Result<Option<Va
     }
     let frame = custody::bounded(&frame_path, transport::HOST_MAX_FRAME)?;
     let operation = if stem == "submit" { 54 } else { 55 };
-    if frame.first() == Some(&255) && !binary.exists() {
+    if frame.first().is_some_and(|b| crate::is_outcome_frame(*b)) && !binary.exists() {
         return Ok(None);
     }
     if frame.first() != Some(&operation) || frame.len() < 2 {
@@ -354,11 +354,11 @@ pub(super) fn plan(
         return Err("grain share preview request differs from source bytes".into());
     }
     check_inputs()?;
-    let frame = session_invoke(&host, &operator_socket, &config, 56, &request)?;
+    let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan = custody::expect_reply(&frame, 56)?;
+    let plan = custody::expect_reply(&frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
     let plan_view = inspect_bounded(
@@ -442,11 +442,11 @@ pub(super) fn prepare(
     check_inputs()?;
     approved_request(&approval, &request, &request_inspected)?;
 
-    let frame = session_invoke(&host, &operator_socket, &config, 56, &request)?;
+    let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan = custody::expect_reply(&frame, 56)?;
+    let plan = custody::expect_reply(&frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_PLAN)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
     let plan_inspected = inspect_bounded(
@@ -500,10 +500,10 @@ pub(super) fn prepare(
     assembly.extend_from_slice(&(plan.len() as u32).to_le_bytes());
     assembly.extend_from_slice(plan);
     assembly.extend_from_slice(&signatures_bytes);
-    let assembled_frame = session_invoke(&host, &operator_socket, &config, 57, &assembly)?;
+    let assembled_frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_ASSEMBLE, &assembly)?;
     check_inputs()?;
     create_private(&directory.join("assembly.frame"), &assembled_frame)?;
-    let ingress = custody::expect_reply(&assembled_frame, 57)?;
+    let ingress = custody::expect_reply(&assembled_frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_ASSEMBLE)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     let pin = json!({"format":FORMAT,"host":utf8_path(&host)?,
         "hostSha256":initial_host_sha,"config":utf8_path(&config)?,
@@ -535,14 +535,14 @@ pub(super) fn submit(directory: &Path, socket: Option<&Path>) -> Result<()> {
         &state.host,
         &state.socket,
         &state.config,
-        54,
+        mini_sdk::host_operations::GRAIN_SHARE_ISSUE_SUBMIT,
         &state.ingress,
     )
     .map_err(|e| format!("grain share submit uncertain; exact ingress retained: {e}"))?;
     create_private(&directory.join("submit.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
     verify_retained(&directory, &state)?;
-    let outcome = confirmed_outcome(&directory, "submit", &frame, 54, &state)?;
+    let outcome = confirmed_outcome(&directory, "submit", &frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_SUBMIT, &state)?;
     verify_retained(&directory, &state)?;
     custody::confirmed(&outcome)?;
     historical_anchor(&directory, &state, 0)?;
@@ -580,13 +580,13 @@ pub(super) fn lookup(directory: &Path, socket: Option<&Path>) -> Result<()> {
         &state.host,
         &state.socket,
         &state.config,
-        55,
+        mini_sdk::host_operations::GRAIN_SHARE_ISSUE_LOOKUP,
         &state.ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     sync_directory_ancestors(&directory)?;
     verify_retained(&directory, &state)?;
-    let outcome = confirmed_outcome(&directory, &stem, &frame, 55, &state)?;
+    let outcome = confirmed_outcome(&directory, &stem, &frame, mini_sdk::host_operations::GRAIN_SHARE_ISSUE_LOOKUP, &state)?;
     verify_retained(&directory, &state)?;
     custody::confirmed(&outcome)?;
     historical_anchor(&directory, &state, index + 1)?;

@@ -1,10 +1,29 @@
 name = "minidregg"
 defaultTargets = ["Minidregg"]
+# HOT-PATH 2d (docs/HOT-PATH-2026-10-27.md): compiled hashes and signature checks are Rust kernels
+# behind @[extern] (Theory/Sp800185Cshake256Native.lean, Compiler/Sp800185Kmac256.lean,
+# Compiler/CredentialSignatureKernel.lean; native/mini-kernels).
+# `scripts/build-mini-kernels.sh` writes both forms under .lake/native/ BEFORE any lake build:
+# the shared library `lean` loads so elaboration and `lean --run` resolve the compiled wrappers,
+# and the two link inputs every Lean executable needs. Paths are relative
+# to this package root (Lake runs lean and leanc here).
+moreLeanArgs = ["--load-dynlib=.lake/native/libmini_kernels_lean.so", "-Dbackward.privateInPublic.warn=false"]
+moreLinkArgs = [".lake/native/mini_kernels_lean.o", ".lake/native/libmini_kernels.a"]
 # Restore every artifact a build takes from the Lake artifact cache INTO .lake/build (hard links), so
 # `lake env lean`, lane-check and lean-ask see a fetched module like a compiled one. The cache itself
-# is enabled per box by scripts/pipeline/lake-shim (LAKE_ARTIFACT_CACHE + one shared LAKE_CACHE_DIR):
-# a low-level edit is compiled once per box, not once per lane.
+# is enabled per box by box.env (scripts/pipeline/box-env: LAKE_ARTIFACT_CACHE=true + one shared LAKE_CACHE_DIR;
+# guard: lib.sh pipeline_cache_audit): a low-level edit is compiled once per box, not once per lane.
 restoreAllArtifacts = true
+
+# MODULE SYSTEM porting option (scripts/lean-modularize.py): a module may use its OWN private names in its
+# public statements and exposed bodies; another module still cannot name them (TokenCensus unchanged).
+# Its .warn sub-option is silenced in moreLeanArgs above (a TOML key cannot be both a value and a table).
+[leanOptions]
+backward.privateInPublic = true
+# Retain the existing visibility of proofs nested in public definitions during
+# the module-system transition. Proof implementation details are not wire identities.
+backward.proofsInPublic = true
+compiler.relaxedMetaCheck = true
 
 # Pin mathlib to the exact revision matching v4.30.0
 # (rev 1c2b90b13009c65b090d95a83c98e248deafb6f1). This is a PORTABLE `git`+`rev`
@@ -77,6 +96,16 @@ root = "Host.Main"
 name = "objective-turn-totality"
 root = "Host.ObjectiveTurnTotalityRunner"
 
+# FD-1 R4a: export a Store as a Turn log; a second process follows it to the root.
+[[lean_exe]]
+name = "turn-log-follower"
+root = "Host.TurnLogFollower"
+
+# HP-6 SIM: the seeded deterministic simulation (Host path vs follower, crash-restart).
+[[lean_exe]]
+name = "world-sim"
+root = "Host.WorldSim"
+
 # Local custody consent, selected separately from the remote Host image.
 # The base entry refuses unsupported higher lifecycle families explicitly.
 [[lean_exe]]
@@ -86,6 +115,16 @@ root = "Host.ClientConsentSession"
 [[lean_exe]]
 name = "minidregg-client-consent-specialized"
 root = "Host.ClientConsentSpecializedSession"
+
+# native/private-backend codec agreement (scripts/gates/check-private-backend-wire): Lean emits the
+# canonical journal, request, receipt and Plan bytes; the Rust crate decodes and re-encodes them.
+[[lean_exe]]
+name = "private-backend-boundary-fixture"
+root = "Compiler.PrivateBackendBoundaryFixture"
+
+[[lean_exe]]
+name = "private-circuit-plan-fixture"
+root = "Host.PrivateCircuitPlanFixture"
 
 # B2 exit measurement: wall-clock of the compiled Kernel.World.fold over a
 # 1000-turn log (Kernel.WorldBench). Not part of the umbrella gate.
@@ -146,6 +185,11 @@ root = "Compiler.ObjectiveBendCDiffGen"
 name = "cshake-bench"
 root = "Host.CshakeBench"
 
+# Compiled Objective record decode (Kernel.ObjectiveActivity.decodeRecord). Not part of the umbrella gate.
+[[lean_exe]]
+name = "codec-bench"
+root = "Host.CodecBench"
+
 # Narrow explicit old-capsule carry verifier; no full Host receiving surface.
 [[lean_exe]]
 name = "minidregg-carry-verifier"
@@ -162,6 +206,19 @@ name = "SimplexQualification"
 # Theory/ObjectiveBend*). Gated separately: `lake build ObjectiveProofs`.
 [[lean_lib]]
 name = "ObjectiveProofs"
+
+# Fixtures/ -- recorded native runs replayed in Lean (Fixtures.lean says why it is its own library).
+# Not imported by Minidregg, Deployed or any census; built explicitly by the umbrella target list
+# (scripts/pipeline/umbrella-targets).
+[[lean_lib]]
+name = "Fixtures"
+
+# The census checks no whole-tree census may import: the token census's self-test (planted
+# forgeries, TokenCensus/SelfTest.lean) and its scoped run over Fixtures (TokenCensus/Fixtures.lean).
+# The merge gate builds each by name; this root makes them reachable (check-build-closure) and puts
+# them in local-gates' library list.
+[[lean_lib]]
+name = "CensusChecks"
 
 # Source-first research is an explicit opt-in build.
 [[lean_lib]]

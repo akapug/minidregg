@@ -3,8 +3,12 @@ Read-only original-receipt lookup for a special dispatch transaction. It
 returns status only: a past receipt cannot be converted into a fresh physical
 HTTP delivery permit, regardless of whether the request bytes repeat.
 -/
-import Kernel.NativeHostReplay
-import Kernel.ApplicationDispatchAdmission
+module
+
+public import Kernel.NativeHostReplay
+public import Kernel.ApplicationDispatchAdmission
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchLookup
 
@@ -32,12 +36,11 @@ def lookupVerified {config : Config} {target : Durable}
   let expectedCommand := ApplicationDispatchCommand.command ingress.dispatch selection ingress.parent
   let transactionId := DeclaredResourceController.transactionId ingress.dispatch.domain
     ingress.dispatch.semantics expectedCommand
-  let some index := verified.opened.durable.image.accepted.findIdx?
-      (fun record => record.transactionId == transactionId)
+  let some index := verified.opened.durable.firstIndex transactionId
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | .error .nativeHistoryUnavailable
   let expectedEvent := ApplicationDispatchAdmissionIngress.event ingress
   let expectedNullifier := ApplicationDispatchAdmissionIngress.nullifier ingress

@@ -1,6 +1,28 @@
-import Compiler.GenericSimplexCodec
-import Kernel.GenericSimplexStructure
-import Theory.AssertAxioms
+module
+
+public import Compiler.GenericSimplexCodec
+public import Kernel.GenericSimplexStructure
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Compiler.GenericSimplexIO
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.GenericSimplexCodec
@@ -207,29 +229,12 @@ def replayLog (expected : Context) (l : Log) : Option State :=
     let s ← replayEvents expected.config (j.snapshot.getD (start expected.config j.self j.initialTime)) j.events
     if s.failed then none else pure s
 
-/-- Whole canonical replay of the physical log bytes. -/
+/-- Whole canonical replay of the physical log bytes: `decodeLog` accepts only
+encodings (`decodeLog_canonical`). -/
 def restoreLog (expected : Context) (bytes : Bytes) : Option (Log × State) := do
   let l ← decodeLog bytes
-  if l.encode != bytes then none
   let s ← replayLog expected l
   some (l,s)
-
-/-- A restored log re-encodes to exactly the physical image it was read from:
-`restoreLog` itself compares them, by the tail-recursive `List.beq`. -/
-theorem restoreLog_encode_eq {expected : Context} {bytes : Bytes} {l : Log} {s : State}
-    (h : restoreLog expected bytes = some (l,s)) : l.encode = bytes := by
-  unfold restoreLog at h
-  cases decoded : decodeLog bytes with
-  | none => simp [decoded] at h
-  | some l' =>
-    by_cases same : l'.encode = bytes
-    · cases replayed : replayLog expected l' with
-      | none => simp [decoded, same, replayed] at h
-      | some s' =>
-        simp [decoded, same, replayed] at h
-        rw [← h.1]
-        exact same
-    · simp [decoded, same] at h
 
 theorem bytesStream_encode_ne_nil (payload : Bytes) : bytesStream.encode payload ≠ [] := by
   simp [bytesStream, StreamCodec.nat, StreamCodec.encodeNat]
@@ -282,6 +287,77 @@ theorem decodeLog_encode (l : Log) : decodeLog l.encode = some l := by
     decodeDeltas_encode _ _ (Nat.le_refl _)
   unfold decodeLog Log.encode Log.deltas
   simp [List.append_assoc, List.take_left', List.drop_left', base, inner, deltas]
+
+theorem encodeDeltas_decodeDeltas {fuel : Nat} {bytes : Bytes} {ds : List Delta}
+    (decoded : decodeDeltas fuel bytes = some ds) : encodeDeltas ds = bytes := by
+  induction fuel generalizing bytes ds with
+  | zero =>
+    by_cases empty : bytes.isEmpty
+    · simp [decodeDeltas, empty] at decoded
+      subst decoded
+      simp [encodeDeltas, List.isEmpty_iff.mp empty]
+    · simp [decodeDeltas, empty] at decoded
+  | succ fuel ih =>
+    by_cases empty : bytes.isEmpty
+    · simp [decodeDeltas, empty] at decoded
+      subst decoded
+      simp [encodeDeltas, List.isEmpty_iff.mp empty]
+    · cases framed : bytesStream.decodePrefix bytes with
+      | none => simp [decodeDeltas, empty, framed] at decoded
+      | some split =>
+        obtain ⟨payload, rest⟩ := split
+        cases delta : deltaStream.toLawful.decode payload with
+        | none => simp [decodeDeltas, empty, framed, delta] at decoded
+        | some d =>
+          cases tail : decodeDeltas fuel rest with
+          | none => simp [decodeDeltas, empty, framed, delta, tail] at decoded
+          | some more =>
+            simp [decodeDeltas, empty, framed, delta, tail] at decoded
+            subst decoded
+            simp only [encodeDeltas, deltaFrame, deltaStream.toLawful_canonical _ _ delta, ih tail]
+            exact bytesStream.encode_decodePrefix _ _ _ framed
+
+/-- The log decoder is canonical: every stream it reads is, the magic is
+checked, and the delta frames are consumed to the end. -/
+theorem decodeLog_canonical {bytes : Bytes} {l : Log}
+    (decoded : decodeLog bytes = some l) : l.encode = bytes := by
+  unfold decodeLog at decoded
+  by_cases magic : (bytes.take logMagic.length != logMagic) = true
+  · simp [magic] at decoded
+  · have exact : bytes.take logMagic.length = logMagic := by simpa using magic
+    simp only [magic, Bool.false_eq_true, ↓reduceIte] at decoded
+    cases framed : bytesStream.decodePrefix (bytes.drop logMagic.length) with
+    | none => simp [framed] at decoded
+    | some split =>
+      obtain ⟨payload, rest⟩ := split
+      cases journal : journalStream.toLawful.decode payload with
+      | none => simp [framed, journal] at decoded
+      | some base =>
+        cases deltas : decodeDeltas rest.length rest with
+        | none => simp [framed, journal, deltas] at decoded
+        | some ds =>
+          simp [framed, journal, deltas] at decoded
+          subst decoded
+          have outer := bytesStream.encode_decodePrefix _ _ _ framed
+          rw [← journalStream.toLawful_canonical _ _ journal,
+            ← encodeDeltas_decodeDeltas deltas] at outer
+          simp only [Log.encode, Log.deltas, List.reverse_reverse, List.append_assoc, outer]
+          conv => rhs; rw [← List.take_append_drop logMagic.length bytes]
+          rw [exact]
+
+/-- A restored log re-encodes to exactly the physical image it was read from. -/
+theorem restoreLog_encode_eq {expected : Context} {bytes : Bytes} {l : Log} {s : State}
+    (h : restoreLog expected bytes = some (l,s)) : l.encode = bytes := by
+  unfold restoreLog at h
+  cases decoded : decodeLog bytes with
+  | none => simp [decoded] at h
+  | some l' =>
+    cases replayed : replayLog expected l' with
+    | none => simp [decoded, replayed] at h
+    | some s' =>
+      simp [decoded, replayed] at h
+      rw [← h.1]
+      exact decodeLog_canonical decoded
 
 theorem Log.merged_push (l : Log) (d : Delta) :
     (l.push d).merged =
@@ -443,6 +519,7 @@ theorem appendRestored_exact {context : Context} (next : Restored context) :
 #assert_axioms decodeLog_encode
 #assert_axioms restoreLog_push
 #assert_axioms restoreLog_encode_eq
+#assert_axioms decodeLog_canonical
 #assert_axioms encodeDeltas_eq_encodeDeltasTR
 #assert_axioms decodeDeltas_eq_decodeDeltasTR
 #assert_axioms appendRestored_exact
@@ -551,7 +628,6 @@ def verifyCommitted (crypto : Crypto) (expected : Context)
 def verifyCommittedBytes (crypto : Crypto) (expected : Context)
     (bytes : Bytes) : IO (Option (VerifiedCommit expected)) := do
   let some certificate := certificateStream.toLawful.decode bytes | return none
-  if certificateStream.encode certificate != bytes then return none
   verifyCommitted crypto expected certificate
 
 def verifyCommitWitness (crypto : Crypto) (expected : Context)

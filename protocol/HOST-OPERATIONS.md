@@ -58,16 +58,31 @@ arbitrary `invoke` arguments, nested codec tags, documentation numbers or all
 integers in the tree.
 
 `response_markers` are a separate namespace. A marker reserves a request byte
-only when `request_reserved` is explicitly true (transport refusal 254 and Host
-refusal 255). Request 164 may legitimately receive response 34, and request 34
+only when `request_reserved` is explicitly true (transport refusal 254, the Host
+outcome envelope 255 and the proven no-record answer 253). A client reads 253
+(`NO_RECORD`: decided before any append, a fresh attempt is safe) as the refusal
+class and 255 (`HOST_OUTCOME`) as undecided, to be looked up by its exact call;
+it never reads 255 as a refusal. Request 164 may legitimately receive response 34, and request 34
 may receive the definitive no-record response 164. Ordinary responses echoing
 their request byte are also not duplicate allocations. This gate does not claim
 to verify response codecs, payload guards or Mini authorization; those remain
-source admission and runtime receiving-test responsibilities.
+source admission and runtime receiving-test responsibilities. Each marker has a
+`symbol`, generated as `RESPONSE_<symbol>` beside the request constants.
+
+`consent_plans` lists the operator plans a client checks against its local
+consent provider (frame 224) before any signing consumer sees the operator's
+reply. Each entry must name an active operation, once. It is generated as
+`CONSENT_PLANS` and is the only copy: `mini_sdk::host_operations` carries the
+generated file, and the client's transport and the SDK consent client both read
+it. The provider's own reconstruction (`Kernel/NativeSpecializedConsent.lean`)
+is the check; this list only says which replies must pass it.
 
 The joined source inventory retains Host-only operations 24/25 for selected-source
 publication. Observer-signed enrollment 117–120 is operator-only; public quote
-121 has its bounded JSON-object guard. Stream renewal 152, route inspection 154
+121 has its bounded JSON-object guard. fn ACK 13/15 is operator-only: the Host
+receiver checks only that the Mini transaction is accepted, not who asks, so a
+public caller is refused by name until Lean states who may ACK a public fn
+delivery; fn poll 12/14 stays public. Stream renewal 152, route inspection 154
 and route-bound dispatch 164 remain private. Exact carry receipt recovery 153,
 paid-claim operations 181–186 and next-key adoption 187–190 have bounded public
 selectors. Their registry status records installed source and routing, not an

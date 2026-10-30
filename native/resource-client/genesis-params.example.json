@@ -17,6 +17,8 @@
   "genesisHeight": 10,
   "issuerEpoch": 2,
   "factoryControllerCapability": 53,
+  "payControlCapability": 4031,
+  "clockControlCapability": 4033,
   "sponsor": {
     "subject": 7,
     "keyId": 7007,
@@ -45,6 +47,7 @@
     "maxStepSeconds": null
   },
   "tailBound": 256,
+  "issuanceCap": 1000000000000000,
   "meterAllowance": {
     "incidences": 10000000,
     "turnBytes": 10000000,
@@ -56,5 +59,16 @@
     "sideEffectCount": 10000000,
     "feeDebit": 10000000,
     "leaseByteBlocks": 10000000
+  },
+  "grainPlatform": {
+    "lifecycleManagement": {
+      "managementSubject": 7,
+      "managementKeyId": 7007
+    },
+    "grainBirthTariff": {
+      "base": 2,
+      "perBirth": 1
+    },
+    "completionCustodianKey": null
   }
 }

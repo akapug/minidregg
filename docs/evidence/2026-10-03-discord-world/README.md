@@ -67,7 +67,7 @@ change the native request protocol. The focused Rust suite was rerun for the
 RAII change; the native composed run was not repeated. The standalone test/build target is isolated from common outputs.
 
 Run instructions and exact residuals are in [the deployment/developer guide](../../../deploy/discord/README.md).
-The reusable scenario is [tests/native-world.py](../../../native/discord-entrance/tests/native-world.py);
+The reusable scenario is [native/discord-entrance/tests/native-world.py](../../../native/discord-entrance/tests/native-world.py);
 its later resume/pin bookkeeping preserves earlier result rows rather than
 replacing the failed attempts. No real Discord messages, command registration or
 deployment were performed.

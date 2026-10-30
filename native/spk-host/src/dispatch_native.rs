@@ -1,8 +1,8 @@
 //! One private, no-retry Mini author/submit operation for the resident SPK
 //! supervisor. Op34's callback bytes are retained before source inspection;
 //! an uncertain write/read leaves a durable marker and cannot be repeated.
-#![allow(dead_code)] // Resident authorized supervisor is not enabled yet.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::{
     match_inspection, FixedCustody, HttpProjection, MatchedInspection,
@@ -21,35 +21,96 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const HOST_MAX_FRAME: usize = 12_102_760;
-const ROUTE_BOUND_DISPATCH_OPCODE: u8 = 164;
+use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD, RESPONSE_PRIVATE_DISPATCH_NO_RECORD};
+use crate::canonical::hex;
+const ROUTE_BOUND_DISPATCH_OPCODE: u8 = crate::host_operations::APPLICATION_ROUTE_BOUND_DISPATCH;
 const NO_RECORD_REFUSAL: &[u8] = b"DREGG/APPLICATION/DISPATCH-NO-RECORD-REFUSAL/v1";
 const MAX_CONFIG: usize = 65_536;
 const MAX_INSPECTION: usize = 96_822_080;
 const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(600);
+const STOP_INSPECTION_DEADLINE: Duration = Duration::from_secs(300);
+const MAX_HELPER_STDERR: u64 = 64 * 1024;
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
-}
-
 fn read_bounded(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
-    File::open(path)?
+    File::open(&path).ctx("open", &path)?
         .take(bound as u64 + 1)
         .read_to_end(&mut bytes)?;
     if bytes.is_empty() || bytes.len() > bound {
         return Err(invalid("private native artifact size refused"));
     }
     Ok(bytes)
+}
+
+/// Read a READ-ONLY pinned input (the Host config) from a parent `pinned_input_dir` admits, through ONE descriptor: opened O_NOFOLLOW, then
+/// fstat'ed on that same descriptor (a regular file owned by this user or root and writable by
+/// neither group nor others), then read from it. A symlink, a directory or a file a non-owner can
+/// alter is refused by name. The bytes returned are the bytes of that descriptor, so a digest taken
+/// over them (check_pin) pins the content the check saw; with a parent `pinned_input_dir` has
+/// admitted, no non-owner can swap the path between this check and the Host helper's own read.
+pub(crate) fn read_pinned_input(path: &Path, bound: usize) -> io::Result<Vec<u8>> {
+    read_pinned_input_fingerprinted(path, bound).map(|(bytes, _)| bytes)
+}
+
+/// As `read_pinned_input`, also returning the fingerprint of the descriptor the bytes came from.
+fn read_pinned_input_fingerprinted(
+    path: &Path,
+    bound: usize,
+) -> io::Result<(Vec<u8>, ImageFingerprint)> {
+    let refuse = |property: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned input {} refused: {property}", path.display()),
+        ))
+    };
+    pinned_input_dir(path.parent().ok_or_else(|| invalid("pinned input parent absent"))?)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .ctx("open", &path)?;
+    let metadata = file.metadata().ctx("inspect", &path)?;
+    if !metadata.is_file() {
+        return refuse("not a regular file (a symlink or directory is refused)");
+    }
+    let uid = metadata.uid();
+    if uid != unsafe { libc::geteuid() } && uid != 0 {
+        return refuse("owned by neither this user nor root");
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return refuse("writable by group or others");
+    }
+    let fingerprint = ImageFingerprint::of(&metadata);
+    let mut bytes = Vec::new();
+    file.take(bound as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.is_empty() || bytes.len() > bound {
+        return Err(invalid("private native artifact size refused"));
+    }
+    Ok((bytes, fingerprint))
+}
+
+/// Create-new, owner-private, unsynced. For SCRATCH only: a helper's input that the very next step
+/// hands to a child process (visible through the page cache) and that no recovery path reads back
+/// (the dispatch attempt's copies are removed by `dispatch_fence::strip` at settlement). Nothing
+/// recovery relies on may be written this way; use `write_new`.
+pub(crate) fn write_new_unsynced(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    if bytes.is_empty() || bytes.len() > MAX_INSPECTION {
+        return Err(invalid("private native artifact size refused"));
+    }
+    let path = directory.join(name);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&path).ctx("open", &path)?;
+    file.write_all(bytes)?;
+    Ok(path)
 }
 
 pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<PathBuf> {
@@ -62,21 +123,51 @@ pub(crate) fn write_new(directory: &Path, name: &str, bytes: &[u8]) -> io::Resul
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
+        .open(&path).ctx("open", &path)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    File::open(directory)?.sync_all()?;
+    File::open(&directory).ctx("open", &directory)?.sync_all()?;
     Ok(path)
 }
 
 pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
+    let metadata = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute()
         || !metadata.is_dir()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.permissions().mode() & 0o777 != 0o700
     {
         return Err(invalid("native attempt directory is not owner-private"));
+    }
+    Ok(())
+}
+
+/// A directory that holds a READ-ONLY pinned input (the operator socket's directory): absolute, a
+/// real directory (not a symlink), owned by this user or by root, and writable by neither group
+/// nor others. Unlike `private_dir`, group or other READ and SEARCH are allowed: on the hosted
+/// frame the Host's deployment directory is 0710 for the `mini-sessions` group, because every
+/// member's shell must read the pinned config there. Directories spk-host WRITES (attempt dirs,
+/// journals) keep `private_dir`. The refusal names the path and the failed property.
+pub(crate) fn pinned_input_dir(path: &Path) -> io::Result<()> {
+    let refuse = |property: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned input directory {} refused: {property}", path.display()),
+        ))
+    };
+    if !path.is_absolute() {
+        return refuse("not an absolute path");
+    }
+    let metadata = fs::symlink_metadata(path).ctx("inspect", &path)?;
+    if !metadata.is_dir() {
+        return refuse("not a directory (a symlink or file is refused)");
+    }
+    let uid = metadata.uid();
+    if uid != unsafe { libc::geteuid() } && uid != 0 {
+        return refuse("owned by neither this user nor root");
+    }
+    if metadata.permissions().mode() & 0o022 != 0 {
+        return refuse("writable by group or others");
     }
     Ok(())
 }
@@ -220,30 +311,7 @@ fn read_exact_deadline(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ImageFingerprint {
-    dev: u64,
-    ino: u64,
-    size: u64,
-    mode: u32,
-    uid: u32,
-    mtime: (i64, i64),
-    ctime: (i64, i64),
-}
-
-impl ImageFingerprint {
-    fn of(meta: &fs::Metadata) -> Self {
-        Self {
-            dev: meta.dev(),
-            ino: meta.ino(),
-            size: meta.size(),
-            mode: meta.mode(),
-            uid: meta.uid(),
-            mtime: (meta.mtime(), meta.mtime_nsec()),
-            ctime: (meta.ctime(), meta.ctime_nsec()),
-        }
-    }
-}
+use crate::file_identity::ImageFingerprint;
 
 struct VerifiedImage {
     path: PathBuf,
@@ -254,6 +322,7 @@ struct VerifiedImage {
 
 /// Holds the verified descriptor open for as long as the caller may execute
 /// it; the `/proc/self/fd` path is valid only while this value lives.
+#[derive(Debug)]
 pub(crate) struct VerifiedExecutable(std::sync::Arc<File>);
 
 impl VerifiedExecutable {
@@ -262,11 +331,16 @@ impl VerifiedExecutable {
         PathBuf::from(format!("/proc/self/fd/{}", self.0.as_raw_fd()))
     }
 }
+impl std::os::fd::AsRawFd for VerifiedExecutable {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0.as_raw_fd()
+    }
+}
 
 static VERIFIED_IMAGES: std::sync::Mutex<Vec<VerifiedImage>> = std::sync::Mutex::new(Vec::new());
 
 fn image_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if !path.is_absolute() || !meta.is_file() || meta.permissions().mode() & 0o022 != 0 {
         return Err(invalid("selected Mini Host image identity refused"));
     }
@@ -274,7 +348,7 @@ fn image_path_metadata(path: &Path) -> io::Result<fs::Metadata> {
 }
 
 /// Returns the retained descriptor of exactly the verified inode.
-fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
+pub(crate) fn verified_image(path: &Path, expected_sha256: &str) -> io::Result<VerifiedExecutable> {
     verified_image_hashing(path, expected_sha256).map(|(image, _)| image)
 }
 
@@ -301,7 +375,7 @@ fn verified_image_hashing(
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(path)?;
+        .open(&path).ctx("open", &path)?;
     let opened = ImageFingerprint::of(&file.metadata()?);
     if opened != named {
         return Err(invalid("selected Mini Host image changed while opened"));
@@ -329,6 +403,52 @@ fn verified_image_hashing(
         fingerprint: opened,
     });
     Ok((VerifiedExecutable(file), true))
+}
+
+struct VerifiedConfig {
+    path: PathBuf,
+    sha256: String,
+    bytes: Vec<u8>,
+    fingerprint: ImageFingerprint,
+}
+
+static VERIFIED_CONFIGS: std::sync::Mutex<Vec<VerifiedConfig>> = std::sync::Mutex::new(Vec::new());
+
+/// The pinned config bytes, hashed once per inode. Every call still re-checks the parent
+/// directory (`pinned_input_dir`) and that the path names a regular file with the fingerprint
+/// (dev, ino, size, mode, owner, mtime, ctime) the bytes were read and hashed under; any
+/// difference drops the entry and re-reads through `read_pinned_input`, re-hashing. A writer
+/// cannot restore ctime, so an in-place edit is always seen.
+fn verified_config(path: &Path, expected_sha256: &str) -> io::Result<Vec<u8>> {
+    let parent = path.parent().ok_or_else(|| invalid("pinned input parent absent"))?;
+    pinned_input_dir(parent)?;
+    let named = fs::symlink_metadata(path).ctx("inspect", &path)?;
+    let named = named.is_file().then(|| ImageFingerprint::of(&named));
+    let mut cache = VERIFIED_CONFIGS
+        .lock()
+        .map_err(|_| invalid("Mini Host config cache poisoned"))?;
+    if let Some(named) = named {
+        if let Some(entry) = cache
+            .iter()
+            .find(|entry| entry.path == path && entry.sha256 == expected_sha256)
+        {
+            if entry.fingerprint == named {
+                return Ok(entry.bytes.clone());
+            }
+        }
+    }
+    cache.retain(|entry| entry.path != path);
+    let (bytes, fingerprint) = read_pinned_input_fingerprinted(path, MAX_CONFIG)?;
+    if expected_sha256 != hex(&Sha256::digest(&bytes)) {
+        return Err(invalid("selected Mini Host config SHA-256 drift"));
+    }
+    cache.push(VerifiedConfig {
+        path: path.to_path_buf(),
+        sha256: expected_sha256.to_owned(),
+        bytes: bytes.clone(),
+        fingerprint,
+    });
+    Ok(bytes)
 }
 
 /// The socket belongs to the separately started operator broker, never a
@@ -370,16 +490,13 @@ impl PrivateOperator {
 
     fn check_pin(&self) -> io::Result<Vec<u8>> {
         self.verified_host()?;
-        let config = read_bounded(&self.config, MAX_CONFIG)?;
-        if self.config_sha256 != hex(&Sha256::digest(&config)) {
-            return Err(invalid("selected Mini Host config SHA-256 drift"));
-        }
+        let config = verified_config(&self.config, &self.config_sha256)?;
         let parent = self
             .socket
             .parent()
             .ok_or_else(|| invalid("operator socket lacks parent"))?;
-        private_dir(parent)?;
-        let socket = fs::symlink_metadata(&self.socket)?;
+        pinned_input_dir(parent)?;
+        let socket = fs::symlink_metadata(&self.socket).ctx("inspect", &self.socket)?;
         if !socket.file_type().is_socket()
             || socket.uid() != unsafe { libc::geteuid() }
             || socket.permissions().mode() & 0o077 != 0
@@ -422,8 +539,10 @@ impl PrivateOperator {
         output: &Path,
         deadline: Instant,
     ) -> io::Result<Vec<u8>> {
+        let pin_began = Instant::now();
         let _ = self.check_pin()?;
         let executable = self.verified_host()?;
+        let pin_ms = pin_began.elapsed().as_millis();
         let cap = match command {
             "author" => MAX_AUTHOR_JSON,
             "inspect" => (HOST_MAX_FRAME - 1) as u64,
@@ -436,7 +555,7 @@ impl PrivateOperator {
                 .parent()
                 .ok_or_else(|| invalid("helper input parent absent"))?,
         )?;
-        let meta = fs::symlink_metadata(input)?;
+        let meta = fs::symlink_metadata(&input).ctx("inspect", &input)?;
         if !meta.is_file()
             || meta.nlink() != 1
             || meta.uid() != unsafe { libc::geteuid() }
@@ -446,6 +565,10 @@ impl PrivateOperator {
         {
             return Err(invalid("Mini Host helper input identity or size refused"));
         }
+        if let Some(bytes) = self.tool_in_session(command, kind, input, output, deadline)? {
+            eprintln!("spk-host: tool-timing {command} {kind} pin_ms={pin_ms} session=1");
+            return Ok(bytes);
+        }
         let mut process = Command::new(executable.path());
         process.arg(&self.config).arg(command);
         if command == "profile" {
@@ -454,7 +577,7 @@ impl PrivateOperator {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(output)?;
+                .open(&output).ctx("open", &output)?;
             process.stdout(Stdio::from(output_file));
         } else {
             if !kind.is_empty() {
@@ -462,35 +585,9 @@ impl PrivateOperator {
             }
             process.arg(input).arg(output).stdout(Stdio::null());
         }
-        process.stdin(Stdio::null()).stderr(Stdio::null());
-        if Instant::now() >= deadline {
-            return Err(invalid("Mini helper deadline"));
-        }
-        let mut child = process.spawn()?;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error);
-                }
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Mini helper deadline",
-                ));
-            }
-            // Bounded local child wait, never a Mini authority poll.
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        if !status.success() {
-            return Err(invalid("pinned Mini Host helper refused"));
-        }
+        let run_began = Instant::now();
+        run_pinned(process, output, deadline)?;
+        eprintln!("spk-host: tool-timing {command} {kind} pin_ms={pin_ms} host_ms={}", run_began.elapsed().as_millis());
         read_bounded(
             output,
             if command == "inspect" {
@@ -499,6 +596,127 @@ impl PrivateOperator {
                 HOST_MAX_FRAME - 1
             },
         )
+    }
+
+    /// The detached `author`/`inspect`/`signatures` verb as one call on the operator socket (the
+    /// Host's TOOL_AUTHOR, TOOL_INSPECT and TOOL_SIGNATURES operations), instead of a fresh Host
+    /// process. The input file was written (and its identity checked) by the caller and stays as
+    /// the audit copy; the output file and a refusal's `<output>.stderr` are written here as the
+    /// detached verb writes them, and the bytes returned are the output file's. `None` means the
+    /// session cannot answer and the caller runs the detached verb: no listener on the socket, a
+    /// request or an output that does not fit one frame, or a command without a session operation.
+    fn tool_in_session(
+        &self,
+        command: &str,
+        kind: &str,
+        input: &Path,
+        output: &Path,
+        deadline: Instant,
+    ) -> io::Result<Option<Vec<u8>>> {
+        use crate::host_operations::{TOOL_AUTHOR, TOOL_INSPECT, TOOL_SIGNATURES};
+        let (operation, with_kind) = match command {
+            "author" => (TOOL_AUTHOR, true),
+            "inspect" => (TOOL_INSPECT, true),
+            "signatures" => (TOOL_SIGNATURES, false),
+            _ => return Ok(None),
+        };
+        if with_kind && (kind.is_empty() || kind.len() > u16::MAX as usize) {
+            return Ok(None);
+        }
+        let mut payload = Vec::new();
+        if with_kind {
+            payload.extend_from_slice(&(kind.len() as u16).to_le_bytes());
+            payload.extend_from_slice(kind.as_bytes());
+        }
+        File::open(input).ctx("open", &input)?.take(HOST_MAX_FRAME as u64).read_to_end(&mut payload)?;
+        if payload.len() >= HOST_MAX_FRAME - 1 {
+            return Ok(None);
+        }
+        let reply = match self.invoke_until(operation, &payload, deadline) {
+            Ok(reply) => reply,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::NotFound
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        };
+        // `invoke_until` has checked the length prefix; byte 4 is the answering operation or a
+        // response marker (a refusal of the call itself), then the tool status and its bytes.
+        if reply[4] != operation || reply.len() < 6 {
+            return Err(invalid("Mini Host tool call was refused"));
+        }
+        let data = &reply[6..];
+        match reply[5] {
+            0 => {
+                let bound = if command == "inspect" { MAX_INSPECTION } else { HOST_MAX_FRAME - 1 };
+                if data.is_empty() || data.len() > bound {
+                    return Err(invalid("private native artifact size refused"));
+                }
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(output).ctx("open", &output)?;
+                file.write_all(data)?;
+                Ok(Some(data.to_vec()))
+            }
+            1 => {
+                let reason = String::from_utf8_lossy(data);
+                if let Some(name) = output.file_name() {
+                    let mut stderr_name = name.to_owned();
+                    stderr_name.push(".stderr");
+                    let _ = OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .custom_flags(libc::O_NOFOLLOW)
+                        .open(output.with_file_name(stderr_name))
+                        .and_then(|mut file| file.write_all(&data[..data.len().min(MAX_HELPER_STDERR as usize)]));
+                }
+                let first = reason.lines().next().unwrap_or("").trim();
+                eprintln!("spk-host: pinned Mini Host helper refused: {first}");
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("pinned Mini Host helper refused: {first}"),
+                ))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// `inspect-stop-claim PLAN COMMITTED OUTPUT`: the current-image STOP
+    /// claim inspection, run from the verified descriptor (never the path)
+    /// under a deadline, its refusal reason retained beside `output`.
+    pub(crate) fn inspect_stop_claim(
+        &self,
+        plan: &Path,
+        committed: &Path,
+        output: &Path,
+        max: u64,
+    ) -> io::Result<Vec<u8>> {
+        let _ = self.pinned_config()?;
+        let executable = self.verified_host()?;
+        let mut process = Command::new(executable.path());
+        process
+            .arg(&self.config)
+            .arg("inspect-stop-claim")
+            .arg(plan)
+            .arg(committed)
+            .arg(output)
+            .stdout(Stdio::null());
+        run_pinned(process, output, Instant::now() + STOP_INSPECTION_DEADLINE)?;
+        let _ = self.pinned_config()?;
+        read_bounded(output, max as usize)
     }
 
     pub(crate) fn invoke(&self, operation: u8, payload: &[u8]) -> io::Result<Vec<u8>> {
@@ -518,15 +736,8 @@ impl PrivateOperator {
         if payload.is_empty() || payload.len() >= HOST_MAX_FRAME {
             return Err(invalid("Mini operator request size refused"));
         }
-        let host_sha = self.host_sha256.as_bytes();
-        if host_sha.len() != 64 {
-            return Err(invalid("Mini Host SHA-256 pin malformed"));
-        }
-        let mut sha = [0u8; 32];
-        for (index, byte) in sha.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&self.host_sha256[index * 2..index * 2 + 2], 16)
-                .map_err(|_| invalid("Mini Host SHA-256 pin malformed"))?;
-        }
+        let sha: [u8; 32] = crate::canonical::unhex_array(&self.host_sha256)
+            .ok_or_else(|| invalid("Mini Host SHA-256 pin malformed"))?;
         let mut envelope = Vec::with_capacity(1 + 4 + config.len() + 32 + 1 + payload.len());
         envelope.push(2);
         envelope.extend_from_slice(&(config.len() as u32).to_le_bytes());
@@ -570,13 +781,106 @@ impl PrivateOperator {
         read_exact_deadline(&mut stream, &mut reply[4..], deadline)?;
         let dispatch_reply = (operation == ROUTE_BOUND_DISPATCH_OPCODE && reply[4] == 34)
             || (operation == 34
-                && reply[4] == ROUTE_BOUND_DISPATCH_OPCODE
+                && reply[4] == RESPONSE_PRIVATE_DISPATCH_NO_RECORD
                 && &reply[5..] == NO_RECORD_REFUSAL);
-        if reply[4] != operation && reply[4] != 255 && !dispatch_reply {
+        // The Host's response markers are a namespace apart from requests:
+        // NO_RECORD carries a receiver's decided refusal, contention or
+        // unavailability (proven no-append), HOST_OUTCOME an undecided one.
+        // Both answer the operation; the fence reads them apart.
+        let marked = reply[4] == RESPONSE_NO_RECORD || reply[4] == RESPONSE_HOST_OUTCOME;
+        if reply[4] != operation && !marked && !dispatch_reply {
             return Err(invalid("Mini operator reply opcode mismatch"));
         }
         Ok(reply)
     }
+}
+
+/// Block until `child` has exited or `deadline` passes, whichever is first, without reaping it: the
+/// caller `try_wait`s afterwards. A pidfd turns the exit into a readable event, so a helper that
+/// finishes is noticed at once instead of at the next 10 ms tick. Where `pidfd_open` is
+/// unavailable the wait degrades to a 2 ms sleep, still bounded by the caller's loop.
+pub(crate) fn wait_for_exit(child: &std::process::Child, deadline: Instant) {
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id() as libc::pid_t, 0) } as libc::c_int;
+    if fd < 0 {
+        std::thread::sleep(Duration::from_millis(2));
+        return;
+    }
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let millis = remaining.as_micros().div_ceil(1000).min(1000) as libc::c_int;
+    let mut entry = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    unsafe {
+        libc::poll(&mut entry, 1, millis);
+        libc::close(fd);
+    }
+}
+
+/// Run one pinned Host helper to completion under `deadline`. Its stderr is
+/// retained as `<output>.stderr` (at most `MAX_HELPER_STDERR` bytes, removed
+/// when empty), and a refusal carries the first line of it: Lean's refusal
+/// reason is never dropped.
+fn run_pinned(mut process: Command, output: &Path, deadline: Instant) -> io::Result<()> {
+    let mut stderr_name = output
+        .file_name()
+        .ok_or_else(|| invalid("helper output name absent"))?
+        .to_owned();
+    stderr_name.push(".stderr");
+    let stderr_path = output.with_file_name(stderr_name);
+    let stderr_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&stderr_path).ctx("open", &stderr_path)?;
+    process
+        .stdin(Stdio::null())
+        .stderr(Stdio::from(stderr_file.try_clone()?));
+    if Instant::now() >= deadline {
+        return Err(invalid("Mini helper deadline"));
+    }
+    let mut child = process.spawn()?;
+    drop(process);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Mini helper deadline",
+            ));
+        }
+        // Bounded local child wait, never a Mini authority poll.
+        wait_for_exit(&child, deadline);
+    };
+    if stderr_file.metadata()?.len() > MAX_HELPER_STDERR {
+        stderr_file.set_len(MAX_HELPER_STDERR)?;
+    }
+    stderr_file.sync_all()?;
+    let mut reason = String::new();
+    File::open(&stderr_path).ctx("open", &stderr_path)?
+        .take(MAX_HELPER_STDERR)
+        .read_to_string(&mut reason)
+        .ok();
+    if reason.is_empty() {
+        let _ = fs::remove_file(&stderr_path).ctx("remove", &stderr_path);
+    }
+    if !status.success() {
+        let first = reason.lines().next().unwrap_or("").trim();
+        eprintln!("spk-host: pinned Mini Host helper refused: {first}");
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pinned Mini Host helper refused: {first}"),
+        ));
+    }
+    Ok(())
 }
 
 /// Every directory is freshly created under the resident's private journal.
@@ -587,7 +891,7 @@ impl ContinuityAttemptDir {
     fn create(parent: &Path) -> io::Result<Self> {
         private_dir(parent)?;
         let mut nonce = [0u8; 32];
-        File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+        File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
         let path = parent.join(format!("continuity-{}", hex(&nonce)));
         DirBuilder::new().mode(0o700).create(&path)?;
         Ok(Self(path))
@@ -595,14 +899,15 @@ impl ContinuityAttemptDir {
 }
 impl Drop for ContinuityAttemptDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.0).ctx("remove", &self.0);
     }
 }
 
 impl PrivateOperator {
     /// The pinned Host's Store key: `storeTag` in its `profile` output, Mini's
-    /// tag of this deployment's genesis seed identity
-    /// (`ApplicationLifecycleResidentProfile.storeTag`). Resident unit names,
+    /// tag of the Store identity, the genesis seed at the Store's root
+    /// (`NativeHost.Config.storeIdentity`, `ApplicationLifecycleResidentProfile.storeTag`).
+    /// Resident unit names,
     /// volumes, slices and the Store's state root all carry it; the physical
     /// host reads it from Mini and never derives its own.
     pub(crate) fn store_tag(&self, parent: &Path) -> io::Result<String> {
@@ -695,7 +1000,7 @@ impl PrivateOperator {
             &attempt.0.join("continuity.bin"),
             deadline,
         )?;
-        let response = self.invoke_until(152, &request_bytes, deadline)?;
+        let response = self.invoke_until(crate::host_operations::APPLICATION_STREAM_RENEW, &request_bytes, deadline)?;
         let payload = response
             .get(5..)
             .ok_or_else(|| invalid("short continuity reply"))?;
@@ -799,38 +1104,40 @@ impl RecordedDispatch {
     }
 
     /// Only a definite RPC result while the same app generation is Running
-    /// releases the global native-submit marker. Timeout, EOF, or a concurrent
+    /// settles this call's submit marker. Timeout, EOF, or a concurrent
     /// fence leaves both physical and native attempt records for audit.
     pub(crate) fn finish(self, journal: &Journal, delivered: bool) -> io::Result<()> {
         journal.finish_dispatch(&self.identity, delivered)?;
-        retire_active_marker(&self.active_marker, &self.active_bytes)
+        let status = if delivered { "delivered" } else { "recorded-undelivered" };
+        settle_committed(&self.active_marker, &self.active_bytes, status)
     }
 
     /// The worker fence proves this exact command is no longer held (or was
     /// never enqueued). The journal keeps its operation terminally Uncertain
     /// and never dispatchable again; the native outcome itself was definite
     /// (committed and inspected) before DeliveryRequested, so once the journal
-    /// has taken that custody the generation-wide native marker is retired
-    /// with the shared slot. Without a matching fence nothing is released.
+    /// has taken that custody this call's submit marker is settled with the
+    /// shared slot. Without a matching fence nothing is released.
     pub(crate) fn release_uncertain(
         self,
         journal: &Journal,
         fence: crate::rpc_adapter::DispatchFence,
     ) -> io::Result<()> {
         journal.finish_dispatch_uncertain_released(&self.identity, fence)?;
-        retire_active_marker(&self.active_marker, &self.active_bytes)
+        settle_committed(&self.active_marker, &self.active_bytes, "delivery-uncertain-released")
     }
 }
 
 impl CommittedDispatch {
-    /// The native op34 marker is only cleared after hostd has fsynced its
+    /// The call's submit marker is only settled after hostd has fsynced its
     /// separate DeliveryRequested tombstone. A crash in either interval
-    /// blocks new native submissions until an operator audits exact records.
+    /// leaves this one call undecided (it counts toward the journal's bound
+    /// and is never looked up as absent: its permit was committed).
     pub(crate) fn record_delivery_requested(
         self,
         journal: &Journal,
     ) -> io::Result<RecordedDispatch> {
-        if fs::read(&self.active_marker)? != self.active_bytes {
+        if fs::read(&self.active_marker).ctx("read", &self.active_marker)? != self.active_bytes {
             return Err(invalid("native submit marker drift"));
         }
         let record = journal
@@ -879,7 +1186,7 @@ fn author_signed_ingress(
     private_dir(parent)?;
     DirBuilder::new().mode(0o700).create(attempt_dir)?;
     let request = custody.request_json(operation_id, http)?;
-    let request_json = write_new(attempt_dir, "request.json", &serde_json::to_vec(&request)?)?;
+    let request_json = write_new_unsynced(attempt_dir, "request.json", &serde_json::to_vec(&request)?)?;
     let request_bin = attempt_dir.join("request.bin");
     let request_bytes = operator.tool_until(
         "author",
@@ -888,12 +1195,18 @@ fn author_signed_ingress(
         &request_bin,
         deadline,
     )?;
-    let plan_reply = operator.invoke_until(36, &request_bytes, deadline)?;
+    let plan_reply = operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_PLAN, &request_bytes, deadline)?;
     if plan_reply[4] != 36 {
-        return Err(invalid("Mini dispatch authoring refused"));
+        return Err(crate::dispatch_fence::refused_before_submit(
+            operator,
+            attempt_dir,
+            operation_id,
+            crate::host_operations::APPLICATION_DISPATCH_PLAN,
+            &plan_reply,
+        ));
     }
     let plan_bytes = &plan_reply[5..];
-    let plan_bin = write_new(attempt_dir, "plan.bin", plan_bytes)?;
+    let plan_bin = write_new_unsynced(attempt_dir, "plan.bin", plan_bytes)?;
     let plan_json_path = attempt_dir.join("plan.json");
     let plan_json = operator.tool_until(
         "inspect",
@@ -903,7 +1216,7 @@ fn author_signed_ingress(
         deadline,
     )?;
     let signatures = custody.sign_plan(plan_bytes, &plan_json, &request_bytes, &request)?;
-    let signatures_json = write_new(
+    let signatures_json = write_new_unsynced(
         attempt_dir,
         "signatures.json",
         &serde_json::to_vec(&signatures)?,
@@ -920,9 +1233,15 @@ fn author_signed_ingress(
     pair.extend_from_slice(&(plan_bytes.len() as u32).to_le_bytes());
     pair.extend_from_slice(plan_bytes);
     pair.extend_from_slice(&signatures_bin);
-    let ingress_reply = operator.invoke_until(37, &pair, deadline)?;
+    let ingress_reply = operator.invoke_until(crate::host_operations::APPLICATION_DISPATCH_ASSEMBLE, &pair, deadline)?;
     if ingress_reply[4] != 37 {
-        return Err(invalid("Mini dispatch assembly refused"));
+        return Err(crate::dispatch_fence::refused_before_submit(
+            operator,
+            attempt_dir,
+            operation_id,
+            crate::host_operations::APPLICATION_DISPATCH_ASSEMBLE,
+            &ingress_reply,
+        ));
     }
     let ingress = &ingress_reply[5..];
     write_new(attempt_dir, "ingress.bin", ingress)?;
@@ -981,18 +1300,12 @@ fn route_bound_dispatch_json(binding: &ContinuityBinding, ingress: &[u8]) -> ser
         "ingressHex":hex(ingress)})
 }
 
-fn retire_active_marker(path: &Path, expected: &[u8]) -> io::Result<()> {
-    if fs::read(path)? != expected {
-        return Err(invalid(
-            "native submit marker drift after definite completion",
-        ));
-    }
-    fs::remove_file(path)?;
-    File::open(
-        path.parent()
-            .ok_or_else(|| invalid("marker parent absent"))?,
-    )?
-    .sync_all()
+fn settle_committed(active: &Path, expected: &[u8], status: &str) -> io::Result<()> {
+    crate::dispatch_fence::settle(
+        active,
+        expected,
+        &json!({"protocol":"mini-spk-dispatch-resolution-v1","status":status,"by":"committed-permit"}),
+    )
 }
 
 struct SubmittedDispatch {
@@ -1003,7 +1316,7 @@ struct SubmittedDispatch {
 
 impl SubmittedDispatch {
     /// A confirmed historical receipt is evidence of a Store record, never a
-    /// fresh physical-delivery permit. Keep the active marker on every outcome.
+    /// fresh physical-delivery permit.
     fn committed_payload(&self) -> io::Result<Vec<u8>> {
         match parse_op34_response(&self.frame)? {
             Op34Reply::CommittedBytes(payload) => Ok(payload.to_vec()),
@@ -1014,9 +1327,24 @@ impl SubmittedDispatch {
     }
 }
 
-/// Only the fresh private response from this call can certify no Store record.
-/// Keep per-attempt evidence and prohibit its replay even after releasing the
-/// generation-wide marker so an unrelated participant can make progress.
+/// What one submit produced.
+enum Submit {
+    /// A whole reply frame; the call's submit marker is still armed.
+    Frame(SubmittedDispatch),
+    /// Lean's positive no-record refusal; the call is settled.
+    NoRecord(crate::dispatch_fence::DispatchOutcome),
+    /// No reply frame; the call's submit marker is still armed.
+    Lost {
+        error: io::Error,
+        active_marker: PathBuf,
+        active_bytes: Vec<u8>,
+    },
+}
+
+/// Only the fresh private response from this call can certify no Store
+/// record. The per-call markers are durable before op34/164 and the same
+/// attempt can never be submitted twice; no journal-wide marker exists, so
+/// another member's call never waits on this one (`dispatch_fence`).
 fn submit_once(
     attempt_dir: &Path,
     operation_id: &str,
@@ -1024,29 +1352,25 @@ fn submit_once(
     opcode: u8,
     submission: &[u8],
     invoke: impl FnOnce(u8, &[u8]) -> io::Result<Vec<u8>>,
-) -> io::Result<SubmittedDispatch> {
+) -> io::Result<Submit> {
     if !matches!(opcode, 34 | ROUTE_BOUND_DISPATCH_OPCODE) {
         return Err(invalid("native dispatch submit opcode refused"));
     }
-    let parent = attempt_dir
-        .parent()
-        .ok_or_else(|| invalid("attempt parent missing"))?;
     let marker = json!({"protocol":"mini-spk-dispatch-submit-requested-v1",
         "operationId":operation_id,"ingressSha256":hex(&Sha256::digest(ingress)),
         "submitOpcode":opcode,"submissionSha256":hex(&Sha256::digest(submission))});
     let active_bytes = serde_json::to_vec(&marker)?;
-    write_new(attempt_dir, "submit-requested.json", &active_bytes)?;
-    let active_marker = parent.join("native-dispatch-active.json");
-    let mut active_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(&active_marker)?;
-    active_file.write_all(&active_bytes)?;
-    active_file.sync_all()?;
-    File::open(parent)?.sync_all()?;
-    let frame = invoke(opcode, submission)?;
+    let active_marker = crate::dispatch_fence::arm(attempt_dir, &active_bytes)?;
+    let frame = match invoke(opcode, submission) {
+        Ok(frame) => frame,
+        Err(error) => {
+            return Ok(Submit::Lost {
+                error,
+                active_marker,
+                active_bytes,
+            })
+        }
+    };
     write_new(attempt_dir, &format!("op{opcode}-frame.bin"), &frame)?;
     let mut refusal = Vec::with_capacity(NO_RECORD_REFUSAL.len() + 5);
     refusal.extend_from_slice(&((NO_RECORD_REFUSAL.len() + 1) as u32).to_le_bytes());
@@ -1055,14 +1379,17 @@ fn submit_once(
     if frame == refusal {
         // Source issues this unique frame only before entering durable submit.
         // Generic outcomes, EOF and malformed frames never reach this branch.
-        retire_active_marker(&active_marker, &active_bytes)?;
-        return Err(invalid("Mini dispatch refused before any Store record"));
+        return Ok(Submit::NoRecord(crate::dispatch_fence::no_record(
+            &active_marker,
+            &active_bytes,
+            operation_id,
+        )?));
     }
-    Ok(SubmittedDispatch {
+    Ok(Submit::Frame(SubmittedDispatch {
         frame,
         active_marker,
         active_bytes,
-    })
+    }))
 }
 
 pub(crate) fn dispatch_opcode(binding: Option<&ContinuityBinding>) -> u8 {
@@ -1087,8 +1414,10 @@ pub(crate) fn author_and_submit(
     #[cfg(feature = "integration-qualification")]
     let qualification = qualification::claim(custody, http, operation_id, attempt_dir)?;
     let deadline = Instant::now() + RESPONSE_DEADLINE;
+    let began = Instant::now();
     let ingress =
         author_signed_ingress(operator, custody, http, operation_id, attempt_dir, deadline)?;
+    let t_author = began.elapsed().as_millis();
     let opcode = dispatch_opcode(route_binding);
     let submission = match route_binding {
         None => ingress.clone(),
@@ -1107,6 +1436,7 @@ pub(crate) fn author_and_submit(
             )?
         }
     };
+    let t_route = began.elapsed().as_millis();
     let submitted = submit_once(
         attempt_dir,
         operation_id,
@@ -1129,25 +1459,91 @@ pub(crate) fn author_and_submit(
             operator.invoke_until(opcode, bytes, deadline)
         },
     )?;
-    let payload = submitted.committed_payload()?;
-    let payload_path = write_new(attempt_dir, "committed-payload.bin", &payload)?;
-    let inspection_path = attempt_dir.join("inspection.json");
-    let inspection = operator.tool(
-        "inspect",
-        "application-dispatch-committed",
-        &payload_path,
-        &inspection_path,
-    )?;
-    let fixed = FixedCustody {
-        app: &custody.app,
-        subject: &custody.subject,
-        session: &custody.session,
-        ticket: &custody.ticket_resource,
+    let t_submit = began.elapsed().as_millis();
+    let submitted = match submitted {
+        Submit::Frame(submitted) => submitted,
+        Submit::NoRecord(outcome) => return Err(outcome.into_error()),
+        Submit::Lost {
+            error,
+            active_marker,
+            active_bytes,
+        } => {
+            eprintln!("spk-host: op{operation_id} submit reply lost: {error}");
+            return Err(crate::dispatch_fence::decide(
+                operator,
+                &active_marker,
+                &active_bytes,
+                operation_id,
+                &ingress,
+                crate::dispatch_fence::Reply::Lost,
+            )
+            .into_error());
+        }
     };
-    let matched = match_inspection(&payload, &inspection, http, &fixed)?;
-    if matched.operation_id != operation_id {
-        return Err(invalid("committed physical operation ID drift"));
-    }
+    let Ok(payload) = submitted.committed_payload() else {
+        return Err(crate::dispatch_fence::decide(
+            operator,
+            &submitted.active_marker,
+            &submitted.active_bytes,
+            operation_id,
+            &ingress,
+            crate::dispatch_fence::Reply::Frame(&submitted.frame),
+        )
+        .into_error());
+    };
+    // Lean committed a permit for this exact call. If it cannot be inspected
+    // and matched here, the permit is never used: the call is recorded and
+    // undelivered, and fd3 was never touched.
+    let inspected = (|| {
+        let payload_path = write_new(attempt_dir, "committed-payload.bin", &payload)?;
+        let inspection_path = attempt_dir.join("inspection.json");
+        let inspection = operator.tool(
+            "inspect",
+            "application-dispatch-committed",
+            &payload_path,
+            &inspection_path,
+        )?;
+        let fixed = FixedCustody {
+            app: &custody.app,
+            subject: &custody.subject,
+            session: &custody.session,
+            ticket: &custody.ticket_resource,
+        };
+        let matched = match_inspection(&payload, &inspection, http, &fixed)?;
+        if matched.operation_id != operation_id {
+            return Err(invalid("committed physical operation ID drift"));
+        }
+        Ok(matched)
+    })();
+    eprintln!(
+        "spk-host: author-timing op={operation_id} author_ms={t_author} route_ms={} submit_ms={} inspect_ms={}",
+        t_route - t_author,
+        t_submit - t_route,
+        began.elapsed().as_millis() - t_submit
+    );
+    let matched = match inspected {
+        Ok(matched) => matched,
+        Err(error) => {
+            eprintln!("spk-host: op{operation_id} committed permit refused: {error}");
+            let settled = crate::dispatch_fence::settle(
+                &submitted.active_marker,
+                &submitted.active_bytes,
+                &json!({"protocol":"mini-spk-dispatch-resolution-v1",
+                    "status":"recorded-undelivered","by":"permit-inspection-refused",
+                    "permitSha256":hex(&Sha256::digest(&payload))}),
+            );
+            return Err(crate::dispatch_fence::DispatchOutcome {
+                operation: Some(operation_id.to_owned()),
+                status: if settled.is_ok() {
+                    crate::dispatch_fence::Status::RecordedUndelivered
+                } else {
+                    crate::dispatch_fence::Status::Uncertain
+                },
+                lean: None,
+            }
+            .into_error());
+        }
+    };
     Ok(CommittedDispatch {
         payload,
         matched,
@@ -1274,14 +1670,19 @@ impl PrivateOperator {
             &attempt.0.join("request.bin"),
             deadline,
         )?;
-        let response = self.invoke_until(154, &request_bytes, deadline)?;
+        let response = self.invoke_until(crate::host_operations::APPLICATION_ROUTE_INSPECT, &request_bytes, deadline)?;
         let payload = response
             .get(5..)
             .ok_or_else(|| invalid("short route admission reply"))?;
         if response.get(4) != Some(&154)
             || !payload.starts_with(b"DREGG/APPLICATION/ROUTE-ADMISSION-ATTESTATION/v1")
         {
-            return Err(invalid("Mini refused current route admission"));
+            // Name the Host's answer: its marker byte and the printable part of
+            // its outcome frame (a refusal reason is ASCII inside it).
+            let text: String = payload.iter().take(512).map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' }).collect();
+            let _ = write_new(&attempt.0, "refusal.bin", payload);
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!(
+                "Mini refused current route admission (marker {:?}): {text}", response.get(4))));
         }
         let response_path = write_new(&attempt.0, "attestation.bin", payload)?;
         let inspection = self.tool_until(
@@ -1335,7 +1736,7 @@ pub(crate) mod qualification {
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(path)?;
+            .open(&path).ctx("open", &path)?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1376,11 +1777,7 @@ pub(crate) mod qualification {
             crate::dispatch_inspection::Route::Api { signed_path } => Some(signed_path),
         };
         if trigger.protocol != "mini-spk-dispatch-race-trigger-v1"
-            || trigger.nonce_hex.len() != 64
-            || !trigger
-                .nonce_hex
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !crate::canonical::hex64(&trigger.nonce_hex)
             || trigger.app != custody.app
             || trigger.session != custody.session
             || trigger.subject != custody.subject
@@ -1642,7 +2039,7 @@ pub(crate) mod qualification {
             framed(b"DREGG/APPLICATION/DISPATCH-COMMITTED-PERMIT/v1x")
         }
         fn receipt() -> Vec<u8> {
-            framed(b"DREGG/NATIVE-HOST/OUTCOME/v5x")
+            framed(b"DREGG/NATIVE-HOST/OUTCOME/v7x")
         }
         fn inspection(permit: bool) -> Value {
             let receipt =
@@ -1733,7 +2130,7 @@ pub(crate) mod qualification {
                     "multiple" => vec![Ok(permit()), Ok(permit())],
                     _ => vec![Ok(permit()), Ok(receipt())],
                 };
-                let result = submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| {
+                let result = submit_once(&attempt, "1", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submission", |_, _| {
                     select_winner(&replies, |_, p, _| {
                         let mut value = inspection(p);
                         if !p && mode == "receipt-drift" {
@@ -1746,15 +2143,15 @@ pub(crate) mod qualification {
                     })?;
                     panic!("ambiguous race must never forward a permit")
                 });
-                assert!(result.is_err());
-                assert!(root.0.join("native-dispatch-active.json").exists());
+                assert!(matches!(result, Ok(Submit::Lost { .. })));
+                assert!(attempt.join("submit-active.json").exists());
                 assert!(attempt.join("submit-requested.json").exists());
                 assert!(!attempt.join("op34-frame.bin").exists());
-                let next = root.0.join("next");
-                DirBuilder::new().mode(0o700).create(&next).unwrap();
+                // The undecided attempt is never resent; another call is not
+                // fenced by it (dispatch_fence bounds the undecided count).
                 assert!(
-                    submit_once(&next, "2", b"ingress", 34, b"submission", |_, _| panic!(
-                        "uncertain race must block subsequent submission"
+                    submit_once(&attempt, "1", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submission", |_, _| panic!(
+                        "uncertain race must never resubmit its own attempt"
                     ))
                     .is_err()
                 );
@@ -1766,7 +2163,7 @@ pub(crate) mod qualification {
             let root = super::super::tests::BoundFixture::new();
             let attempt = root.0.join("attempt");
             DirBuilder::new().mode(0o700).create(&attempt).unwrap();
-            let result = submit_once(&attempt, "1", b"ingress", 34, b"submission", |_, _| {
+            let result = submit_once(&attempt, "1", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"submission", |_, _| {
                 await_go(
                     &attempt,
                     "nonce",
@@ -1775,8 +2172,9 @@ pub(crate) mod qualification {
                 )?;
                 panic!("missing go must never submit")
             });
-            assert_eq!(result.err().unwrap().kind(), io::ErrorKind::TimedOut);
-            assert!(root.0.join("native-dispatch-active.json").exists());
+            assert!(matches!(result, Ok(Submit::Lost { ref error, .. })
+                if error.kind() == io::ErrorKind::TimedOut));
+            assert!(attempt.join("submit-active.json").exists());
             assert!(attempt.join("submit-requested.json").exists());
             write_new(&attempt,"race-go.json",br#"{"protocol":"mini-spk-dispatch-race-go-v1","nonceHex":"other","submissionSha256":"hash"}"#).unwrap();
             assert!(await_go(
@@ -1862,6 +2260,94 @@ mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn dir_with_mode(label: &str, mode: u32) -> PathBuf {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("pinned-input-{label}-{}-{nonce}", std::process::id()));
+        DirBuilder::new().mode(0o700).create(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        path
+    }
+
+    #[test]
+    fn read_pinned_input_reads_through_one_descriptor_and_refuses_symlinks_and_writable_files_by_name() {
+        let dir = dir_with_mode("input", 0o710);
+        let file = dir.join("pinned-config.json");
+        fs::write(&file, b"{}").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        assert_eq!(read_pinned_input(&file, 64).unwrap(), b"{}");
+        let link = dir.join("link.json");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        let error = read_pinned_input(&link, 64).unwrap_err();
+        // O_NOFOLLOW refuses the open itself (ELOOP) and the refusal carries the path.
+        assert!(error.to_string().contains("link.json"), "{error}");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+        let error = read_pinned_input(&file, 64).unwrap_err().to_string();
+        assert!(error.contains("pinned input") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o770)).unwrap();
+        let error = read_pinned_input(&file, 64).unwrap_err().to_string();
+        assert!(error.contains("pinned input directory") && error.contains("writable by group or others"), "{error}");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o710)).unwrap();
+        fs::remove_file(&link).unwrap();
+        fs::remove_file(&file).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn verified_config_hashes_once_per_inode_and_rehashes_on_any_change() {
+        let dir = dir_with_mode("verified-config", 0o710);
+        let file = dir.join("config.json");
+        fs::write(&file, b"{\"a\":1}").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
+        let sha = hex(&Sha256::digest(b"{\"a\":1}"));
+        assert_eq!(verified_config(&file, &sha).unwrap(), b"{\"a\":1}");
+        assert_eq!(verified_config(&file, &sha).unwrap(), b"{\"a\":1}");
+        // A same-size in-place edit moves ctime: the entry is dropped and the new bytes drift the pin.
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(&file, b"{\"a\":2}").unwrap();
+        let error = verified_config(&file, &sha).unwrap_err().to_string();
+        assert!(error.contains("config SHA-256 drift"), "{error}");
+        // Restoring the pinned bytes verifies again; widening the mode is refused by name.
+        std::thread::sleep(Duration::from_millis(30));
+        fs::write(&file, b"{\"a\":1}").unwrap();
+        assert_eq!(verified_config(&file, &sha).unwrap(), b"{\"a\":1}");
+        std::thread::sleep(Duration::from_millis(30));
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o660)).unwrap();
+        let error = verified_config(&file, &sha).unwrap_err().to_string();
+        assert!(error.contains("writable by group or others"), "{error}");
+        fs::remove_file(&file).unwrap();
+        fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn pinned_input_dir_accepts_a_group_readable_parent_and_refuses_a_writable_one_by_name() {
+        let hosted = dir_with_mode("hosted", 0o710);
+        pinned_input_dir(&hosted).unwrap();
+        for (mode, label) in [(0o730, "group-write"), (0o777, "world-write"), (0o702, "other-write")] {
+            let bad = dir_with_mode(label, mode);
+            let error = pinned_input_dir(&bad).unwrap_err().to_string();
+            assert!(
+                error.contains("pinned input directory") && error.contains(&bad.display().to_string()) && error.contains("writable by group or others"),
+                "{label}: {error}"
+            );
+            fs::remove_dir(&bad).unwrap();
+        }
+        let link = hosted.with_extension("link");
+        std::os::unix::fs::symlink(&hosted, &link).unwrap();
+        let error = pinned_input_dir(&link).unwrap_err().to_string();
+        assert!(error.contains("not a directory"), "{error}");
+        fs::remove_file(&link).unwrap();
+        fs::remove_dir(&hosted).unwrap();
+    }
+
+    #[test]
+    fn pinned_input_dir_does_not_relax_the_private_attempt_directory_rule() {
+        let hosted = dir_with_mode("attempt-parent", 0o710);
+        let error = private_dir(&hosted).unwrap_err().to_string();
+        assert_eq!(error, "native attempt directory is not owner-private");
+        fs::remove_dir(&hosted).unwrap();
+    }
 
     pub(super) struct BoundFixture(pub(super) PathBuf);
     impl BoundFixture {
@@ -1982,7 +2468,7 @@ mod tests {
             (34, no_record_frame(), true),
             (
                 ROUTE_BOUND_DISPATCH_OPCODE,
-                frame(34, b"source committed permit"),
+                frame(crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"source committed permit"),
                 true,
             ),
             (
@@ -1993,7 +2479,7 @@ mod tests {
             (36, no_record_frame(), false),
             (
                 ROUTE_BOUND_DISPATCH_OPCODE,
-                frame(36, b"wrong operation"),
+                frame(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"wrong operation"),
                 false,
             ),
         ];
@@ -2111,17 +2597,15 @@ mod tests {
                     assert_eq!(payload, b"a submission");
                     Ok(refusal.clone())
                 },
-            );
-            assert_eq!(
-                result.err().unwrap().to_string(),
-                "Mini dispatch refused before any Store record"
-            );
-            assert!(!root.0.join("native-dispatch-active.json").exists());
+            )
+            .unwrap();
+            let Submit::NoRecord(outcome) = result else {
+                panic!("the exact no-record frame settles the call");
+            };
+            assert_eq!(outcome.status, crate::dispatch_fence::Status::Refused);
+            assert!(!a.join("submit-active.json").exists());
             assert!(a.join("submit-requested.json").exists());
-            assert_eq!(
-                fs::read(a.join(format!("op{opcode}-frame.bin"))).unwrap(),
-                refusal
-            );
+            assert!(a.join("resolution.json").exists());
             assert!(submit_once(
                 &a,
                 "1",
@@ -2132,23 +2616,28 @@ mod tests {
             )
             .is_err());
             let b = root.attempt("b");
-            let submitted = submit_once(&b, "2", b"b ingress", 34, b"b submission", |op, bytes| {
-                assert_eq!(op, 34);
-                assert_eq!(bytes, b"b submission");
-                Ok(b"private committed response".to_vec())
-            })
-            .unwrap();
+            let Submit::Frame(submitted) =
+                submit_once(&b, "2", b"b ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"b submission", |op, bytes| {
+                    assert_eq!(op, 34);
+                    assert_eq!(bytes, b"b submission");
+                    Ok(b"private committed response".to_vec())
+                })
+                .unwrap()
+            else {
+                panic!("a reply frame is retained for decoding");
+            };
             assert_eq!(submitted.frame, b"private committed response");
-            assert!(submitted.active_marker.exists());
-            retire_active_marker(&submitted.active_marker, &submitted.active_bytes).unwrap();
+            assert_eq!(submitted.active_marker, b.join("submit-active.json"));
+            settle_committed(&submitted.active_marker, &submitted.active_bytes, "delivered").unwrap();
+            assert!(!submitted.active_marker.exists());
         }
     }
     #[test]
-    fn bound_dispatch_historical_confirmed_receipt_retains_marker_and_refuses_delivery() {
+    fn bound_dispatch_historical_confirmed_receipt_never_delivers_and_fences_only_its_call() {
         // NativeHostCodec.outcomeCodec: confirmed (.inl), replayed (.inr false),
         // then receipt(transactionId=11,eventId=12,acceptedCount=13,worldRoot=14).
         // Each positive Nat/Digest is one base-255 digit followed by 255.
-        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v5".to_vec();
+        let mut outcome = b"DREGG/NATIVE-HOST/OUTCOME/v8".to_vec();
         outcome.extend_from_slice(&[0, 1, 0, 11, 255, 12, 255, 13, 255, 14, 255]);
         let mut historical = ((outcome.len() + 1) as u32).to_le_bytes().to_vec();
         historical.push(34);
@@ -2160,10 +2649,14 @@ mod tests {
         for opcode in [34, ROUTE_BOUND_DISPATCH_OPCODE] {
             let root = BoundFixture::new();
             let a = root.attempt("a");
-            let submitted = submit_once(&a, "1", b"a ingress", opcode, b"a submission", |_, _| {
-                Ok(historical.clone())
-            })
-            .unwrap();
+            let Submit::Frame(submitted) =
+                submit_once(&a, "1", b"a ingress", opcode, b"a submission", |_, _| {
+                    Ok(historical.clone())
+                })
+                .unwrap()
+            else {
+                panic!("an outcome frame is retained for decoding");
+            };
             // This is the production gate before writing/inspecting a permit
             // or constructing the opaque CommittedDispatch used for delivery.
             assert_eq!(
@@ -2187,13 +2680,16 @@ mod tests {
                 })
                 .is_err()
             );
+            // B is a different signed call: A's undecided marker is A's alone.
             let b = root.attempt("b");
-            assert!(
-                submit_once(&b, "2", b"b ingress", 34, b"b submission", |_, _| {
-                    panic!("historical receipt must not release the global marker")
-                })
-                .is_err()
-            );
+            assert!(matches!(
+                submit_once(&b, "2", b"b ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"b submission", |_, _| Ok(
+                    historical.clone()
+                ))
+                .unwrap(),
+                Submit::Frame(_)
+            ));
+            assert!(!root.0.join("native-dispatch-active.json").exists());
             assert_eq!(
                 fs::read(&submitted.active_marker).unwrap(),
                 submitted.active_bytes
@@ -2202,7 +2698,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_dispatch_uncertain_or_malformed_refusal_preserves_global_marker() {
+    fn bound_dispatch_uncertain_or_malformed_reply_keeps_its_call_undecided_only() {
         let valid = no_record_frame();
         let mut wrong_tag = valid.clone();
         wrong_tag[4] = 34;
@@ -2221,7 +2717,7 @@ mod tests {
         ] {
             let root = BoundFixture::new();
             let a = root.attempt("a");
-            let submitted = submit_once(
+            let Submit::Frame(submitted) = submit_once(
                 &a,
                 "1",
                 b"ingress",
@@ -2229,32 +2725,37 @@ mod tests {
                 b"request",
                 |_, _| Ok(response),
             )
-            .unwrap();
+            .unwrap() else {
+                panic!("a non-exact frame is never a settlement");
+            };
             assert!(submitted.active_marker.exists());
             assert!(submitted.committed_payload().is_err());
             let b = root.attempt("b");
-            assert!(
-                submit_once(&b, "2", b"ingress", 34, b"request", |_, _| panic!(
-                    "uncertain A must block B"
-                ))
-                .is_err()
-            );
+            assert!(matches!(
+                submit_once(&b, "2", b"ingress", crate::host_operations::APPLICATION_DISPATCH_SUBMIT, b"request", |_, _| Ok(valid.clone()))
+                    .unwrap(),
+                Submit::NoRecord(_)
+            ));
+            assert!(submitted.active_marker.exists());
         }
         let root = BoundFixture::new();
         let a = root.attempt("a");
-        assert!(submit_once(
-            &a,
-            "1",
-            b"ingress",
-            ROUTE_BOUND_DISPATCH_OPCODE,
-            b"request",
-            |_, _| Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "lost response"
-            ))
-        )
-        .is_err());
-        assert!(root.0.join("native-dispatch-active.json").exists());
+        assert!(matches!(
+            submit_once(
+                &a,
+                "1",
+                b"ingress",
+                ROUTE_BOUND_DISPATCH_OPCODE,
+                b"request",
+                |_, _| Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "lost response"
+                ))
+            )
+            .unwrap(),
+            Submit::Lost { .. }
+        ));
+        assert!(a.join("submit-active.json").exists());
         let root = BoundFixture::new();
         let a = root.attempt("a");
         assert!(submit_once(
@@ -2264,15 +2765,12 @@ mod tests {
             ROUTE_BOUND_DISPATCH_OPCODE,
             b"request",
             |_, _| {
-                fs::write(root.0.join("native-dispatch-active.json"), b"changed").unwrap();
+                fs::write(a.join("submit-active.json"), b"changed").unwrap();
                 Ok(valid)
             }
         )
         .is_err());
-        assert_eq!(
-            fs::read(root.0.join("native-dispatch-active.json")).unwrap(),
-            b"changed"
-        );
+        assert_eq!(fs::read(a.join("submit-active.json")).unwrap(), b"changed");
     }
 
     #[test]
@@ -2343,7 +2841,7 @@ mod tests {
                 .unwrap();
         });
         assert_eq!(
-            operator.invoke(36, b"source request").unwrap(),
+            operator.invoke(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"source request").unwrap(),
             [5, 0, 0, 0, 36, b'p', b'l', b'a', b'n']
         );
         server.join().unwrap();
@@ -2364,23 +2862,17 @@ mod tests {
             )
             .is_err());
         fs::write(&config, b"{\"fixture\":false}").unwrap();
-        assert!(operator.invoke(36, b"source request").is_err());
+        assert!(operator.invoke(crate::host_operations::APPLICATION_DISPATCH_PLAN, b"source request").is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn native_submit_marker_is_create_new_and_blocks_a_second_attempt() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("mini-spk-submit-{}-{nonce}", std::process::id()));
-        DirBuilder::new().mode(0o700).create(&root).unwrap();
-        let marker = root.join("native-dispatch-active.json");
-        write_new(&root, "native-dispatch-active.json", b"first").unwrap();
-        assert!(write_new(&root, "native-dispatch-active.json", b"second").is_err());
-        assert_eq!(fs::read(marker).unwrap(), b"first");
-        fs::remove_dir_all(root).unwrap();
+        let root = BoundFixture::new();
+        let attempt = root.attempt("a");
+        crate::dispatch_fence::arm(&attempt, b"first").unwrap();
+        assert!(crate::dispatch_fence::arm(&attempt, b"second").is_err());
+        assert_eq!(fs::read(attempt.join("submit-active.json")).unwrap(), b"first");
+        assert_eq!(fs::read(attempt.join("submit-requested.json")).unwrap(), b"first");
     }
 }

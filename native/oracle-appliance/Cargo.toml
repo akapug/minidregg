@@ -1,0 +1,18 @@
+[package]
+name = "minidregg-oracle-appliance"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Private Sandstorm fd3 endpoint for a fixed Oracle7 appliance"
+
+[dependencies]
+minidregg-spk-rpc = { path = "../spk-rpc" }
+capnp = { version = "=0.27.0", features = ["unaligned"] }
+capnp-rpc = "=0.27.0"
+futures = "=0.3.32"
+tokio = { version = "=1.48.0", features = ["net", "rt", "macros", "time", "io-util", "sync"] }
+tokio-util = { version = "=0.7.17", features = ["compat"] }
+serde_json = "=1.0.151"
+libc = "=0.2.189"
+sha2 = "=0.10.9"

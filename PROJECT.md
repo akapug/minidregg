@@ -1,7 +1,9 @@
 # The minidregg project
 
-This document is the stable construction plan. [`README.md`](README.md) explains the design point;
-[`GOAL.md`](GOAL.md) records evidence and history.
+This document holds the project's design: its invariants, the semantic machine and its boundaries.
+[`README.md`](README.md) explains the design point. The current plan is
+[`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md); status is
+[`docs/STATUS.md`](docs/STATUS.md).
 
 ## One sentence
 
@@ -97,6 +99,12 @@ parallel authorization semantics.
 6. `AcceptedCellEffectRequestBinding` completes common binding with a lawful family-selected
    argument projection; digest reflection/CR remains an explicit premise.
 7. A validated patch derives one canonical post-state and exact footprint.
+   Value admission has one solvency rule (`Theory/CanonicalResourceKernel.lean`): a debit may
+   take its source to minus its floor and no further. Floor 0 is an ordinary account, a floor L
+   a credit limit, the issuer well's floor C its issuance cap; floors are Book state set only by
+   `setFloor`, a zero-value posting from the issuer well (verb `mintAsset`). Under the floor law
+   an asset's positive balances never exceed the sum of its floors (`outstanding_le_sum_floors`).
+   The cap bounds net issuance; a lifetime gross-mint ceiling is a counter, not value.
 8. A multi-resource action is a flat finite hyperedge with one shared apex and aggregate law—not a
    hidden call forest.
 9. Rejection has no post-state unless explicitly modeled as a charged committed effect.
@@ -108,6 +116,18 @@ parallel authorization semantics.
     to an output commitment.
 12. An intent/admission receipt is not proof that external I/O happened; completion/refusal is a
     later event.
+    What a later event can establish depends on the target, never on the ledger
+    (`Kernel/IrreversibleEffectSettlement.lean`). The ledger promises at-most-once authorization,
+    bounded attempts (`maxAttempt`) and an explicit uncertain terminal (`quarantinedForward`).
+    Exactly-once of the physical effect is a property of the target, in three classes:
+    **class 1, keyed-idempotent** (the target deduplicates by intent key and answers for a key:
+    an indeterminate forward is reconciled with new evidence for the same command,
+    `Settlement.reconcile`; refined for a toy target by `KeyedTarget.refinement`,
+    `duplicate_forward_no_second_effect`); **class 2, readable-state** (resolvable only when the
+    effect is distinguishable from concurrent changes in what the target exposes; no instance);
+    **class 3, fire-and-forget** (actuators, a service performed in person: indeterminate is final
+    for the logic and goes to compensation or human policy). No class-2 or class-3 refinement and
+    no production class-1 target exists here.
 
 ### History and storage
 
@@ -345,71 +365,11 @@ actual history false acceptance must imply history PCS, binding/CR, or ROM/commo
 Open **P** work: construct that classifier and common-coin realization with concrete PCS opening,
 commitment CR/binding, ROM transport, MCA/code-exact hypotheses, and hiding/sub-UD.
 
-## Consumer migration
+## Process
 
-The proof system does not subsume a kernel until consumers move. Required **D** demonstrations:
-
-1. token authorization: one real capability/revocation/nullifier path;
-2. DeOS/agent platform: one reactive view, invalidation, promise, and tool lifecycle;
-3. Grains: one R3 causal chain and checkpoint;
-4. Drex/FHEgg/Dark Bazaar: one sealed computation, resource settlement, and later release;
-5. DreggCloud/DreggNet: one multi-resource command through a durable handler; and
-6. hypermedia: one offline branch, authenticated transclusion/backlink, merge conflict, and current
-   authority settlement.
-
-Each adapter must map request, authority, state roots, effects, history, failure behavior, and
-physical completion. Compatibility modules are migration views, not proof of cutover.
-
-## Ordered frontier
-
-1. Construct the actual-history same-coin PCS/CR/ROM classifier and instantiate common-coin
-   transport, MCA, code-exactness, and hiding.
-2. Give Tower256 additive and lookup work complete versioned proof/container/domain codecs and
-   artifact-native work identities; emit an executable Lean-owned checker boundary.
-3. Instantiate concrete Ext6 PCS/subfield/proximity/final-LDT reductions inside the landed
-   controller and extensible global ledger.
-4. Deploy the pure private-computation core for one BFV consumer, then add disclosure as a separate
-   authorized event.
-5. Instantiate durable storage refinement for one consumer, including WAL recovery and tariffs.
-6. Complete Hyperdocument operation grammar, authenticated transclusion/backlink maintenance, and
-   one real offline merge UI.
-7. Run matched **B** workloads against candidate external stacks and apply Selvage's kill criteria.
-
-## Performance and evidence discipline
-
-The landed native benchmark at source `54295c6` and evidence `4d1f290` validates byte identity and
-measures only generated work-9101 dispatch overhead: ratio `0.985–1.040` on hbox and
-`0.985–1.025` on persvati for lengths 1–16384. It sets no threshold and proves no semantics.
-
-Future benchmarks must use the actual admitted protocol and measure proof size, memory, checkpoint
-cadence, tail latency, dense/sparse crossover, and CPU/SIMD/GPU kernels. Remote evidence uses exact
-committed archives and isolated run trees through [`scripts/remote-check.sh`](scripts/remote-check.sh).
-
-## Work discipline
-
-Each step closes one edge in the composition graph:
-
-1. state the exact relation and false neighboring claim;
-2. land the theorem or Lean controller that owns the edge;
-3. commit immediately in a thematic commit, green or not;
-4. fix forward with a separate commit;
-5. record exact residuals and maturity boundary; and
-6. measure only a selected, admitted path.
-
-No step adds a second semantic implementation in Rust. New native code is generated data/dispatch
-or caller-parameterized opaque computation. Decisions with cross-layer consequences receive a
-record under [`docs/decisions/`](docs/decisions/).
-
-## Public-claim gate
-
-A diagram or poster may describe the design today. A deployment claim requires:
-
-- one canonical typed multi-cell turn through a real durable handler;
-- two concrete Lean-owned proof controllers with priced security reductions;
-- lookup/RAM linked to semantic columns and a real consumer;
-- succinct history on the same security game as its checkpoint proof;
-- sealed compute plus separately authorized disclosure; and
-- matched committed-source performance evidence.
-
-Until those conditions hold, the construction is an ambitious and increasingly concrete research
-program—not a deployed universal kernel or completed proof system.
+How this project is developed (what we optimise, the gates and their verdicts, how a lane and the
+orchestrator work, the boxes, the cadence) is [`docs/COORDINATION-2026-10-27.md`](docs/COORDINATION-2026-10-27.md); the work and the public-opening
+contract are [`docs/DEMO-PREFIX-2026-10-26.md`](docs/DEMO-PREFIX-2026-10-26.md). Two rules from the
+older text that still hold: no step adds a second semantic implementation in Rust (new native code is
+generated data/dispatch or caller-parameterized opaque computation), and performance is measured on
+the actual admitted path and published, never a gate.

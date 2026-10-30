@@ -58,17 +58,15 @@ def insert(anchor, extra):
     if code.count(anchor) != 1: raise RuntimeError('bootstrap seam changed: ' + anchor)
     code = code.replace(anchor, textwrap.dedent(extra) + '\n' + anchor, 1)
 if a.ssh:
-    insert('genesis = {"domain": "8501"',"""
+    # the member's next key: genesis.sh commits its digest (the compact enrollment's nextPublicKey)
+    insert('# genesis seam: extractors adjust TAIL_BOUND, NEXT_PUBLIC and operator["providerServices"] here',"""
     next_member=nacl.signing.SigningKey.generate()
     open(path('keys/20.key.next'),'wb').write(bytes(next_member))
     os.chmod(path('keys/20.key.next'),0o600)
     open(path('member-next.json'),'w').write(json.dumps({'publicKey':next_member.verify_key.encode().hex()}))
-    subprocess.run([HOST,path('operator.json'),'author','signing-key-next-digest',path('member-next.json'),path('member-next.digest')],check=True,capture_output=True)
-    next_digest=open(path('member-next.digest')).read().strip()
+    NEXT_PUBLIC[20]=next_member.verify_key.encode().hex()
     """)
-    code=code.replace('"nextKeyDigest": None','"nextKeyDigest": next_digest if s==20 else None')
-insert('json.dump(genesis, open(path("genesis.json"), "w"), indent=1)',
-       'genesis["clockTickers"]=[]\ngenesis["tailBound"]="256"')
+insert('# genesis seam: extractors adjust TAIL_BOUND, NEXT_PUBLIC and operator["providerServices"] here', 'TAIL_BOUND = 256')
 insert('json.dump(birth, open(path("birth-intent.json"), "w"))',
        'birth["birth"]["resources"][0]["budget"]="1000"\nbirth["birth"]["resources"][3]["budget"]="300000"')
 os.environ.update(HOST=manifest['host'], MINI=a.mini, STORE=manifest['store'],

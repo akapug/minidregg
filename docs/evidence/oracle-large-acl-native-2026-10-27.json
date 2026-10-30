@@ -1,0 +1,59 @@
+{
+  "bound_source": "hbox /usr/include/linux/limits.h:16 XATTR_SIZE_MAX",
+  "checks": {
+    "actual_inode_acl_entries": 132,
+    "covers": [
+      "kernel fsetxattr and production fgetxattr reader",
+      "complete returned ACL bytes",
+      "allowed named users",
+      "explicitly denied named user",
+      "absent user",
+      "existing ACL mask and mode semantics"
+    ],
+    "failed": 0,
+    "passed": 2
+  },
+  "date": "2026-10-27",
+  "host": "hbox",
+  "logs": {
+    "native-checks-large-acl.log": {
+      "path": "/othersys/lanes/oracle-u2-20261027/native-checks-large-acl.log",
+      "sha256": "41487cf3aa68c4b0b20f13cb197bb3b94614ba7a65ea41873075109d7199ea1e"
+    },
+    "native-release-large-acl.log": {
+      "path": "/othersys/lanes/oracle-u2-20261027/native-release-large-acl.log",
+      "sha256": "c9f521771fb503c12cd3e19921d7a76986b2454fa26ad0ef39e8a369d8a27422"
+    }
+  },
+  "measured_failure": {
+    "actual_launcher_acl_bytes": 580,
+    "actual_launcher_acl_entries": 72,
+    "error": "ERANGE(34)",
+    "old_buffer_bytes": 516,
+    "production_acl_not_modified_by_fix": true
+  },
+  "new_bound_bytes": 65536,
+  "release_binary_sha256": {
+    "mini-spk-broker": "76ad1f2cbcef85b3f645af738eda00757c6381769eee5405186b1c48412af00c",
+    "mini-spk-volume-helper": "75c9ba3af878fb2374ae2fbaabf484bc9a1fc2ea3d925be89dcfe1f2801aa76e",
+    "spk-data-publish": "b6751890e41422d8b0e5a2a4288b5add7af167f7c0d9df85aa24918668f32f9c",
+    "spk-host": "9d3d1808708453cc0cc184267975ee10a67a55fc5509855b392a7c2a88905758"
+  },
+  "release_build": {
+    "cpus": [
+      20,
+      21
+    ],
+    "elapsed": "1m16s",
+    "exit": 0,
+    "jobs": 2,
+    "memory_max": "4G"
+  },
+  "schema": "mini-launcher-large-acl-checks-v1",
+  "scope": "Native bounded ACL read and execution-permission decision. Full Mini receiving journey is separate evidence.",
+  "source_basis": "Previously qualified native HTTP/EOF build plus spawn_gate.rs below. Oracle runtime-v4.spk unchanged.",
+  "source_commit": "62596974",
+  "source_sha256": {
+    "native/spk-host/src/spawn_gate.rs": "346557ee0c1f0f4171c4d6bba5009b347655fcb1c29695fcc2f34ef04b4be798"
+  }
+}

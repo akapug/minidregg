@@ -10,7 +10,7 @@ use crate::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::{Read, Result},
+    io::Result,
 };
 const WORDS: usize = 2; // Independent 128-bit coordinates; 256-bit hidden entropy.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,24 +210,6 @@ impl Asks {
             .filter(|s| self.h(self.me + 1, s) == commits[self.me as usize])
             .cloned()
     }
-    /// Real entropy from OS for dealer fixture. The party must persist the selected
-    /// polynomial and this outbound list before transmitting; regenerating after
-    /// uncertainty is an equivocation. Caller owns the durable transcript adapter.
-    pub fn dealer_start(&self) -> Result<Vec<Send>> {
-        if self.me != self.dealer {
-            return Err(bad("not dealer"));
-        }
-        let mut coefficients = vec![vec![Field(0); self.f + 1]; WORDS];
-        let mut rng = std::fs::File::open("/dev/urandom")?;
-        for p in &mut coefficients {
-            for c in p {
-                let mut b = [0; 16];
-                rng.read_exact(&mut b)?;
-                *c = Field(u128::from_le_bytes(b));
-            }
-        }
-        self.dealer_with_coefficients(&coefficients)
-    }
     pub fn dealer_with_coefficients(&self, coefficients: &[Vec<Field>]) -> Result<Vec<Send>> {
         if self.me != self.dealer
             || coefficients.len() != WORDS
@@ -241,7 +223,7 @@ impl Asks {
             let x = Field(i as u128 + 1);
             let words: Vec<_> = coefficients
                 .iter()
-                .map(|p| p.iter().rev().fold(Field(0), |z, c| z.mul(x).add(*c)))
+                .map(|p| crate::reconstruction::eval(p, x))
                 .collect();
             commitments.extend(self.h(i as u16 + 1, &words));
             out.push(Send {
@@ -338,24 +320,8 @@ impl Asks {
                         .take(self.f + 1)
                         .map(|(i, s)| (*i, s))
                         .collect();
-                    let interpolate_at = |at: Field| -> Result<Vec<Field>> {
-                        let mut result = vec![Field(0); WORDS];
-                        for (i, (sender, words)) in points.iter().enumerate() {
-                            let xi = Field(*sender as u128 + 1);
-                            let mut coefficient = Field(1);
-                            for (j, (other, _)) in points.iter().enumerate() {
-                                if i != j {
-                                    let xj = Field(*other as u128 + 1);
-                                    coefficient =
-                                        coefficient.mul(at.add(xj)).mul(xi.add(xj).inv()?);
-                                }
-                            }
-                            for (k, w) in words.iter().enumerate() {
-                                result[k] = result[k].add(coefficient.mul(*w));
-                            }
-                        }
-                        Ok(result)
-                    };
+                    let interpolate_at =
+                        |at: Field| crate::reconstruction::interpolate_at(&points, at, WORDS);
                     let mut coherent = true;
                     for i in 0..self.n {
                         if self.h(i as u16 + 1, &interpolate_at(Field(i as u128 + 1))?)
@@ -694,5 +660,58 @@ mod wire_tests {
             bad.push(0);
             assert!(decode_message(&bad).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    use crate::codec::Nat;
+    fn g() -> Generation {
+        Generation {
+            invocation: Nat::new(1),
+            command: vec![9],
+            attempt: Nat::new(1),
+            generation: Nat::new(2),
+            configuration: Nat::new(3),
+        }
+    }
+    /// The dealer's share words are the Horner evaluation of the fixed
+    /// coefficients at x = holder + 1; the reconstructed key is H(0, constant
+    /// terms), the Lagrange interpolation at 0 from f + 1 valid shares.
+    #[test]
+    fn pin_dealer_horner_and_reconstruction_lagrange() {
+        let ns: Vec<Asks> = (0..4).map(|i| Asks::new(i, 0, 4, 1, &g()).unwrap()).collect();
+        let coeff = [vec![Field(42), Field(17)], vec![Field(7), Field(13)]];
+        let sends = ns[0].dealer_with_coefficients(&coeff).unwrap();
+        for s in &sends {
+            if let Body::PrivateShare(w) = &s.message.body {
+                let x = Field(s.recipient as u128 + 1);
+                assert_eq!(w[0], Field(42).add(Field(17).mul(x)));
+                assert_eq!(w[1], Field(7).add(Field(13).mul(x)));
+            }
+        }
+        let mut ns = ns;
+        let mut q: std::collections::VecDeque<(u16, Send)> =
+            sends.into_iter().map(|s| (0, s)).collect();
+        while let Some((sender, s)) = q.pop_back() {
+            let r = s.recipient;
+            for p in ns[r as usize].receive(sender, s.message).unwrap() {
+                q.push_front((r, p));
+            }
+        }
+        for n in &mut ns {
+            for s in n.start_reconstruction().unwrap() {
+                q.push_back((n.me, s));
+            }
+        }
+        while let Some((sender, s)) = q.pop_back() {
+            let r = s.recipient;
+            for p in ns[r as usize].receive(sender, s.message).unwrap() {
+                q.push_front((r, p));
+            }
+        }
+        let expect = ns[0].h(0, &[Field(42), Field(7)]);
+        assert!(ns.iter().all(|n| n.key == Some(expect)));
     }
 }

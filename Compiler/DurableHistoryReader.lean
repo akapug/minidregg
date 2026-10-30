@@ -38,11 +38,32 @@ Rules for port lanes:
   checks, `StateAt` carries its base's MAC and its records' verification.
   `scripts/kn2/check-planted-api-faults.sh` keeps that true.
 -/
-import Compiler.DurableHistory
-import Compiler.DurableIndex
-import Compiler.DurableReceiverCodec
-import Compiler.DurableCheckpointCodec
-import Kernel.DurableView
+module
+
+public import Compiler.DurableHistory
+public import Compiler.DurableIndex
+public import Compiler.DurableReceiverCodec
+public import Compiler.DurableCheckpointCodec
+public import Kernel.DurableView
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableHistoryReader
 
@@ -86,6 +107,24 @@ structure Spent {store : StoreIdentity} (head : Head store) (nullifier : StableN
   opens : DurableIndex.Opens head.indexRoot (DurableIndex.nullifierKey nullifier)
     (value.map DurableIndex.heightValue)
 
+/-- **A base its holder computed** (CONSENT-OWN): the state after `height`
+records that the holder itself folded from the seed, never one a Store key holder
+sealed. `fold` is the genesis fold (`Image.restore`) of records chaining from
+`logStart` to `chain`; a consent provider mints one from its own admitted image
+(`ConsentAnchor.Anchored.ownBase`), so `resume_sound`'s premises hold for it by
+construction. -/
+structure OwnBase (rootBytes : List UInt8 → Digest) where
+  seed : Seed
+  logStart : Digest
+  height : Nat
+  chain : Digest
+  state : State
+  fold : ∃ records : List IntentRecord, records.length = height ∧
+    chainAfter logStart records = chain ∧
+    ∃ snapshot : DataSnapshot rootBytes,
+      Minidregg.Kernel.DurableReceiver.Image.restore rootBytes (Minidregg.Kernel.DurableReceiver.Image.ofAccepted seed records) = some snapshot ∧
+      state = Minidregg.Kernel.DurableCheckpoint.State.ofSnapshot (Minidregg.Kernel.DurableReceiver.Image.ofAccepted seed records) snapshot
+
 /-- The state after `height` records, with what makes it authentic:
 * the base is the seed (height 0, the pinned genesis) or a checkpoint whose
   MAC verified under the head's key (`openSealed`), sitting on the log: the
@@ -101,6 +140,9 @@ structure StateAt (rootBytes : List UInt8 → Digest) (seed : Seed) {store : Sto
   baseAuthentic : (baseHeight = 0 ∧ baseState = State.ofSeed seed ∧ baseChain = store.logStart) ∨
     ((∃ bytes, ∃ body : DurableCheckpointCodec.Body, openSealed store.key rootBytes bytes = .ok body ∧
         body.height = baseHeight ∧ body.chain = baseChain ∧ body.state = baseState) ∧
+      ∃ base : Record head baseHeight, base.verified.chain = baseChain) ∨
+    ((∃ own : OwnBase rootBytes, own.seed = seed ∧ own.logStart = store.logStart ∧
+        own.height = baseHeight ∧ own.chain = baseChain ∧ own.state = baseState) ∧
       ∃ base : Record head baseHeight, base.verified.chain = baseChain)
   reads : List ((at_ : Nat) × Record head at_)
   heights : reads.map (·.1) = (List.range reads.length).map (baseHeight + · + 1)

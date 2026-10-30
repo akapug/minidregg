@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JROT (K-PREROTATE, DEOS #19): key pre-rotation on the journey's live Store.
+# JROT (K-PREROTATE, docs/DEOS.md §9 row 19): key pre-rotation on the journey's live Store.
 #
 # A friend enrolls with a committed next key kept on "other media"; writes; a
 # thief holding a copy of the friend's daily key tries to rotate the subject to
@@ -16,6 +16,7 @@
 # Hook contract: journey.sh exports MINI HOST CONFIG SOCKET SPONSOR_WS
 # JOURNEY_WORLD JOURNEY_STEP_DIR. Last stdout line = artifact; last stderr line = detail.
 set -u
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 D=$JOURNEY_STEP_DIR/jrot
 mkdir -p -m 700 "$D" "$D/offline" "$D/req"
@@ -36,7 +37,7 @@ row() {  # row CHECK EXPECTED OBSERVED OK(0/1)
   else printf 'FAIL\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"$T"; BAD=$((BAD + 1)); fi
 }
 die() { echo "$T"; echo "JROT: $*" >&2; exit 1; }
-installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
+installed() { attempt_answer "$1" | jq -e '.type == "confirmed" and .confirmation == "installed"' >/dev/null 2>&1; }
 # The Host's named refusal from a client refusal ending (exit 3).
 refusal() { grep -m1 '^refused: ' "$D/$1.err" 2>/dev/null | cut -c1-240; }
 field_value() { jq -r --arg f "$2" '[.cell.entries[]? | select(.key.field == $f) | .value][0] // "absent"' "$1"; }
@@ -247,8 +248,8 @@ row "the old key's renounce changed nothing: the friend still writes through rn"
   "$(installed "$FW/attempts/w-rn-1/outcome.json" && echo 1 || echo 0)"
 renounce "$FW" rn-friend rn
 row "the friend, signing with the CURRENT key (epoch 3), renounces rn: admitted" "confirmed" \
-  "rc=$(cat "$D/rn-friend-submit.rc" 2>/dev/null) $(jq -r '.type // empty' "$FW/attempts/rn-friend/outcome.json" 2>/dev/null)" \
-  "$(jq -e '.type == "confirmed"' "$FW/attempts/rn-friend/outcome.json" >/dev/null 2>&1 && echo 1 || echo 0)"
+  "rc=$(cat "$D/rn-friend-submit.rc" 2>/dev/null) $(attempt_answer "$FW/attempts/rn-friend/outcome.json" | jq -r '.type // empty' 2>/dev/null)" \
+  "$(attempt_answer "$FW/attempts/rn-friend/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1 && echo 1 || echo 0)"
 write_on "$FW" w-rn-2 rn 8
 row "a write through the renounced grant is refused, naming the revocation" "exit != 0, revoked" \
   "$(refusal w-rn-2-propose)$(refusal w-rn-2-submit)" \

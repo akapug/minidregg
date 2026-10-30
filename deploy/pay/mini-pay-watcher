@@ -1,5 +1,5 @@
 #!/bin/sh
-# One tick of the PAY watcher (PAY.md §3.4): a oneshot, run by mini-pay-watcher.timer.
+# One tick of the PAY watcher (docs/PAY.md §3.4): a oneshot, run by mini-pay-watcher.timer.
 #
 #   1. `mini pay watch-config`  the watcher config from the signed pay view (op 107): the
 #                               tariff's mint and token program, the ASSIGNED book rows, and
@@ -13,7 +13,7 @@
 #                               observer's workspace; a decided transfer gets a receipt
 #                               (WS/pay/receipts/SIGNATURE.ADDRESS -> the attempt), which is
 #                               what step 2 reads next tick.
-#   5. self-enrollment          a record at the tariff's enrollment index (PAY §11) is never in
+#   5. self-enrollment          a record at the tariff's enrollment index (docs/PAY.md §11) is never in
 #                               a report: `observe` submits it ALONE through ops 117-120 on the
 #                               Host's operator socket under the observer's C_enrol, and the
 #                               kernel decides enrol | renew | journal. One decision spends one
@@ -35,22 +35,28 @@
 #   PAY_RPC_ENDPOINTS        live endpoints, whitespace- or comma-separated (rpc.env; never argv)
 #   PAY_RPC_FIXTURES         instead of live endpoints: fixture endpoint directories (rehearsal)
 #   PAY_MIN_ENDPOINTS        optional; the watcher's default is 2
-#   PAY_ENROL_INDEX PAY_JOURNAL_FLOOR   optional, together: the enrollment row (PAY §11)
+#   PAY_WATCH_ENROL          optional, `yes`: watch the enrollment row (docs/PAY.md §11). Its index and
+#                            journal floor are the SIGNED TARIFF's (`mini pay watch-config --enrol
+#                            tariff`); the retired PAY_ENROL_INDEX / PAY_JOURNAL_FLOOR are refused
 #   PAY_ENROL_CAPABILITY PAY_OPERATOR_SOCKET   optional, together: the observer's genesis
 #                            `payObserver.enrolCapability` (C_enrol) and the operator socket of
 #                            the same Host (`mini serve --operator-socket`); without them an
 #                            enrollment-index record is left undecided (`enrol-unconfigured`)
 #   PAY_ENROL_ROUNDS         extra watcher+observe rounds per tick while enrollments wait (default 8)
-#   MINI PAY_WATCHER         binaries (default /opt/mini/bin/{mini,pay-watcher})
+#   MINI PAY_WATCHER         binaries (default the installed candidate, /var/lib/mini/candidate/current/bin/{mini,pay-watcher})
 #
 # Exit: the watcher's 2 stops before observation; any pending recovery record stays retained;
 # otherwise `mini pay observe`'s status: 0 settled or waiting, 3 a record was quarantined or
 # the Host refused, 4 undecided (the next tick looks it up).
+#
+# Operator verb, when `mini pay observe` cannot settle a pending tick (every later payment waits
+# behind it): `mini-pay-watcher --quarantine-tick ID REASON...` moves it whole to
+# STATE/tick/quarantine/ID.json; the next tick lists and emits its unreceipted transfers again.
 set -eu
 umask 077
 
-MINI=${MINI:-/opt/mini/bin/mini}
-PAY_WATCHER=${PAY_WATCHER:-/opt/mini/bin/pay-watcher}
+MINI=${MINI:-/var/lib/mini/candidate/current/bin/mini}
+PAY_WATCHER=${PAY_WATCHER:-/var/lib/mini/candidate/current/bin/pay-watcher}
 PAY_STATE=${PAY_STATE:-/var/lib/mini/pay}
 : "${PAY_OBSERVER_WS:?PAY_OBSERVER_WS is required}"
 : "${PAY_OBSERVER_CAPABILITY:?PAY_OBSERVER_CAPABILITY is required}"
@@ -61,19 +67,28 @@ TICK=$PAY_STATE/tick
 mkdir -p "$TICK"
 exec 9>"$PAY_STATE/.service.lock"
 flock -n 9 || { echo 'mini-pay-watcher: another tick is active' >&2; exit 2; }
+if [ "${1:-}" = --quarantine-tick ]; then
+  [ $# -ge 3 ] || { echo 'mini-pay-watcher: --quarantine-tick ID REASON...' >&2; exit 64; }
+  id=$2; shift 2
+  [ -f "$PAY_STATE/watcher.json" ] || { echo 'mini-pay-watcher: no watcher.json yet: nothing to quarantine' >&2; exit 2; }
+  exec "$PAY_WATCHER" --config "$PAY_STATE/watcher.json" --out "$TICK" --quarantine-tick "$id" --reason "$*"
+fi
 if [ -n "${PAY_ENROL_CAPABILITY:-}" ] || [ -n "${PAY_OPERATOR_SOCKET:-}" ]; then
   : "${PAY_ENROL_CAPABILITY:?PAY_ENROL_CAPABILITY and PAY_OPERATOR_SOCKET go together}"
   : "${PAY_OPERATOR_SOCKET:?PAY_ENROL_CAPABILITY and PAY_OPERATOR_SOCKET go together}"
 fi
+if [ -n "${PAY_ENROL_INDEX:-}" ] || [ -n "${PAY_JOURNAL_FLOOR:-}" ]; then
+  echo 'mini-pay-watcher: PAY_ENROL_INDEX/PAY_JOURNAL_FLOOR are retired: the enrollment row and floor come from the signed tariff; set PAY_WATCH_ENROL=yes instead' >&2
+  exit 2
+fi
+case ${PAY_WATCH_ENROL:-} in ''|yes) ;; *) echo 'mini-pay-watcher: PAY_WATCH_ENROL must be yes or unset' >&2; exit 2;; esac
 rounds=${PAY_ENROL_ROUNDS:-8}
 case $rounds in ''|*[!0-9]*) echo 'mini-pay-watcher: PAY_ENROL_ROUNDS must be an integer' >&2; exit 2;; esac
 
 round() {
   set -- --dir "$PAY_OBSERVER_WS" --out "$PAY_STATE/watcher.json"
   [ -n "${PAY_MIN_ENDPOINTS:-}" ] && set -- "$@" --min-endpoints "$PAY_MIN_ENDPOINTS"
-  if [ -n "${PAY_ENROL_INDEX:-}" ] || [ -n "${PAY_JOURNAL_FLOOR:-}" ]; then
-    set -- "$@" --enrol-index "${PAY_ENROL_INDEX:?}" --journal-floor "${PAY_JOURNAL_FLOOR:?}"
-  fi
+  [ "${PAY_WATCH_ENROL:-}" = yes ] && set -- "$@" --enrol tariff
   "$MINI" pay watch-config "$@" >/dev/null || return $?
 
   set -- --config "$PAY_STATE/watcher.json" --out "$TICK" --spool "$TICK" --durable-ticks

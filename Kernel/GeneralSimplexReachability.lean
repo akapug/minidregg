@@ -1,4 +1,8 @@
-import Kernel.GenericSimplexVAInvariant
+module
+
+public import Kernel.GenericSimplexVAInvariant
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GeneralSimplexReachability
 open Minidregg.Kernel.GenericSimplex

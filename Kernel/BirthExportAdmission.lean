@@ -1,14 +1,33 @@
 /- Explicit inherited export restrictions on the exact signed initial effect.
 The old factory law remains the authorizer. A newborn's own local component is
 not an export root and is never self-evaluated by this gate. -/
-import Compiler.PhysicalLawResolution
-import Compiler.WorldKindLawDependencies
-import Compiler.CanonicalRuntimeProfileCore
-import Kernel.WorldKindProjection
-import Kernel.ContentResource
-import Kernel.DeclaredResourceProjection
-import Kernel.ClockCellDomain
-import Theory.AxiomPin
+module
+
+public import Compiler.PhysicalLawResolution
+public import Compiler.WorldKindLawDependencies
+public import Compiler.CanonicalRuntimeProfileCore
+public import Kernel.WorldKindProjection
+public import Kernel.ContentResource
+public import Kernel.DeclaredResourceProjection
+public import Kernel.ClockCellDomain
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.BirthExportAdmission
 
@@ -199,6 +218,17 @@ structure Evaluated (profile : PolicyCompilerProfile F) (deployment : Deployment
     (rootedItems deployment directory.directory descriptor.births)
   guardsExact : ∀ guard ∈ clock.readGuard :: items.guards,
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId
+theorem Evaluated.items_judged {profile : PolicyCompilerProfile F} {deployment : Deployment}
+    {pins : FactoryPins} {durable : Durable}
+    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {factoryRoot : Digest} {height : Height} {descriptor : Descriptor Registry}
+    (evaluated : Evaluated profile deployment pins durable directory authority factoryRoot height descriptor)
+    {item : BirthItem Registry}
+    (member : item ∈ rootedItems deployment directory.directory descriptor.births) :
+    Nonempty (ItemChecked profile deployment pins durable directory authority factoryRoot height
+      descriptor evaluated.clock.clock item) :=
+  evaluated.items.item member
 
 def Evaluated.readGuards {profile : PolicyCompilerProfile F} {deployment : Deployment}
     {pins : FactoryPins} {durable : Durable}
@@ -230,6 +260,12 @@ structure NeutralItem (deployment : Deployment)
   dependencies : WorldKindLawDependencies.Dependencies
   dependenciesExact : WorldKindLawDependencies.loadBirth deployment directory item = some dependencies
   rootsEmpty : roots item dependencies = []
+theorem NeutralItem.neutral {deployment : Deployment}
+    {directory : CellRegistry.Directory Nat Registry} {item : BirthItem Registry}
+    (neutral : NeutralItem deployment directory item) :
+    WorldKindLawDependencies.loadBirth deployment directory item = some neutral.dependencies ∧
+    roots item neutral.dependencies = [] :=
+  ⟨neutral.dependenciesExact, neutral.rootsEmpty⟩
 
 inductive NeutralItems (deployment : Deployment)
     (directory : CellRegistry.Directory Nat Registry) : List (BirthItem Registry) → Type

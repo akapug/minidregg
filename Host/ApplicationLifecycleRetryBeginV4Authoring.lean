@@ -1,8 +1,29 @@
 /- Exact current-manager authority to repeat CREATE on the same retained volume.
 The report certifies a dead incarnation, never absence of previous effects. -/
-import Host.ApplicationLifecycleBeginOperator
-import Kernel.ApplicationLifecycleRetryBeginV4Admission
-import Host.ApplicationLifecycleLaunchBeginAuthoring
+module
+
+public import Host.ApplicationLifecycleBeginOperator
+public import Kernel.ApplicationLifecycleRetryBeginV4Admission
+public import Host.ApplicationLifecycleLaunchBeginAuthoring
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleRetryBeginV4Authoring
 
@@ -127,7 +148,7 @@ def prepareVerified (config : Config) {target : Durable}
       imageIdentity := descriptor.package.imageIdentity
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
-        config.expectedSeed pin.app (if launch.kind == .stop then before.generation
+        config.storeIdentity pin.app (if launch.kind == .stop then before.generation
                  else before.generation + 1) }
   if launch.kind == .stop then
     match verified.selectRunning source with

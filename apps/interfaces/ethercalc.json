@@ -1,0 +1,210 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "ethercalc",
+  "interfaceVersion": 1,
+  "appId": "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
+  "packageId": "da9d64ca90e51cdf2643c3271f9ee9b1",
+  "appVersion": "2026.10.26.0+sandstorm1",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "sheet.replace": {
+      "description": "Replace the whole named sheet with CSV. This package exposes no compare-and-swap; concurrent browser edits can be overwritten. No automatic retry after uncertain completion.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "sheet": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "csv": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "sheet",
+          "csv"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "_/",
+          {
+            "arg": "sheet",
+            "encoding": "segment"
+          }
+        ],
+        "decode": "status",
+        "status": [
+          200,
+          201,
+          202
+        ],
+        "headers": {
+          "content-type": "text/csv; charset=utf-8"
+        },
+        "text": {
+          "arg": "csv"
+        }
+      }
+    },
+    "sheet.read": {
+      "description": "Export the named sheet as CSV. Sheet identity is grain plus sheet name; no room discovery or pagination is implied.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "sheet": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "sheet"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "_/",
+          {
+            "arg": "sheet",
+            "encoding": "segment"
+          },
+          "/csv"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    },
+    "sheet.rows.read": {
+      "description": "Read computed display values as typed rows from CSV JSON export. Values are strings, formulas and styling are not returned. Bounded complete export, no pagination or implicit truncation.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "sheet": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "sheet"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "_/",
+          {
+            "arg": "sheet",
+            "encoding": "segment"
+          },
+          "/csv.json"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "write",
+      "op": "sheet.replace",
+      "args": {
+        "sheet": {
+          "context": "runId"
+        },
+        "csv": "item,qty\nwidgets,3\n"
+      }
+    },
+    {
+      "id": "read",
+      "op": "sheet.rows.read",
+      "args": {
+        "sheet": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "equals": "item"
+        },
+        {
+          "path": [
+            1,
+            0
+          ],
+          "equals": "widgets"
+        },
+        {
+          "path": [
+            1,
+            1
+          ],
+          "equals": "3"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/sandstorm-org/ethercalc-sandstorm",
+    "scripts/spk-platform/featured-qualify.sh:77",
+    "https://github.com/audreyt/ethercalc/blob/0.20261026.0/API.md",
+    "package:da9d64ca90e51cdf2643c3271f9ee9b1/opt/app/API.md"
+  ]
+}

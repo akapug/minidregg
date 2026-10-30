@@ -1,8 +1,8 @@
 //! Distinct v3 launch completion plan and one-shot event25 submission.
 //! A source-authored, custodian-signed v2 physical report is required; this
 //! module never encodes that report or infers process/volume evidence.
-#![allow(dead_code)] // Awaiting v2 report Host route and physical caller.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::SignerPin;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
@@ -22,23 +22,12 @@ use std::path::{Path, PathBuf};
 
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-LAUNCH-COMPLETION-OPERATOR-PLAN/v1";
 const INGRESS_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v2";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn number(value: &Value) -> io::Result<String> {
-    let result = value
-        .as_str()
-        .map(str::to_owned)
-        .or_else(|| value.as_u64().map(|number| number.to_string()))
-        .ok_or_else(|| invalid("v3 completion management number malformed"))?;
-    if !decimal(&result) {
-        return Err(invalid("v3 completion management number noncanonical"));
-    }
-    Ok(result)
-}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -234,9 +223,9 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op70-requested.json", &active)?;
     write_new(parent, "lifecycle-completion-v2-active.json", &active)?;
-    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 70, PLAN_TAG)?;
+    let plan = framed_payload("launch completion plan", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let inspected = operator.tool(
         "inspect",
@@ -274,9 +263,9 @@ pub(crate) fn assemble_once(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
-    let reply = operator.invoke(71, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 71, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch completion assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "completion-v2.bin", &ingress)?;
     Ok(AssembledLaunchCompletion {
         attempt_dir: attempt_dir.to_path_buf(),
@@ -300,8 +289,8 @@ fn checked_assembled(
         .parent()
         .ok_or_else(|| invalid("v3 completion parent absent"))?;
     private_dir(parent)?;
-    if fs::read(parent.join("lifecycle-completion-v2-active.json"))? != assembled.active_marker
-        || fs::read(attempt.join("completion-v2.bin"))? != assembled.ingress
+    if fs::read(parent.join("lifecycle-completion-v2-active.json")).ctx("read", &(parent.join("lifecycle-completion-v2-active.json")))? != assembled.active_marker
+        || fs::read(attempt.join("completion-v2.bin")).ctx("read", &(attempt.join("completion-v2.bin")))? != assembled.ingress
         || assembled.begin_sha256 != hex(&Sha256::digest(&begin.ingress))
         || assembled.claim_sha256 != hex(&Sha256::digest(&claim.claim_ingress))
         || assembled.report_sha256 != hex(&Sha256::digest(signed_report))
@@ -314,31 +303,7 @@ fn checked_assembled(
 }
 
 fn retained_file(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max
-    {
-        return Err(invalid("v3 completion retained artifact identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("v3 completion retained artifact changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref().take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("v3 completion retained artifact length changed"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "v3 completion retained artifact identity refused")
 }
 
 /// Reopens one protected op71 result after process restart. The caller must
@@ -421,9 +386,9 @@ pub(crate) fn submit_fresh_once(
         "op38-requested.json",
         &serde_json::to_vec(&marker)?,
     )?;
-    let reply = operator.invoke(38, &assembled.ingress)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, &assembled.ingress)?;
     write_new(attempt, "op38-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 38, OUTCOME_TAG)?;
+    let outcome = framed_payload("lifecycle completion submit", &reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let outcome_path = write_new(attempt, "op38-outcome.bin", outcome)?;
     let inspected = operator.tool(
         "inspect",
@@ -454,7 +419,7 @@ pub(crate) fn recover_receipt_only(
 ) -> io::Result<RecoveredLaunchCompletion> {
     checked_assembled(assembled, begin, claim, signed_report)?;
     let attempt = &assembled.attempt_dir;
-    let marker: Value = serde_json::from_slice(&fs::read(attempt.join("op38-requested.json"))?)?;
+    let marker: Value = serde_json::from_slice(&fs::read(attempt.join("op38-requested.json")).ctx("read", &(attempt.join("op38-requested.json")))?)?;
     if text(&marker, "protocol")? != "mini-spk-launch-completion-submit-requested-v1"
         || text(&marker, "ingressSha256")? != hex(&Sha256::digest(&assembled.ingress))
         || text(&marker, "claimSha256")? != hex(&Sha256::digest(&claim.committed))
@@ -464,11 +429,11 @@ pub(crate) fn recover_receipt_only(
     // A lookup may be repeated after another lost reply. Each read-only probe
     // owns fresh output paths; the original op38 marker and ingress stay fixed.
     let mut nonce = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    std::fs::File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
     let lookup_dir = attempt.join(format!("op39-lookup-{}", hex(&nonce)));
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
-    let reply = operator.invoke(39, &assembled.ingress)?;
-    let payload = framed_payload(&reply, 39, OUTCOME_TAG)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, &assembled.ingress)?;
+    let payload = framed_payload("lifecycle completion lookup", &reply, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
     let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
     let inspected = operator.tool(
         "inspect",
@@ -548,12 +513,12 @@ mod tests {
             result.push(0);
             result
         };
-        let ingress = frame(71, INGRESS_TAG);
-        assert!(framed_payload(&ingress, 71, INGRESS_TAG).is_ok());
-        assert!(framed_payload(&ingress, 38, OUTCOME_TAG).is_err());
-        assert!(framed_payload(
+        let ingress = frame(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG);
+        assert!(framed_payload("launch completion assemble", &ingress, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG).is_ok());
+        assert!(framed_payload("lifecycle completion submit", &ingress, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG).is_err());
+        assert!(framed_payload("launch completion assemble", 
             &ingress,
-            71,
+            crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE,
             b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v1"
         )
         .is_err());
@@ -643,17 +608,44 @@ mod tests {
         write_new(&attempt, "completion-v2.bin", ingress).unwrap();
         assert!(load_retained(&attempt, &begin, &claim, report).is_ok());
         assert!(load_retained(&attempt, &begin, &claim, b"other report").is_err());
-        let submit = serde_json::to_vec(&json!({
-            "protocol":"mini-spk-launch-completion-submit-requested-v1",
-            "ingressSha256":hex(&Sha256::digest(ingress)),
-            "claimSha256":hex(&Sha256::digest(&claim.committed)),
-        }))
-        .unwrap();
-        write_new(&attempt, "op38-requested.json", &submit).unwrap();
-        assert_eq!(
-            fs::read(attempt.join("op38-requested.json")).unwrap(),
-            submit
-        );
+        let assembled = load_retained(&attempt, &begin, &claim, report).unwrap();
+        // recover_receipt_only checks the retained op38 submit marker before
+        // it touches the operator, so an unreachable operator isolates the
+        // marker check: refusal names the marker, acceptance fails later.
+        let operator = PrivateOperator {
+            host: parent.join("absent-host"),
+            config: parent.join("absent-config"),
+            socket: parent.join("absent-socket"),
+            host_sha256: "00".repeat(32),
+            config_sha256: "00".repeat(32),
+        };
+        let marker = |protocol: &str, ingress: &[u8], committed: &[u8]| {
+            serde_json::to_vec(&json!({
+                "protocol": protocol,
+                "ingressSha256": hex(&Sha256::digest(ingress)),
+                "claimSha256": hex(&Sha256::digest(committed)),
+            }))
+            .unwrap()
+        };
+        let recover = || {
+            recover_receipt_only(&operator, &assembled, &begin, &claim, report)
+                .err()
+                .expect("an unreachable operator cannot recover a receipt")
+                .to_string()
+        };
+        let missing = recover_receipt_only(&operator, &assembled, &begin, &claim, report);
+        assert!(missing.is_err());
+        let submit = "mini-spk-launch-completion-submit-requested-v1";
+        for (label, bytes) in [
+            ("wrong protocol", marker("other-protocol-v1", ingress, &claim.committed)),
+            ("wrong ingress", marker(submit, b"other ingress", &claim.committed)),
+            ("wrong claim", marker(submit, ingress, b"other committed")),
+        ] {
+            fs::write(attempt.join("op38-requested.json"), bytes).unwrap();
+            assert!(recover().contains("submit marker differs"), "{label}");
+        }
+        fs::write(attempt.join("op38-requested.json"), marker(submit, ingress, &claim.committed)).unwrap();
+        assert!(!recover().contains("submit marker differs"));
         fs::remove_dir_all(parent).unwrap();
     }
 }

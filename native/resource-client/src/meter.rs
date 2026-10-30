@@ -27,8 +27,9 @@ fn canonical_decimal(value: &Value, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The metering selection in the retained metadata (v3): the configured
-/// provider resource and the route the purse recorded at reserve.
+/// The metering selection in the retained metadata (v4,
+/// `Host/ProviderUsage.lean` `quotePayload`): the configured provider
+/// resource, the route the purse recorded at reserve, and the leg.
 struct Selection {
     provider: String,
     route: String,
@@ -37,8 +38,15 @@ struct Selection {
 fn selected_provider(metadata: &[u8]) -> Result<Selection> {
     let value: Value = serde_json::from_slice(metadata)
         .map_err(|e| format!("invalid retained metering metadata: {e}"))?;
-    if value.get("version").and_then(Value::as_str) != Some("3") {
-        return Err("unknown metering metadata version (v3 names the route)".into());
+    if value.get("version").and_then(Value::as_str) != Some("4") {
+        return Err("unknown metering metadata version (v4 names the route and the leg)".into());
+    }
+    if !value
+        .get("leg")
+        .and_then(Value::as_str)
+        .is_some_and(|leg| matches!(leg, "complete" | "timeout" | "truncated" | "lost"))
+    {
+        return Err("metering metadata leg must be complete, timeout, truncated or lost".into());
     }
     let id = value
         .get("providerResourceId")
@@ -60,23 +68,36 @@ fn selected_provider(metadata: &[u8]) -> Result<Selection> {
 
 fn quoted_report(value: &Value, expected: &Selection) -> Result<()> {
     let user = expected.route == "user";
-    let (status, claim) = if user {
-        (
-            "quoted-per-operation",
-            "per-operation fee under operator tariff; the provider bill is the key owner's",
-        )
-    } else {
-        (
-            "quoted-reported-usage",
-            "provider-reported usage under operator tariff; not invoice-verified",
-        )
+    // The four bases `Host/ProviderUsage.lean` `reportJson` answers: the user
+    // route is always the per-operation fee; a metered route is reported
+    // usage, a refused (non-200) reply at the route fee, or an undecided leg
+    // at the hold. Only reported usage carries token counts.
+    let status = value.get("status").and_then(Value::as_str).unwrap_or("");
+    let claim = match (user, status) {
+        (true, "quoted-per-operation") => {
+            "per-operation fee under operator tariff; the provider bill is the key owner's"
+        }
+        (false, "quoted-reported-usage") => {
+            "provider-reported usage under operator tariff; not invoice-verified"
+        }
+        (false, "quoted-refused-reply") => {
+            "complete non-200 reply: the route's declared per-operation fee; the provider bills nothing for a refused call"
+        }
+        (false, "quoted-undecided-at-hold") => {
+            "no usage record could be read for this leg: the whole hold, the maximum the provider may have billed"
+        }
+        _ => return Err("unexpected provider metering reply type/status/route".into()),
     };
     if value.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v2")
-        || value.get("status").and_then(Value::as_str) != Some(status)
         || value.get("route").and_then(Value::as_str) != Some(expected.route.as_str())
+        || !value
+            .get("leg")
+            .and_then(Value::as_str)
+            .is_some_and(|leg| matches!(leg, "complete" | "timeout" | "truncated" | "lost"))
     {
         return Err("unexpected provider metering reply type/status/route".into());
     }
+    let counted = status == "quoted-reported-usage";
     let model = value
         .get("model")
         .and_then(Value::as_str)
@@ -84,7 +105,7 @@ fn quoted_report(value: &Value, expected: &Selection) -> Result<()> {
     if model.is_empty() || model.len() > 256 {
         return Err("provider quote has invalid model".into());
     }
-    let counts: &[&str] = if user {
+    let counts: &[&str] = if !counted {
         &[]
     } else {
         &["promptTokens", "completionTokens", "totalTokens"]
@@ -106,11 +127,11 @@ fn quoted_report(value: &Value, expected: &Selection) -> Result<()> {
     {
         canonical_decimal(value, field)?;
     }
-    if user && ["promptTokens", "completionTokens", "totalTokens"]
+    if !counted && ["promptTokens", "completionTokens", "totalTokens"]
         .iter()
         .any(|field| value.get(*field).is_some())
     {
-        return Err("a user-route quote carries no token counts".into());
+        return Err("only a reported-usage quote carries token counts".into());
     }
     if value.get("providerResourceId").and_then(Value::as_str) != Some(expected.provider.as_str()) {
         return Err("provider quote selected another configured resource".into());
@@ -169,7 +190,7 @@ pub(crate) fn meter(
     payload.extend_from_slice(&(request_bytes.len() as u32).to_le_bytes());
     payload.extend_from_slice(&request_bytes);
     payload.extend_from_slice(&response_bytes);
-    let frame = session_invoke(host, socket, &retained_config, 19, &payload)?;
+    let frame = session_invoke(host, socket, &retained_config, mini_sdk::host_operations::PROVIDER_USAGE_QUOTE, &payload)?;
     create_private(&directory.join("reply.frame"), &frame)?;
     sync_directory_ancestors(directory)?;
     match frame.first() {
@@ -182,7 +203,7 @@ pub(crate) fn meter(
             sync_directory_ancestors(directory)?;
             print_json(&value)
         }
-        Some(255) => {
+        Some(&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD)) => {
             create_private(&directory.join("refusal.bin"), &frame[1..])?;
             if let Ok(value) = serde_json::from_slice::<Value>(&frame[1..]) {
                 create_private(&directory.join("refusal.json"), &frame[1..])?;
@@ -204,7 +225,7 @@ mod tests {
     fn quote_requires_source_operation_route_and_provenance() {
         let pool = Selection { provider: "7004".into(), route: "pool".into() };
         let mut report = json!({
-            "type":"minidregg-provider-metering-v2",
+            "type":"minidregg-provider-metering-v2","leg":"complete",
             "status":"quoted-reported-usage","route":"pool",
             "providerResourceId":"7004","model":"fixture","tariffVersion":"1",
             "tariffDigest":"1","requestDigest":"2","responseDigest":"3",
@@ -227,7 +248,7 @@ mod tests {
         report["requestDigest"] = json!("02");
         assert!(quoted_report(&report, &pool).is_err());
         let fee = json!({
-            "type":"minidregg-provider-metering-v2","status":"quoted-per-operation","route":"user",
+            "type":"minidregg-provider-metering-v2","leg":"complete","status":"quoted-per-operation","route":"user",
             "providerResourceId":"7004","model":"fixture","tariffVersion":"1",
             "tariffDigest":"1","requestDigest":"2","responseDigest":"3",
             "requestBytes":"10","responseBytes":"20","perOp":"1","reserve":"1","charge":"1",
@@ -238,16 +259,37 @@ mod tests {
         let mut counted = fee.clone();
         counted["promptTokens"] = json!("1");
         assert!(quoted_report(&counted, &user).is_err());
+        let refused = json!({
+            "type":"minidregg-provider-metering-v2","leg":"complete","status":"quoted-refused-reply","route":"pool",
+            "providerResourceId":"7004","model":"fixture","tariffVersion":"1",
+            "tariffDigest":"1","requestDigest":"2","responseDigest":"3",
+            "requestBytes":"10","responseBytes":"20","perOp":"2","reserve":"5","charge":"2",
+            "operation":{"type":"settle","charge":"2","route":"pool"},
+            "claim":"complete non-200 reply: the route's declared per-operation fee; the provider bills nothing for a refused call"
+        });
+        assert!(quoted_report(&refused, &pool).is_ok());
+        assert!(quoted_report(&refused, &user).is_err());
+        let mut undecided = refused.clone();
+        undecided["status"] = json!("quoted-undecided-at-hold");
+        undecided["leg"] = json!("lost");
+        undecided["claim"] = json!("no usage record could be read for this leg: the whole hold, the maximum the provider may have billed");
+        assert!(quoted_report(&undecided, &pool).is_ok());
+        undecided["promptTokens"] = json!("1");
+        assert!(quoted_report(&undecided, &pool).is_err());
     }
 
     #[test]
-    fn metadata_v3_names_the_provider_and_the_route() {
-        let metadata = br#"{"version":"3","providerResourceId":"7950","route":"pool","status":"200","contentType":"application/json","reserve":"8"}"#;
+    fn metadata_v4_names_the_provider_the_route_and_the_leg() {
+        let metadata = br#"{"version":"4","providerResourceId":"7950","route":"pool","leg":"complete","status":"200","contentType":"application/json","reserve":"8"}"#;
         let selected = selected_provider(metadata).unwrap();
         assert_eq!((selected.provider.as_str(), selected.route.as_str()), ("7950", "pool"));
-        assert!(selected_provider(br#"{"version":"3","providerResourceId":"07950","route":"pool"}"#).is_err());
-        assert!(selected_provider(br#"{"version":"3","providerResourceId":"7950","route":"none"}"#).is_err());
+        assert!(selected_provider(br#"{"version":"4","providerResourceId":"07950","route":"pool","leg":"complete"}"#).is_err());
+        assert!(selected_provider(br#"{"version":"4","providerResourceId":"7950","route":"none","leg":"complete"}"#).is_err());
         assert!(selected_provider(br#"{"version":"2","providerResourceId":"7950"}"#).is_err());
+        let v3 = selected_provider(br#"{"version":"3","providerResourceId":"7950","route":"pool","status":"200","contentType":"application/json","reserve":"8"}"#);
+        assert!(v3.as_ref().err().is_some_and(|e| e.contains("unknown metering metadata version") && e.contains("v4")),
+            "a v3 frame is refused by name: {:?}", v3.err());
+        assert!(selected_provider(br#"{"version":"4","providerResourceId":"7950","route":"pool","leg":"gone"}"#).is_err());
         assert!(selected_provider(br#"{"status":"200"}"#).is_err());
     }
 }

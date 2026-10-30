@@ -4,9 +4,13 @@ release for one selected poll. This checked object is deliberately not yet a
 durable admission: a verifier-minted unified frontier predecessor is also
 required before event17 can advance Mini or authorize any fn ACK.
 -/
-import Kernel.FnConsumerFrontierGateway
-import Kernel.FnSelectedPollReleaseLink
-import Kernel.FnSelectedPollAdmissionAt
+module
+
+public import Kernel.FnConsumerFrontierGateway
+public import Kernel.FnSelectedPollReleaseLink
+public import Kernel.FnSelectedPollAdmissionAt
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollAdmission
 
@@ -46,6 +50,17 @@ structure Checked {config : NativeHost.Config} {target : NativeHost.Durable}
   originalExact : original.receipt = ingress.spec.evidence.releaseReceipt
   keyExact : FnSelectiveReleaseIngress.transactionId original.ingress =
     ingress.spec.evidence.releaseKey
+theorem Checked.sound {config : NativeHost.Config} {target : NativeHost.Durable}
+    {verified : NativeHostReplay.Verified config target} {ingress : Ingress}
+    (checked : Checked verified ingress) :
+    config.fnGateway = some checked.pin ∧
+    FnGatewayPolicy.checkCurrent config verified.opened checked.pin = .ok () ∧
+    FnConsumerFrontierGateway.authorize checked.prepared checked.signature.signature = some checked.signature.authorization ∧
+    checked.original.receipt = ingress.spec.evidence.releaseReceipt ∧
+    FnSelectiveReleaseIngress.transactionId checked.original.ingress =
+      ingress.spec.evidence.releaseKey :=
+  ⟨checked.pinExact, checked.current, checked.signature.authorized, checked.originalExact,
+    checked.keyExact⟩
 
 def check {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (ingress : Ingress) :
@@ -101,6 +116,17 @@ structure AcceptedVerified {config : NativeHost.Config} {target : NativeHost.Dur
     ingress.spec.registrationReceipt = .ok registration
   lower : FnSelectedPollAdmissionAt.Accepted config verified.opened
     cursor original registration ingress
+theorem AcceptedVerified.sound {config : NativeHost.Config} {target : NativeHost.Durable}
+    {verified : NativeHostReplay.Verified config target} {ingress : Ingress}
+    (accepted : AcceptedVerified verified ingress) :
+    verified.frontierCursor ingress.spec.evidence.key = .ok accepted.cursor ∧
+    FnSelectedPollReleaseLink.select verified ingress.spec.evidence.releaseKey =
+      some accepted.original ∧
+    verified.frontierRegistration ingress.spec.evidence.key
+      ingress.spec.registrationReceipt = .ok accepted.registration ∧
+    FnConsumerFrontierCore.checkAfter accepted.cursor (candidate ingress.spec) = .ok () :=
+  ⟨accepted.cursorExact, accepted.originalExact, accepted.registrationExact,
+    accepted.lower.frontierExact⟩
 
 def admitVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target) (ingress : Ingress) :

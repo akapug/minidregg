@@ -1,6 +1,27 @@
 /- Durable judgment and append over the shared loaded-image core. -/
-import Compiler.DurableReceiverCore
-import Kernel.ObjectiveAdmissible
+module
+
+public import Compiler.DurableReceiverCore
+public import Kernel.ObjectiveAdmissible
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -58,8 +79,7 @@ abbrev Commit {rootBytes : List UInt8 → Digest} (transport : Transport)
   CommitEvidence candidate (transport.sourceGate loaded.snapshot candidate.intent)
     (match transport.systemCell with
     | none => (Except.ok () : Except RejectReason Unit)
-    | some systemId => Kernel.TailBound.gate systemId (loaded.height + 1)
-        loaded.chain loaded.snapshot candidate.intent)
+    | some systemId => Kernel.TailBound.gate systemId loaded loaded.snapshot candidate.intent)
 
 /-- Admission now returns the evidence consumed by the append, rather than
 throwing away the judgment as Unit. -/
@@ -74,8 +94,7 @@ def Loaded.judge {rootBytes : List UInt8 → Digest} (transport : Transport)
     | .ok () =>
       match tail : (match transport.systemCell with
         | none => (Except.ok () : Except RejectReason Unit)
-        | some systemId => Kernel.TailBound.gate systemId (loaded.height + 1)
-            loaded.chain loaded.snapshot candidate.intent) with
+        | some systemId => Kernel.TailBound.gate systemId loaded loaded.snapshot candidate.intent) with
       | .error reason => .error reason
       | .ok () => .ok ⟨reserved, source, tail⟩
 
@@ -83,7 +102,7 @@ theorem Commit.tail_pinned {rootBytes : List UInt8 → Digest} {transport : Tran
     {loaded : Loaded rootBytes} {candidate : Candidate loaded}
     (commit : Commit transport loaded candidate) (systemId : CellId)
     (pinned : transport.systemCell = some systemId) :
-    Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot candidate.intent = .ok () := by
+    Kernel.TailBound.gate systemId loaded loaded.snapshot candidate.intent = .ok () := by
   simpa only [pinned] using commit.tail
 
 /-- An ordinary certificate cannot write any OB-protected coordinate, for
@@ -117,7 +136,7 @@ theorem Judged.tail_pinned {rootBytes : List UInt8 → Digest} {transport : Tran
     {loaded : Loaded rootBytes} {intent : DataIntent rootBytes}
     (judged : Judged transport loaded intent) (systemId : CellId)
     (pinned : transport.systemCell = some systemId) :
-    Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent = .ok () := by
+    Kernel.TailBound.gate systemId loaded loaded.snapshot intent = .ok () := by
   rw [← judged.intentExact]
   exact Commit.tail_pinned judged.commit systemId pinned
 
@@ -168,7 +187,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     (loaded : Loaded rootBytes) {intent : DataIntent rootBytes}
     (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot intent)
     (key : MacKey) : IO (Except String (PreparedAppend loaded intent)) := do
-  let height := loaded.image.accepted.length + 1
+  let height := loaded.height + 1
   let recordBytes := recordFrame.encode (IntentRecord.ofIntent intent)
   let chain := loaded.chainAfterIntent intent
   let some frontier := loaded.frontier
@@ -178,7 +197,7 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     | .ok root => pure root
     | .error message => return .error message
   let keys := DurableIndex.IndexRows.keys intent.transactionId intent.nullifiers
-  let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.image.accepted.length keys
+  let (indexAfter, indexWrites) ← match ← withIndexRows transport loaded.height keys
       (fun rows => DurableIndex.IndexRows.apply rows indexBefore height intent.transactionId
         intent.nullifiers) with
     | .ok result => pure result
@@ -186,6 +205,10 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   -- The tag keeps this record's receipt root, the root the extended image
   -- serves, the accumulator frontier after it and the index root after it.
   let extended := loaded.extend ready
+  -- The World judges the append: an intent whose turn it does not admit is
+  -- refused here, before any byte is written (FD-1 4a).
+  if let .lost reason := extended.track then
+    return .error s!"not admitted by the World: {reason}"
   let leaf := leafDigest height recordBytes chain extended.worldRoot
   let frontierAfter := DurableHistory.Frontier.push frontier leaf
   let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) indexWrites
@@ -193,12 +216,13 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
   return .ok ⟨entry, rfl, nodes, extended, rfl, indexAfter⟩
 
+
 /-- What the receiving loop does after the append's observation: confirm by
 exact readback (seal a due checkpoint), or report contention. -/
 def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes)
     (intent : DataIntent rootBytes) (prepared : PreparedAppend loaded intent)
     (observation : CasObservation) : IO (Bool × DetailedResult rootBytes loaded intent) := do
-  let height := loaded.image.accepted.length + 1
+  let height := loaded.height + 1
   let entry := prepared.entry
   let extended := prepared.extended
   let indexAfter := prepared.indexAfter
@@ -217,7 +241,8 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
           return (installed, .exact kind
             ⟨afterCheckpoint tagged checkpointStored,
               (afterCheckpoint_image tagged checkpointStored).trans prepared.extendedImage, entry,
-              prepared.entryExact⟩)
+              prepared.entryExact,
+              (afterCheckpoint_headTag tagged checkpointStored).trans rfl⟩)
         else return (false, .ordinary .contention)
   match observation with
   | .installed => confirm true .installed
@@ -231,7 +256,7 @@ def publish (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded 
     {candidate : Candidate loaded} (_commit : Commit transport loaded candidate)
     (prepared : PreparedAppend loaded candidate.intent) :
     IO (Bool × DetailedResult rootBytes loaded candidate.intent) :=
-  transport.append (loaded.image.accepted.length + 1) prepared.entry prepared.nodes >>=
+  transport.append (loaded.height + 1) prepared.entry prepared.nodes >>=
     publishAfter transport rootBytes loaded candidate.intent prepared
 
 /-- A conflicting append is contention, and nothing else is read or written. -/
@@ -247,8 +272,7 @@ call installed the entry. -/
 def receiveCandidateWithFresh (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) (candidate : Candidate loaded) :
     IO (Bool × DetailedResult rootBytes loaded candidate.intent) := do
-  match prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot loaded.withinLog
-      loaded.resumed candidate.intent with
+  match loaded.prepare candidate.intent with
   | .inr (.replayed _) => return (false, .ordinary (.confirmed .replayed loaded.snapshot))
   | .inr (.rejected reason) => return (false, .ordinary (.rejected reason))
   | .inr _ => return (false, .ordinary (.unavailable "unexpected complete-schedule outcome"))
@@ -261,6 +285,33 @@ def receiveCandidateWithFresh (transport : Transport) (rootBytes : List UInt8 �
         match ← prepareAppend transport loaded ready key with
         | .error message => return (false, .ordinary (.unavailable message))
         | .ok prepared => publish transport rootBytes loaded commit prepared
+
+/-- A candidate the loaded image's own schedule rejects is answered with NO transport
+effect: the receive action IS the pure refusal. This is the receiver half of the
+NO_RECORD contract (`Host.RequestRefusal`): a `rejected` the Host turns into a
+`refused` outcome was decided before any append. -/
+theorem receiveCandidateWithFresh_rejected_at_prepare (transport : Transport)
+    (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) (candidate : Candidate loaded)
+    (reason : RejectReason)
+    (prepared : loaded.prepare candidate.intent = .inr (.rejected reason)) :
+    receiveCandidateWithFresh transport rootBytes loaded candidate =
+      pure (false, .ordinary (.rejected reason)) := by
+  unfold receiveCandidateWithFresh
+  rw [prepared]
+
+/-- A candidate the judge refuses (gate, source gate or tail bound) is likewise answered
+before the checkpoint key is read and before anything is prepared or published. -/
+theorem receiveCandidateWithFresh_rejected_at_judge (transport : Transport)
+    (rootBytes : List UInt8 → Digest) (loaded : Loaded rootBytes) (candidate : Candidate loaded)
+    (ready : Ready rootBytes loaded.image loaded.baseHeight loaded.base loaded.snapshot
+      candidate.intent)
+    (reason : RejectReason)
+    (prepared : loaded.prepare candidate.intent = .inl ready)
+    (judged : loaded.judge transport candidate = .error reason) :
+    receiveCandidateWithFresh transport rootBytes loaded candidate =
+      pure (false, .ordinary (.rejected reason)) := by
+  unfold receiveCandidateWithFresh
+  rw [prepared, judged]
 
 /-- The raw wrapper constructs only the ordinary arm. In particular, choosing
 a permissive transport source gate cannot bypass the protected-cell check. -/
@@ -297,6 +348,16 @@ def tipIs (transport : Transport) (height : Nat) (entry : Entry) : IO (Except St
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) => return .ok (stored.head = height && stored.entries == [entry])
 
+/-- The opened Store's identity for authenticating this image's head
+(`DurableHistory.StoreIdentity.ofOpen`, minted only here): `none` when the
+Store's key is unreadable. -/
+def headStore {rootBytes : List UInt8 → Digest} (transport : Transport)
+    (loaded : Loaded rootBytes) :
+    IO (Option DurableHistory.StoreIdentity) := do
+  match ← transport.key with
+  | .error _ => return none
+  | .ok key => return some (DurableHistory.StoreIdentity.ofOpen key loaded.logStart)
+
 /-- Bounded contention retry for an internal intent whose admission does not
 depend on a journal-wide clock. Each retry reloads. -/
 def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
@@ -310,41 +371,35 @@ def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
           | .contention => receive transport rootBytes intent attempts
           | result => return result
 
-/-- Rebasing at the head keeps the image and the log start. -/
-theorem Loaded.rebase_image {rootBytes : List UInt8 → Digest} {loaded rebased : Loaded rootBytes}
-    (done : loaded.rebase = some rebased) :
-    rebased.image = loaded.image ∧ rebased.logStart = loaded.logStart := by
-  unfold Loaded.rebase at done
-  dsimp only at done
-  split at done
-  · cases done
-  · cases done
-    exact ⟨rfl, rfl⟩
-
 /-- Replay stored records onto a loaded image through the shared executor, one
 `Loaded.extend` each. The result's image is the given one followed by exactly
 these records. -/
 def Loaded.replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     (records : List IntentRecord) →
     Except String {next : Loaded rootBytes //
-      next.image = ⟨loaded.image.seed, loaded.image.accepted ++ records⟩ ∧
+      next.image = Image.ofAccepted loaded.image.seed (loaded.image.accepted ++ records) ∧
         next.logStart = loaded.logStart}
-  | [] => .ok ⟨loaded, by rw [List.append_nil], rfl⟩
+  | [] => .ok ⟨loaded, by simp, rfl⟩
   | record :: rest =>
       match bound : record.bind? rootBytes with
       | none => .error "durable log record does not bind its roots"
       | some intent =>
-          match prepare loaded.image loaded.baseHeight loaded.base loaded.snapshot
-              loaded.withinLog loaded.resumed intent with
+          match loaded.prepare intent with
           | .inl ready =>
+              match (loaded.extend ready).track with
+              | .lost reason => .error s!"durable log is not a turn log: {reason}"
+              | .held _ _ =>
               match (loaded.extend ready).replay rest with
               | .error message => .error message
               | .ok ⟨next, imaged, started⟩ =>
                   .ok ⟨next, by
                     rw [imaged]
-                    show (⟨loaded.image.seed, (loaded.image.accepted ++
-                      [IntentRecord.ofIntent intent]) ++ rest⟩ : Image) = _
-                    rw [IntentRecord.bind_exact bound, List.append_assoc, List.singleton_append],
+                    change Image.ofAccepted (loaded.extend ready).image.seed
+                      ((loaded.extend ready).image.accepted ++ rest) = _
+                    rw [show (loaded.extend ready).image = loaded.image.append intent from rfl,
+                      Image.accepted_append, IntentRecord.bind_exact bound]
+                    simp only [Image.append, Image.snoc_seed, List.append_assoc,
+                      List.singleton_append],
                     started⟩
           | .inr _ => .error "durable log suffix does not replay through the canonical executor"
 
@@ -363,7 +418,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
   let key ← match ← transport.key with
     | .error message => return .error message
     | .ok key => pure key
-  let height := loaded.image.accepted.length
+  let height := loaded.height
   match ← transport.read (height + 1) false with
   | .error message => return .error message
   | .ok none => return .error "durable store is not initialized"
@@ -400,13 +455,8 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
             some ((trailerCarried entry.tag).map (·.root) |>.getD ⟨0⟩)) then
           return .error "durable log root tag differs from the replayed root"
         let current := { current with headTag := stored.entries.getLast?.map (·.tag) }
-        if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
-          match rebased : current.rebase with
-          | some next =>
-              have kept := Loaded.rebase_image rebased
-              return .ok ⟨next, by rw [kept.1]; exact extended.1,
-                by rw [kept.1]; exact extended.2.1, by rw [kept.2]; exact extended.2.2⟩
-          | none => return .error "rebase at the head does not resume through the canonical executor"
+        if current.height ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
+          return .ok ⟨current.rebase, extended⟩
         return .ok ⟨current, extended⟩
 
 /-- Explicit bootstrap, separate from receipt acceptance. An existing different

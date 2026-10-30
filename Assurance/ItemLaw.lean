@@ -1,7 +1,7 @@
 /-
 # Assurance.ItemLaw — no dupe for a unique item, as a theorem of the item law and the kernel
 
-`deploy/shell/templates/mud/item/law.item.json` (branch `mud-templates`, commit `1ee44ed`), composed
+`native/resource-client/templates/mud/item/law.item.json` (branch `mud-templates`, commit `1ee44ed`), composed
 `all [law.management, clause 1, …, clause 7]`, written out literally in §2. Field numbers are
 `item/fields.json`: id 0, kind 1, owner 2, where 3, worn 4, charges 5.
 
@@ -242,7 +242,7 @@ theorem holder_keeps_unless_holder_writes (p : Params) :
       exact holder_keeps_unless_holder_writes p t.post ts o acc.tail post
         (fun s hs => others s (by simp [stepsOf, hs]))
 
-/-- **`no_dupe_unique`** (MUD.md §2.2 / §5 item 6). Along any accepted history of a unique item:
+/-- **`no_dupe_unique`** (docs/MUD.md §2.2 / §5 item 6). Along any accepted history of a unique item:
 (1) every step is by the holder at that height, or by the referee leaving `owner` present and
 unchanged; (2) so every change of `owner` was written by the owner it took the item from; and
 (3) a holder who never writes keeps the item, whoever else writes. Two subjects never both hold it:

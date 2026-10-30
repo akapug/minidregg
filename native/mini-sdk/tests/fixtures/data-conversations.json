@@ -1,0 +1,102 @@
+{
+  "evidence": "source-derived protocol fixtures; not recorded live receiving-path evidence",
+  "sources": [
+    "package:57dedad4b0275606c24bdb13d995b218/usr/local/lib/python2.7/dist-packages/notebook/services/kernels/handlers.py",
+    "https://github.com/jupyter/jupyter_client/blob/5.0.0/docs/messaging.rst",
+    "package:9365130605f1998f3d4aea205d8768ae/opt/app/lib/dashboard.js",
+    "package:9365130605f1998f3d4aea205d8768ae/opt/app/lib/metric.js",
+    "https://github.com/dwrensha/groovebasin/blob/c6a2cbda0b7a94971f9671a6b4955e1007470556/lib/player_server.js"
+  ],
+  "cases": [
+    {
+      "name": "notebook-reply-then-idle",
+      "wire": "json-v1",
+      "frames": [
+        "{\"header\":{\"msg_type\":\"execute_reply\",\"msg_id\":\"server-execute_reply\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"operation-1\"},\"metadata\":{},\"content\":{\"status\":\"ok\",\"execution_count\":1,\"user_expressions\":{\"answer\":{\"status\":\"ok\",\"data\":{\"text/plain\":\"42\"},\"metadata\":{}}}}}",
+        "{\"header\":{\"msg_type\":\"status\",\"msg_id\":\"server-status\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"operation-1\"},\"metadata\":{},\"content\":{\"execution_state\":\"idle\"}}"
+      ],
+      "expectedTerminals": [
+        "reply",
+        "idle"
+      ]
+    },
+    {
+      "name": "notebook-idle-then-reply-with-unrelated-frame",
+      "wire": "json-v1",
+      "frames": [
+        "{\"header\":{\"msg_type\":\"status\",\"msg_id\":\"server-status\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"other-operation\"},\"metadata\":{},\"content\":{\"execution_state\":\"idle\"}}",
+        "{\"header\":{\"msg_type\":\"status\",\"msg_id\":\"server-status\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"operation-1\"},\"metadata\":{},\"content\":{\"execution_state\":\"idle\"}}",
+        "{\"header\":{\"msg_type\":\"execute_reply\",\"msg_id\":\"server-execute_reply\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"operation-1\"},\"metadata\":{},\"content\":{\"status\":\"ok\",\"execution_count\":1,\"user_expressions\":{\"answer\":{\"status\":\"ok\",\"data\":{\"text/plain\":\"42\"},\"metadata\":{}}}}}"
+      ],
+      "expectedTerminals": [
+        "idle",
+        "reply"
+      ]
+    },
+    {
+      "name": "notebook-idle-only-is-uncertain",
+      "wire": "json-v1",
+      "frames": [
+        "{\"header\":{\"msg_type\":\"status\",\"msg_id\":\"server-status\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"operation-1\"},\"metadata\":{},\"content\":{\"execution_state\":\"idle\"}}"
+      ],
+      "expectedMissing": [
+        "reply"
+      ],
+      "expectedOutcome": "uncertain-after-execute-send"
+    },
+    {
+      "name": "notebook-reply-only-is-uncertain",
+      "wire": "json-v1",
+      "frames": [
+        "{\"header\":{\"msg_type\":\"execute_reply\",\"msg_id\":\"server-execute_reply\",\"date\":\"2026-10-28T12:00:00.000Z\",\"session\":\"kernel-session\",\"username\":\"kernel\",\"version\":\"5.0\"},\"parent_header\":{\"msg_id\":\"operation-1\"},\"metadata\":{},\"content\":{\"status\":\"ok\",\"execution_count\":1,\"user_expressions\":{\"answer\":{\"status\":\"ok\",\"data\":{\"text/plain\":\"42\"},\"metadata\":{}}}}}"
+      ],
+      "expectedMissing": [
+        "idle"
+      ],
+      "expectedOutcome": "uncertain-after-execute-send"
+    },
+    {
+      "name": "hummingbird-correlated-hit-amid-concurrent-hits",
+      "wire": "socket.io-eio4",
+      "frames": [
+        "0{\"sid\":\"source-session\",\"upgrades\":[],\"pingInterval\":25000,\"pingTimeout\":20000}",
+        "40{\"sid\":\"namespace-session\"}",
+        "42[\"hits\",[{\"url\":\"https://grain.test/other\",\"timestamp\":\"2026-10-28T12:00:00.000Z\"},{\"url\":\"https://grain.test/analytics/operation-1\",\"timestamp\":\"2026-10-28T12:00:00.001Z\"}]]"
+      ],
+      "match": {
+        "event": "hits",
+        "where": [
+          {
+            "path": [
+              0
+            ],
+            "contains": {
+              "url": "https://grain.test/analytics/operation-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "groove-live-token-and-full-library-map",
+      "wire": "json-v1",
+      "frames": [
+        "{\"name\":\"token\",\"args\":\"source-derived-token\"}",
+        "{\"name\":\"library\",\"args\":{\"track-1\":{\"key\":\"track-1\",\"name\":\"Mini Typed Tone\",\"artistName\":\"Mini\",\"albumName\":\"Typed Library\",\"file\":\"Mini/Typed Library/01 Mini Typed Tone.wav\",\"duration\":0.5}}}"
+      ],
+      "httpCookie": {
+        "token": "source-derived-token"
+      },
+      "expectedProjection": [
+        {
+          "key": "track-1",
+          "name": "Mini Typed Tone",
+          "artistName": "Mini",
+          "albumName": "Typed Library",
+          "file": "Mini/Typed Library/01 Mini Typed Tone.wav",
+          "duration": 0.5
+        }
+      ]
+    }
+  ]
+}

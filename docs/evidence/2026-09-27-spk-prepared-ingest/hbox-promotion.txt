@@ -1,0 +1,9 @@
+2026-09-27 hbox root-owned physical helper promotion (no Store/image/volume action)
+directory /opt/minidregg-gitweb-r3-20260927/bin root:root 0755
+ancestor /opt root:root 0755
+all files root:root 0755 nlink=1
+45a5e393f6145975d63e9331a134416bdf9e963a43dd9d2d37ea25072a3e1603  /opt/minidregg-gitweb-r3-20260927/bin/spk-host-8d7a3f8
+3f007ea5813b4a680e491147ea72428574dc0421b1728dd8f143295494d465ba  /opt/minidregg-gitweb-r3-20260927/bin/spk-ingest
+c7bf06b51d5a27b0befe06e7c9a23462b8e753c8101a68c6fa6650e2ba128e22  /opt/minidregg-gitweb-r3-20260927/bin/spk-ingest-prepared
+fdb7e29619c182340debc2b88276017fb3c243ce9b390fab524dd12f07f738fa  /opt/minidregg-gitweb-r3-20260927/bin/spk-stage-prepared-inbox
+c9c03020be2ba9029cf7193c3f63047d2bea295c710c4774c6c81a9109d4f13b  /opt/minidregg-gitweb-r3-20260927/bin/spk-var-volume

@@ -17,9 +17,9 @@ def main (args : List String) : IO UInt32 := do
           IO.eprintln "imported source byte capacity";return (2 : UInt32)
       let packageBytes ← IO.FS.readBinFile packagePath
       let artifactBytes ← IO.FS.readBinFile artifactPath
-      let some package := Minidregg.Compiler.ObjectiveSourcePackage.decode packageBytes.toList | do
+      let some package := Minidregg.Compiler.ObjectiveSourcePackage.decodeBytes packageBytes | do
         IO.eprintln "canonical imported Objective package required";return (2 : UInt32)
-      let some artifact := Minidregg.Compiler.ObjectiveBendSourceArtifact.decode artifactBytes.toList | do
+      let some artifact := Minidregg.Compiler.ObjectiveBendSourceArtifact.decodeBytes artifactBytes | do
         IO.eprintln "canonical imported source artifact required";return (2 : UInt32)
       if artifact.package != Minidregg.Compiler.ObjectiveSourcePackage.identity package ||
           Minidregg.Compiler.ObjectiveSourcePackage.selectedDeclaration package != some artifact.declaration then
@@ -40,7 +40,7 @@ def main (args : List String) : IO UInt32 := do
       if ← directory.pathExists then IO.eprintln "replay directory already exists";return (2 : UInt32)
       let raw ← IO.FS.readBinFile packagePath
       if raw.size > 12582912 then IO.eprintln "package byte capacity";return (2 : UInt32)
-      let some package := Minidregg.Compiler.ObjectiveSourcePackage.decode raw.toList | do
+      let some package := Minidregg.Compiler.ObjectiveSourcePackage.decodeBytes raw | do
         IO.eprintln "canonical Objective package required";return (2 : UInt32)
       if !Minidregg.Compiler.ObjectiveSourcePackage.wellFormed package then IO.eprintln "package structure refusal";return (2 : UInt32)
       if package.frontEnd != Minidregg.Compiler.ObjectiveBendFrontEndIdentity.identity then

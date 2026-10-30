@@ -14,6 +14,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = Path("protocol/host-operations.json")
 GENERATED = Path("native/host-operations.rs")
+GENERATED_LEAN = Path("Host/HostOperations.lean")
 
 class Invalid(ValueError):
     pass
@@ -32,10 +33,10 @@ def unique_object(pairs):
 def load(root):
     data = json.loads((root / REGISTRY).read_text(), object_pairs_hook=unique_object)
     require(data.get("format") == "mini-host-request-operations-v1", "unknown operation registry format")
-    require(set(data) == {"format", "operations", "response_markers", "client_constants"}, "unknown registry fields")
+    require(set(data) == {"format", "operations", "response_markers", "consent_plans", "consent_exempt", "client_constants", "consent_frames", "ordinary_headers", "dav_methods", "dav_headers", "dav_header_rules"}, "unknown registry fields")
     ids, symbols = {}, set()
     for entry in data["operations"]:
-        require(set(entry) == {"code", "symbol", "status", "routes", "owner", "purpose", "receiver"}, f"invalid operation fields: {entry}")
+        require(set(entry) == {"code", "symbol", "status", "routes", "owner", "purpose", "receiver", "effect"}, f"invalid operation fields: {entry}")
         code, symbol = entry["code"], entry["symbol"]
         require(type(code) is int and 0 <= code <= 255, f"invalid request byte: {code}")
         require(code not in ids, f"duplicate request allocation: {code}")
@@ -46,14 +47,66 @@ def load(root):
         require(all(isinstance(entry[k], str) and entry[k].strip() for k in ["owner", "purpose"]), f"missing owner/purpose: {symbol}")
         require(entry["receiver"] in {"dispatchSession", "fnDispatch", "serveFrame", None}, f"unknown receiver: {symbol}")
         require((entry["status"] == "reserved") == (entry["receiver"] is None), f"receiver/status mismatch: {symbol}")
+        # effect: whether the receiver can append to the durable log. A thrown handler on an `append`
+        # operation is answered undecided (255), never NO_RECORD (Host/RequestRefusal.lean exceptionAnswer).
+        require(entry["effect"] in {"none", "append"}, f"invalid effect: {symbol}")
+        require(entry["status"] == "active" or entry["effect"] == "none", f"reserved operation with an effect: {symbol}")
+        require(not (entry["status"] == "active" and symbol.endswith("_SUBMIT")) or entry["effect"] == "append",
+                f"active submit operation without effect append: {symbol}")
         ids[code] = entry
         symbols.add(symbol)
-    responses = set()
+    responses, markers = set(), set()
     for entry in data["response_markers"]:
-        require(set(entry) == {"code", "purpose", "request_reserved"} and type(entry["code"]) is int and type(entry["request_reserved"]) is bool, "invalid response marker")
+        require(set(entry) == {"code", "symbol", "purpose", "request_reserved"} and type(entry["code"]) is int and type(entry["request_reserved"]) is bool, "invalid response marker")
         require(0 <= entry["code"] <= 255 and entry["code"] not in responses, "duplicate/invalid response marker")
+        require(isinstance(entry["symbol"], str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", entry["symbol"]), f"invalid response marker symbol: {entry['symbol']}")
+        require(entry["symbol"] not in markers, f"duplicate response marker symbol: {entry['symbol']}")
+        markers.add(entry["symbol"])
         require(not entry["request_reserved"] or entry["code"] not in ids, f"request collides with reserved response marker: {entry['code']}")
         responses.add(entry["code"])
+    # The operator plans a client checks against its local consent provider (frame 224) before any
+    # signing consumer sees the operator's reply. Each must be an active allocation, listed once.
+    plans = data["consent_plans"]
+    require(isinstance(plans, list) and all(isinstance(p, str) for p in plans), "consent_plans must be a list of operation symbols")
+    require(len(set(plans)) == len(plans), "duplicate consent plan")
+    by_symbol = {e["symbol"]: e for e in ids.values()}
+    for plan in plans:
+        require(plan in by_symbol and by_symbol[plan]["status"] == "active", f"consent plan is not an active operation: {plan}")
+    # Every active signing-plan operation (symbol *_PLAN, *_READY, *_PREPARE) is either consent-checked
+    # (consent_plans) or recorded as exempt WITH its reason (consent_exempt); an unlisted one refuses by name.
+    exempt = data["consent_exempt"]
+    require(isinstance(exempt, dict) and all(isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in exempt.items()), "consent_exempt must map operation symbols to a non-empty reason")
+    for symbol in exempt:
+        require(symbol in by_symbol and by_symbol[symbol]["status"] == "active", f"consent_exempt names no active operation: {symbol}")
+        require(symbol not in plans, f"consent_exempt and consent_plans both list: {symbol}")
+    for symbol, entry in by_symbol.items():
+        if entry["status"] == "active" and re.search(r"_(PLAN|READY|PREPARE)$", symbol):
+            require(symbol in plans or symbol in exempt, f"signing-plan operation neither consent-checked nor recorded exempt: {symbol}")
+    # The local consent provider's frames (Host/ClientConsentCore.lean): a namespace of their own,
+    # 220..239, never a request allocation.
+    frames = set()
+    for entry in data["consent_frames"]:
+        require(set(entry) == {"code", "symbol", "purpose"} and type(entry["code"]) is int, f"invalid consent frame: {entry}")
+        require(220 <= entry["code"] <= 239 and entry["code"] not in frames, f"duplicate/out-of-namespace consent frame: {entry['code']}")
+        require(entry["code"] not in ids, f"consent frame collides with a request allocation: {entry['code']}")
+        require(re.fullmatch(r"CONSENT_[A-Z0-9_]+", entry["symbol"]) and entry["symbol"] not in symbols, f"invalid consent frame symbol: {entry['symbol']}")
+        require(isinstance(entry["purpose"], str) and entry["purpose"].strip(), f"consent frame without purpose: {entry['symbol']}")
+        frames.add(entry["code"])
+    for code in ids:
+        require(not 220 <= code <= 239, f"request allocation inside the consent frame namespace: {code}")
+    # Lean's ordinaryHeaderName (Kernel/ApplicationDispatchAdmission.lean), emitted for every Rust reader.
+    headers = data["ordinary_headers"]
+    require(isinstance(headers, list) and headers and all(isinstance(h, str) and re.fullmatch(r"[a-z0-9-]+", h) for h in headers) and len(set(headers)) == len(headers), "ordinary_headers must be distinct lowercase header names")
+    # Lean's davMethod and davHeaderName: the WebDAV/CalDAV calls and their parameter headers.
+    for field, pattern in (("dav_methods", r"[A-Z]+"), ("dav_headers", r"[a-z0-9-]+")):
+        names = data[field]
+        require(isinstance(names, list) and names and all(isinstance(n, str) and re.fullmatch(pattern, n) for n in names) and len(set(names)) == len(names), f"{field} must be distinct names")
+    require(not set(data["dav_headers"]) & set(headers), "dav_headers must not be ordinary headers")
+    for rule in data["dav_header_rules"]:
+        require(set(rule) == {"name", "methods", "values"}, "invalid DAV header rule")
+        require(rule["name"] in data["dav_headers"] and rule["methods"] and set(rule["methods"]) <= set(data["dav_methods"]), "invalid DAV method/header rule")
+        require(all(isinstance(v, str) and v for v in rule["values"]), "invalid DAV values")
+    require([r["name"] for r in data["dav_header_rules"]] == data["dav_headers"], "DAV rules must cover each header exactly once")
     bindings = set()
     for binding in data["client_constants"]:
         require(set(binding) == {"path", "constant", "operation"}, "invalid client constant binding")
@@ -65,6 +118,9 @@ def load(root):
         require(key not in bindings, f"duplicate client constant binding: {key}")
         bindings.add(key)
     return data, ids
+
+RUST_RAW = re.compile(r'(?:br|r)(#*)"')
+RUST_CHAR = re.compile(r"'(?:[^'\\\n]|\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.))'")
 
 def masked(source, language):
     """Preserve offsets/newlines while masking comments and literal contents.
@@ -93,16 +149,18 @@ def masked(source, language):
                 else: i += 1
             require(depth == 0, "unclosed source block comment")
             blank(start, i); continue
-        if language == "rust":
-            raw = re.match(r'(?:br|r)(#*)"', source[i:])
+        # Positional matches (pattern.match(source, i)), never source[i:]: a slice per character is
+        # quadratic, and the literal scan masks every file of five crates.
+        if language == "rust" and source[i] in "rb'":
+            raw = RUST_RAW.match(source, i)
             if raw:
                 end_marker = '"' + raw[1]
-                end = source.find(end_marker, i + raw.end())
+                end = source.find(end_marker, raw.end())
                 require(end >= 0, "unclosed Rust raw string")
                 end += len(end_marker); blank(i, end); i = end; continue
-            character = re.match(r"'(?:[^'\\\n]|\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.))'", source[i:])
+            character = RUST_CHAR.match(source, i)
             if character:
-                end = i + character.end(); blank(i, end); i = end; continue
+                end = character.end(); blank(i, end); i = end; continue
         if source[i] == '"':
             start = i; i += 1
             while i < len(source) and source[i] != '"':
@@ -210,7 +268,7 @@ def selector_codes(selector, symbols):
             first, last = map(int, interval.groups())
             require(0 <= first <= last <= 255, "invalid opcode selector range")
             codes.extend(range(first, last + 1)); continue
-        symbol = re.fullmatch(r"(?:crate::)?host_operations::([A-Z][A-Z0-9_]*)", part)
+        symbol = re.fullmatch(r"(?:crate::|mini_sdk::)?host_operations::([A-Z][A-Z0-9_]*)", part)
         require(symbol and symbol[1] in symbols, f"unknown Rust opcode selector: {part}")
         codes.append(symbols[symbol[1]])
     require(codes and all(0 <= n <= 255 for n in codes), "invalid Rust operation selector")
@@ -260,20 +318,248 @@ def rust_routes(source, name, symbols):
             i += 1
     raise Invalid(f"{name}: missing false fallback")
 
+def no_append(data):
+    """Active operations whose receiver never appends to the durable log (effect: none)."""
+    return sorted(e["code"] for e in data["operations"] if e["status"] == "active" and e["effect"] == "none")
+
+def by_symbol_codes(data):
+    return {e["symbol"]: e["code"] for e in data["operations"]}
+
+def plan_codes(data):
+    by_symbol = {e["symbol"]: e["code"] for e in data["operations"]}
+    return [by_symbol[p] for p in data["consent_plans"]]
+
+def lean_name(symbol):
+    parts = symbol.lower().split("_")
+    return parts[0] + "".join(part.capitalize() for part in parts[1:])
+
+def generated_lean(data):
+    lines = ["module", "", "@[expose] public section", "",
+             "/-! Generated by `scripts/host-operations.py generate`; edit `protocol/host-operations.json`.",
+             "The Host's copy of the request registry's derived tables: the response markers, the",
+             "append-free operation set the answer discipline reads (`Host.RequestRefusal`) and the",
+             "consent plan list. No payload codec or admission rule lives here. -/", "",
+             "namespace Minidregg.Host.HostOperations", ""]
+    for entry in sorted(data["response_markers"], key=lambda e: e["code"]):
+        lines += [f"/-- {entry['purpose']} -/", f"def {lean_name(entry['symbol'])}Marker : UInt8 := {entry['code']}", ""]
+    lines += ["/-- Active request operations whose receiver never appends to the durable log",
+              "(registry `effect: none`). A handler of one of these that throws is answered a",
+              "proven no-append refusal; on every other operation it is answered undecided. -/",
+              f"def noAppendOperations : List UInt8 := [{', '.join(map(str, no_append(data)))}]", "",
+              "/-- The operator plans a client checks against its local consent provider (frame 224)",
+              "before any signing consumer sees the reply (registry `consent_plans`). -/",
+              f"def consentPlans : List UInt8 := [{', '.join(map(str, plan_codes(data)))}]", "",
+              "/-- Signing-plan operations recorded as NOT consent-checked, each with its reason in the",
+              "registry (`consent_exempt`). -/",
+              f"def consentExemptPlans : List UInt8 := [{', '.join(map(str, sorted(by_symbol_codes(data)[s] for s in data['consent_exempt'])))}]", ""]
+    lines += ["/-- The local consent provider's frames (`Host.ClientConsentCore`), a namespace apart from",
+              "requests (registry `consent_frames`). -/"]
+    for entry in data["consent_frames"]:
+        lines += [f"def {lean_name(entry['symbol'])}Frame : UInt8 := {entry['code']}"]
+    lines += [f"def consentFrames : List UInt8 := [{', '.join(str(e['code']) for e in data['consent_frames'])}]", "",
+              "/-- `Kernel.ApplicationDispatchAdmission.ordinaryHeaderName`'s names (registry `ordinary_headers`). -/",
+              "def ordinaryHeaderNames : List String := [" + ", ".join(json.dumps(h) for h in data["ordinary_headers"]) + "]", "",
+              "/-- `Kernel.ApplicationDispatchAdmission.davMethod`'s and `davHeaderName`'s names. -/",
+              "def davMethodNames : List String := [" + ", ".join(json.dumps(h) for h in data["dav_methods"]) + "]",
+              "def davHeaderNames : List String := [" + ", ".join(json.dumps(h) for h in data["dav_headers"]) + "]", "",
+              "end Minidregg.Host.HostOperations"]
+    return "\n".join(lines) + "\n"
+
+def generated_hosted_dav(data):
+    q = lambda xs: "[" + ", ".join(json.dumps(x) for x in xs) + "]"
+    rows = ["  (" + json.dumps(r["name"]) + ", " + q(r["methods"]) + ", " + q(r["values"]) + ")" for r in data["dav_header_rules"]]
+    return """/- Generated by scripts/host-operations.py; edit protocol/host-operations.json. -/
+module
+@[expose] public section
+namespace Minidregg.Effects.Revival.HostedDav
+/-- Physical parameter vocabulary; empty values means nonempty transport text.
+Destination origin/prefix resolution is the receiving adapter's custody obligation. -/
+def rules : List (String × List String × List String) := [
+""" + ",\n".join(rows) + " ]\n" + "def contract : List UInt8 := " + json.dumps("DREGG/HOSTED-DAV/v1:" + json.dumps(data["dav_header_rules"], sort_keys=True, separators=(",", ":"))) + ".toUTF8.toList\n" + """
+def headerAllowed (method name value : List UInt8) : Bool :=
+  rules.any fun (n, methods, values) =>
+    name == n.toUTF8.toList &&
+    methods.any (fun m => method == m.toUTF8.toList) &&
+    (if values.isEmpty then !value.isEmpty else
+      values.any (fun v => value == v.toUTF8.toList))
+end Minidregg.Effects.Revival.HostedDav
+"""
+
 def generated(data):
     lines = ["// Generated by scripts/host-operations.py generate; edit protocol/host-operations.json.",
-             "// Request byte allocations only. No payload codecs or admission rules live here.",
+             "// Request byte allocations, response markers and the derived operation sets.",
+             "// No payload codecs or admission rules live here.",
              "#![allow(dead_code)]", ""]
     for entry in sorted(data["operations"], key=lambda e: e["code"]):
-        lines += [f"// {entry['status']}; {','.join(entry['routes']) or 'Host stdio only'}; owner: {entry['owner']}",
+        lines += [f"// {entry['status']}; {','.join(entry['routes']) or 'Host stdio only'}; owner: {entry['owner']}; effect: {entry['effect']}",
                   f"pub const {entry['symbol']}: u8 = {entry['code']};"]
+    lines += ["", "// Response markers: the first byte of a reply frame, a namespace apart from requests."]
+    for entry in data["response_markers"]:
+        lines += [f"// {entry['purpose']}", f"pub const RESPONSE_{entry['symbol']}: u8 = {entry['code']};"]
+    lines += ["", "// Operator plans checked against the local consent provider (frame 224) before signing."]
+    lines += ["pub const CONSENT_PLANS: &[u8] = &[" + ", ".join(p for p in data["consent_plans"]) + "];"]
+    lines += ["", "// Signing-plan operations recorded as NOT consent-checked, each with its reason in the registry (consent_exempt)."]
+    lines += ["pub const CONSENT_EXEMPT_PLANS: &[u8] = &[" + ", ".join(sorted(data["consent_exempt"])) + "];"]
+    lines += ["", "// Active operations whose receiver never appends to the durable log (effect: none).",
+              "// A reply under RESPONSE_HOST_OUTCOME to any operation is undecided; to one of these it still only ever means undecided.",
+              f"pub const NO_APPEND_OPERATIONS: &[u8] = &[{', '.join(map(str, no_append(data)))}];"]
+    lines += ["", "// The local consent provider's frames (Host/ClientConsentCore.lean), a namespace apart from requests."]
+    for entry in data["consent_frames"]:
+        lines += [f"// {entry['purpose']}", f"pub const {entry['symbol']}: u8 = {entry['code']};"]
+    lines += ["pub const CONSENT_FRAMES: &[u8] = &[" + ", ".join(e["symbol"] for e in data["consent_frames"]) + "];"]
+    lines += ["", "// Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: the signed ordinary request headers.",
+              "pub const ORDINARY_HEADER_NAMES: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["ordinary_headers"]) + "];",
+              "pub fn ordinary_header_name(name: &str) -> bool {", "    ORDINARY_HEADER_NAMES.contains(&name)", "}",
+              "", "// Kernel/ApplicationDispatchAdmission.lean davMethod: the WebSession DAV calls, each an exchange.",
+              "pub const DAV_METHODS: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["dav_methods"]) + "];",
+              "pub fn dav_method(name: &str) -> bool {", "    DAV_METHODS.contains(&name)", "}",
+              "// Kernel/ApplicationDispatchAdmission.lean davHeaderName: signed, admitted on a DAV method only.",
+              "pub const DAV_HEADER_NAMES: &[&str] = &[" + ", ".join(json.dumps(h) for h in data["dav_headers"]) + "];",
+              "pub fn dav_header_name(name: &str) -> bool {", "    DAV_HEADER_NAMES.contains(&name)", "}"]
+    lines += ["", "pub fn dav_header_allowed(method: &str, name: &str, value: &str) -> bool {", "    DAV_HEADER_RULES.iter().any(|(n, methods, values)| *n == name && methods.contains(&method) && if values.is_empty() { !value.is_empty() } else { values.contains(&value) })", "}", "pub const DAV_HEADER_RULES: &[(&str, &[&str], &[&str])] = &["]
+    for r in data["dav_header_rules"]:
+        lines.append("    (" + json.dumps(r["name"]) + ", &[" + ", ".join(json.dumps(m) for m in r["methods"]) + "], &[" + ", ".join(json.dumps(v) for v in r["values"]) + "]),")
+    lines.append("];")
     return "\n".join(lines) + "\n"
+
+# The Rust crates that speak the Host wire (each can name the generated constants).
+WIRE_CRATES = ["mini-sdk", "resource-client", "spk-host", "discord-entrance", "grain-runtime"]
+OP_PARAMETERS = {"operation", "op", "opcode", "request_op", "op_code", "operation_byte", "request_operation"}
+EXEMPT_MARK = "not-a-host-op"
+
+def _arguments(source, start):
+    """Top-level argument spans of the call/signature whose `(` ends just before `start`."""
+    depth, spans, current = 0, [], start
+    for i in range(start, len(source)):
+        ch = source[i]
+        if ch in "([{": depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                spans.append((current, i)); return spans
+            depth -= 1
+        elif ch == "," and depth == 0:
+            spans.append((current, i)); current = i + 1
+    return spans
+
+def rust_literals(root, data):
+    """Every request byte or consent frame written as a decimal literal in a wire crate where the
+    callee's own signature types the argument as an operation (`operation: u8`, `op: u8`, ...), or
+    bound to an `*_OP`/`*_OPERATION`/`*_OPCODE` constant. Such a byte names its generated constant
+    (native/host-operations.rs); a line marked `not-a-host-op` (same or previous line) is exempt.
+    Returns (findings, unregistered): `path:line callee value SYMBOL` rows, and consent-namespace
+    literals (220..239) that no registry entry names."""
+    named = {e["code"]: e["symbol"] for e in data["operations"]}
+    named.update({e["code"]: e["symbol"] for e in data["consent_frames"]})
+    markers = {e["code"]: "RESPONSE_" + e["symbol"] for e in data["response_markers"] if e["code"] >= 253}
+    named.update(markers)
+    files = [f for crate in WIRE_CRATES for f in sorted((root / "native" / crate).rglob("*.rs"))
+             if "target" not in f.parts and f.name != GENERATED.name]
+    sources = {f: f.read_text() for f in files}
+    masks = {f: masked(text, "rust") for f, text in sources.items()}
+    callees = {}
+    signature = re.compile(r"\bfn\s+(\w+)\s*(?:<[^{(]*?>)?\s*\(", re.S)
+    for f, text in masks.items():
+        crate = f.relative_to(root).parts[1]
+        for m in signature.finditer(text):
+            spans = _arguments(text, m.end())
+            method = bool(spans) and text[spans[0][0]:spans[0][1]].strip().endswith("self")
+            for index, (a, b) in enumerate(spans):
+                param = re.fullmatch(r"(?:mut\s+)?(\w+)\s*:\s*u8", text[a:b].strip())
+                if param and param[1] in OP_PARAMETERS:
+                    callees.setdefault((crate, m[1]), set()).add(index - method)
+    findings, unregistered = [], []
+    def report(f, offset, callee, value):
+        line = masks[f].count("\n", 0, offset) + 1
+        lines = sources[f].splitlines()
+        if EXEMPT_MARK in lines[line - 1] or (line > 1 and EXEMPT_MARK in lines[line - 2]): return
+        row = f"{f.relative_to(root)}:{line} {callee} {value} {named.get(value, '?')}"
+        if value in named: findings.append(row)
+        elif 220 <= value <= 239: unregistered.append(row)
+    call = re.compile(r"(?<![\w])(\w+)\s*(?:::<[^>]*>)?\s*\(")
+    for f, text in masks.items():
+        crate = f.relative_to(root).parts[1]
+        for m in call.finditer(text):
+            key = (crate, m[1])
+            if key not in callees or text[max(0, m.start() - 3):m.start()].rstrip().endswith("fn"): continue
+            spans = _arguments(text, m.end())
+            for index in callees[key]:
+                if index < len(spans):
+                    a, b = spans[index]
+                    literal = re.fullmatch(r"\s*(\d+)(?:u8)?\s*", text[a:b])
+                    if literal: report(f, a, m[1], int(literal[1]))
+        for m in re.finditer(r"\bconst\s+(\w*(?:OP|OPERATION|OPCODE)\w*)\s*:\s*u8\s*=\s*(\d+)(?:u8)?\s*;", text):
+            report(f, m.start(), "const " + m[1], int(m[2]))
+        # A frame's first byte matched against literals: `matches!(frame.first(), Some(48 | 58))`,
+        # `if let Some(220) = request.first()` (an operation, a consent frame or a response marker).
+        for m in re.finditer(r"\.first\(\)(?:\.copied\(\))?\s*,\s*Some\(\s*&?\s*(\d+(?:\s*\|\s*&?\s*\d+)*)\s*\)", text):
+            for number in re.finditer(r"\d+", m[1]):
+                report(f, m.start(1) + number.start(), "first()", int(number[0]))
+        for m in re.finditer(r"Some\(\s*&?\s*(\d+(?:\s*\|\s*&?\s*\d+)*)\s*\)\s*=\s*[\w.]+\.first\(\)", text):
+            for number in re.finditer(r"\d+", m[1]):
+                report(f, m.start(1) + number.start(), "first()", int(number[0]))
+        # A `match` on an operation-named variable whose top-level arms are literals (`183 =>`,
+        # `185 | 186 =>`, `183 if guard =>`).
+        for m in re.finditer(r"\bmatch\s+\*?(?:" + "|".join(sorted(OP_PARAMETERS)) + r")\s*\{", text):
+            depth, k, seen = 1, m.end(), set()
+            while depth and k < len(text):
+                c = text[k]
+                depth += c == "{"
+                depth -= c == "}"
+                if depth == 1 and text[k - 1] in ",{\n":
+                    arm = re.match(r"\s*(\d+(?:\s*\|\s*\d+)*)\s*(?:if\b[^=]*)?=>", text[k:])
+                    if arm and k + arm.start(1) not in seen:
+                        seen.add(k + arm.start(1))
+                        for number in re.finditer(r"\d+", arm[1]):
+                            report(f, k + arm.start(1) + number.start(), "match arm", int(number[0]))
+                k += 1
+        # A reply's leading byte compared with a marker: `frame[0] != 255`, `reply.first() != Some(&255)`.
+        for m in re.finditer(r"\b\w+\s*\[\s*0\s*\]\s*(?:==|!=)\s*(\d+)\b", text):
+            if int(m[1]) in markers: report(f, m.start(1), "[0] ==", int(m[1]))
+        for m in re.finditer(r"\.first\(\)(?:\.copied\(\))?\s*(?:==|!=)\s*Some\(\s*&?\s*(\d+)\s*\)", text):
+            if int(m[1]) in markers: report(f, m.start(1), "first() ==", int(m[1]))
+        # A reply classified by its leading marker in a slice pattern: `[255, ..] =>`.
+        for m in re.finditer(r"\[\s*(\d+)\s*,\s*(?:\w+\s*@\s*)?\.\.\s*\]\s*(?:=>|\||if\b)", text):
+            if int(m[1]) in markers: report(f, m.start(1), "[marker, ..]", int(m[1]))
+    return findings, unregistered
+
+def lean_ordinary_headers(root):
+    source = (root / LEAN_HEADERS).read_text()
+    m = re.search(r"def ordinaryHeaderName\b.*?:=\s*\(\[(.*?)\]\s*:\s*List String\)", source, re.S)
+    require(m, "Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName: shape not recognised")
+    return re.findall(r'"([^"]*)"', m[1])
+
+def lean_string_list(root, definition):
+    source = (root / "Kernel/ApplicationDispatchAdmission.lean").read_text()
+    m = re.search(r"def " + definition + r"\b.*?:=\s*\(\[(.*?)\]\s*:\s*List String\)", source, re.S)
+    require(m, f"Kernel/ApplicationDispatchAdmission.lean {definition}: shape not recognised")
+    return re.findall(r'"([^"]*)"', m[1])
+
+def lean_consent_frames(root):
+    """The frame numbers Host/ClientConsentCore.lean dispatches on (match arms, comparisons, ranges)."""
+    source = masked((root / LEAN_CONSENT).read_text(), "lean")
+    found = {int(n) for n in re.findall(r"\|\s*(2[2-3]\d)\s*=>", source)}
+    found |= {int(n) for n in re.findall(r"operation\s*==\s*(2[2-3]\d)\b", source)}
+    for a, b in re.findall(r"operation\s*≥\s*(2[2-3]\d)\s*&&\s*operation\s*≤\s*(2[2-3]\d)", source):
+        found |= set(range(int(a), int(b) + 1))
+    return found
+
+LEAN_HEADERS = Path("Kernel/ApplicationDispatchAdmission.lean")
+LEAN_CONSENT = Path("Host/ClientConsentCore.lean")
+HOST_MAIN = Path("Host/Main.lean")
+TRANSPORT = Path("native/resource-client/src/transport.rs")
+
+def inputs(root, data):
+    """Every path `check` reads, relative to root: the one list a copy of the tree must carry."""
+    paths = {REGISTRY, GENERATED, GENERATED_LEAN, LEAN_HEADERS, LEAN_CONSENT, HOST_MAIN, TRANSPORT, Path("Effects/Revival/HostedDav.lean")}
+    paths.update(Path(binding["path"]) for binding in data["client_constants"])
+    paths.update(f.relative_to(root) for crate in WIRE_CRATES for f in (root / "native" / crate).rglob("*.rs"))
+    return paths
 
 def check(root, check_generated=True):
     data, ids = load(root)
     symbols = {e["symbol"]: e["code"] for e in ids.values()}
-    receivers = host_receivers((root / "Host/Main.lean").read_text())
-    rust = (root / "native/resource-client/src/transport.rs").read_text()
+    receivers = host_receivers((root / HOST_MAIN).read_text())
+    rust = (root / TRANSPORT).read_text()
     public = rust_routes(rust, "allowed_operation", symbols)
     private = rust_routes(rust, "allowed_operator_operation", symbols)
     active = {code for code, entry in ids.items() if entry["status"] == "active"}
@@ -291,9 +577,20 @@ def check(root, check_generated=True):
         require(len(matches) == 1, f"missing/ambiguous bound client constant {binding['path']}:{binding['constant']}")
         values = selector_codes(matches[0], symbols)
         require(values == [symbols[binding["operation"]]], f"client constant drift: {binding['path']}:{binding['constant']} expected {binding['operation']}")
+    require(lean_ordinary_headers(root) == data["ordinary_headers"], "ordinary_headers differ from Kernel/ApplicationDispatchAdmission.lean ordinaryHeaderName (order included)")
+    require(lean_string_list(root, "davMethod") == data["dav_methods"], "dav_methods differ from Kernel/ApplicationDispatchAdmission.lean davMethod (order included)")
+    require(lean_string_list(root, "davHeaderName") == data["dav_headers"], "dav_headers differ from Kernel/ApplicationDispatchAdmission.lean davHeaderName (order included)")
+    frames = {e["code"] for e in data["consent_frames"]}
+    served = lean_consent_frames(root)
+    require(served == frames, f"consent frames: Host/ClientConsentCore.lean serves unregistered {sorted(served - frames)}; registered but not served {sorted(frames - served)}")
+    literals, unregistered = rust_literals(root, data)
+    require(not unregistered, "unregistered consent frame in Rust (register it in consent_frames): " + "; ".join(unregistered[:10]))
+    require(not literals, f"{len(literals)} literal Host operation bytes in Rust; name the generated constant (native/host-operations.rs) or mark the line {EXEMPT_MARK}: " + "; ".join(literals[:10]))
     if check_generated:
+        require((root / "Effects/Revival/HostedDav.lean").read_text() == generated_hosted_dav(data), "generated hosted DAV vocabulary drift")
         require((root / GENERATED).read_text() == generated(data), "generated request constants drift; run scripts/host-operations.py generate")
-    return {"active": len(active), "reserved": len(ids)-len(active), "public": len(public), "operatorOnly": len(private-public), "hostOnly": sorted(active-(public|private)), "clientConstants": len(data["client_constants"])}
+        require((root / GENERATED_LEAN).read_text() == generated_lean(data), "generated Lean operation tables drift; run scripts/host-operations.py generate")
+    return {"active": len(active), "reserved": len(ids)-len(active), "public": len(public), "operatorOnly": len(private-public), "hostOnly": sorted(active-(public|private)), "clientConstants": len(data["client_constants"]), "consentFrames": len(frames), "ordinaryHeaders": len(data["ordinary_headers"])}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -307,6 +604,11 @@ def main():
         temporary = target.with_name(target.name + f".tmp.{os.getpid()}")
         temporary.write_text(generated(data))
         temporary.replace(target)
+        (args.root / "Effects/Revival/HostedDav.lean").write_text(generated_hosted_dav(data))
+        lean_target = args.root / GENERATED_LEAN
+        temporary = lean_target.with_name(lean_target.name + f".tmp.{os.getpid()}")
+        temporary.write_text(generated_lean(data))
+        temporary.replace(lean_target)
     result = check(args.root)
     print("host-operations: " + json.dumps(result, sort_keys=True))
 

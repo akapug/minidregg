@@ -2,9 +2,31 @@
 no proposed command, produced output or caller-chosen authenticated input hash.
 Expected source bytes are independently regenerated through the pinned frontend;
 this codec does not establish frontend adequacy or authorize a native effect. -/
-import Compiler.ObjectiveInvocationClaim
-import Compiler.NativeObservationCodec
-import Kernel.RunComputeBudgetDomain
+module
+
+public import Compiler.ObjectiveInvocationClaim
+public import Compiler.NativeObservationCodec
+public import Kernel.RunComputeBudgetDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendQuoteRequest
 open Minidregg.Theory Minidregg.Theory.TypedAuthorization Minidregg.Theory.IndexedProgram
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -28,7 +50,9 @@ structure Role where
 def Role.target (r : Role) (payload : Payload) : Target :=
   ⟨r.kind,r.resource,r.capability,r.schemaVersion,r.root,payload,
     r.observeCapability,r.audienceEpoch,r.audienceRoster⟩
-def roleStream : StreamCodec Role := StreamCodec.xmap targetStream
+/-- A role always writes the `.read` placeholder payload; a target carrying any
+other payload is not the spelling of a role and is refused (`retract`). -/
+def roleStream : StreamCodec Role := StreamCodec.retract targetStream
   (fun r => r.target .read)
   (fun t => ⟨t.kind,t.target,t.capability,t.schemaVersion,t.expectedTargetRoot,
     t.observeCapability,t.audienceEpoch,t.audienceRoster⟩)

@@ -34,10 +34,29 @@ the kernel's projection is shaped this way is read from `DeclaredResourceProject
 checked by the journey (`jlawsat.sh` submits each witness as a write and the kernel admits
 it); it is not a theorem of this module.
 -/
-import Pred.SatisfiableTotal
-import Compiler.RefusalReason
-import Theory.AssertAxioms
-import Lean.Data.Json
+module
+
+public import Pred.SatisfiableTotal
+public import Compiler.RefusalReason
+public import Theory.AssertAxioms
+public import Lean.Data.Json
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.LawSat
 
@@ -588,7 +607,7 @@ def falsifier : Pred :=
 def admitting : Pred :=
   Pred.all [.le "resource/field/1/after" 0, .monotone "resource/field/1/after"]
 
-/-- The EVAL falsifier: unsatisfiable, and the certificate is the two-constraint cycle
+/-- The falsifier of docs/EVAL.md §2b(b): unsatisfiable, and the certificate is the two-constraint cycle
 `field 1 ≤ 0`, `field 1 ≥ 1`. -/
 theorem falsifier_answer :
     (match answer ⟨falsifier, Pred.all [], false⟩ with

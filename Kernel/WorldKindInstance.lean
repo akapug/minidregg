@@ -4,7 +4,26 @@ Uses the exact descriptor-generated Store, its canonical wire, and Patch.run.
 This is preparation, not authority: the native receiver must add current kind
 export law, capability admission and durable read guards to the resulting turn.
 -/
-import Compiler.WorldKindDescriptor
+module
+
+public import Compiler.WorldKindDescriptor
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.WorldKindInstance
 
@@ -35,8 +54,45 @@ def decode (bytes : List UInt8) : Option Instance := do
       (bytes.drop frame.length)
     let ⟨descriptor, valid⟩ ← decodeDefinition definition
     let store ← StoreCodec.decode (wire descriptor) payload
-    let value := Instance.mk descriptor valid store
-    if ResourceBirthCodec.bytesEqual (encode value) bytes then some value else none
+    some (Instance.mk descriptor valid store)
+
+theorem decodeDefinition_canonical {bytes : List UInt8}
+    {definition : { descriptor : Descriptor // descriptor.Valid }}
+    (decoded : decodeDefinition bytes = some definition) :
+    descriptorCodec.encode definition.val = bytes := by
+  unfold decodeDefinition at decoded
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
+  obtain ⟨descriptor, raw, decoded⟩ := decoded
+  split at decoded
+  · cases decoded
+    exact descriptorStream.toLawful_canonical _ _ raw
+  · cases decoded
+
+/-- **Canonicity.** The frame is compared exactly and every component decoder
+is canonical, so an accepted string is exactly the instance's encoding; the
+decoder needs no re-encode. -/
+theorem decode_canonical {bytes : List UInt8} {value : Instance}
+    (decoded : decode bytes = some value) : encode value = bytes := by
+  unfold decode at decoded
+  split at decoded
+  · cases decoded
+  · rename_i framed
+    have framed : bytes.take frame.length = frame := by simpa using framed
+    simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
+    obtain ⟨⟨definition, payload⟩, pair, decoded⟩ := decoded
+    simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
+    obtain ⟨⟨descriptor, valid⟩, described, decoded⟩ := decoded
+    simp only [Option.bind_eq_bind, Option.bind_eq_some_iff] at decoded
+    obtain ⟨store, stored, decoded⟩ := decoded
+    cases decoded
+    have pairBytes := (StreamCodec.product bytesStream bytesStream).toLawful_canonical _ _ pair
+    have definitionBytes := decodeDefinition_canonical described
+    have storeBytes := StoreCodec.decode_reencodes _ stored
+    calc encode ⟨descriptor, valid, store⟩
+        = bytes.take frame.length ++ bytes.drop frame.length := by
+          unfold encode
+          rw [definitionBytes, storeBytes, pairBytes, framed]
+      _ = bytes := List.take_append_drop _ _
 
 /-- Transport actions name a semantic field, not a positional namespace.
 The expected value is mandatory for replacement/deletion. -/
@@ -90,7 +146,7 @@ def findField (descriptor : Descriptor) (id : Nat) : Option (Fin descriptor.fiel
 
 def decodeValue (descriptor : Descriptor) (space : Fin descriptor.fields.length)
     (bytes : List UInt8) : Option ((layout descriptor).Value space) :=
-  (ResourceBirthCodec.strictCodec (descriptor.fields.get space).codec.stream.toLawful).decode bytes
+  (descriptor.fields.get space).codec.stream.toLawful.decode bytes
 
 /-- One source lowering; clients cannot supply an independent field footprint
 or a differently typed post. Unknown fields and noncanonical values refuse. -/

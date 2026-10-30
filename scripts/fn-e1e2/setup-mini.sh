@@ -72,53 +72,16 @@ if [ "$PUBLIC_KEY" = "$ORDINARY_PUBLIC_KEY" ]; then
   exit 1
 fi
 
-cat >"$ROOT/operator.json" <<EOF
-{
-  "domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
-  "authorityCellId":12,"issuer":5,"ownerBudget":$OWNER_BUDGET,"lifetime":10000,
-  "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
-  "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
-  "genesisHeight":10,"expectedSeed":0,
-  "storageBinary":"$STORE_BINARY","storageRoot":"$ROOT/store",
-  "signatureBinary":"$SIGNATURE_BINARY"
-}
-EOF
-"$HOST" "$ROOT/operator.json" profile >"$ROOT/profile.json"
+# The genesis through the one template (native/resource-client/scenario-genesis.sh): only what
+# this world differs by: the gateway is the sponsor, the ordinary custody one further enrollment.
+jq -n --arg key "$ORDINARY_PUBLIC_KEY" --argjson s "$ORDINARY_SUBJECT" '[
+  {subject: $s, keyId: 8008, publicKey: $key, accountId: $s, spendCapabilityId: 42,
+   controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 100}]' >"$ROOT/enrollments.json"
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$REPO/native/resource-client/scenario-genesis.sh" "$ROOT" "$PUBLIC_KEY" \
+  "del(.grainPlatform) | .ownerBudget = $OWNER_BUDGET | .sponsor.subject = $GATEWAY_SUBJECT | .sponsor.accountId = $GATEWAY_SUBJECT | .sponsor.initialBalance = 100" \
+  "$ROOT/enrollments.json"
 SEMANTICS=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$ROOT/profile.json")
-
-cat >"$ROOT/genesis.json" <<EOF
-{
-  "domain":"8501","factoryId":"10","resourceBookId":"11",
-  "authorityCellId":"12","federation":"9","tariffBase":"3",
-  "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
-  "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
-  "issuerEpoch":"2","genesisHeight":"10",
-  "factoryPredicate":{"type":"all","predicates":[]},
-  "enrollments":[{
-    "key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"$GATEWAY_SUBJECT",
-           "publicKey":"$PUBLIC_KEY","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-    "accountId":"$GATEWAY_SUBJECT","spendCapabilityId":"41","controlCapabilityId":"51",
-    "factoryObserveCapabilityId":"54","initialBalance":"100",
-    "accountPredicate":{"type":"all","predicates":[]}
-  },{
-    "key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"$ORDINARY_SUBJECT",
-           "publicKey":"$ORDINARY_PUBLIC_KEY","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-    "accountId":"$ORDINARY_SUBJECT","spendCapabilityId":"42","controlCapabilityId":"52",
-    "factoryObserveCapabilityId":"55","initialBalance":"100",
-    "accountPredicate":{"type":"all","predicates":[]}
-  }],
-  "factoryControllerSubject":"$GATEWAY_SUBJECT","factoryControllerCapability":"53","clockTickers":[],
-  "tailBound":"256",
-  "meterAllowance":{
-    "incidences":"10000000","turnBytes":"10000000","memoryTouches":"10000000",
-    "witnessBytes":"10000000","proofWork":"10000000","storageBytes":"10000000",
-    "networkBytes":"10000000","sideEffectCount":"10000000","feeDebit":"10000000",
-    "leaseByteBlocks":"10000000"
-  }
-}
-EOF
-
-sh "$GENESIS_PARAMS_SH" fill-source "$ROOT/genesis.json"   # the genesis clock, chosen at genesis time
 "$MINI" bootstrap --host "$HOST" --config "$ROOT/operator.json" \
   --source "$ROOT/genesis.json" --dir "$ROOT/deployment" >"$ROOT/bootstrap.stdout"
 

@@ -12,17 +12,37 @@ capability controllers. The default oracle refuses with the named
 `Reject.noReadOracle`. The command-free `Core` is what quotation reuses.
 A closed registered policy selects source/input/output and resource envelopes;
 actual full writes and guards are checked before an AcceptedInvocation exists. -/
-import Kernel.ObjectiveBendNativeInput
-import Kernel.ObjectiveBendPublishedPackage
-import Compiler.ObjectiveBendPublication
-import Kernel.ObjectiveBendPreparedOutput
-import Compiler.ObjectiveBendCombinedResult
-import Compiler.ObjectiveBendGenericResult
-import Compiler.ObjectiveInvocationClaim
-import Compiler.NativeInvocationProfile
-import Theory.ResourceCost
-import Compiler.Evaluator
-import Kernel.ObjectiveTariff
+module
+
+public import Kernel.ObjectiveBendNativeInput
+public import Kernel.ObjectiveBendPublishedPackage
+public import Compiler.ObjectiveBendPublication
+public import Kernel.ObjectiveBendPreparedOutput
+public import Compiler.ObjectiveBendCombinedResult
+public import Compiler.ObjectiveBendGenericResult
+public import Compiler.ObjectiveInvocationClaim
+public import Compiler.NativeInvocationProfile
+public import Theory.ResourceCost
+public import Compiler.Evaluator
+public import Kernel.ObjectiveTariff
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendNativeAdmission
 open Minidregg.Kernel.ObjectiveTariff
 open Minidregg.Compiler Minidregg.Theory
@@ -98,7 +118,7 @@ def decodePolicy (bytes : List UInt8) : Option Policy :=
   if bytes.take policyFrame.length != policyFrame then none else
     match policyStream.toLawful.decode (bytes.drop policyFrame.length) with
     | none => none
-    | some p => if encodePolicy p == bytes && p.tariff.valid &&
+    | some p => if p.tariff.valid &&
         decide (p.maximum.extractTicks ≤ p.extractTicksPerTurn) then some p else none
 
 theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
@@ -112,7 +132,7 @@ theorem decodePolicy_tariff_valid {bytes : List UInt8} {p : Policy}
       · rename_i ok
         cases Option.some.inj decoded
         simp only [Bool.and_eq_true] at ok
-        exact ok.1.2
+        exact ok.1
       · cases decoded
 
 /-- A decoded policy's per-turn extraction ceiling covers one extraction at its per-extraction
@@ -264,21 +284,25 @@ theorem Output.exact {deployment : Deployment}
   | generic p => exact p.nativeExact
 
 /-- Complete native counters; proofWork remains a signed work envelope charged
-by prepareCompute, while source and forcing ticks have their own exact cap. -/
+by prepareCompute, while source and forcing ticks have their own exact cap.  The
+turn bytes are the retained event's, and the storage lane is the World's
+(`DeployedCharge.storageCharge` of the final writes and event against
+the admission image `snap`): the signed capacity is a ceiling on it, and the
+debit charges the actual number (`DeclaredResourceController.sourceChargeFrom`). -/
 def usage {deployment : Deployment}
     {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
     {result : ObjectiveBendResultAdapter.Profile} {command : Command} {source : AnnotatedTerm}
     {c : ObjectiveInvocationClaim.Capacity} (output : Output deployment loaded result command source c)
-    (inputBytes sourceBytes : List UInt8) (ingress : List UInt8)
-    (writes : List DataWrite) (guards : List ReadGuard) : ResourceCost.Charge
+    (inputBytes sourceBytes : List UInt8) (snap : DataSnapshot ResourceBirthCodec.rootBytes)
+    (event : StableEvent) (writes : List DataWrite) (guards : List ReadGuard) : ResourceCost.Charge
   | .incidences => command.targets.length+1
-  | .turnBytes => ingress.length
+  | .turnBytes => event.canonicalBytes.length
   | .memoryTouches => writes.length+guards.length+output.execution.extraction.result.state.heap.size
   | .witnessBytes => inputBytes.length+sourceBytes.length+
       ((output.plan.effects.map (fun e => BendWorldPlan.effectStream.encode e)).flatten.length +
        (output.plan.returns.map BendWorldPlan.encodeReturn).flatten.length)
   | .proofWork => c.proofWork
-  | .storageBytes => (writes.map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge snap writes event
   | .networkBytes => 0
   | .sideEffectCount => output.plan.effects.length
   | .feeDebit => c.feeDebit
@@ -444,6 +468,18 @@ structure SourceSelection {F : Type} [Field F] [DecidableEq F] {deployment : Dep
   claimInputExact : claim.inputCodec = loaded.artifact.inputCodec
   outputCodecExact : claim.outputCodec = loaded.artifact.outputCodec
   outputRegistered : loaded.artifact.outputCodec ∈ policy.outputs
+theorem SourceSelection.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {ground : Ground deployment} {environment : Environment deployment ground}
+    {profile : CanonicalRuntimeProfile.Profile F} {claim : ObjectiveInvocationClaim.Claim}
+    {read : Read environment profile} {policy : Policy} (source : SourceSelection claim read policy) :
+    ResourceObservationAdmission.readerFields environment.context claim.source.kind claim.source.capability = none ∧
+      read.prepared.observed.before = ⟨.content,source.payload⟩ ∧
+      ObjectiveSourcePackage.selectedDeclaration source.package.package = some source.loaded.artifact.declaration ∧
+      source.package.package.frontEnd = policy.frontEnd ∧ policy.frontEnd = ObjectiveBendFrontEndIdentity.identity ∧
+      claim.inputCodec = source.loaded.artifact.inputCodec ∧ claim.outputCodec = source.loaded.artifact.outputCodec ∧
+      source.loaded.artifact.outputCodec ∈ policy.outputs :=
+  ⟨source.fullScope, source.observedExact, source.declarationExact, source.frontEndExact, source.frontEndOwn,
+    source.claimInputExact, source.outputCodecExact, source.outputRegistered⟩
 
 private def selectSource {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
     {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
@@ -551,6 +587,17 @@ structure Core {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {g
   inputTerm : ObjectiveBendOpenRecursion.Term
   inputTermExact : ObjectiveBendNativeInput.sourceTerm input claim.capacity.inputBytes claim.capacity.scalarBits = .ok inputTerm
   typed : Checked (ObjectiveBendNativeInput.instantiate source.replayed.accepted.source inputTerm) []
+theorem Core.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
+    {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
+    {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) :
+    NativeInvocationProfile.binding profile.receiverParameters .objectiveMethod = some (encodePolicy core.policy) ∧
+      capacityWithin claim.capacity core.policy.maximum = true ∧
+      claim.capacity.proofWork = core.policy.tariff.workOf claim.capacity ∧
+      (∃ funded, environment.compute = some funded ∧
+        funded.steps = claim.capacity.proofWork ∧ funded.credits = claim.capacity.feeDebit) ∧
+      core.input = inputOf core.authenticated ∧
+      ObjectiveInvocationClaim.inputCommitment (ObjectiveBendNativeInput.encode core.input) = claim.expectedInput :=
+  ⟨core.policyExact, core.capacities, core.tariffExact, core.funding, core.inputExact, core.inputCommitted⟩
 
 /-- Every admitted Objective invocation is charged positive work: the signed
 `proofWork` (which `checkedFunding` binds to the fee-first compute preparation)
@@ -574,7 +621,7 @@ def Core.applied {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} 
 def Core.contextBytes {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {ground : Ground deployment}
     {environment : Environment deployment ground} {profile : CanonicalRuntimeProfile.Profile F}
     {claim : ObjectiveInvocationClaim.Claim} (core : Core environment profile claim) : List UInt8 :=
-  "DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT".toUTF8.toList ++ [2] ++
+  "DREGG/OBJECTIVE-BEND/ADMITTED-INPUT-CONTEXT".toUTF8.toList ++ [6] ++
   ObjectiveInvocationClaim.encode claim ++ ObjectiveBendNativeInput.encode core.input ++
   digestStream.encode (ObjectiveBendSourceArtifact.identity core.source.loaded.artifact)
 
@@ -621,11 +668,11 @@ def prepareCore {F : Type} [Field F] [DecidableEq F] {deployment : Deployment} {
       else return .error .objectiveInput
 
 /-- This evidence is indexed by the SAME prepared native command/image and
-final full ingress/write/guard lists. It contains no signature/law permission. -/
+final full event/write/guard lists. It contains no signature/law permission. -/
 structure Admitted {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
     (prepared : PreparedInvocation deployment profile ambient ground command)
-    (ingress : List UInt8) (writes : List DataWrite) (guards : List ReadGuard) where
+    (event : StableEvent) (writes : List DataWrite) (guards : List ReadGuard) where
   private mk ::
   claim : ObjectiveInvocationClaim.Claim
   selected : command.objectiveClaim = .ok (some claim)
@@ -649,7 +696,22 @@ structure Admitted {F : Type} [Field F] [DecidableEq F] {deployment : Deployment
   readsCurrent : ∀ guard ∈ output.plan.reads, guard ∈ guards ∨
     ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre
   fits : usage output (ObjectiveBendNativeInput.encode core.input)
-    (core.source.loaded.record.payload ++ core.source.package.record.payload) ingress writes guards ≤ charge claim.capacity
+    (core.source.loaded.record.payload ++ core.source.package.record.payload) ground.view event writes guards ≤
+      charge claim.capacity
+theorem Admitted.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command}
+    {event : StableEvent} {writes : List DataWrite} {guards : List ReadGuard}
+    (admitted : Admitted prepared event writes guards) :
+    command.objectiveClaim = .ok (some admitted.claim) ∧ admitted.genesisHeight + ground.height = ambient.height ∧
+      (∀ guard ∈ admitted.core.guards, guard ∈ guards ∨
+        ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre) ∧
+      (∀ guard ∈ admitted.output.plan.reads, guard ∈ guards ∨
+        ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre) ∧
+      usage admitted.output (ObjectiveBendNativeInput.encode admitted.core.input)
+        (admitted.core.source.loaded.record.payload ++ admitted.core.source.package.record.payload) ground.view event
+        writes guards ≤ charge admitted.claim.capacity :=
+  ⟨admitted.selected, admitted.heightExact, admitted.inputsCurrent, admitted.readsCurrent, admitted.fits⟩
 
 private def selectResult (policy : Policy) (artifact : ObjectiveBendSourceArtifact.Artifact)
     (command : Command) (codec : Digest) : Option ObjectiveBendResultAdapter.Profile :=
@@ -697,6 +759,11 @@ structure Selection {F : Type} [Field F] [DecidableEq F] {deployment : Deploymen
   genesisHeight : Nat
   heightExact : genesisHeight + ground.height = ambient.height
   core : Core (environment prepared genesisHeight) profile claim
+theorem Selection.sound {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
+    {prepared : PreparedInvocation deployment profile ambient ground command} (selection : Selection prepared) :
+    command.objectiveClaim = .ok (some selection.claim) ∧ selection.genesisHeight + ground.height = ambient.height :=
+  ⟨selection.selected, selection.heightExact⟩
 
 /-- Called ONLY after current original native authority checks. Signature,
 policy and source typing work; no source demand runs here. -/
@@ -717,14 +784,14 @@ def select {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
       | .ok core => return .ok ⟨claim,selected,genesisHeight,heightExact,core⟩
     else return .error .bendExecution
 
-/-- Source demand and exact output binding against the FINAL full ingress,
+/-- Source demand and exact output binding against the FINAL full event,
 writes and guards. Families cannot fall through to ordinary admission;
 malformed source or output refuses. -/
 def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {ground : Ground deployment} {command : Command}
     {prepared : PreparedInvocation deployment profile ambient ground command}
-    (selection : Selection prepared) (ingress : List UInt8)
-    (writes : List DataWrite) (guards : List ReadGuard) : Except Reject (Admitted prepared ingress writes guards) := do
+    (selection : Selection prepared) (event : StableEvent)
+    (writes : List DataWrite) (guards : List ReadGuard) : Except Reject (Admitted prepared event writes guards) := do
   let core := selection.core
   let claim := selection.claim
   if inputsCurrent : ∀ guard ∈ core.guards, guard ∈ guards ∨
@@ -739,7 +806,8 @@ def admit {F : Type} [Field F] [DecidableEq F] {deployment : Deployment}
       if readsCurrent : ∀ guard ∈ output.1.plan.reads, guard ∈ guards ∨
           ∃ write ∈ writes, guard.cellId = write.cellId ∧ guard.expectedRoot = write.expectedPre then
         if fits : usage output.1 (ObjectiveBendNativeInput.encode core.input)
-            (core.source.loaded.record.payload ++ core.source.package.record.payload) ingress writes guards ≤ charge claim.capacity then
+            (core.source.loaded.record.payload ++ core.source.package.record.payload) ground.view event writes
+              guards ≤ charge claim.capacity then
           pure ⟨claim,selection.selected,selection.genesisHeight,selection.heightExact,core,inputsCurrent,
             result,resultExact,output.1,output.2,readsCurrent,fits⟩
         else throw .objectiveUsage

@@ -1,6 +1,27 @@
 /- Source-owned signed custody audit for the exact failed START incarnation. This does not prove that no earlier physical effect occurred. -/
-import Kernel.ApplicationLifecycleClaimV3Projection
-import Kernel.ApplicationLifecycleCompletionV2Report
+module
+
+public import Kernel.ApplicationLifecycleClaimV3Projection
+public import Kernel.ApplicationLifecycleCompletionV2Report
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedStartRecoveryReport
 open Minidregg.Compiler
@@ -113,6 +134,19 @@ structure Checked (domain semantics : Digest) (publicKey : List UInt8)
   shape : signed.report.validFor begin = true
   keyLength : publicKey.length = 32
   signatureLength : signed.signature.length = 64
+  /-- The frame the custodian signature was checked over (the question the oracle was asked). -/
+  frame : List UInt8
+  frameExact : frame = signingFrame domain semantics signed.report
+
+/-- A `Checked` records the frame its signature was verified over: the report under exactly these
+`domain` and `semantics`, by the pinned key of the right length. The oracle's verdict itself is a runtime
+fact (`CheckedSignature`'s caveat); only `check` mints. -/
+theorem Checked.asked {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleBeginV3Ingress.Ingress}
+    (checked : Checked domain semantics publicKey begin) :
+    checked.signed.report.validFor begin = true ∧ publicKey.length = 32 ∧
+      checked.frame = signingFrame domain semantics checked.signed.report :=
+  ⟨checked.shape, checked.keyLength, checked.frameExact⟩
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (domain semantics : Digest) (publicKey : List UInt8)
@@ -123,7 +157,7 @@ def check (native : CredentialSignatureIO.NativeConfig)
       if shape : signed.report.validFor begin = true then
         match ← CredentialSignatureIO.verify native publicKey
             (signingFrame domain semantics signed.report) signed.signature with
-        | .ok true => return .ok ⟨signed, shape, keyLength, signatureLength⟩
+        | .ok true => return .ok ⟨signed, shape, keyLength, signatureLength, _, rfl⟩
         | .ok false => return .error "failed START custodian signature refused"
         | .error _ => return .error "failed START custodian verifier unavailable"
       else return .error "failed START audit/original claim mismatch"

@@ -31,21 +31,16 @@ import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
-import Kernel.Job  -- COMPUTE C1: the job lifecycle as one Pred law (deploy/shell/templates/job/law.job); both poles per edge, no_double_settle, bond_slashed_iff_mismatch, settle_requires_match_or_timeout, caller_cannot_forge_truth
+import Kernel.Job  -- docs/COMPUTE.md §8 C1: the job lifecycle as one Pred law (native/resource-client/templates/job/law.job); both poles per edge, no_double_settle, bond_slashed_iff_mismatch, settle_requires_match_or_timeout, caller_cannot_forge_truth
+import Kernel.AppsRequest  -- APP-MARKET: the app-install request law (the template is its rendering): choice_frozen_after_setup, outcome_once_by_manager, no_install_no_revoke
 import Kernel.SealedMarket  -- SEALED-MARKET: the sealed-bid market law (the template is its rendering) and its guarantees
 
 -- Previously orphaned general carry claims and their regression gates.
 import Theory.CheckedCarry
-import Compiler.LegacyStoreCarryChecks
-import Compiler.CarryConfigurationChecks
 import Verify.JointDecisionRecovery
 -- The Objective Bend front end's compiled vectors (the front end itself is reached through Host.Main).
 import Compiler.Sha256Vectors

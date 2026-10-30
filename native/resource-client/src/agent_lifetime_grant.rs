@@ -17,10 +17,10 @@ const SUBMIT_MARKER: &str = "minidregg-agent-lifetime-grant-submit-attempt-v1";
 const LOOKUP_MARKER: &str = "minidregg-agent-lifetime-grant-lookup-v1";
 const REQUEST_TYPE: &str = "application-agent-lifetime-grant-request-v1";
 const PLAN_TYPE: &str = "application-agent-lifetime-grant-plan-v1";
-const PLAN_OPERATION: u8 = 74;
-const ASSEMBLE_OPERATION: u8 = 75;
-const SUBMIT_OPERATION: u8 = 72;
-const LOOKUP_OPERATION: u8 = 73;
+const PLAN_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_PLAN;
+const ASSEMBLE_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_ASSEMBLE;
+const SUBMIT_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_SUBMIT;
+const LOOKUP_OPERATION: u8 = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_LOOKUP;
 
 // These names are the source-owned Host author/inspection routes. The exact
 // native image and these strings are pinned together by `plan`.
@@ -29,7 +29,7 @@ const PLAN_ROUTE: &str = "application-agent-lifetime-grant-plan";
 
 fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!("grant Host refused op{operation}; frame retained")),
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!("grant Host refused op{operation}; frame retained")),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
         _ => Err(format!("grant op{operation} returned an invalid frame")),
     }
@@ -589,4 +589,20 @@ mod tests {
         wrong["eventId"] = Value::Null;
         assert!(exact_receipt(&wrong).is_err());
     }
+}
+
+/// Read the exact accepted original from the image/config-pinned operator Host.
+/// This issues no grant and does not replace independent dispatch consent.
+pub(crate) fn inspect_accepted(host: &Path, config: &Path, socket: &Path,
+    ingress: &Path, output: &Path) -> Result<()> {
+    private_socket(socket)?;
+    let call = private_bytes(ingress, REQUEST_LIMIT)?;
+    let operation = mini_sdk::host_operations::AGENT_LIFETIME_GRANT_INSPECT;
+    let frame = session_invoke(host, socket, config, operation, &call)?;
+    let body = expect_reply(&frame, operation)?;
+    if body.len() > 2 * 1024 * 1024 {
+        return Err("accepted grant inspection exceeds JSON budget".into());
+    }
+    // Host owns the projection; the client only checks the response framing.
+    create_private(output, body)
 }

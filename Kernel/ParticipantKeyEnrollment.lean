@@ -1,22 +1,27 @@
-import Compiler.SigningKeyCommitment
-/-
-Runtime enrollment of a fresh signing principal. The new key is installed in
-the same canonical authority cell used by every signed receiver. Enrollment
-does not issue a capability or create an account: a current factory-management
-capability, its current law, and the new key holder's proof of possession are
-all required before the authority update and its durable nullifier commit.
+module
 
-A record that commits to a next key (pre-rotation) also needs POSSESSION of
-that next key: the ingress carries the next public key and its signature over
-`nextPossessionFrame` (the enrolled public key and the next public key), and
-admission runs `Theory.KeyPreRotation.enrollGate` -- the same possession rule a
-rotation has (`Accepted.nextPossession`).  A sponsor therefore cannot commit a
-next key it merely names.  It CAN commit a keypair of its own; only the
-subject's client, comparing the commitment with the digest of its own next
-key, refuses that (`workspace init`).
--/
-import Kernel.CapabilityRevocationController
-import Theory.KeyPreRotation
+public import Compiler.SigningKeyCommitment
+public import Kernel.CapabilityRevocationController
+public import Theory.KeyPreRotation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ParticipantKeyEnrollment
 
@@ -89,18 +94,15 @@ def commandStream : StreamCodec Command :=
       ⟨sponsor, control, nonce, factoryRoot, authorityRoot, key⟩)
     (by intro command; cases command; rfl)
 
-def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  { encode := fun value => frame ++ stream.encode value
-    decode := fun bytes => if bytes.take frame.length = frame then
-        stream.toLawful.decode (bytes.drop frame.length) else none
-    decode_encode := by
-      intro value
-      have exact := stream.toLawful.decode_encode value
-      change stream.toLawful.decode (stream.encode value) = some value at exact
-      simp [exact] }
-
+/-- `frame`, checked, then one value: the top-level codec of `StreamCodec.framed`,
+canonical by construction (`framed_canonical`), so decoding never re-encodes. -/
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+  (StreamCodec.framed frame stream).toLawful
+
+theorem framed_canonical {α : Type} {frame : List UInt8} {stream : StreamCodec α}
+    {bytes : List UInt8} {value : α} (decoded : (framed frame stream).decode bytes = some value) :
+    (framed frame stream).encode value = bytes :=
+  (StreamCodec.framed frame stream).toLawful_canonical bytes value decoded
 
 def commandCodec : LawfulCodec Command :=
   framed "DREGG/PARTICIPANT/KEY-ENROLL/v1".toUTF8.toList commandStream
@@ -138,6 +140,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.sponsorEnvelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.sponsorEnvelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -148,9 +155,7 @@ def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
     | none => none
     | some envelope =>
       some ⟨ingress, command,
-        ResourceBirthCodec.strictCodec_canonical
-          (framedRaw "DREGG/PARTICIPANT/KEY-ENROLL/v1".toUTF8.toList commandStream)
-          commandExact, envelope, envelopeExact⟩
+        framed_canonical commandExact, envelope, envelopeExact⟩
 
 def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
@@ -181,7 +186,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.key, command.expectedAuthorityRoot, marker domain semantics command⟩
@@ -313,6 +318,20 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     command.key.activeFrom ≤ authority.snapshot.revision + 1 ∧
     authority.snapshot.revision + 1 ≤ command.key.activeUntil ∧
     command.key.subject ≠ command.sponsor.value
+theorem Prepared.sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : Prepared deployment profile ambient durable command) :
+    command.expectedFactoryRoot = prepared.factory.before.payload.root ∧
+      allKeys prepared.authority.snapshot.logical (fun key => key.subject != command.key.subject) = true ∧
+      allKeys prepared.authority.snapshot.logical (fun key => key.keyId != command.key.keyId) = true ∧
+      allKeys prepared.authority.snapshot.logical (fun key => key.publicKey != command.key.publicKey) = true ∧
+      (command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
+        command.key.publicKey.length = 32 ∧
+        command.key.activeFrom ≤ prepared.authority.snapshot.revision + 1 ∧
+        prepared.authority.snapshot.revision + 1 ≤ command.key.activeUntil ∧
+        command.key.subject ≠ command.sponsor.value) :=
+  ⟨prepared.factory.rootExact, prepared.subjectFresh, prepared.keyIdFresh, prepared.publicKeyFresh,
+    prepared.keyShape⟩
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -466,6 +485,15 @@ structure Accepted [DecidableEq F]
   nextVerified : Bool
   nextGated : KeyPreRotation.enrollGate nextKeyDigest command.key ingress.ingress.nextPublicKey
     (presentedNext ingress.ingress.nextPublicKey nextVerified) = .ok ()
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (policyConfig prepared).portal prepared.authority.snapshot.authState
+        (request deployment prepared.authority.snapshot profile.semantics ambient command)) ∧
+      KeyPreRotation.enrollGate nextKeyDigest command.key ingress.ingress.nextPublicKey
+        (presentedNext ingress.ingress.nextPublicKey accepted.nextVerified) = .ok () :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩, accepted.nextGated⟩
 
 /-- The native verdict on the next-possession signature: `false` (and no call)
 when no next key is presented. -/

@@ -17,8 +17,9 @@
 #                        acceptance or retrieval is never Mini admission.
 #
 # Phases then run through `mini selected-exchange`: prepare and publish under
-# A's key, receive-transport into B's served Store, exact retry,
-# verify-transport. Disclosure, tampered-article, tampered-packet, wrong-signer
+# A's key, receive-transport into B's served Store, exact retry (through the
+# fn consumer unit's ExecStart, deploy/fn/mini-fn-receive@.service),
+# verify-transport. This is the fn consumer worker's journey row. Disclosure, tampered-article, tampered-packet, wrong-signer
 # and wrong-root cases are checked at their recorded boundaries.
 #
 # Usage: selected-exchange-journey.sh HOST MINI STORE VERIFIER FN_LAUNCHER FN_CORE NEW_ROOT
@@ -36,6 +37,8 @@ HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 FN_LAUNCHER=$5 FN_CORE=$6 ROOT=$7
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 NEWPARTICIPANT=$HERE/newparticipant-acceptance.sh
 SCRIPT=$HERE/selected-exchange-journey.sh
+FN_UNIT=$HERE/../../deploy/fn/mini-fn-receive@.service
+[ -f "$FN_UNIT" ] || { echo "fn consumer unit missing: $FN_UNIT" >&2; exit 2; }
 for executable in "$HOST" "$MINI" "$STORE" "$VERIFIER" "$FN_LAUNCHER" "$NEWPARTICIPANT"; do
   case "$executable" in /*) ;; *) echo "path must be absolute: $executable" >&2; exit 2;; esac
   [ -x "$executable" ] || { echo "not executable: $executable" >&2; exit 2; }
@@ -64,7 +67,7 @@ ROOT=$(CDPATH='' cd -- "$ROOT" && pwd)
 A=$ROOT/a B=$ROOT/b FN=$ROOT/fn X=$ROOT/exchange-contract N=$ROOT/negative
 TIMINGS=$ROOT/timings.tsv
 printf 'step\tseconds\n' >"$TIMINGS"
-sha256sum "$SCRIPT" "$NEWPARTICIPANT" "$HOST" "$MINI" "$STORE" "$VERIFIER" \
+sha256sum "$SCRIPT" "$FN_UNIT" "$NEWPARTICIPANT" "$HOST" "$MINI" "$STORE" "$VERIFIER" \
   "$FN_LAUNCHER" "$FN_CORE" >"$ROOT/input-sha256.txt"
 
 FN_PID=
@@ -389,7 +392,7 @@ jq -n --arg host "$HOST" --arg src "$A/deployment/pinned-config.json" \
   --arg post "$FN/post-config.json" --arg fnx "$FNX" --arg core "$FN_CORE" \
   --arg scope "$FN/scope.json" --arg control "$FN/control.sock" \
   --arg rcap "$RECIPIENT_CAP" --arg auth "$AUTHORITY_ROOT" --arg troot "$TARGET_ROOT" \
-  --arg socket "$B/public/mini.sock" --arg gateway "$B/sponsor.key" \
+  --arg socket "$B/public/mini.sock" \
   --arg qintent "$ROOT/verify-intent.json" \
   --arg mid "<m9-$(od -An -tx4 -N8 /dev/urandom | tr -d ' ')@mini.invalid>" \
   '{type:"minidregg-selected-exchange-v1",releaseProfile:"public-peerable-v2",
@@ -402,8 +405,8 @@ jq -n --arg host "$HOST" --arg src "$A/deployment/pinned-config.json" \
     date:"Wed, 30 Sep 2026 06:00:00 +0000",subject:"Selected note from Store A",
     privatePostConfig:$post,fnBinary:$fnx,fnRuntimeImage:$core,fnScope:$scope,
     fnControl:$control,recipientCapability:$rcap,recipientAuthorityRoot:$auth,
-    recipientTargetRoot:$troot,recipientSocket:$socket,recipientOperatorSocket:$socket,
-    gatewayKey:$gateway,recipientQueryIntent:$qintent,recipientQueryKey:$owner}' \
+    recipientTargetRoot:$troot,recipientSocket:$socket,
+    recipientQueryIntent:$qintent,recipientQueryKey:$owner}' \
   >"$ROOT/contract.json"
 jq -n --arg s "$SOURCE_SUBJECT" --arg t "$INBOX" --arg c "$RECIPIENT_CAP" \
   --arg nonce "$(od -An -tu8 -N8 /dev/urandom | tr -d ' ')" \
@@ -443,7 +446,12 @@ cmp "$ROOT/fn-stored-body.bin" "$X/packet.bin"
 [ "$(count_in "$ROOT/fn-stored-body.bin" "$SELECTED_TEXT")" = 1 ]
 [ "$(count_in "$ROOT/fn-stored-body.bin" "$UNSELECTED_TEXT")" = 0 ]
 begin exact-retry
-exchange receive-transport >"$ROOT/receive-retry.stdout"
+# The retry is the fn consumer unit's own ExecStart line, run verbatim: what
+# the timer runs on the box is what this row admits and replays.
+unit_exec=$(sed -n 's/^ExecStart=//p' "$FN_UNIT")
+[ -n "$unit_exec" ] || { echo "no ExecStart in $FN_UNIT" >&2; exit 1; }
+( MINI=$MINI MINI_FN_CONTRACT=$ROOT/contract.json MINI_FN_STATE=$X; export MINI MINI_FN_CONTRACT MINI_FN_STATE
+  eval "$unit_exec" ) >"$ROOT/receive-retry.stdout"
 exchange publish >"$ROOT/publish-retry.stdout"
 end
 confirmed "$X/recipient-attempt/request-0001.outcome.json" replayed
@@ -560,7 +568,7 @@ jq -e '.type == "minidregg-selected-exchange-verified-v1" and .transportOnly == 
 stop_fn
 
 # --- 11. Public summary (no secrets, no raw signatures) ------------------------
-sha256sum "$SCRIPT" "$NEWPARTICIPANT" "$HOST" "$MINI" "$STORE" "$VERIFIER" \
+sha256sum "$SCRIPT" "$FN_UNIT" "$NEWPARTICIPANT" "$HOST" "$MINI" "$STORE" "$VERIFIER" \
   "$FN_LAUNCHER" "$FN_CORE" >"$ROOT/final-input-sha256.txt"
 cmp "$ROOT/input-sha256.txt" "$ROOT/final-input-sha256.txt"
 jq -n --slurpfile receipt "$ROOT/receipt-0000.json" \

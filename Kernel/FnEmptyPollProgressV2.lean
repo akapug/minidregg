@@ -5,7 +5,26 @@ shares the predecessor nullifier with selected coverage event17. A receipt for
 the old tag9 may be an audited historical anchor, never a claim that the old
 receiver enforced this order at its original admission.
 -/
-import Kernel.FnConsumerFrontierCore
+module
+
+public import Kernel.FnConsumerFrontierCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnEmptyPollProgressV2
 
@@ -43,9 +62,8 @@ def evidenceStream : StreamCodec Evidence :=
     (by intro e; cases e; rfl)
 
 def evidenceCodec : LawfulCodec Evidence :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-PROGRESS/v2".toUTF8.toList
-      evidenceStream)
+  NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-PROGRESS/v2".toUTF8.toList
+      evidenceStream
 
 def maxEvidenceBytes : Nat := 4096
 
@@ -93,8 +111,7 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 def specCodec : LawfulCodec Spec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-SPEC/v2".toUTF8.toList specStream)
+  NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-SPEC/v2".toUTF8.toList specStream
 
 structure Ingress where
   spec : Spec
@@ -115,9 +132,8 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-INGRESS/v2".toUTF8.toList
-      ingressStream)
+  NativeHostCodec.framed "DREGG/FN/EMPTY-POLL-INGRESS/v2".toUTF8.toList
+      ingressStream
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash

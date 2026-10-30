@@ -14,9 +14,9 @@ Slot names are short so the kernel evaluates the emitted systems quickly; they s
 `alive` = `joint/index/1/field/alive/after`. The atoms read slot names opaquely, so nothing
 depends on the spelling.
 
-The combat law is MUD.md §2.4's balance clause at `COST = 3`: a strike is lawful only when the
+The combat law is the balance clause of docs/MUD.md §2.3 at `COST = 3`: a strike is lawful only when the
 attacker's new balance timestamp is at least `now + 3`. It is written twice: directly with a
-negative offset, `now ≤ bal − 3`, and in MUD.md's spelling `not (bal ≤ now + (COST − 1))`.
+negative offset, `now ≤ bal − 3`, and in the design's negated spelling `not (bal ≤ now + (COST − 1))`.
 -/
 import Compiler.PredCompile
 
@@ -150,13 +150,13 @@ theorem disabled_refuses_leSlots (A : List Nat → Nat → ZMod 17) :
 /-- info: 'Minidregg.Compiler.SlotFoldWitness.story_without_key_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms story_without_key_refused
 
-/-! ### Combat: the balance clause (`leSlotsOff`, MUD.md §2.4, `COST = 3`) -/
+/-! ### Combat: the balance clause (`leSlotsOff`, docs/MUD.md §2.3, `COST = 3`) -/
 
 /-- `bal/after ≥ now + 3`, stated as `now ≤ bal + (−3)`, for a live attacker. -/
 def strikeLaw : Pred := Pred.all
   [.eq "alive" 1, .leSlotsOff "now" "bal" (-3)]
 
-/-- MUD.md's spelling: `not (leSlotsOff bal now (COST − 1))`, i.e. `¬ (bal ≤ now + 2)`. -/
+/-- The design's negated spelling: `not (leSlotsOff bal now (COST − 1))`, i.e. `¬ (bal ≤ now + 2)`. -/
 def strikeLawMud : Pred := Pred.all
   [.eq "alive" 1, .not (.leSlotsOff "bal" "now" 2)]
 
@@ -203,12 +203,12 @@ theorem strike_unclocked_refused (A : List Nat → Nat → ZMod 17) :
   rw [hfalse] at holds
   contradiction
 
-/-- MUD.md's spelling admits the paid strike through the compiler. -/
+/-- The negated spelling admits the paid strike through the compiler. -/
 theorem strike_mud_paid_accepts :
     systemAccepts (stepAsg before paid (wit profile (F := ZMod 17) strikeLawMud before paid))
       (lower profile strikeLawMud) := by decide
 
-/-- MUD.md's spelling refuses the short strike for every auxiliary assignment. -/
+/-- The negated spelling refuses the short strike for every auxiliary assignment. -/
 theorem strike_mud_short_refused (A : List Nat → Nat → ZMod 17) :
     ¬ systemAccepts (stepAsg before short A) (lower profile strikeLawMud) := by
   intro accepted

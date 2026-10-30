@@ -1,12 +1,31 @@
 /-
 Source-owned issuance request for the distinct event27 lifetime grant. The
-ordinary birth leg creates a content resource; only the later special
+source-bound birth leg creates a content resource; only the special
 receiver may join that exact birth with current app delegation and install
 the first canonical grant atom in one durable transaction. This source alone
 neither admits a grant nor extends event21's generation-bound ticket.
 -/
-import Kernel.ApplicationAgentLifetimeGrant
-import Kernel.ApplicationShareIssueSource
+module
+
+public import Kernel.ApplicationAgentLifetimeGrant
+public import Kernel.ApplicationShareIssueSource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeGrantSource
 
@@ -65,9 +84,9 @@ def specStream : StreamCodec Spec :=
       ⟨grant, grantOwnerCapability, grantControlCapability⟩)
     (by intro spec; cases spec; rfl)
 
-def specCodec : LawfulCodec Spec := ResourceBirthCodec.strictCodec
-  (NativeHostCodec.framed
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v1".toUTF8.toList specStream)
+def specCodec : LawfulCodec Spec :=
+  NativeHostCodec.framed
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SPEC/v5".toUTF8.toList specStream
 
 theorem spec_decode_encode (spec : Spec) :
     specCodec.decode (specCodec.encode spec) = some spec :=
@@ -88,10 +107,10 @@ def ingressStream : StreamCodec Ingress :=
       ⟨spec, birthIngress, appEnvelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressCodec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec
-  (NativeHostCodec.framed
+def ingressCodec : LawfulCodec Ingress :=
+  NativeHostCodec.framed
     "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-INGRESS/v1".toUTF8.toList
-    ingressStream)
+    ingressStream
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 :=
   ingressCodec.encode ingress
@@ -121,11 +140,11 @@ theorem event_retains_ingress (domain : Digest) (ingress : Ingress) :
 theorem event_retains_domain (domain : Digest) (ingress : Ingress) :
     (event domain ingress).domain = domain := rfl
 
-/-- The app request signs both the complete canonical grant and the ordinary
+/-- The app request signs both the complete canonical grant and the source-bound
 birth descriptor, so a grant payload cannot be spliced into another birth. -/
 def sourceBytes (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : List UInt8 :=
-  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v1".toUTF8.toList ++
+  "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-SOURCE/v5".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       (specCodec.encode spec,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode descriptor)
@@ -133,7 +152,7 @@ def sourceBytes (spec : Spec)
 def issueMarker (spec : Spec)
     (descriptor : Descriptor CanonicalCellRegistry.registry) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v1".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-MARKER/v5".toUTF8.toList
     (sourceBytes spec descriptor)).digest.value
 
 def appRequest (domain semantics : Digest) (federation : FederationId)
@@ -148,10 +167,10 @@ def appRequest (domain semantics : Digest) (federation : FederationId)
   target := ⟨spec.grant.participant.app⟩
   verb := .delegateObject
   argsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v1".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-ARGS/v5".toUTF8.toList
     (sourceBytes spec descriptor)).digest
   effectsDigest := (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v1".toUTF8.toList
+    "DREGG/APPLICATION/AGENT-LIFETIME-ISSUE-EFFECTS/v5".toUTF8.toList
     (sourceBytes spec descriptor)).digest
   nonce := spec.grant.approval.nonce
   height := height
@@ -176,7 +195,7 @@ theorem appRequest_delegate (domain semantics : Digest)
       spec descriptor).verb = .delegateObject := rfl
 
 /-- The special event27 finalizes this one atom in the same physical write
-as an otherwise ordinary empty content-resource birth. The issuer's content
+as the source-bound content-resource birth. The issuer's content
 capability alone cannot authorize lifetime app delegation. -/
 def grantPage (domain : Digest) (spec : Spec) (operation : Nat) :
     Except String ContentResource.ContentStore := do
@@ -240,8 +259,12 @@ def Ready.births (ready : Ready domain spec operation) :
 theorem Ready.one_birth (ready : Ready domain spec operation) :
     ready.births.length = 1 := rfl
 
+/-- A root grant of the grant resource, bound by the factory template under the platform
+record (`ResourceBirthPolicyController.Concrete.templateAt`): the record's owner budget and
+lifetime, the profile's issuer. -/
 private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState)
     (height : Nat) (identifier : CapabilityId) (subject : SubjectId)
     (target : Nat) (verbs : Finset (Verb kind)) : Capability kind where
   id := identifier
@@ -249,9 +272,9 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   parent := none
   issuer := profile.template.issuer
   holder := .subject subject
-  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget, none, ∅⟩
+  scope := ⟨.explicit {⟨target⟩}, verbs, record.ownerBudget, none, ∅⟩
   notBefore := height
-  notAfter := height + profile.template.lifetime
+  notAfter := height + record.lifetime
   issuerEpoch := authority.issuerEpoch profile.template.issuer
   policyId := ⟨target⟩
   policyEpoch := authority.policyEpoch ⟨target⟩
@@ -259,16 +282,16 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   channels := ∅
 
 private def ownerGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
-    (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.object, ⟨rootCapability .object profile authority height
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState) (height : Nat) (spec : Spec) : AuthorityGrant :=
+  ⟨.object, ⟨rootCapability .object profile record authority height
       spec.grantOwnerCapability spec.grant.approval.issuer spec.grant.source.resource
       (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
 
 private def controlGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
-    (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.program, ⟨rootCapability .program profile authority height
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState) (height : Nat) (spec : Spec) : AuthorityGrant :=
+  ⟨.program, ⟨rootCapability .program profile record authority height
       spec.grantControlCapability spec.grant.approval.issuer spec.grant.source.resource
       {.installPolicy, .revokeCapability}, []⟩⟩
 
@@ -276,22 +299,45 @@ private def controlGrant {F : Type} [Field F]
 grant content or manage policy. Event26 still checks its current signature,
 revocation, law, and exact physical content root. -/
 private def participantObserveGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (authority : AuthState)
-    (height : Nat) (spec : Spec) : AuthorityGrant :=
-  ⟨.object, ⟨rootCapability .object profile authority height
+    (profile : CanonicalRuntimeProfile.Profile F) (record : PlatformCellLayout.Platform)
+    (authority : AuthState) (height : Nat) (spec : Spec) : AuthorityGrant :=
+  ⟨.object, ⟨rootCapability .object profile record authority height
       spec.grant.participant.grantObserveCapability spec.grant.participant.subject
       spec.grant.source.resource {.observeObject}, []⟩⟩
 
 def Ready.grants {F : Type} [Field F]
     (_ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (authority : AuthState) (height : Nat) : List AuthorityGrant :=
-  [ownerGrant profile authority height spec, controlGrant profile authority height spec,
-    participantObserveGrant profile authority height spec]
+    (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
+    List AuthorityGrant :=
+  [ownerGrant profile record authority height spec,
+    controlGrant profile record authority height spec,
+    participantObserveGrant profile record authority height spec]
 
 theorem Ready.three_grants {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
-    (authority : AuthState) (height : Nat) :
-    (ready.grants profile authority height).length = 3 := rfl
+    (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
+    (ready.grants profile record authority height).length = 3 := rfl
+
+/-- The additional installed authority is the participant's named capability,
+scoped to this one grant resource and observation alone. -/
+def ObserverAuthorityBound (spec : Spec) (grants : List AuthorityGrant) : Prop :=
+  ∃ capability : Capability .object,
+    grants[2]? = some ⟨.object, ⟨capability, []⟩⟩ ∧
+    capability.id = spec.grant.participant.grantObserveCapability ∧
+    capability.holder = .subject spec.grant.participant.subject ∧
+    capability.scope.targets = .explicit {⟨spec.grant.source.resource⟩} ∧
+    capability.scope.verbs = {.observeObject} ∧
+    capability.policyId = ⟨spec.grant.source.resource⟩ ∧
+    capability.parent = none ∧ capability.ancestors = ∅ ∧ capability.channels = ∅
+
+theorem Ready.observer_authority_exact {F : Type} [Field F]
+    (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
+    (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
+    ObserverAuthorityBound spec (ready.grants profile record authority height) := by
+  exact ⟨rootCapability .object profile record authority height
+    spec.grant.participant.grantObserveCapability spec.grant.participant.subject
+    spec.grant.source.resource {.observeObject},
+    rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 /-- The initial policy permits observation but locks ordinary mutation of the
 signed grant atom. Future policy changes are not intrinsically revocations:
@@ -325,14 +371,15 @@ def Ready.initialPolicies {F : Type} [Field F]
     PolicyRecordCodec.encode record⟩]
 
 /-- The factory/Book descriptor is fixed by issuer, nonce, one content birth
-carrying its source-derived first atom, three source-derived capabilities and
-the pinned tariff on that whole payload.  The event27 admission compares the
+carrying its source-derived first atom, three source-derived capabilities bound by the
+platform record's owner budget and lifetime, and the record's creation tariff on that whole
+payload.  The event27 admission compares the
 complete decoded descriptor and checks the current app delegation before the
 birth commits. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation)
     (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHost.Config)
-    (authority : AuthState) (height : Nat)
+    (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat)
     (_domainBound : domain = config.deployment.domain)
     (_operationBound : operation =
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
@@ -349,23 +396,40 @@ def Ready.descriptor {F : Type} [Field F]
       nonce := spec.grant.approval.nonce,
       births := ready.births,
       auxiliaryCreates := [],
-      grants := ready.grants profile authority height,
+      grants := ready.grants profile record authority height,
       initialPolicies := ready.initialPolicies profile config,
       authorityNullifier := identity.value,
       funding := funding,
-      fee := ⟨payer, config.tariff.collector, config.tariff.asset, 0⟩ }
+      fee := ⟨payer, record.creation.collector, record.creation.asset, 0⟩ }
   { draft with fee := { draft.fee with amount :=
-      (draft.quotedFee config.tariff) } }
+      (draft.quotedFee record.creation) } }
 
 def Ready.expectedDescriptor {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHost.Config)
+    (config : NativeHost.Config) (record : PlatformCellLayout.Platform)
     (ready : Ready config.deployment.domain spec
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.grant.approval.issuer spec.grant.approval.nonce).value)
     (authority : AuthState) (height payer : Nat)
     (funding : List InitialFunding := []) :
     Descriptor CanonicalCellRegistry.registry :=
-  ready.descriptor profile config authority height rfl rfl payer funding
+  ready.descriptor profile config record authority height rfl rfl payer funding
+
+/-- Regression: the old ordinary checker can never admit this source's three
+capabilities for one birth, under any template. Selecting the special method is necessary. -/
+theorem Ready.expectedDescriptor_not_ordinary {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHost.Config)
+    (record : PlatformCellLayout.Platform)
+    (template : CanonicalRuntimeProfile.FactoryTemplate)
+    (ready : Ready config.deployment.domain spec
+      (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
+        config.deployment spec.grant.approval.issuer spec.grant.approval.nonce).value)
+    (authority : AuthState) (height payer : Nat) (funding : List InitialFunding) :
+    ¬ ResourceBirthPolicyController.Concrete.TemplateBound template authority height
+      (ready.expectedDescriptor profile config record authority height payer funding) := by
+  intro bound
+  have count := bound.2.2.2
+  change 3 = 2 * 1 at count
+  exact (by decide : ¬ (3 = 2 * 1)) count
 
 end Minidregg.Kernel.ApplicationAgentLifetimeGrantSource

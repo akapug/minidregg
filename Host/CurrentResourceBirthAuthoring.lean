@@ -5,8 +5,12 @@ canonical cells, policies, grants and fee using current height and authority.
 The genesis description is checked against the pinned runtime seed, never
 treated as the current authority snapshot.
 -/
-import Host.Json
-import Kernel.NativeHost
+module
+
+public import Host.Json
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Host.CurrentResourceBirthAuthoring
 
@@ -24,7 +28,8 @@ authored grants. Require a sponsor-signed factory resource observation against
 this exact opened image before deriving or returning those bytes. -/
 def intentLoadedAuthorized (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (signedObservationBytes : List UInt8)
-    (json : Lean.Json) : IO (Except String (List UInt8)) := do
+    (json : Lean.Json) (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) :
+    IO (Except String (List UInt8)) := do
   let refused := "resource birth observation refused"
   let some signed := signedCodec.decode signedObservationBytes
     | return .error refused
@@ -39,11 +44,14 @@ def intentLoadedAuthorized (config : NativeHost.Config)
       config.federation config.genesisHeight signed with
   | .error _ => return .error refused
   | .ok _ =>
-      match Json.birthIntentFrom "$" json (fun path source =>
-          Json.birthCurrent path source config
+      let some current := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+        | return .error "platform cell unavailable: the image holds no platform record to price a birth from"
+      match SourceAgreementJson.birthIntentFrom "$" json (fun path source =>
+          SourceAgreementJson.birthCurrent path source config
             (NativeHost.logicalHeight config opened.durable)
             opened.authority.snapshot.authState
-            (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)) with
+            (ResourceBirthPolicyController.Concrete.placementLineage opened.authority.snapshot.cell)
+            current providerRoutes) with
       | .error reason => return .error reason
       | .ok intent =>
           if intent.subject != signed.challenge.intent.subject then

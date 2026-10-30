@@ -1,10 +1,10 @@
 //! Compare Mini's read-only op34 inspection to the exact private Host payload
 //! and the authenticated, canonical HTTP request. This is not admission:
 //! source JSON from a caller cannot replace the captured Host response.
-#![allow(dead_code)] // The private signer/op34 invocation is not linked yet.
 
 use serde_json::Value;
 use std::io;
+use crate::canonical::{decimal as canonical_decimal, hex_matches};
 
 const MAX_INSPECTION_BYTES: usize = 96_822_080;
 const MAX_PERMIT_BYTES: usize = 12_102_759; // Host frame also has opcode 34.
@@ -25,13 +25,6 @@ fn string<'a>(object: &'a Value, field: &str) -> io::Result<&'a str> {
         .ok_or_else(|| invalid("Mini inspection field is not text"))
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 fn decimal<'a>(object: &'a Value, field: &str) -> io::Result<&'a str> {
     let value = string(object, field)?;
     if !canonical_decimal(value) {
@@ -40,39 +33,9 @@ fn decimal<'a>(object: &'a Value, field: &str) -> io::Result<&'a str> {
     Ok(value)
 }
 
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        result.push_str(&format!("{byte:02x}"));
-    }
-    result
-}
-
-fn lower_hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 fn hex32(value: &str) -> io::Result<[u8; 32]> {
-    if value.len() != 64 || !lower_hex(value) {
-        return Err(invalid(
-            "Mini checked identity is not 32 lowercase-hex bytes",
-        ));
-    }
-    let mut bytes = [0u8; 32];
-    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        let digit = |byte: u8| -> u8 {
-            if byte.is_ascii_digit() {
-                byte - b'0'
-            } else {
-                byte - b'a' + 10
-            }
-        };
-        bytes[index] = (digit(pair[0]) << 4) | digit(pair[1]);
-    }
-    Ok(bytes)
+    crate::canonical::unhex_array(value)
+        .ok_or_else(|| invalid("Mini checked identity is not 32 lowercase-hex bytes"))
 }
 
 /// Mini Digest Nat is projected as decimal; the physical RPC cache uses the
@@ -143,6 +106,7 @@ pub(crate) struct MatchedInspection {
     pub dispatch_event: String,
     pub session_fingerprint: [u8; 32],
     pub principal: [u8; 32],
+    #[allow(dead_code)] // Projected for agent v1, which council rulings keep untouched.
     pub before_world_root: String,
     pub after_world_root: String,
     pub accepted_count: String,
@@ -174,7 +138,7 @@ pub(crate) fn app_route_path(http: &HttpProjection<'_>) -> io::Result<(String, S
         .split_once('?')
         .unwrap_or((http.path_and_query, ""));
     let app_path = match http.route {
-        Route::Browser => path.to_owned(),
+        Route::Browser => minidregg_signed_api_path::browser_route(path).map_err(invalid)?,
         Route::Api { signed_path } => {
             minidregg_signed_api_path::route(signed_path, path).map_err(invalid)?
         }
@@ -203,7 +167,7 @@ pub(crate) fn match_inspection(
     let parsed: Value = serde_json::from_slice(inspection_json)?;
     if string(&parsed, "type")? != "application-dispatch-committed-inspection-v2"
         || decimal(&parsed, "frameByteCount")? != committed_payload.len().to_string()
-        || string(&parsed, "frameHex")? != hex(committed_payload)
+        || !hex_matches(string(&parsed, "frameHex")?, committed_payload)
     {
         return Err(invalid(
             "Mini inspection does not echo exact private op34 payload",
@@ -250,10 +214,10 @@ pub(crate) fn match_inspection(
     if member(request, "streamed")?.as_bool() != Some(http.method == STREAMED_OPEN_METHOD) {
         return Err(invalid("Mini streamed-dispatch mark differs from the HTTP open"));
     }
-    if string(request, "methodHex")? != hex(http.method.as_bytes())
-        || string(request, "pathHex")? != hex(app_path.as_bytes())
-        || string(request, "queryHex")? != hex(query.as_bytes())
-        || string(request, "bodyHex")? != hex(http.body)
+    if !hex_matches(string(request, "methodHex")?, http.method.as_bytes())
+        || !hex_matches(string(request, "pathHex")?, app_path.as_bytes())
+        || !hex_matches(string(request, "queryHex")?, query.as_bytes())
+        || !hex_matches(string(request, "bodyHex")?, http.body)
     {
         return Err(invalid(
             "Mini committed request differs from authenticated HTTP bytes",
@@ -267,8 +231,8 @@ pub(crate) fn match_inspection(
     }
     for (inspected, (name, value)) in inspected_headers.iter().zip(http.ordered_headers) {
         if member(inspected, "generated")?.as_bool() != Some(false)
-            || string(inspected, "nameHex")? != hex(name.as_bytes())
-            || string(inspected, "valueHex")? != hex(value.as_bytes())
+            || !hex_matches(string(inspected, "nameHex")?, name.as_bytes())
+            || !hex_matches(string(inspected, "valueHex")?, value.as_bytes())
         {
             return Err(invalid("Mini committed ordered header differs from HTTP"));
         }
@@ -346,6 +310,7 @@ pub(crate) fn match_inspection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonical::hex;
     use serde_json::json;
 
     fn fixture(payload: &[u8]) -> Value {

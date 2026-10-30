@@ -2,8 +2,27 @@
 source plans. Entries are extracted from signed account targets by the parent
 receiver; its existing current capability/law/signature admission is mandatory.
 No accepted effect or durable receipt can be obtained from this token alone. -/
-import Kernel.ResourceMoneyWire
-import Compiler.ResourceAuthorityProjection
+module
+
+public import Kernel.ResourceMoneyWire
+public import Compiler.ResourceAuthorityProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceMoneyReceiver
 open Minidregg.Compiler
@@ -49,6 +68,11 @@ structure Prepared (deployment : Deployment) (physical : Physical) (entries : Li
   covered : Covered entries batch
   financial : ResourceMoneyOperationDomain.Prepared loaded.book batch.expectedBookRoot
     loaded.funding batch.operations
+theorem Prepared.consented {deployment : Deployment} {physical : Physical} {entries : List Entry}
+    (prepared : Prepared deployment physical entries) :
+    entries.filterMap (fun entry => entry.consent.batch) = [prepared.batch] ∧
+      Covered entries prepared.batch :=
+  ⟨prepared.batchExact, prepared.covered⟩
 
 def prepare {deployment : Deployment} {physical : Physical} {subject : SubjectId}
     (accounting : Option (RunComputeBudgetDomain.Prepared deployment physical subject))

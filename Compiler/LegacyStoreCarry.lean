@@ -1,12 +1,32 @@
 /-
-Frozen Store2 boundary for the audited 3b1f628a deployment. The generic codec
+Frozen Store2 boundary for the audited 3b1f628a deployment.
+These descriptors spell the deployment's OLD codec names. The generic codec
 below only describes source bytes; it authorizes nothing. The closed role
 converters pin old descriptors and are used only after retained-source audit.
 Transform2 begins each retained hiding key's target ratchet at the carry height;
 it does not assert that historical Store2 writes already followed that ratchet.
 -/
-import Compiler.CanonicalCellRegistry
-import Kernel.PayCellUpgrade
+module
+
+public import Compiler.CanonicalCellRegistry
+public import Kernel.PayCellUpgrade
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.LegacyStoreCarry
 
@@ -27,11 +47,24 @@ def frameV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) : List UInt8 :=
 def encodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (store : Store L) : List UInt8 :=
   frameV2 wire ++ (payloadStream wire).encode store
 
-/-- Fully consumed canonical source bytes, including the frozen outer frame. -/
-def decodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (bytes : List UInt8) : Option (Store L) := do
-  if bytes.take (frameV2 wire).length != frameV2 wire then none else do
-    let store ← decodePayload wire (bytes.drop (frameV2 wire).length)
-    if encodeV2 wire store = bytes then some store else none
+/-- Fully consumed canonical source bytes, including the frozen outer frame.
+The frame is compared exactly and the payload decoder is canonical, so an
+accepted string is exactly an encoding (`decodeV2_canonical`). -/
+def decodeV2 {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) (bytes : List UInt8) : Option (Store L) :=
+  if bytes.take (frameV2 wire).length != frameV2 wire then none else
+    decodePayload wire (bytes.drop (frameV2 wire).length)
+
+theorem decodeV2_canonical {L : Layout.{0, 0, 0}} (wire : StoreCodec.Wire L) {bytes : List UInt8}
+    {store : Store L} (accepted : decodeV2 wire bytes = some store) : encodeV2 wire store = bytes := by
+  unfold decodeV2 at accepted
+  split at accepted
+  · cases accepted
+  · rename_i framed
+    have payload := (decodePayload_eq_some_iff wire _ store).mp accepted
+    have framed : bytes.take (frameV2 wire).length = frameV2 wire := by simpa using framed
+    calc encodeV2 wire store = bytes.take (frameV2 wire).length ++ bytes.drop (frameV2 wire).length := by
+          rw [encodeV2, payload, framed]
+      _ = bytes := List.take_append_drop _ _
 
 private def ns (tag : List UInt8) (discipline : UInt8) (key value : String) : NamespaceDescriptor :=
   (tag, discipline, key.toUTF8.toList, value.toUTF8.toList)
@@ -262,7 +295,8 @@ def convertPayload (kind : Kind) (height : Nat) (bytes : List UInt8) :
       match NockProgramCodec.materializer.codec.decode bytes with
       | some store => .ok store
       | none => .error "carry source Nock program is not canonical"
-  | .content | .policySource | .worldKind | .worldInstance | .objectiveActivity | .seat =>
+  | .content | .policySource | .worldKind | .worldInstance | .objectiveActivity | .seat
+  | .platform =>
       .error "carry role requires a separate closed semantic converter"
 
 end Minidregg.Compiler.LegacyStoreCarry

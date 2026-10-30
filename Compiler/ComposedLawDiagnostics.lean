@@ -1,7 +1,11 @@
 /- Admission uses the complete closure. Public explanations require authority
 for both their source origin and their disclosed target slots. -/
-import Compiler.ComposedPolicyAdmission
-import Compiler.PredRangeLeaf
+module
+
+public import Compiler.ComposedPolicyAdmission
+public import Compiler.PredRangeLeaf
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ComposedLawDiagnostics
 

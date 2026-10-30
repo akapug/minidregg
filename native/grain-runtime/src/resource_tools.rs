@@ -509,10 +509,13 @@ pub(super) fn select_read<'a>(
         .get("name")
         .and_then(Value::as_str)
         .ok_or("mini_read_resource name must be a string")?;
-    reads
-        .iter()
-        .find(|read| read.name == name)
-        .ok_or_else(|| format!("resource read {name} is not allowlisted"))
+    let mut matches = reads.iter().filter(|read| read.name == name);
+    let read = matches.next()
+        .ok_or_else(|| format!("resource read {name} is not allowlisted"))?;
+    if matches.next().is_some() {
+        return Err(format!("resource read {name} is ambiguous"));
+    }
+    Ok(read)
 }
 
 /// A born owner grant has observe and mutate verbs in the source factory law.
@@ -540,18 +543,31 @@ pub(super) fn born_publication(born: &BornResource) -> PublicationGrant {
     }
 }
 
-/// `run` owns the exact child lifetime. Production controller callers should
-/// use its CustodyGate so hard disconnect cancels and reaps a query instead of
-/// leaving an untracked native process.
+/// Only already configured custody can be selected. Controller custody is used
+/// solely after the caller verifies a controller-owned session birth receipt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ResourceReadSigner {
+    Tool,
+    Controller,
+}
+
+/// `run` owns the exact child lifetime. Production callers use CustodyGate so
+/// hard disconnect cancels and reaps a query rather than leaving a child.
 pub(super) fn read_resource_with(
     config: &Config,
     tool: &ToolTask,
     read: &AllowedResourceRead,
     nonce: u64,
+    signer: ResourceReadSigner,
     run: impl FnOnce(&mut Command) -> Result<()>,
 ) -> Result<Value> {
+    let (subject, key) = match signer {
+        ResourceReadSigner::Tool => (&tool.subject, &tool.custody_key),
+        ResourceReadSigner::Controller => (&config.subject, &config.custody_key),
+    };
     if read.observe_capability == tool.capability
         || read.observe_capability == tool.parent_capability
+        || (signer == ResourceReadSigner::Controller && read.observe_capability == config.capability)
     {
         return Err("resource read needs an observe grant distinct from mutation authority".into());
     }
@@ -561,7 +577,7 @@ pub(super) fn read_resource_with(
     let dir = config.state_dir.join(format!("resource-read-{nonce:016}"));
     fs::create_dir(&dir).map_err(|e| format!("resource read directory: {e}"))?;
     let intent = json!({
-        "subject": tool.subject,
+        "subject": subject,
         "nonce": nonce.to_string(),
         "purpose": {
             "type": "query", "kind": read.kind, "target": read.target,
@@ -587,7 +603,7 @@ pub(super) fn read_resource_with(
         .arg("--intent")
         .arg(&intent_path)
         .arg("--key")
-        .arg(&tool.custody_key)
+        .arg(key)
         .arg("--view")
         .arg("resource")
         .arg("--dir")
@@ -676,7 +692,7 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 
 // ---------------------------------------------------------------- room tools
 
-/// Hermes's tools in a room (PLACE §2.7, §5 row 7). Each is one or two lines
+/// Hermes's tools in a room (docs/PLACE.md §2.7, §5 item 7). Each is one or two lines
 /// of the pinned `mini` client's shell, run under HERMES'S OWN workspace (its
 /// key, its references, its grants): no tool holds or lends authority the
 /// workspace lacks, and a line the Host refuses comes back as the Host's
@@ -689,15 +705,16 @@ fn read_bounded(path: &Path, max: usize) -> Result<Vec<u8>> {
 /// refuses that payment at plan (`bookRefused`) and the write is not
 /// attempted: the error starts `out of budget:`.
 ///
-/// Seams: `mini_doc_quote` and `mini_doc_history` (DEOS §2.3) wait for the
+/// Seams: `mini_doc_quote` and `mini_doc_history` (docs/DEOS.md §2.3) wait for the
 /// docuverse-on-final lane (the content cell's transclusion action and the
 /// history view); they are not offered.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RoomToolsConfig {
     /// Offer and accept only room tools for this resident. Generic workspace
-    /// mutations would bypass the room turn payment. Existing setups opt in.
-    #[serde(default)]
+    /// mutations would bypass the room turn payment, so this is on unless a
+    /// config says `"restrictTools": false` explicitly.
+    #[serde(default = "restrict_tools_default")]
     pub restrict_tools: bool,
     /// The pinned `mini` client.
     pub mini: PathBuf,
@@ -714,6 +731,8 @@ pub(crate) struct RoomToolsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
 }
+
+fn restrict_tools_default() -> bool { true }
 
 /// The room tools' MCP schemas (also the provider's function list).
 pub(crate) fn room_tool_specs() -> Vec<Value> {
@@ -756,6 +775,14 @@ pub(crate) fn room_tool_specs() -> Vec<Value> {
             "description":"Append a line to document `doc` (a turn). Admitted only where you hold a grant to write `doc` and its law admits you; otherwise the Host refuses and says why (no-grant, law-denied).",
             "inputSchema":{"type":"object","properties":{"doc":name,"text":{"type":"string","maxLength":3000}},
                 "required":["doc","text"],"additionalProperties":false}}),
+        json!({"name":"mini_pending_awaits",
+            "description":"World programs waiting for YOUR answer: the activities a room member announced in this room (a message `await OBJECT TRANSACTION`) whose current await is a reply slot you decide. Each names its slot, deadline, the object's declared state (the question's data) and who announced it. Signed reads; read-only.",
+            "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}),
+        json!({"name":"mini_answer_await",
+            "description":"Answer one pending await (a turn): decide `slot` with `reply` (the value, in the program's data JSON, e.g. {\"tag\":\"record\",\"fields\":[{\"name\":\"amount\",\"value\":{\"tag\":\"natural\",\"value\":\"5\"}}]}) or `refused` (a reason). Only awaits announced in this room are answerable; the kernel admits only the slot's decider (notDecider) and only once (a decided slot refuses).",
+            "inputSchema":{"type":"object","properties":{"slot":{"type":"string","pattern":"^[0-9]+$","maxLength":80},
+                "reply":{"type":"object"},"refused":{"type":"string","maxLength":500}},
+                "required":["slot"],"additionalProperties":false}}),
     ]
 }
 
@@ -782,6 +809,7 @@ pub(crate) fn validate_room_write(name: &str, arguments: &Value) -> Result<()> {
             bounded_name(arguments, "to")?;
             bounded_decimal(arguments, "relation", 10)?;
         }
+        "mini_answer_await" => { await_answer(arguments)?; }
         _ => return Err(format!("{name} is not a room write tool")),
     }
     Ok(())
@@ -796,7 +824,7 @@ pub(crate) fn compact_doc_rendering(text: &str) -> String {
 }
 
 /// The room tools that write (each one a metered turn).
-pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &["mini_say", "mini_doc_link", "mini_doc_append", "mini_doc_review"];
+pub(crate) const ROOM_WRITE_TOOLS: &[&str] = &["mini_say", "mini_doc_link", "mini_doc_append", "mini_doc_review", "mini_answer_await"];
 
 pub(crate) fn is_room_tool(name: &str) -> bool {
     room_tool_specs().iter().any(|spec| spec["name"] == name)
@@ -852,6 +880,41 @@ fn bounded_text(value: &Value, key: &str) -> Result<String> {
     Ok(text.to_owned())
 }
 
+/// `mini_answer_await`'s arguments: (slot, the answer as `bend answer` takes it).
+fn await_answer(arguments: &Value) -> Result<(String, Value)> {
+    only_keys(arguments, &["slot", "reply", "refused"])?;
+    let slot = bounded_decimal(arguments, "slot", 80)?.ok_or("slot absent")?;
+    let answer = match (arguments.get("reply"), arguments.get("refused")) {
+        (Some(reply), None) if reply.is_object() => json!({"reply": reply}),
+        (None, Some(Value::String(reason))) if !reason.trim().is_empty() && reason.len() <= 500 => json!({"refused": reason}),
+        _ => return Err("answer with exactly one of reply (an object) or refused (a reason)".into()),
+    };
+    if serde_json::to_vec(&answer).map_err(|e| e.to_string())?.len() > 4096 {
+        return Err("an answer is at most 4096 bytes".into());
+    }
+    Ok((slot, answer))
+}
+
+/// The births room members announced to the resident: `await OBJECT TRANSACTION` in an entry
+/// not written by `me`, newest first, at most eight. Announcing in the room is the member's
+/// allowance: a resident answers only programs its room's members named.
+pub(crate) fn announced_awaits(entries: &[Value], me: &str) -> Vec<(String, String, String)> {
+    let mut found: Vec<(String, String, String)> = Vec::new();
+    for entry in entries.iter().rev() {
+        if entry["author"].as_str() == Some(me) { continue; }
+        let author = entry["author"].as_str().unwrap_or("").to_owned();
+        let words: Vec<&str> = entry["text"].as_str().unwrap_or("").split_whitespace().collect();
+        for w in words.windows(3) {
+            let decimal = |t: &str| !t.is_empty() && t.len() <= 80 && t.bytes().all(|b| b.is_ascii_digit());
+            if w[0] == "await" && decimal(w[1]) && decimal(w[2])
+                && !found.iter().any(|(o, t, _)| o == w[1] && t == w[2]) && found.len() < 8 {
+                found.push((w[1].to_owned(), w[2].to_owned(), author.clone()));
+            }
+        }
+    }
+    found
+}
+
 fn only_keys(value: &Value, keys: &[&str]) -> Result<()> {
     let object = value.as_object().ok_or("tool arguments must be an object")?;
     if let Some(extra) = object.keys().find(|k| !keys.contains(&k.as_str())) {
@@ -905,7 +968,7 @@ impl RoomTools<'_> {
 
     fn line_with_input(&self, line: &str, input: Option<&[u8]>, spawned: &mut dyn FnMut(u32)) -> Result<LineRun> {
         let config = self.config;
-        let mut child = Command::new(&config.mini)
+        let mut child = crate::deadline::spawn(Command::new(&config.mini)
             .arg("shell")
             .arg("--socket")
             .arg(&config.socket)
@@ -919,10 +982,7 @@ impl RoomTools<'_> {
             .arg(&config.home)
             .arg("--line")
             .arg(line)
-            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }))
             .map_err(|e| format!("{}: {e}", config.mini.display()))?;
         spawned(child.id());
         if let Some(bytes) = input {
@@ -934,7 +994,10 @@ impl RoomTools<'_> {
                 return Err(format!("discovery stdin: {error}"));
             }
         }
-        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        // On the deadline the submitter's process group is killed and reaped
+        // before this returns, so the journaled submitter is provably stopped.
+        let out = crate::deadline::wait(child, crate::deadline::NATIVE_CALL)
+            .map_err(|e| crate::deadline::describe("mini shell", e))?;
         Ok(LineRun {
             code: out.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -1004,6 +1067,10 @@ impl RoomTools<'_> {
                 let state = docs.next().ok_or("entry lookup printed no room state")?;
                 Ok(json!({"room":state,"entries":docs.collect::<Vec<_>>()}))
             }
+            "mini_pending_awaits" => {
+                only_keys(arguments, &[])?;
+                Ok(json!({"awaits": self.pending_awaits(true)?}))
+            }
             "mini_stream_tail" => {
                 only_keys(arguments, &["n", "since"])?;
                 let n = bounded_decimal(arguments, "n", 6)?.unwrap_or_else(|| "100".into());
@@ -1028,7 +1095,10 @@ impl RoomTools<'_> {
                 only_keys(arguments, &["doc"])?;
                 let doc = bounded_name(arguments, "doc")?;
                 let run = Self::ok_or_ending(self.line(&format!("doc show {doc}"))?)?;
-                Ok(json!({"doc":doc,"text":compact_doc_rendering(&run.stdout),"links":rendered_links(&run.stdout)}))
+                // `doc show` prints the text only; the links come from the
+                // Host's link index (`doc links`).
+                let links = Self::ok_or_ending(self.line(&format!("doc links {doc}"))?)?;
+                Ok(json!({"doc":doc,"text":compact_doc_rendering(&run.stdout),"links":rendered_links(&links.stdout)}))
             }
             _ => Err(format!("{name} is not a room read tool")),
         }
@@ -1061,11 +1131,11 @@ impl RoomTools<'_> {
             Err(error) => return Err(format!("operation record metadata: {error}")),
             Ok(_) => {}
         }
-        let output = Command::new(&self.config.mini)
+        let output = crate::deadline::output(Command::new(&self.config.mini)
             .args(["credit", "--action", "lookup-operation", "--dir"])
             .arg(&self.config.workspace).arg("--operation-record").arg(&record)
-            .arg("--socket").arg(&self.config.socket)
-            .stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+            .arg("--socket").arg(&self.config.socket), crate::deadline::NATIVE_CALL)
+            .map_err(|e| crate::deadline::describe("operation lookup", e))?;
         let recovered = last_json(&String::from_utf8_lossy(&output.stdout));
         let resolution = match recovered.as_ref().filter(|v| v["type"] == "minidregg-operation-recovery-v1").and_then(|v| v["status"].as_str()) {
             Some("confirmed") => "performed",
@@ -1083,7 +1153,7 @@ impl RoomTools<'_> {
         let Some(account) = &self.config.account else {
             return Ok(json!({"paid":false,"note":"unmetered"}));
         };
-        let output = Command::new(&self.config.mini)
+        let output = crate::deadline::output(Command::new(&self.config.mini)
             .arg("credit")
             .arg("--action")
             .arg("turn")
@@ -1098,10 +1168,10 @@ impl RoomTools<'_> {
             .arg("--operation-record")
             .arg(self.operation_record(op, "payment")?)
             .arg("--socket")
-            .arg(&self.config.socket)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| format!("{}: {e}", self.config.mini.display()))?;
+            .arg(&self.config.socket), crate::deadline::NATIVE_CALL)
+            // A timed-out payment may have been sent: the caller recovers it by
+            // its exact operation record, never by this error's text.
+            .map_err(|e| crate::deadline::describe("the turn's payment", e))?;
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
             let run = LineRun { code: output.status.code().unwrap_or(-1), stdout: String::new(), stderr: stderr.into_owned() };
@@ -1194,14 +1264,62 @@ impl RoomTools<'_> {
                 let run = Self::ok_or_ending(self.line_with(&format!("submit {id}"), spawned)?)?;
                 Ok(json!({"proposal":id,"submitted":run.stdout.trim()}))
             }
+            "mini_answer_await" => {
+                let (slot, answer) = await_answer(arguments)?;
+                // The room's allowance, read fresh: the slot must belong to an await a member
+                // announced here. Who decides it and whether it is still open is the kernel's.
+                if !self.pending_awaits(false)?.iter().any(|a| a["slot"].as_str() == Some(slot.as_str())) {
+                    return Err(format!("refused: await-not-in-room: no await announced in {} has slot {slot}", self.config.room));
+                }
+                let dir = self.config.workspace.join("answers");
+                fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                fs::write(dir.join(format!("{id}.json")), json!({"slot":slot}).to_string()).map_err(|e| e.to_string())?;
+                let file = self.request_file(&format!("{id}-answer.json"), &answer.to_string())?;
+                let run = Self::ok_or_ending(self.line_with(&format!("bend answer {slot} @{file}"), spawned)?)?;
+                Ok(json!({"slot":slot,"answered":run.stdout.trim()}))
+            }
             _ => Err(format!("{name} is not a room write tool")),
         }
+    }
+
+    /// The awaits members announced in this room, read through the Host. With `mine`, only those
+    /// whose current await is a reply slot this workspace's subject decides.
+    fn pending_awaits(&self, mine: bool) -> Result<Vec<Value>> {
+        let me = fs::read(self.config.workspace.join("workspace.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|ws| ws["subject"].as_str().map(str::to_owned)).ok_or("the resident's workspace names no subject")?;
+        let tail = self.read("mini_stream_tail", &json!({"n":"200"}))?;
+        let entries: Vec<Value> = tail["entries"].as_array().cloned().unwrap_or_default();
+        let mut awaits = Vec::new();
+        for (object, transaction, announced_by) in announced_awaits(&entries, &me) {
+            let run = Self::ok_or_ending(self.line(&format!("bend await {object} {transaction}"))?)?;
+            let Some(view) = last_json(&run.stdout) else { continue };
+            if view["phase"] != "awaiting" || view["slot"].is_null() { continue; }
+            if mine && view["decider"].as_str() != Some(me.as_str()) { continue; }
+            awaits.push(json!({"object":object,"transaction":transaction,"announcedBy":announced_by,
+                "slot":view["slot"],"decider":view["decider"],"deadline":view["deadline"],"height":view["height"],
+                "state":view["stateText"]}));
+        }
+        Ok(awaits)
     }
 
     /// Exact lookup of operation `op`'s submission (never a resend): its
     /// attempt's outcome after `mini workspace --action recover`.
     pub fn lookup(&self, op: &str) -> Result<Value> {
         let id = Self::proposal(op);
+        let answer = self.config.workspace.join("answers").join(format!("{id}.json"));
+        if answer.exists() {
+            // A resolve turn: its exact retained ingress, looked up by `bend lookup` (never resent).
+            let slot = fs::read(&answer).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|a| a["slot"].as_str().map(str::to_owned)).ok_or("answer record has no slot")?;
+            let name = format!("answer-{}", &crate::sha256_bytes(slot.as_bytes())?[..16]);
+            let run = self.line(&format!("bend lookup {name}"))?;
+            if run.code == 0 && run.stdout.contains("admitted:") {
+                return Ok(json!({"resolution":"performed","basis":"exact-lookup","proposal":id,"detail":run.stdout.trim()}));
+            }
+            if run.code == 3 || run.stdout.contains("no attempt") || run.stderr.contains("no attempt") {
+                return Ok(json!({"resolution":"refused","basis":"host-refusal-or-not-submitted","proposal":id,"detail":run.ending()}));
+            }
+            return Ok(json!({"resolution":"uncertain","basis":"lookup-inconclusive","proposal":id,"detail":run.ending()}));
+        }
         let attempt = self.config.workspace.join("attempts").join(&id);
         if !attempt.join("call.bin").exists() {
             return Ok(json!({"resolution":"refused","basis":"not-submitted","proposal":id}));
@@ -1259,8 +1377,41 @@ impl RoomTools<'_> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn only_awaits_a_member_announced_are_answerable_and_answers_are_shaped() {
+        let entries = vec![
+            json!({"author":"21","text":"hermes, please answer await 12 34 when you can"}),
+            json!({"author":"8","text":"await 99 1"}),
+            json!({"author":"22","text":"await 12 34 again, and await 56 78"}),
+            json!({"author":"21","text":"await x 1 and await 1"}),
+        ];
+        let found = announced_awaits(&entries, "8");
+        assert_eq!(found, vec![("12".into(),"34".into(),"22".into()), ("56".into(),"78".into(),"22".into())],
+            "newest first, deduplicated, never the resident's own words, decimals only");
+        assert_eq!(await_answer(&json!({"slot":"5","reply":{"tag":"natural","value":"7"}})).unwrap().1,
+            json!({"reply":{"tag":"natural","value":"7"}}));
+        assert_eq!(await_answer(&json!({"slot":"5","refused":"no"})).unwrap().1, json!({"refused":"no"}));
+        assert!(await_answer(&json!({"slot":"5"})).is_err());
+        assert!(await_answer(&json!({"slot":"5","reply":{},"refused":"no"})).is_err());
+        assert!(await_answer(&json!({"slot":"x","refused":"no"})).is_err());
+        assert!(validate_room_write("mini_answer_await", &json!({"slot":"5","refused":"no"})).is_ok());
+        assert!(is_room_tool("mini_pending_awaits") && is_room_tool("mini_answer_await"));
+    }
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn restrict_tools_is_on_unless_a_config_turns_it_off() {
+        let base = json!({"mini":"/m","host":"/h","hostConfig":"/c","socket":"/s",
+            "workspace":"/w","home":"/home","room":"lab"});
+        let config: RoomToolsConfig = serde_json::from_value(base.clone()).unwrap();
+        assert!(config.restrict_tools);
+        let mut off = base;
+        off["restrictTools"] = json!(false);
+        let config: RoomToolsConfig = serde_json::from_value(off).unwrap();
+        assert!(!config.restrict_tools);
+    }
 
     #[test]
     fn discovery_pipes_bounded_json_and_never_reads_model_paths() {
@@ -1340,7 +1491,7 @@ mod tests {
             fn_inbox_summary: false,
         };
         let mut entered = false;
-        let error = read_resource_with(&config, &tool, &read, 5, |command| {
+        let error = read_resource_with(&config, &tool, &read, 5, ResourceReadSigner::Tool, |command| {
             entered = true;
             assert_eq!(command.get_program(), "/unused/mini");
             Err("fenced before spawn".into())
@@ -1351,7 +1502,36 @@ mod tests {
         let intent: Value =
             serde_json::from_slice(&fs::read(dir.join("intent-source.json")).unwrap()).unwrap();
         assert_eq!(intent["grants"][0]["capability"], "90");
+        assert_eq!(intent["subject"], "8");
         assert!(!dir.join("attempt").exists());
+        let error = read_resource_with(
+            &config, &tool, &read, 6, ResourceReadSigner::Controller, |command| {
+                let args = command.get_args().collect::<Vec<_>>();
+                let key = args.iter().position(|arg| *arg == "--key").unwrap();
+                assert_eq!(args[key + 1], config.custody_key.as_os_str());
+                Err("controller fenced before spawn".into())
+            },
+        ).unwrap_err();
+        assert!(error.contains("controller fenced before spawn"));
+        let dir = config.state_dir.join("resource-read-0000000000000006");
+        let intent: Value =
+            serde_json::from_slice(&fs::read(dir.join("intent-source.json")).unwrap()).unwrap();
+        assert_eq!(intent["subject"], "7");
+        assert_eq!(intent["grants"][0]["capability"], "90");
+        assert_eq!(intent["purpose"]["target"], "100");
+        assert!(!dir.join("attempt").exists());
+        // A static name must not borrow the signer selected for a born member
+        // of the same name. Reject before choosing either grant/target pair.
+        let mut conflicting = read.clone();
+        conflicting.target = "999".into();
+        assert!(select_read(&[read.clone(), conflicting], &json!({"name":read.name})).is_err());
+        let mut task_grant = read.clone();
+        task_grant.observe_capability = config.capability.clone();
+        assert!(read_resource_with(
+            &config, &tool, &task_grant, 7, ResourceReadSigner::Controller,
+            |_| panic!("task mutation grant must refuse before spawn"),
+        ).is_err());
+        assert!(!config.state_dir.join("resource-read-0000000000000007").exists());
         fs::remove_dir_all(&config.state_dir).unwrap();
     }
 
@@ -1378,6 +1558,8 @@ mod tests {
             registered_shared_applications: vec![],
             allowed_application_api_routes: vec![],
             allowed_application_lifetime_routes: vec![],
+            application_services: vec![],
+            typed_applications: vec![],
             agent_api_host_sha256: None,
             lifetime_api_host_sha256: None,
             current_birth_host_sha256: None,
@@ -1557,6 +1739,9 @@ mod tests {
     fn rendered_links_name_their_targets() {
         let text = "# doc lab-index: document 77 cell root 1 at height 9\n  1  created-by 7   map\nlink 3 -> lab-cell-501 (document 501) relation 0 created-by 42\nlink 4 -> object 502 relation 0 created-by 42\n# 3 cell entries\n";
         assert_eq!(super::rendered_links(text), vec!["501".to_owned(), "502".to_owned()]);
+        // `doc links` as the client prints it: by ID, or by name with the ID.
+        let links = "# links from lab-index (document 77) at height 9\nlink 3 -> object 501 relation 0 revision 4 since 8\nlink 5 -> object lab-cell-502 (target 502) relation 0 revision 6 since 9\n# 2 links\n";
+        assert_eq!(super::rendered_links(links), vec!["501".to_owned(), "502".to_owned()]);
     }
 
     #[test]

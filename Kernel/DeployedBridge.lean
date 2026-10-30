@@ -1,7 +1,7 @@
 /-
 # Kernel.DeployedBridge -- the deployed `Bridge`: the real cell codec, one wire per kind (T3b)
 
-SURPASS §2(b), stage 0, lane T3b.  T3 defined `Represents` over an abstract
+docs/SURPASS.md §2(b), stage 0, lane T3b.  T3 defined `Represents` over an abstract
 `Bridge` and only named the deployed registry.  This module assembles the
 deployed one, so `Represents` is stated over the real codecs:
 
@@ -29,9 +29,28 @@ this bridge says exactly that every deployed cell's bytes ARE the canonical
 encoding of the world's cell, or the retired image over an absent one.  ROM kinds: `policySource_romOnly`, `nockProgram_romOnly` (every store of
 those kinds is a legal birth image).
 -/
-import Kernel.TurnOfIntent
-import Compiler.CanonicalCellRegistry
-import Theory.AssertAxioms
+module
+
+public import Kernel.TurnOfIntent
+public import Compiler.CanonicalCellRegistry
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DeployedBridge
 
@@ -131,6 +150,7 @@ def wireOf : (k : deployedR.Kind) → Wire (deployedR.layout k)
   | .worldInstance => WorldKindCell.instanceWire
   | .objectiveActivity => objectiveActivityWire
   | .seat => seatWire
+  | .platform => Kernel.PlatformCellLayout.wire
 
 /-! ## The cell decoder -/
 
@@ -150,6 +170,7 @@ def unpack (cell : Theory.CellRegistry.PackedCell CanonicalCellRegistry.registry
   rcases cell with ⟨kind, payload⟩
   unfold packOf unpack
   congr 1
+  exact Theory.CellState.Materialized.ext rfl
 
 /-- The canonical bytes of a world slot: the lifecycle image. -/
 def encodeCell : Option (Cell deployedR) → List UInt8
@@ -227,6 +248,22 @@ theorem decodeCell_retired :
   rw [LifecycleImage.decode_encode]
   exact ⟨rfl, rfl⟩
 
+/-- **The deployed per-cell digest** of a slot, the absent slot included:
+the root of its canonical bytes.  It is the one function the deployed history's
+`cellDigest` (what a pin is compared with) and the compact log's digest guard
+(`DeployedTurnCompact`) both use. -/
+def cellRoot (slot : Option (Cell deployedR)) : Theory.TypedAuthorization.Digest :=
+  ResourceBirthCodec.rootBytes (encodeCell slot)
+
+/-- **Pin coherence at the deployed codec**: a slot's bytes that decode and do
+not retire have the root of the slot they decode to. -/
+theorem cellRoot_of_decode {bytes : List UInt8} {slot : Option (Cell deployedR)}
+    (h : decodeCell bytes = some slot) (live : retiresCell bytes = false) :
+    cellRoot slot = ResourceBirthCodec.rootBytes bytes := by
+  rcases decodeCell_canonical h with canonical | ⟨-, retired⟩
+  · unfold cellRoot; rw [canonical]
+  · rw [live] at retired; cases retired
+
 /-! ## The bridge -/
 
 /-- The deployed cell codec: the decoder and the canonical address order of
@@ -238,7 +275,12 @@ def codec : Codec deployedR :=
 /-- **The deployed `Bridge`**: the real cell codec and the injective nullifier
 key. -/
 def bridge : Bridge deployedR Theory.TypedAuthorization.Digest :=
-  ⟨codec, digestKey, digestKey_injective⟩
+  ⟨codec, digestKey, digestKey_injective, id⟩
+
+/-- The deployed pin reading is the identity: an asserted root IS the pin. -/
+@[simp] theorem bridge_pin : bridge.pin = id := rfl
+
+theorem bridge_pin_injective : Function.Injective bridge.pin := fun _ _ h => h
 
 /-- **`Represents`' cells field over the deployed bridge** is exactly: every
 deployed cell's bytes are the canonical encoding of the world's cell, or the
@@ -312,6 +354,8 @@ theorem decodeCell_policySource (record : CanonicalPolicyAdmission.PolicyRecord)
 #assert_axioms packOf_unpack
 #assert_axioms bridge_decode_total_on_registry
 #assert_axioms decodeCell_canonical
+#assert_axioms cellRoot_of_decode
+#assert_axioms bridge_pin_injective
 #assert_axioms decodeCell_retired
 #assert_axioms retiresCell_decode
 #assert_axioms deployed_cells_iff

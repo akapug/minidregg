@@ -1,7 +1,6 @@
 //! One-way controller reserve bridge for lifetime dispatch. The controller
 //! owns the purse key; the resident re-inspects its exact source plan before
 //! accepting per-operation current claims. No reply is a delivery permit.
-#![allow(dead_code)] // The shared v3 listener is enabled in a later cut.
 
 use crate::agent_api_lifetime_v3::{
     match_reserve_plan, operation_fingerprint, CurrentClaims, LifetimeBinding, ReceiptPin,
@@ -15,18 +14,12 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use crate::canonical::{decimal, hex};
 
 const MAX_SOURCE_FRAME: usize = 12_102_759;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn index_precedes_count(index: &str, count: &str) -> bool {
@@ -52,32 +45,11 @@ fn index_precedes_count(index: &str, count: &str) -> bool {
     digits == count.as_bytes()
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        || value.len() > MAX_SOURCE_FRAME * 2
-    {
+    if value.len() > MAX_SOURCE_FRAME * 2 {
         return Err(refused("lifetime source frame hex refused"));
     }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| refused("lifetime hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| refused("lifetime source frame hex refused"))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -208,6 +180,7 @@ pub(crate) struct RetainedReserveV3 {
     pub plan_bytes: Vec<u8>,
     pub context_bytes: Vec<u8>,
     pub request_sha256: String,
+    #[allow(dead_code)] // Agent API v3 is parked (ruling R7); the worker wall bound is not yet enforced from it.
     pub effective_worker_wall_seconds: String,
 }
 
@@ -280,10 +253,7 @@ impl LifetimeReverseClient {
         let sha = reply
             .response_sha256
             .ok_or_else(|| refused("lifetime settlement digest absent"))?;
-        if sha.len() != 64
-            || !sha
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        if !crate::canonical::hex64(&sha)
         {
             return Err(refused("lifetime settlement digest refused"));
         }
@@ -355,10 +325,7 @@ impl LifetimeReverseClient {
         cancelled: &AtomicBool,
         deadline: Instant,
     ) -> io::Result<()> {
-        if response_sha256.len() != 64
-            || !response_sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        if !crate::canonical::hex64(&response_sha256)
         {
             return Err(refused("lifetime definite response digest refused"));
         }
@@ -414,10 +381,7 @@ impl LifetimeReverseClient {
             || reply.signatures.is_empty()
             || reply.signatures.len() > 64
             || reply.signatures.iter().any(|signature| {
-                signature.len() != 128
-                    || !signature
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                !crate::canonical::lower_hex_of(&signature, 64)
             })
         {
             return Err(refused("lifetime payer signatures differ from exact plan"));

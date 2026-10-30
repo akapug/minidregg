@@ -11,17 +11,36 @@ source, construct their accepted incidences from the same Descriptor, and bind
 the old authority cell. Nothing here manufactures those semantic proofs or calls
 a host verdict; it is not a public raw-DataIntent endpoint.
 -/
-import Compiler.ResourceBirthCodec
-import Compiler.CredentialAuthorityReplay
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.GrainResourceBirthAuthority
-import Theory.ResourceBirthAuthority
-import Kernel.CanonicalResourceEffect
-import Kernel.DurableDataIntent
-import Kernel.RoomBirthGate
-import Kernel.BirthExportAdmission
-import Kernel.BirthCandidateAdmission
-import Kernel.ReceivingLaw
+module
+
+public import Compiler.ResourceBirthCodec
+public import Compiler.CredentialAuthorityReplay
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.GrainResourceBirthAuthority
+public import Theory.ResourceBirthAuthority
+public import Kernel.CanonicalResourceEffect
+public import Kernel.DurableDataIntent
+public import Kernel.RoomBirthGate
+public import Kernel.BirthExportAdmission
+public import Kernel.BirthCandidateAdmission
+public import Kernel.ReceivingLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceBirthController
 
@@ -740,6 +759,23 @@ structure PreparedPostAuthority {profile : PolicyCompilerProfile F}
   finalCells : ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
       resources.post authorityWrites, PhysicalPostLaw deployment write
 
+/-- The planned writes of a post-authority preparation (allocations, factory, Book post and the
+given `authorityWrites`) touch distinct cells, each expects exactly the durable snapshot's root at
+its cell, and each final cell satisfies its physical cell law. -/
+theorem PreparedPostAuthority.planExact {profile : PolicyCompilerProfile F}
+    {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
+    {descriptor : Descriptor Registry}
+    {pre : PreparedPreAuthority profile deployment pins durable descriptor}
+    {authorityWrites : List DataWrite} (post : PreparedPostAuthority pre authorityWrites) :
+    ((planWrites deployment descriptor pre.factory.payload pre.book.payload
+        post.resources.post authorityWrites).map DataWrite.cellId).Nodup ∧
+      (∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
+          post.resources.post authorityWrites,
+        write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
+      ∀ write ∈ planWrites deployment descriptor pre.factory.payload pre.book.payload
+          post.resources.post authorityWrites, PhysicalPostLaw deployment write :=
+  ⟨post.writesUnique, post.writePreExact, post.finalCells⟩
+
 def preparePostAuthority {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
     {descriptor : Descriptor Registry}
@@ -1337,5 +1373,6 @@ end Concrete
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed
 #assert_axioms Concrete.unnamedBirth_none_iff Concrete.unnamedBirth_some
+#assert_axioms Concrete.PreparedPostAuthority.planExact
 
 end Minidregg.Kernel.ResourceBirthController

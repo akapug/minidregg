@@ -1,0 +1,157 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "etherpad",
+  "interfaceVersion": 1,
+  "appId": "ksyn7qa4szjwa14v89r7znxwrpjs0dez5q2u8s810d0awnuswmfh",
+  "packageId": "e6d71fa0205f177c6cd7d8d49dfc79e0",
+  "appVersion": "3.3.12-1",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "document.replace": {
+      "description": "Replace pad text through the package import route. Full replacement may overwrite concurrent browser edits; this is not an OT patch or revision-conditional update.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "pad": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "pad",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "const": 0
+          },
+          "message": {
+            "type": "string",
+            "const": "ok"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "p/",
+          {
+            "arg": "pad",
+            "encoding": "segment"
+          },
+          "/import"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "multipart": [
+          {
+            "name": "file",
+            "filename": "document.txt",
+            "contentType": "text/plain",
+            "text": {
+              "arg": "text"
+            }
+          }
+        ]
+      }
+    },
+    "document.read": {
+      "description": "Export current pad plain text from the same grain and pad identity; formatting is not represented.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "pad": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "pad"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "p/",
+          {
+            "arg": "pad",
+            "encoding": "segment"
+          },
+          "/export/txt"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "write",
+      "op": "document.replace",
+      "args": {
+        "pad": {
+          "context": "runId"
+        },
+        "text": "typed document\n"
+      }
+    },
+    {
+      "id": "read",
+      "op": "document.read",
+      "args": {
+        "pad": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [],
+          "equals": "typed document\n"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/sandstorm-org/etherpad-lite-sandstorm",
+    "scripts/spk-platform/market-writes/japps.sh:3",
+    "https://github.com/ether/etherpad/blob/v3.3.12/src/node/handler/ImportHandler.ts",
+    "package:e6d71fa0205f177c6cd7d8d49dfc79e0/opt/app/etherpad-lite/src/node/handler/ImportHandler.ts"
+  ]
+}

@@ -8,9 +8,28 @@ grain/parent/publication command, and renders only Mini's strict application
 source. fn retains hybrid signing, article admission, peering and identity.
 Other Mini origin shapes have no constructor in this renderer.
 -/
-import Kernel.FnPortableSource
-import Kernel.AgentGrain
-import Compiler.ResourceBirthCodec
+module
+
+public import Kernel.FnPortableSource
+public import Kernel.AgentGrain
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.GrainOriginSource
 
@@ -166,11 +185,11 @@ def render (packageBytes : List UInt8) (verifiedReceipt : Receipt)
   match parsed : FnPortableSource.extract source with
   | .error detail => throw s!"authored fn source fails Mini's strict source parser: {detail}"
   | .ok extracted =>
-      if packageExact : ResourceBirthCodec.bytesEqual extracted.package packageBytes then
+      if packageExact : Tower256ConcreteBackend.bytesEqual extracted.package packageBytes then
         if messageExact : extracted.messageId = messageId then
           if groupExact : extracted.groups = context.group then
             have exactBytes : extracted.package = packageBytes :=
-              (ResourceBirthCodec.bytesEqual_eq_true_iff extracted.package packageBytes).mp packageExact
+              (Tower256ConcreteBackend.bytesEqual_eq_true_iff extracted.package packageBytes).mp packageExact
             return ⟨context, selection, packageBytes, verifiedReceipt,
               command.targets.map (·.target), messageId, source, extracted,
               parsed, exactBytes, messageExact, groupExact⟩

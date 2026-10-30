@@ -1,0 +1,2 @@
+<?php
+$conf['showuseras'] = 'username';

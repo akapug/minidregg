@@ -19,6 +19,7 @@
 //! * Mounts. `mounts/<name>` registers a directory the fixture volume helper
 //!   stands up as a mounted `/var` of a given size.
 
+use crate::io_context::IoContext;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -45,7 +46,7 @@ pub(crate) fn root() -> io::Result<PathBuf> {
     let root = PathBuf::from(
         std::env::var_os(ROOT_ENV).ok_or_else(|| invalid("fixture OS root unset ($MINI_FIXTURE_OS)"))?,
     );
-    let meta = fs::symlink_metadata(&root)?;
+    let meta = fs::symlink_metadata(&root).ctx("inspect", &root)?;
     if !root.is_absolute()
         || !meta.is_dir()
         || meta.uid() != euid()
@@ -54,18 +55,6 @@ pub(crate) fn root() -> io::Result<PathBuf> {
         return Err(invalid("fixture OS root must be an absolute principal-owned 0700 directory"));
     }
     Ok(root)
-}
-
-pub(crate) fn root_uid() -> u32 {
-    euid()
-}
-
-pub(crate) fn root_group(gid: u32) -> bool {
-    gid == 0 || gid == unsafe { libc::getegid() }
-}
-
-pub(crate) fn privileged() -> bool {
-    true
 }
 
 pub(crate) fn app_owner(uid: u32, app_uid: u32) -> bool {
@@ -78,12 +67,6 @@ pub(crate) fn runtime_units() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("/nonexistent/fixture-os/units"))
 }
 
-pub(crate) fn host_identity_path() -> PathBuf {
-    root()
-        .map(|root| root.join("host-identity"))
-        .unwrap_or_else(|_| PathBuf::from("/nonexistent/fixture-os/host-identity"))
-}
-
 /// The model's unit manager client, `$MINI_FIXTURE_OS/systemctl` (the fixture
 /// journey installs it as `spk-host fixture-systemctl`).
 pub(crate) fn systemctl() -> Command {
@@ -94,16 +77,6 @@ pub(crate) fn systemctl() -> Command {
     )
 }
 
-/// The modeled identity switch keeps the principal's credentials, so the process
-/// that executes the launcher is the principal: judge the execute bit for it.
-pub(crate) fn executes_as_app(owner: u32, group: u32, mode: u32, _app_uid: u32, _app_gid: u32) -> bool {
-    crate::spawn_gate::execute_mode_permits(owner, group, mode, euid(), unsafe { libc::getegid() })
-}
-
-/// Every pool UID names an account whose primary group has the same number.
-pub(crate) fn account_gid(uid: u32) -> Option<u32> {
-    (uid != 0 && uid != euid()).then_some(uid)
-}
 
 pub(crate) fn self_cgroup() -> io::Result<String> {
     Ok(match std::env::var(CGROUP_ENV) {
@@ -114,7 +87,7 @@ pub(crate) fn self_cgroup() -> io::Result<String> {
 
 /// The session id of a live process (`/proc/<pid>/stat` field 6).
 fn session_of(pid: u32) -> io::Result<u32> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat"))?;
+    let stat = { let stat_path = format!("/proc/{pid}/stat"); fs::read_to_string(&stat_path).ctx("read", &stat_path)? };
     let tail = stat
         .rsplit_once(')')
         .map(|(_, tail)| tail)
@@ -260,7 +233,7 @@ fn read_state(root: &Path, unit: &str) -> io::Result<UnitState> {
 
 fn write_state(root: &Path, unit: &str, state: &UnitState) -> io::Result<()> {
     let dir = root.join("state");
-    fs::create_dir_all(&dir)?;
+    fs::create_dir_all(&dir).ctx("create directory", &dir)?;
     let temp = dir.join(format!(".{unit}.{}.tmp", std::process::id()));
     {
         let mut file = OpenOptions::new()
@@ -268,7 +241,7 @@ fn write_state(root: &Path, unit: &str, state: &UnitState) -> io::Result<()> {
             .create(true)
             .truncate(true)
             .mode(0o600)
-            .open(&temp)?;
+            .open(&temp).ctx("open", &temp)?;
         file.write_all(&serde_json::to_vec(state)?)?;
         file.sync_all()?;
     }
@@ -390,7 +363,7 @@ fn start(root: &Path, unit: &str) -> io::Result<()> {
     if load_unit(root, unit)?.is_none() {
         return Err(invalid(format!("Unit {unit} not found.")));
     }
-    fs::create_dir_all(root.join("logs"))?;
+    fs::create_dir_all(root.join("logs")).ctx("create directory", &(root.join("logs")))?;
     let log = OpenOptions::new()
         .append(true)
         .create(true)
@@ -606,7 +579,7 @@ pub fn unit_run_main(args: &[String]) -> i32 {
         argv_ptr.push(std::ptr::null());
         let mut envp_ptr: Vec<*const libc::c_char> = envp.iter().map(|a| a.as_ptr()).collect();
         envp_ptr.push(std::ptr::null());
-        let devnull = File::open("/dev/null")?;
+        let devnull = File::open("/dev/null").ctx("open", &"/dev/null")?;
         let pid = unsafe { libc::fork() };
         if pid < 0 {
             return Err(io::Error::last_os_error());

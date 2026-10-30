@@ -17,10 +17,30 @@ Finite sets are written as the list of their members in the byte order of the
 members' own encodings (`sortedFinsetStream`), so every codec here is
 computable and a set has exactly one encoding order.
 -/
-import Compiler.TypedAuthorizationRequestCodec
-import Theory.HyperdocumentOperations
-import Theory.StableRanges
-import Mathlib.Data.List.Lex
+module
+
+public import Compiler.TypedAuthorizationRequestCodec
+public import Theory.HyperdocumentOperations
+public import Theory.StableRanges
+public import Mathlib.Data.List.Lex
+public import Compiler.FiniteDependentMapCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.HyperdocumentCodec
 
@@ -32,6 +52,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization (Digest ResourceKind CapabilityId SubjectId)
 
 set_option autoImplicit false
+
 
 /-! ## Identifiers
 
@@ -60,7 +81,7 @@ def resourceKindOfTag : Nat -> ResourceKind
   | _ => .program
 
 def resourceKindStream : StreamCodec ResourceKind :=
-  StreamCodec.xmap StreamCodec.nat resourceKindTag resourceKindOfTag
+  StreamCodec.retract StreamCodec.nat resourceKindTag resourceKindOfTag
     (by intro value; cases value <;> rfl)
 
 def transclusionModeTag : TransclusionMode -> Nat
@@ -72,7 +93,7 @@ def transclusionModeOfTag : Nat -> TransclusionMode
   | _ => .live
 
 def transclusionModeStream : StreamCodec TransclusionMode :=
-  StreamCodec.xmap StreamCodec.nat transclusionModeTag transclusionModeOfTag
+  StreamCodec.retract StreamCodec.nat transclusionModeTag transclusionModeOfTag
     (by intro value; cases value <;> rfl)
 
 def openingShapeTag : StoredOpeningShape -> Nat
@@ -84,7 +105,7 @@ def openingShapeOfTag : Nat -> StoredOpeningShape
   | _ => .range
 
 def openingShapeStream : StreamCodec StoredOpeningShape :=
-  StreamCodec.xmap StreamCodec.nat openingShapeTag openingShapeOfTag
+  StreamCodec.retract StreamCodec.nat openingShapeTag openingShapeOfTag
     (by intro value; cases value <;> rfl)
 
 def deathPolicyTag : EndpointDeathPolicy -> Nat
@@ -104,7 +125,7 @@ def deathPolicyOfTag : Nat -> EndpointDeathPolicy
   | _ => .preferNextThenPrevious
 
 def deathPolicyStream : StreamCodec EndpointDeathPolicy :=
-  StreamCodec.xmap StreamCodec.nat deathPolicyTag deathPolicyOfTag
+  StreamCodec.retract StreamCodec.nat deathPolicyTag deathPolicyOfTag
     (by intro value; cases value <;> rfl)
 
 /-! ## Small records -/
@@ -168,12 +189,12 @@ theorem encodedKey_injective {alpha : Type} (codec : StreamCodec alpha) :
   LinearOrder.lift' (encodedKey codec) (encodedKey_injective codec)
 
 /-- A finite set as the list of its members sorted by their encoded bytes.
-Computable, and one set has one encoding. -/
-def sortedFinsetStream {alpha : Type} [DecidableEq alpha] (codec : StreamCodec alpha) :
+Computable, and one set has one encoding: an unsorted or repeating member list
+is refused by the decoder. -/
+def sortedFinsetStream {alpha : Type} (codec : StreamCodec alpha) :
     StreamCodec (Finset alpha) :=
   letI := encodedOrder codec
-  StreamCodec.xmap (StreamCodec.list codec) (fun values => values.sort (· ≤ ·))
-    List.toFinset (by intro values; exact Finset.sort_toFinset _ _)
+  FiniteDependentMapCodec.finsetStream codec
 
 def storedTransclusionRefStream : StreamCodec StoredTransclusionRef :=
   StreamCodec.xmap
@@ -221,12 +242,13 @@ def atomKindStream : StreamCodec AtomKind where
     let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
     match tag with
     | 0 => some (.text, afterTag)
+    | 1 => do
+        let (schema, suffix) ← digestStream.decodePrefix afterTag
+        some (.inlineObject schema, suffix)
     | 2 => do
         let ((schema, fragment), suffix) ← (StreamCodec.product digestStream authoredFragmentStream).decodePrefix afterTag
         some (.sealedObject schema fragment, suffix)
-    | _ => do
-        let (schema, suffix) ← digestStream.decodePrefix afterTag
-        some (.inlineObject schema, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value with
@@ -234,10 +256,10 @@ def atomKindStream : StreamCodec AtomKind where
     | inlineObject schema =>
         simp [atomKindTag, atomKindPayload, List.append_assoc,
           StreamCodec.nat.decodePrefix_encode, digestStream.decodePrefix_encode]
-
     | sealedObject schema fragment =>
         simp [atomKindTag, atomKindPayload, List.append_assoc,
           StreamCodec.nat.decodePrefix_encode, StreamCodec.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def atomRecordStream : StreamCodec AtomRecord :=
   StreamCodec.xmap
@@ -269,7 +291,7 @@ def anchorBiasOfTag : Nat -> AnchorBias
   | _ => .after
 
 def anchorBiasStream : StreamCodec AnchorBias :=
-  StreamCodec.xmap StreamCodec.nat anchorBiasTag anchorBiasOfTag
+  StreamCodec.retract StreamCodec.nat anchorBiasTag anchorBiasOfTag
     (by intro value; cases value <;> rfl)
 
 def stablePointStream : StreamCodec StablePoint :=
@@ -329,10 +351,11 @@ def elementBodyStream : StreamCodec ElementBody where
     | 3 => do
         let (atom, suffix) ← (identifierStream .v1 .atom).decodePrefix afterTag
         some (.atom atom, suffix)
-    | _ => do
+    | 4 => do
         let (schema, afterSchema) ← digestStream.decodePrefix afterTag
         let (payload, suffix) ← bytesStream.decodePrefix afterSchema
         some (.opaque schema payload, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value <;>
@@ -343,6 +366,7 @@ def elementBodyStream : StreamCodec ElementBody where
         (identifierStream .v1 .transclusion).decodePrefix_encode,
         (identifierStream .v1 .atom).decodePrefix_encode, digestStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def linkTargetTag : LinkTarget -> Nat
   | .document _ => 0
@@ -388,11 +412,12 @@ def linkTargetStream : StreamCodec LinkTarget where
         let (reference, suffix) ←
           storedTransclusionRefStream.decodePrefix afterTarget
         some (.transclusion target reference, suffix)
-    | _ => do
+    | 4 => do
         let (scheme, afterScheme) ← bytesStream.decodePrefix afterTag
         let (authority, afterAuthority) ← bytesStream.decodePrefix afterScheme
         let (path, suffix) ← bytesStream.decodePrefix afterAuthority
         some (.external scheme authority path, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value <;>
@@ -404,6 +429,7 @@ def linkTargetStream : StreamCodec LinkTarget where
         storedStableRangeStream.decodePrefix_encode,
         storedTransclusionRefStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 /-! ## Operational stable ranges -/
 
@@ -418,7 +444,7 @@ def locationStream : StreamCodec (Location RunId AtomId) :=
 
 open Minidregg.Theory.StableRanges in
 def sideStream : StreamCodec Side :=
-  StreamCodec.xmap StreamCodec.nat
+  StreamCodec.retract StreamCodec.nat
     (fun value => match value with | .before => 0 | .after => 1)
     (fun tag => match tag with | 0 => .before | _ => .after)
     (by intro value; cases value <;> rfl)
@@ -537,6 +563,7 @@ def markKindStream : StreamCodec MarkKind where
     cases value <;>
       simp [markKindTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
         (identifierStream .v1 .link).decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 def markPayloadStream : StreamCodec MarkPayload :=
   StreamCodec.xmap
@@ -600,9 +627,10 @@ def actionStream : StreamCodec Action where
     | 4 => do
         let (payload, suffix) ← markPayloadStream.decodePrefix afterTag
         some (.mark payload, suffix)
-    | _ => do
+    | 5 => do
         let (payload, suffix) ← annotatePayloadStream.decodePrefix afterTag
         some (.annotate payload, suffix)
+    | _ => none
   decodePrefix_encode := by
     intro value suffix
     cases value <;>
@@ -613,6 +641,7 @@ def actionStream : StreamCodec Action where
         transcludePayloadStream.decodePrefix_encode,
         markPayloadStream.decodePrefix_encode,
         annotatePayloadStream.decodePrefix_encode]
+  encode_decodePrefix := by stream_canonical_tagged
 
 /-- **`LawfulCodec Action` exists.**  The second of the three codecs a
 `HyperdocumentOperations.Config` demands. -/

@@ -9,10 +9,31 @@ earlier records were semantically admitted and exposes no commit or host
 permit. The upper native history verifier supplies that separate inductive
 provenance.
 -/
-import Kernel.NativeHostContext
-import Compiler.DurableHistoryReader
-import Compiler.DurableServed
-import Kernel.NativeHostServed
+module
+
+public import Kernel.NativeHostContext
+public import Compiler.DurableHistoryReader
+public import Compiler.DurableServed
+public import Kernel.NativeHostServed
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHistorySelection
 
@@ -51,6 +72,12 @@ structure Candidate (config : Config) {store : StoreIdentity} (head : Head store
   groundedLight : grounded.ground = .light prior
   priorPast : ∃ (seed : DurableReceiver.Seed) (state : StateAt rootBytes seed head index),
     prior.served = Served.ofStateAt state
+theorem Candidate.selectedUnderHead {config : Config} {store : StoreIdentity} {head : Head store}
+    {index : Nat} (candidate : Candidate config head index) :
+    (∃ read : Record head (index + 1), read.record = candidate.record) ∧
+      ∃ (seed : DurableReceiver.Seed) (state : StateAt rootBytes seed head index),
+        candidate.prior.served = Served.ofStateAt state :=
+  ⟨⟨candidate.read, candidate.recordExact⟩, candidate.priorPast⟩
 
 /-- The ground a historical admission re-runs on: the prior basis. -/
 def Candidate.ground {config : Config} {store : StoreIdentity} {head : Head store} {index : Nat}
@@ -130,6 +157,11 @@ structure Matched {config : Config} {store : StoreIdentity} {head : Head store} 
   selectedRecord : DurableReceiver.IntentRecord
   selected : selectedRecord = candidate.record
   exact : selectedRecord = DurableReceiver.IntentRecord.ofIntent intent
+theorem Matched.candidateRecord {config : Config} {store : StoreIdentity} {head : Head store}
+    {index : Nat} {candidate : Candidate config head index} {intent : DataIntent rootBytes}
+    (matched : Matched candidate intent) :
+    candidate.record = DurableReceiver.IntentRecord.ofIntent intent :=
+  matched.selected.symm.trans matched.exact
 
 def matchIntent {config : Config} {store : StoreIdentity} {head : Head store} {index : Nat}
     (candidate : Candidate config head index) (intent : DataIntent rootBytes) :

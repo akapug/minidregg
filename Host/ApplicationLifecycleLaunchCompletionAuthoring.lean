@@ -3,10 +3,32 @@ Operator-private current-image signing plan for one lifecycle completion.
 The fixed Pin is loaded from Host settings, never from the request frame.
 This returns exact native credential headers, not an authorization to complete.
 -/
-import Host.ApplicationLifecycleCompletionOperator
-import Kernel.ApplicationLifecycleCompletionV2Admission
-import Kernel.NativeHostReplay
-import Kernel.NativeHost
+module
+
+public import Host.ApplicationLifecycleCompletionOperator
+public import Kernel.ApplicationLifecycleCompletionV2Admission
+public import Kernel.NativeHostReplay
+public import Kernel.NativeHost
+public import Kernel.NativeHostStoreIdentity
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleLaunchCompletionAuthoring
 
@@ -75,7 +97,7 @@ private def fixedHeaders (pin : Pin) (plan : SigningPlan) : Except String Unit :
       throw "completion signing key differs from operator pin"
 
 /-- Op70 obtains a source-derived plan from the exact admitted current image.
-The physical report is verified under Config's distinct custodian key before
+The physical report is verified under the platform record's custodian key before
 any management header escapes. Current grants and law remain decisive in op38. -/
 def prepareVerified (config : Config) {target : Durable}
     (verified : NativeHostReplay.Verified config target) (pin : Pin)
@@ -93,10 +115,12 @@ def prepareVerified (config : Config) {target : Durable}
       beginSource.packageManifest != pin.packageManifest ||
       beginSource.managementSubject.value != pin.managementSubject then
     return .error "completion subject or resource differs from operator pin"
-  if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.expectedSeed begin then
+  if !ApplicationLifecycleResidentProfile.beginMatchesV3 config.storeIdentity begin then
     return .error "completion BEGIN is outside resident host profile"
-  let some key := config.completionCustodianKey
-    | return .error "pinned physical custodian key unavailable"
+  let some record := PlatformCellDomain.recordOn config.deployment opened.durable.snapshot
+    | return .error "platform cell unavailable (completion custodian key)"
+  let some key := record.completionCustodianKey
+    | return .error "physical custodian key unavailable in the platform record"
   match ← ApplicationLifecycleCompletionV2Report.check config.signature
       config.deployment.domain config.profile.semantics key begin physical with
   | .error detail => return .error detail

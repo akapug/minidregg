@@ -29,7 +29,7 @@
 #             the exact retry returns the original receipt. alice re-invites bob:
 #             a NEW grant, which reads and places.
 #   kick      alice kicks carl (the founder's revocation still works): carl's read
-#             is refused. Then the tooth PLACE names (J10): bob bears notes6
+#             is refused. Then the tooth J10 names (docs/PLACE.md §2.2): bob bears notes6
 #             into lab with his new grant, writes it, and delegates it to dave;
 #             alice kicks bob (`room kick` revokes every standing grant he holds
 #             under lab). bob's own doc is refused `revoked` (show, append,
@@ -291,7 +291,8 @@ ok leave alice "room invite i-carl lab $C --verbs observe"
 handoff leave alice i-carl
 ok leave carl "import labc $REF"
 ok leave carl "read labc"
-ok leave carl "renounce c-bob $BOBCAP"
+# by number with its kind: carl holds no reference to bob's grant (a bare number names a reference)
+ok leave carl "renounce c-bob $BOBCAP object"
 named leave carl "submit c-bob" notHolder
 ok leave bob "read lab"
 ok leave bob "room leave l-bob lab"
@@ -320,8 +321,8 @@ ok leave bob "room leave l-bob2 lab"
 named leave bob "submit l-bob2" alreadyRevoked
 ok leave bob "retry l-bob"
 check leave "the exact retry returns the original receipt (replayed, same transaction)" \
-  jq -e -s '.[0].transactionId == .[1].transactionId and .[0].eventId == .[1].eventId
-    and .[1].confirmation == "replayed"' "$WS/bob/attempts/l-bob/outcome.json" "$WS/bob/attempts/l-bob/retry-0001.json"
+  sh -c '"$MINI" attempt-state --attempt "$1" --json | jq -e ".outcome.transactionId == .retries[0].outcome.transactionId
+    and .outcome.eventId == .retries[0].outcome.eventId and .retries[0].outcome.confirmation == \"replayed\""' - "$WS/bob/attempts/l-bob"
 fails leave alice "room leave l-alice lab" 1 "not a room you joined"
 ok leave alice "room invite i-bob2 lab $B --verbs observe,place"
 handoff leave alice i-bob2
@@ -343,7 +344,7 @@ ok kick alice "submit k-carl"
 refused kick carl "read labc" revoked
 ok kick bob "read lab2"
 
-# ------------------------------------------------ kick: a doc bob bore falls with him (PLACE J10)
+# ------------------------------------------------ kick: a doc bob bore falls with him (J10, docs/PLACE.md §2.2)
 ok kickdoc bob "doc append b-n6 notes6 written-before-the-kick"
 ok kickdoc bob "submit b-n6"
 ok kickdoc bob "delegate d-n6 notes6 $D observe 1000"

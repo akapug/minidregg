@@ -3,7 +3,11 @@ Exact-CAS receiving for launch-bound lifecycle BEGIN. Event23 records a durable
 pending operation, not physical execution. Continue admission is gated by the
 Verified original completed-create certificate in NativeHostReplay.
 -/
-import Kernel.NativeHostReplay
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBeginV3Receiver
 
@@ -29,13 +33,13 @@ structure Confirmed (config : Config) where
 def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate confirmed.old
-        confirmed.readback.derived confirmed.readback.ready) :=
+        confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) :=
   NativeHostReplay.extendExact confirmed.reader confirmed.old confirmed.readback
 
 def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
     NativeHostCodec.Receipt :=
   let candidate := NativeHostReplay.exactCandidate confirmed.old
-    confirmed.readback.derived confirmed.readback.ready
+    confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     confirmed.old.opened.durable.height + 1,
@@ -46,6 +50,18 @@ theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed conf
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback
+
+/-- The confirmed successor is admitted under `config`: the read-back intent
+carries this ingress's event, and `validateLoaded config` accepts the one
+candidate extending the verified tip by that read-back intent. -/
+theorem Confirmed.successor_validated {config : Config} (confirmed : Confirmed config) :
+    confirmed.readback.derived.intent.event =
+        ApplicationLifecycleBeginV3Ingress.event confirmed.ingress ∧
+      NativeHost.validateLoaded config
+          (NativeHostReplay.exactCandidate confirmed.old
+            confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) =
+        .ok confirmed.readback.after :=
+  ⟨confirmed.eventExact, confirmed.readback.validated⟩
 
 inductive Result (config : Config) where
   | confirmed (confirmed : Confirmed config)

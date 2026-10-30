@@ -1,8 +1,8 @@
-//! Stories (PLACE §2.8, item 8): a friend writes a transition table, seals it,
+//! Stories (docs/PLACE.md §2.8, §5 item 8): a friend writes a transition table, seals it,
 //! and from then on the table is the LAW on every player's cell.
 //!
 //! THE TABLE is a document in the story's room (`NAME/table`), one row per
-//! line (`deploy/shell/templates/story/README.md` has the grammar):
+//! line (`native/resource-client/templates/story/README.md` has the grammar):
 //!   title TEXT | scene N TITLE | TEXT | start N | end N | item NAME N
 //!   exit N WORD M [needs ITEM] | act N VERB M [needs ITEM]
 //! `table_of` parses and checks it (fail closed: a dangling exit, an
@@ -17,7 +17,7 @@
 //! mover (only the player), turn (+1 exactly), exits (stay, or one table
 //! edge), needs (per conditional edge: its item already held), here and once
 //! (per item: taken in its scene, standing still, 0 to 1 and never back), and
-//! progress (a turn moves or takes). The Lean file `Assurance/StoryLaw.lean` defines the same law for every table and
+//! progress (a turn moves or takes). The Lean file `Kernel/StoryLaw.lean` defines the same law for every table and
 //! proves `sealed_story_scene_monotone`; `scripts/gen-storylaw.py` embeds this
 //! generator's output for the tale and the build proves it is that `law`.
 //!
@@ -62,18 +62,18 @@ use std::fs;
 use std::path::PathBuf;
 
 /// The built-in tale's table.
-pub(crate) const TALE: &str = include_str!("../../../deploy/shell/templates/story/tale/table");
+pub(crate) const TALE: &str = include_str!("../templates/story/tale/table");
 
 /// The fields every player cell has before its items, in field order.
 pub(crate) const PLAYER_FIELDS: [&str; 2] = ["scene", "turn"];
 
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "story", usage: "story new NAME --from tale|@FILE [--gm SUBJECT] | story seal NAME | story invite NAME SUBJECT [gm] | story join NAME INVITATION|@FILE | story enter NAME | story list | story law NAME|tale|@FILE [SUBJECT]", operation: "a story: a room, a table document the author seals, and one cell per player under the law the table generates; `help story`" },
-    Verb { name: "look", usage: "look", operation: "signed reads: the table, my cell and both their laws; print my scene, its exits, items and the GM's last words" },
-    Verb { name: "go", usage: "go EXIT|SCENE", operation: "one write to my cell: scene := the exit's scene, turn + 1 (the sealed law judges it)" },
-    Verb { name: "take", usage: "take ITEM", operation: "one write to my cell: carries/ITEM := 1, turn + 1" },
-    Verb { name: "act", usage: "act VERB", operation: "one write to my cell: scene := the act's scene, turn + 1" },
-    Verb { name: "narrate", usage: "narrate TEXT", operation: "append {\"type\":\"say\",\"text\":TEXT} to the story's scenes stream (the GM's)" },
+    Verb { name: "story", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "look", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "go", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "take", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "act", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
+    Verb { name: "narrate", usage: "", operation: "" },  // grammar data (shell_grammar), rendered by `rendered_row`
 ];
 
 pub(crate) const HELP: &str = "\
@@ -307,7 +307,7 @@ pub(crate) struct Clause {
 
 /// The law of player `subject`'s cell (`subject` may be a placeholder such as
 /// `{S}`, for the template files). Clause order is the refusal order and is
-/// `Assurance/StoryLaw.lean`'s `clauses`.
+/// `Kernel/StoryLaw.lean`'s `clauses`.
 pub(crate) fn player_clauses(table: &Table, subject: &str) -> Vec<Clause> {
     let c = |name: String, predicate: Value| Clause { name, predicate };
     let step = |w: &Way| all(vec![eq(&slot(0, "before"), w.from), eq(&slot(0, "after"), w.to)]);
@@ -544,56 +544,34 @@ fn subject_word(w: &str) -> Result<String, String> {
 }
 
 pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
-    let (verb, rest) = split(line)?;
-    let usage_of = |name: &str| VERBS.iter().find(|v| v.name == name).map(|v| v.usage).unwrap_or("").to_owned();
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let one = |name: &str| -> Result<String, String> {
-        match words.as_slice() {
-            [w] => Ok((*w).to_owned()),
-            _ => Err(usage_of(name)),
-        }
-    };
+    use crate::shell_grammar::{parse_line, usage, ACT, GO, LOOK, NARRATE, STORY, TAKE};
+    let (verb, _rest) = split(line)?;
     Some(match verb {
-        "look" if words.is_empty() => Ok(Line::Look),
-        "look" => Err(usage_of("look")),
-        "go" => one("go").map(Line::Go),
-        "take" => one("take").map(Line::Take),
-        "act" => one("act").map(Line::Act),
-        "narrate" => {
-            let t = free_text(rest);
+        "look" => parse_line(&LOOK, line).map(|_| Line::Look),
+        "go" => parse_line(&GO, line).map(|p| Line::Go(p.arg(0).to_owned())),
+        "take" => parse_line(&TAKE, line).map(|p| Line::Take(p.arg(0).to_owned())),
+        "act" => parse_line(&ACT, line).map(|p| Line::Act(p.arg(0).to_owned())),
+        "narrate" => parse_line(&NARRATE, line).and_then(|p| {
+            let t = free_text(p.arg(0));
             if t.is_empty() || t.len() > 2048 { Err("narrate TEXT (1..2048 bytes)".into()) } else { Ok(Line::Narrate(t)) }
-        }
-        "story" => (|| -> Result<Line, String> {
-            let u = usage_of("story");
-            match words.as_slice() {
-                ["new", name, rest @ ..] => {
-                    let name = story_name(name)?;
-                    let (mut from, mut gm) = (None, None);
-                    let mut i = 0;
-                    while i < rest.len() {
-                        match (rest[i], rest.get(i + 1)) {
-                            ("--from", Some(v)) if from.is_none() => from = Some((*v).to_owned()),
-                            ("--gm", Some(v)) if gm.is_none() => gm = Some(subject_word(v)?),
-                            _ => return Err(u),
-                        }
-                        i += 2;
-                    }
-                    Ok(Line::New { name, from: from.ok_or(u)?, gm })
+        }),
+        "story" => parse_line(&STORY, line).and_then(|p| {
+            let u = usage(&STORY);
+            match p.leaf.path {
+                ["story", "new"] => {
+                    let name = story_name(p.arg(0))?;
+                    let gm = p.flag("--gm").flatten().map(subject_word).transpose()?;
+                    Ok(Line::New { name, from: p.required("--from").to_owned(), gm })
                 }
-                ["seal", name] => Ok(Line::Seal(story_name(name)?)),
-                ["invite", name, subject] => Ok(Line::Invite { name: story_name(name)?, subject: subject_word(subject)?, gm: false }),
-                ["invite", name, subject, "gm"] => Ok(Line::Invite { name: story_name(name)?, subject: subject_word(subject)?, gm: true }),
-                ["join", name, _, ..] => {
-                    let invitation = rest.trim_start()[4..].trim_start()[name.len()..].trim().to_owned();
-                    Ok(Line::Join { name: story_name(name)?, invitation })
-                }
-                ["enter", name] => Ok(Line::Enter(story_name(name)?)),
-                ["list"] => Ok(Line::List),
-                ["law", from] => Ok(Line::Law { from: (*from).to_owned(), subject: None }),
-                ["law", from, subject] => Ok(Line::Law { from: (*from).to_owned(), subject: Some(subject_word(subject)?) }),
+                ["story", "seal"] => Ok(Line::Seal(story_name(p.arg(0))?)),
+                ["story", "invite"] => Ok(Line::Invite { name: story_name(p.arg(0))?, subject: subject_word(p.arg(1))?, gm: p.opt(2).is_some() }),
+                ["story", "join"] => Ok(Line::Join { name: story_name(p.arg(0))?, invitation: p.arg(1).trim().to_owned() }),
+                ["story", "enter"] => Ok(Line::Enter(story_name(p.arg(0))?)),
+                ["story", "list"] => Ok(Line::List),
+                ["story", "law"] => Ok(Line::Law { from: p.arg(0).to_owned(), subject: p.opt(1).map(subject_word).transpose()? }),
                 _ => Err(u),
             }
-        })(),
+        }),
         _ => return None,
     })
 }
@@ -678,7 +656,7 @@ fn table_rows(view: &Value) -> Result<Vec<String>, Done> {
     let mut out = Vec::new();
     for a in atoms {
         let hex = a.get("payload").and_then(Value::as_str).unwrap_or("");
-        let bytes: Option<Vec<u8>> = crate::decode_hex(hex).ok();
+        let bytes: Option<Vec<u8>> = mini_sdk::hex::decode(hex).ok();
         let text = bytes.and_then(|b| String::from_utf8(b).ok()).ok_or_else(|| error("a table row is not UTF-8 text"))?;
         out.extend(rows(&text));
     }
@@ -789,8 +767,10 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
     }
 }
 
-fn create(session: &Session, name: &str, storage: &str, law: &Value, room: &str) -> Result<Value, Done> {
-    crate::chat::create_cell(session, name, storage, law, Some(room), None)
+/// The story's table: a document in the story's room (born with its document,
+/// since its rows are appended lines).
+fn create_document(session: &Session, name: &str, law: &Value, room: &str) -> Result<Value, Done> {
+    crate::chat::create_document(session, name, law, Some(room))
 }
 
 fn install(session: &Session, name: &str, law: &Value) -> Result<(), Done> {
@@ -817,7 +797,7 @@ fn story_new(session: &Session, name: &str, from: &str, gm: Option<String>) -> R
     if gm != author {
         install(session, &format!("{name}/scenes"), &scenes_law(&gm))?;
     }
-    let table_ref = create(session, &format!("{name}/table"), "content", &table_open_law(&author), name)?;
+    let table_ref = create_document(session, &format!("{name}/table"), &table_open_law(&author), name)?;
     let actions: Vec<Value> = rows(&text).iter().map(|r| json!({"type":"append","text":r})).collect();
     propose_submit(
         session,
@@ -861,6 +841,13 @@ fn story_seal(session: &Session, name: &str) -> Result<(), Done> {
     let target = field(&story, "table")?;
     let rows = table_rows(&read(session, &story, "table", target, "resource")?)?;
     let table = table_of(&rows).map_err(|e| usage(format!("the table refuses: {e}")))?;
+    // Sealing is idempotent: a table that already carries the sealed law is left alone, so a seal that
+    // died after installing (or a seed that re-runs `story seal` to finish a failed one) writes nothing.
+    let policy = read(session, &story, "table-law", target, "policy")?;
+    if carries_unconditional_local_law(&policy, &table_sealed_law()) {
+        println!("story {name} is already sealed; nothing was written");
+        return Ok(());
+    }
     install(session, &format!("{name}/table"), &table_sealed_law())?;
     let clauses = player_clauses(&table, "{S}");
     println!("story {name} sealed: the table cannot be edited or re-lawed by anyone. Each player's cell will carry:");
@@ -887,6 +874,31 @@ fn grant(session: &Session, room: &str, recipient: &str, verbs: &[&str]) -> Resu
         .ok_or_else(|| error("the published delegation left no recipient-reference.json"))
 }
 
+/// What `story invite` does for a player whose cell the author may already have.
+#[derive(Debug, PartialEq)]
+enum InvitePlan {
+    /// The cell stands at the start under the player's law and the invitation was saved: print it, write nothing.
+    Reprint,
+    /// A named refusal; nothing is written.
+    Refuse(String),
+    /// Birth what is missing, write what is not at the start, install what is not installed, grant.
+    Proceed,
+}
+
+fn invite_plan(cell_exists: bool, turn: i64, start_complete: bool, law_carried: bool, saved: bool) -> InvitePlan {
+    if cell_exists && turn != 0 {
+        return InvitePlan::Refuse(format!("the player's cell is already in play (turn {turn}); an invitation never rewinds it"));
+    }
+    if cell_exists && start_complete && law_carried {
+        return if saved {
+            InvitePlan::Reprint
+        } else {
+            InvitePlan::Proceed
+        };
+    }
+    InvitePlan::Proceed
+}
+
 fn story_invite(session: &Session, name: &str, subject: &str, as_gm: bool) -> Result<(), Done> {
     let story = load(session, name)?;
     if story["role"] != "author" {
@@ -904,11 +916,17 @@ fn story_invite(session: &Session, name: &str, subject: &str, as_gm: bool) -> Re
     } else {
         let cell = format!("{name}/p-{subject}");
         let author = field(&story, "author")?.to_owned();
+        let saved_path = story_dir(session).join("invites").join(format!("{name}-{subject}.json"));
         // THE field list: born, then written, in `player_fields` order.
         let fields = player_fields(&table);
         let declared = format!("0-{}", fields.len() - 1);
-        let born = crate::chat::create_cell_with_fields(session, &cell, "declared",
-            &staging_law(&author), Some(name), None, Some(&declared))?;
+        // A cell this author already births for SUBJECT is resumed, never born twice.
+        let existing = reference(session, &cell).ok();
+        let born = match &existing {
+            Some(b) => b.clone(),
+            None => crate::chat::create_cell_with_fields(session, &cell, "declared",
+                &staging_law(&author), Some(name), None, Some(&declared))?,
+        };
         let target = member(&born, "target").map_err(error)?.to_owned();
         // A declared cell is born holding some fields (field 1, today): each
         // start value is a create where the field is absent and a write from
@@ -925,13 +943,32 @@ fn story_invite(session: &Session, name: &str, subject: &str, as_gm: bool) -> Re
                 }
             })
             .collect();
-        propose_submit(
-            session,
-            "start",
-            &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
-                "targets":[{"name":cell,"payload":{"type":"scalar","actions":actions}}]}),
-        )?;
-        install(session, &cell, &player_law(&table, subject))?;
+        let law_carried = existing.is_some() && {
+            let policy = read(session, &story, "cell-law", &target, "policy")?;
+            carries_unconditional_local_law(&policy, &player_law(&table, subject))
+        };
+        let saved = get_json(&saved_path);
+        match invite_plan(existing.is_some(), held.get(&1).copied().unwrap_or(0), actions.is_empty(), law_carried, saved.is_some()) {
+            InvitePlan::Refuse(why) => return Err(usage(format!("{cell}: {why}; nothing was written"))),
+            InvitePlan::Reprint => {
+                let invitation = saved.expect("Reprint needs the saved invitation");
+                println!("{subject} is already invited to {name} (nothing was written); give them this line again:");
+                println!("story join {name} {}", serde_json::to_string(&invitation).expect("JSON"));
+                return Ok(());
+            }
+            InvitePlan::Proceed => {}
+        }
+        if !actions.is_empty() {
+            propose_submit(
+                session,
+                "start",
+                &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+                    "targets":[{"name":cell,"payload":{"type":"scalar","actions":actions}}]}),
+            )?;
+        }
+        if !law_carried {
+            install(session, &cell, &player_law(&table, subject))?;
+        }
         invitation["role"] = json!("player");
         invitation["cell"] = json!(target);
         invitation["grant"] = grant(session, name, subject, &["observe", "mutate", "append"])?;
@@ -965,13 +1002,31 @@ fn story_join(session: &Session, name: &str, invitation: &str) -> Result<(), Don
     if value.pointer("/grant/recipient").and_then(Value::as_str) != Some(me.as_str()) {
         return Err(usage(format!("this invitation is not addressed to you ({me})")));
     }
-    import_from(session, name, &value["grant"])?;
+    // The author joining their own table (invited by themself, to play as well as to run it)
+    // already holds the room's and the scenes' references and the story's record: those are
+    // kept, and the player's cell is added to the record; everyone else imports the grant.
+    let mine = value["author"].as_str() == Some(me.as_str());
+    if !(mine && reference(session, name).is_ok()) {
+        import_from(session, name, &value["grant"])?;
+    }
     let grant = reference(session, name).map_err(error)?;
     let capability = member(&grant, "observeCapability").map_err(error)?.to_owned();
     let s = |k: &str| value.get(k).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| usage(format!("the invitation lacks {k}")));
-    import_stream(session, &format!("{name}/scenes"), &s("scenes")?, &capability)?;
-    let mut record = json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
-        "grant":name,"table":s("table")?,"scenes":s("scenes")?});
+    let scenes_ref = format!("{name}/scenes");
+    if !(mine && reference(session, &scenes_ref).is_ok()) {
+        import_stream(session, &scenes_ref, &s("scenes")?, &capability)?;
+    }
+    let existing = if mine { fs::read(record_path(session, name)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) } else { None };
+    let mut record = match existing {
+        // The author's record keeps its author and GM fields; the role becomes the invitation's
+        // (a player's cell is what the moves need; narrating stays the GM's by the gm field).
+        Some(mut r) if r.is_object() => {
+            r["role"] = json!(s("role")?);
+            r
+        }
+        _ => json!({"type":"mini-story-v1","story":name,"role":s("role")?,"author":s("author")?,"gm":s("gm")?,
+            "grant":name,"table":s("table")?,"scenes":s("scenes")?}),
+    };
     if value["role"] == "player" {
         import_stream(session, &format!("{name}/me"), &s("cell")?, &capability)?;
         record["cell"] = json!(s("cell")?);
@@ -1228,6 +1283,21 @@ mod tests {
         let said = "refused: law-denied: any [ not (all [ field 0 before == 1, field 0 == 3 ]), field 2 before == 1 ] (Host refused prepare, reply byte 255)";
         assert_eq!(clause_named(&clauses, said).map(|(i, _)| i), Some(4));
         assert_eq!(render(&explained(&guard(vec![any(vec![])]))), "sealed");
+    }
+
+    #[test]
+    fn invite_is_idempotent_when_done_and_refuses_a_cell_in_play() {
+        assert_eq!(invite_plan(true, 0, true, true, true), InvitePlan::Reprint);
+        // done but the invitation line was never saved: grant again (a write), not a reprint
+        assert_eq!(invite_plan(true, 0, true, true, false), InvitePlan::Proceed);
+        // born but the start or the law is missing: resume
+        assert_eq!(invite_plan(true, 0, false, true, true), InvitePlan::Proceed);
+        assert_eq!(invite_plan(true, 0, true, false, true), InvitePlan::Proceed);
+        // nothing yet
+        assert_eq!(invite_plan(false, 0, false, false, false), InvitePlan::Proceed);
+        // a cell in play is never re-started, whatever else holds
+        assert!(matches!(invite_plan(true, 3, false, true, true), InvitePlan::Refuse(w) if w.contains("turn 3")));
+        assert!(matches!(invite_plan(true, 1, true, true, true), InvitePlan::Refuse(_)));
     }
 
     #[test]

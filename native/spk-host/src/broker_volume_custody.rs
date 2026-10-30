@@ -1,6 +1,7 @@
 //! Root volume copies retain every directory/file handle. A durable freeze
 //! intent precedes FIFREEZE; startup takes the same lock and reconciles only
 //! that exact filesystem. No path-based chown, destination reopen or thaw.
+use crate::io_context::IoContext;
 use super::*;
 use std::io::{Seek,SeekFrom};
 use std::os::unix::process::CommandExt;
@@ -17,7 +18,7 @@ fn component(name:&str)->io::Result<CString>{
 impl Dir {
     fn absolute(path:&Path,allowed:&[u32])->io::Result<Self>{
         if !path.is_absolute(){return Err(invalid("volume custody absolute directory required"))}
-        let mut dir=Self(File::open("/")?);
+        let mut dir=Self(File::open("/").ctx("open", &"/")?);
         for part in path.components().skip(1) {
             let std::path::Component::Normal(part)=part else{return Err(invalid("noncanonical volume path"))};
             let name=part.to_str().ok_or_else(||invalid("volume path encoding"))?;
@@ -178,7 +179,7 @@ fn clear_pending(dir:&Dir,leaf:&str,thaw:impl FnOnce()->io::Result<()>)->io::Res
 }
 fn recover_locked(root:&Path,dir:&Dir)->io::Result<()>{
     let listing=PathBuf::from(format!("/proc/self/fd/{}",dir.0.as_raw_fd()));
-    for entry in fs::read_dir(listing)?{
+    for entry in fs::read_dir(&listing).ctx("list", &listing)?{
         let leaf=entry?.file_name().to_string_lossy().into_owned();
         if leaf==".freeze.lock"{continue}
         if !leaf.ends_with(".json"){return Err(invalid("unknown freeze custody artifact"))}
@@ -273,46 +274,6 @@ pub(super) fn export(root:&Path,store:&str,app:&str,uid:u32,gid:u32)->io::Result
         "rootListing":String::from_utf8_lossy(&listing.stdout).lines().map(str::trim).filter(|line|!line.is_empty()).collect::<Vec<_>>()}))
 }
 
-pub(super) struct BackupTarget {dir:Dir}
-pub(super) struct Copy {pub(super) file:File,pub(super) hash:String,pub(super) bytes:u64,pub(super) frozen_ms:u128}
-impl BackupTarget {
-    pub(super) fn create(path:&Path,operator:u32)->io::Result<Self>{
-        let parent=Dir::absolute(path.parent().ok_or_else(||invalid("backup parent"))?,&[0,operator])?;
-        let leaf=path.file_name().and_then(|n|n.to_str()).ok_or_else(||invalid("backup leaf"))?;
-        let c=component(leaf)?;
-        if unsafe{libc::mkdirat(parent.0.as_raw_fd(),c.as_ptr(),0o700)}!=0{return Err(io::Error::last_os_error())}
-        let dir=parent.directory(leaf,&[0])?;
-        dir.0.sync_all()?;parent.0.sync_all()?;
-        Ok(Self{dir})
-    }
-    pub(super) fn copy_volume(&self,root:&Path,name:&str,active:bool)->io::Result<Copy>{
-        let source_dir=Dir::absolute(root,&[0])?.directory("volumes",&[0])?;
-        let leaf=format!("{name}.ext4");
-        let mut source=source_dir.read_root(&leaf)?;
-        let mut out=self.dir.create(&leaf)?;
-        let started=std::time::Instant::now();
-        let frozen=Frozen::begin(root,name,active)?;
-        let copied=(||->io::Result<String>{
-            sparse_copy(&mut source,&mut out)?;out.sync_all()?;
-            source_dir.same_leaf(&leaf,&source)?;
-            out.seek(SeekFrom::Start(0))?;file_sha256(&mut out)
-        })();
-        if let Some(guard)=frozen{guard.finish()?}
-        let hash=copied?;
-        self.dir.same_leaf(&leaf,&out)?;self.dir.0.sync_all()?;
-        let conf=format!("{name}.conf");
-        let mut source=source_dir.read_root(&conf)?;
-        let mut destination=self.dir.create(&conf)?;
-        io::copy(&mut source,&mut destination)?;
-        destination.sync_all()?;self.dir.same_leaf(&conf,&destination)?;self.dir.0.sync_all()?;
-        let bytes=out.metadata()?.len();
-        Ok(Copy{file:out,hash,bytes,frozen_ms:started.elapsed().as_millis()})
-    }
-    pub(super) fn write_manifest(&self,value:&Value)->io::Result<()>{
-        let mut file=self.dir.create("grains-backup.json")?;
-        file.write_all(&serde_json::to_vec_pretty(value)?)?;file.sync_all()?;self.dir.0.sync_all()
-    }
-}
 pub(super) fn inspect_copy(program:&str,args:&[&str],file:&File)->io::Result<std::process::Output>{
     let fd=file.as_raw_fd();
     let mut cmd=Command::new(program);

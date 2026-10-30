@@ -4,19 +4,17 @@
 content atom. Its `prepare` phase checks a current signed Mini resource view and
 compares the selected atom with the caller's exact payload file. The pinned Lean
 Host then authors the owner-signed public release and event14 source ingress.
-`publish` admits event14 before posting the exact article to fn. `receive`
-projects that article through the Host and submits event13 to an independently
-authorized recipient Mini. Coverage event17 precedes fn cursor ACK. `verify`
-requires a fresh signed recipient read showing the exact accepted packet.
-Current fn NNTP POST stores a legacy `fn-r` article. For that route,
+`publish` admits event14 before posting the exact article to fn. fn's NNTP
+POST stores a legacy `fn-r` article, so the receiving route is `fn-r`:
 `receive-transport` makes an authenticated local consumer poll, has fn's ACL2
 `consumer-article` decoder extract the exact stored article and Message-ID,
-checks the stored article carries the complete selected source, then asks Mini
-to admit event13 under its own current law. `verify-transport` makes the fresh
-signed recipient read. This path records **transport only**: `fn-r` carries no
-historical fn authorship verdict and neither phase claims event17 or fn ACK.
-The stronger `receive`/`cover-plan`/`cover-advance`/`ack`/`verify` path remains
-for a schema-1 `fn-e` accepted-article event; it refuses `fn-r`.
+checks the stored article carries the complete selected source, then asks the
+recipient Mini to admit event13 under its own current law. `verify-transport`
+makes the fresh signed recipient read. This route records **transport only**:
+`fn-r` carries no historical fn authorship verdict, no event17 coverage and no
+fn cursor ACK. The schema-1 `fn-e` phases (`receive`, `cover-plan`,
+`cover-advance`, `ack`, `verify`) refuse by name: fn does not store `fn-e`
+for a POST, and their one native run was refused.
 
 The command replaced the GitWeb-specific join (`scripts/fn-gitweb-preview/`),
 which is deleted. Content from any application, GitWeb included, enters as a Mini
@@ -35,7 +33,7 @@ The private contract is a JSON object with `type` equal to
 | `ownerKey`, `sourceDelegateCapability` | Owner signing key and current source publication capability. |
 | `destinationDomain`, `destinationSemantics`, `destinationTarget`, `group`, `messageId`, `policyRoot`, `keysetRoot`, `epoch`, `ownerSubject`, `ownerNonce`, `expiresAt`, `from`, `date`, `subject` | Exact public release request passed to Lean. The group is a routing label, not an access control list. |
 | `privatePostConfig`, `fnBinary`, `fnRuntimeImage`, `fnScope`, `fnControl` | Protected fn POST custody and explicit fn consumer launcher, underlying executable/core image, scope and socket. Use a separately initialized test fn Store for experiments. |
-| `recipientCapability`, `recipientAuthorityRoot`, `recipientTargetRoot`, `recipientSocket`, `recipientOperatorSocket`, `gatewayKey` | Recipient current admission and event17 coverage inputs. Roots must come from a fresh authorized recipient read. |
+| `recipientCapability`, `recipientAuthorityRoot`, `recipientTargetRoot`, `recipientSocket` | Recipient current admission inputs. Roots must come from a fresh authorized recipient read. |
 | `recipientQueryIntent`, `recipientQueryKey` | Separately authorized signed read of the exact recipient content resource after admission. |
 
 Every numeric field is a canonical decimal string. The contract and source,
@@ -50,15 +48,14 @@ reuse that state:
 ```sh
 mini selected-exchange --phase prepare --contract /private/release.json --state-dir /private/exchange
 mini selected-exchange --phase publish --contract /private/release.json --state-dir /private/exchange
-mini selected-exchange --phase receive --contract /private/release.json --state-dir /private/exchange
-mini selected-exchange --phase cover-plan --contract /private/release.json --state-dir /private/exchange
-mini selected-exchange --phase cover-advance --contract /private/release.json --state-dir /private/exchange --approval /private/exact-frontier-approval.json
-mini selected-exchange --phase ack --contract /private/release.json --state-dir /private/exchange
-mini selected-exchange --phase verify --contract /private/release.json --state-dir /private/exchange
-# For an NNTP-posted fn-r article, after prepare and publish:
 mini selected-exchange --phase receive-transport --contract /private/release.json --state-dir /private/exchange
 mini selected-exchange --phase verify-transport --contract /private/release.json --state-dir /private/exchange
 ```
+
+On a box, `receive-transport` runs unattended as the fn consumer unit
+[`deploy/fn/mini-fn-receive@.service`](../../deploy/fn/mini-fn-receive@.service)
+(one instance and timer per exchange, its own uid, no network: Mini's fn wire
+reaches only the co-located fn node; the cross-machine leg is fn peering).
 
 Each phase holds a nonblocking owner-private lock over the exchange state, so
 concurrent phase commands refuse. An interrupted preparation retains its files
@@ -68,18 +65,18 @@ and reports which local evidence exists; it does not infer admission. If
 start a new preparation in a new directory. No later phase can consume the
 incomplete attempt.
 
-`publish` uses the existing selected publisher's durable marker and never
-blindly reposts after an uncertain fn response. Once a recipient attempt
-directory exists, `receive` performs only exact op21 lookup; it does not create
-a second event13. An absent or uncertain latest lookup prevents coverage and
-ACK. Event17 uses the existing operator-private frontier plan and exact approval.
-The fn ACK checks that event13 and event17 are admitted, and a subsequent signed
-read checks the installed packet. Installing or executing an application version
-from that packet requires a separate receiving authority and operation.
-The `fn-r` transport path retains its raw cursor, report, stored article and
-Host result. It never calls fn ACK. A retry after an event13 attempt uses only
-exact op21 lookup. Its signed recipient read proves the selected packet was
-installed; a fn `240` response or retrieved article alone does not.
+`publish` uses the selected publisher's durable marker and the one NNTP
+repost rule (`worker.rs` `post_action`): once the attempt marker exists the
+article is never POSTed again; only fn's `240` or its exact "already stored
+here" line finishes, and anything else holds with the exact article retained.
+`receive-transport` retains its raw cursor, report, stored article and Host
+result and never calls fn ACK. Once a recipient attempt exists it performs only
+exact op21 lookup, so it never creates a second event13. Its signed recipient
+read (`verify-transport`) proves the selected packet was installed; a fn `240`
+response or retrieved article alone does not. Installing or executing an
+application version from that packet requires a separate receiving authority
+and operation. Because `fn-r` never ACKs, one fn consumer scope yields one
+article; each exchange carries its own scope.
 
 ## Two Stores with independent credentials
 

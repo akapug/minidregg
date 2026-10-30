@@ -10,8 +10,9 @@ use crate::{
     codec::{bad, bytes, Generation, Nat},
     consensus_wire::Cursor,
     custody::hash,
+    entropy::Entropy,
     private_send::{self, PrivateSend},
-    reconstruction::Field,
+    reconstruction::{eval, Field},
 };
 use std::{
     collections::BTreeMap,
@@ -84,13 +85,8 @@ impl Profile {
         let mut b = b"DREGG.DZK.PRIVATE.INSTANCE.V1".to_vec();
         b.extend(self.context);
         b.extend(holder.to_le_bytes());
-        let mut result = g.clone();
-        result.invocation = Nat::from_be(&hash(&b));
-        result
+        g.derived(&hash(&b))
     }
-}
-fn eval(p: &[Field], x: Field) -> Field {
-    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
 }
 fn pow(mut x: Field, mut e: usize) -> Field {
     let mut y = Field(1);
@@ -118,14 +114,7 @@ fn phase_bytes(p: &PhaseMessage) -> &[u8] {
         PhaseMessage::Init(b) | PhaseMessage::Echo(b) | PhaseMessage::Ready(b) => b,
     }
 }
-fn entropy(seed: [u8; 32], context: [u8; 32], tag: u8, index: usize) -> [u8; 32] {
-    let mut b = b"DREGG.DZK.RANDOM.V1".to_vec();
-    b.extend(seed);
-    b.extend(context);
-    b.push(tag);
-    b.extend((index as u64).to_le_bytes());
-    hash(&b)
-}
+const RANDOM: &[u8] = b"DREGG.DZK.RANDOM.V1";
 fn challenge(p: &Profile, roots: &[[u8; 32]]) -> Field {
     let mut b = b"DREGG.DZK.CHALLENGE.V1".to_vec();
     b.extend(p.context);
@@ -168,7 +157,7 @@ fn tree(
     let mut salts = vec![];
     let mut level = vec![];
     for i in 0..width {
-        let salt = entropy(seed, p.context, 1, stage * 32 + i);
+        let salt = Entropy::derive(RANDOM, seed, p.context, 1, stage * 32 + i);
         salts.push(salt);
         level.push(leaf(
             p,
@@ -232,12 +221,19 @@ pub struct PublicProof {
     roots: Vec<[u8; 32]>,
     final_poly: Vec<Field>,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct PrivateProof {
     holder: u16,
     mask: Field,
     blocks: Vec<[Field; 2]>,
     openings: Vec<Opening>,
+}
+redacted_debug!(PrivateProof);
+impl Drop for PrivateProof {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.mask);
+        zeroize::Zeroize::zeroize(&mut self.blocks);
+    }
 }
 pub fn encode_public(p: &Profile, v: &PublicProof) -> Vec<u8> {
     let mut b = b"DREGG.DZK.PUBLIC\x01".to_vec();
@@ -333,7 +329,7 @@ pub fn prove(
     let random_poly: Vec<_> = (0..=p.degree)
         .map(|i| {
             Field(u128::from_le_bytes(
-                entropy(seed, p.context, 0, i)[..16].try_into().unwrap(),
+                Entropy::derive(RANDOM, seed, p.context, 0, i)[..16].try_into().unwrap(),
             ))
         })
         .collect();
@@ -454,12 +450,13 @@ fn verify(
     }
     previous == eval(&public.final_poly, x)
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Delivered {
     context: [u8; 32],
     public_bytes: Vec<u8>,
     local_bytes: Vec<u8>,
 }
+redacted_debug!(Delivered);
 impl Delivered {
     pub fn context(&self) -> [u8; 32] {
         self.context
@@ -471,13 +468,19 @@ impl Delivered {
         &self.local_bytes
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct VerifiedShares {
     context: [u8; 32],
     holder: u16,
     receiver: u16,
     values: Vec<Field>,
     public_hash: [u8; 32],
+}
+redacted_debug!(VerifiedShares);
+impl Drop for VerifiedShares {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.values);
+    }
 }
 impl VerifiedShares {
     pub fn context(&self) -> [u8; 32] {
@@ -517,18 +520,20 @@ impl RejectedProof {
         self.evidence_hash
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Verification {
     Accepted(VerifiedShares),
     Rejected(RejectedProof),
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+redacted_debug!(Verification);
+#[derive(Clone, Eq, PartialEq)]
 pub struct OpenProof {
     verification: Verification,
     public_bytes: Vec<u8>,
     private_bytes: Vec<u8>,
     values: Vec<Field>,
 }
+redacted_debug!(OpenProof);
 impl OpenProof {
     pub fn verification(&self) -> &Verification {
         &self.verification
@@ -583,11 +588,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct Dzk {
     pub me: u16,
@@ -675,7 +676,7 @@ impl Dzk {
             for (k, p) in coeff.iter_mut().enumerate() {
                 for l in 0..=self.profile.f {
                     p.push(Field(u128::from_le_bytes(
-                        entropy(seed, self.profile.context, 2, j * 32 + k * 16 + l)[..16]
+                        Entropy::derive(RANDOM, seed, self.profile.context, 2, j * 32 + k * 16 + l)[..16]
                             .try_into()
                             .unwrap(),
                     )));
@@ -820,9 +821,6 @@ impl Dzk {
             })
         }
     }
-    pub(crate) fn dealer_inputs(&self) -> Option<&[Vec<Field>]> {
-        self.dealer_inputs.as_deref()
-    }
     pub fn verify_private(&self, holder: u16, values: &[Field]) -> Result<Verification> {
         if self.delivered().is_none() {
             return Err(Error::new(
@@ -899,6 +897,29 @@ impl Dzk {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+    #[test]
+    fn debug_of_secret_proof_types_prints_no_share_bytes() {
+        const SECRET: u128 = 0x5ec2e75ec2e75ec2e75ec2e75ec2e771;
+        let verified = VerifiedShares {
+            context: [1; 32],
+            holder: 1,
+            receiver: 2,
+            values: vec![Field(SECRET)],
+            public_hash: [0; 32],
+        };
+        let private = PrivateProof {
+            holder: 1,
+            mask: Field(SECRET),
+            blocks: vec![[Field(SECRET), Field(SECRET)]],
+            openings: vec![],
+        };
+        let accepted = Verification::Accepted(verified.clone());
+        for shown in [format!("{verified:?}"), format!("{private:?}"), format!("{accepted:?}"), format!("{verified:#?}")] {
+            assert!(shown.contains("redacted"), "{shown}");
+            assert!(!shown.contains(&SECRET.to_string()), "{shown}");
+            assert!(!shown.to_lowercase().contains(&format!("{SECRET:x}")), "{shown}");
+        }
+    }
     pub(super) fn generation() -> Generation {
         Generation {
             invocation: Nat::new(91),
@@ -1130,5 +1151,41 @@ mod tests {
         encoded.push(0);
         assert!(decode_private(&a, &encoded).is_err());
         assert!(prove(&a, &[vec![Field(1)]], [0; 32]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod pin_helpers {
+    use super::*;
+    #[test]
+    fn pin_dzk_seeded_prg() {
+        let seed: [u8; 32] = std::array::from_fn(|i| i as u8);
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 0, 0), [0x1d, 0x09, 0x04, 0xc0, 0x97, 0xf3, 0x11, 0xe7, 0x8f, 0xf1, 0x44, 0x75, 0x4c, 0x4d, 0xd8, 0x92, 0x3a, 0x9d, 0x2e, 0x53, 0xbd, 0x0e, 0xe5, 0x79, 0x9a, 0xf5, 0x10, 0x54, 0x02, 0x8e, 0x63, 0x1b]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 1, 0), [0xdc, 0xcb, 0x34, 0xf5, 0x25, 0xfd, 0x36, 0xc5, 0xfb, 0xd7, 0xd5, 0xc6, 0x5c, 0x0f, 0x65, 0x37, 0xea, 0xc7, 0xc7, 0x13, 0x75, 0xf3, 0x5b, 0xbb, 0xc2, 0x51, 0x75, 0x80, 0xfe, 0xd0, 0x58, 0x2c]);
+        assert_eq!(Entropy::derive(RANDOM, seed, ctx, 3, 7), [0xa7, 0xf1, 0x75, 0x10, 0xfd, 0x55, 0xf9, 0x68, 0xfe, 0xd3, 0x63, 0xb4, 0x6c, 0xef, 0x16, 0x74, 0x0b, 0x43, 0xc0, 0x58, 0x87, 0xb9, 0xa6, 0x29, 0xd8, 0x29, 0x89, 0x82, 0x29, 0x26, 0xe9, 0x0d]);
+    }
+}
+
+#[cfg(test)]
+mod pin_child {
+    use super::*;
+    #[test]
+    fn pin_dzk_holder_generation() {
+        let g = Generation {
+            invocation: Nat::new(19),
+            command: vec![3, 4],
+            attempt: Nat::new(2),
+            generation: Nat::new(1),
+            configuration: Nat::new(5),
+        };
+        let ctx: [u8; 32] = std::array::from_fn(|i| 100 + i as u8);
+        let p = Profile { n: 4, f: 1, dealer: 0, count: 1, degree: 1, context: ctx };
+        let c = p.holder_generation(&g, 0);
+        assert_eq!(c.invocation.digits(), &[24, 223, 171, 7, 39, 30, 249, 233, 248, 165, 75, 86, 97, 182, 178, 111, 192, 91, 29, 141, 108, 168, 110, 137, 236, 180, 7, 145, 85, 142, 99, 200][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
+        let c = p.holder_generation(&g, 3);
+        assert_eq!(c.invocation.digits(), &[93, 155, 216, 130, 187, 96, 145, 194, 252, 146, 107, 26, 242, 168, 94, 222, 231, 238, 239, 191, 251, 233, 15, 159, 142, 37, 232, 80, 110, 30, 95, 181][..]);
+        assert_eq!((&c.command, &c.attempt, &c.generation, &c.configuration), (&g.command, &g.attempt, &g.generation, &g.configuration));
     }
 }

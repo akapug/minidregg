@@ -5,7 +5,26 @@ loaded durable image. Both existing grain targets are then prepared from that
 same directory and old authority, before any policy or native signature can
 be accepted. This is not a receiving endpoint.
 -/
-import Kernel.GrainResourceBirthFamilies
+module
+
+public import Kernel.GrainResourceBirthFamilies
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GrainResourceBirthTransaction
 
@@ -38,6 +57,16 @@ structure PreparedTargets
   targets : (i : DeclaredResourceController.TargetIndex command) →
     DeclaredResourceController.PreparedTarget deployment directory snapshot
       semantics ambient command command.targets[i]
+theorem PreparedTargets.present {deployment : Deployment}
+    {directory : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {snapshot : CredentialAuthorityDomain.Snapshot} {semantics : Digest} {ambient : Ambient}
+    {command : DeclaredResourceController.Command}
+    (prepared : PreparedTargets deployment directory snapshot semantics ambient command)
+    (i : DeclaredResourceController.TargetIndex command) :
+    directory.slots command.targets[i].target = .present (prepared.targets i).before ∧
+      DeclaredResourceController.selectTarget deployment command.targets[i]
+        (prepared.targets i).before = some (prepared.targets i).pre :=
+  ⟨(prepared.targets i).present, (prepared.targets i).selected⟩
 
 def prepareTargets {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
@@ -253,7 +282,7 @@ def plan {F : Type} [Field F]
     PreparationPlan (layout birth grain) Unit where
   leg := rawLeg birth grain height
   jointDigest := fun _ => CanonicalCellRegistry.sourceEncoding.hashBytes
-    ("DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v1".toUTF8.toList ++ source.canonicalBytes tariff)
+    ("DREGG/GRAIN-RESOURCE-BIRTH/JOINT/v5".toUTF8.toList ++ source.canonicalBytes tariff)
   legEffectsDigest := fun _ incidence =>
     (rawLeg birth grain height () incidence).request.2.effectsDigest
   bindFamily := bindFamily birth grain height

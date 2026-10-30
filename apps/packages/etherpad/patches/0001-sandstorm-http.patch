@@ -1,0 +1,41 @@
+diff --git a/src/node/hooks/express/specialpages.ts b/src/node/hooks/express/specialpages.ts
+--- a/src/node/hooks/express/specialpages.ts
++++ b/src/node/hooks/express/specialpages.ts
+@@ -386,6 +386,10 @@
+
+     // serve index.html under /
+     args.app.get('/', (req: any, res: any) => {
++      if (process.env.SANDSTORM) {
++        res.redirect('/p/main');
++        return;
++      }
+       const proxyPath = sanitizeProxyPath(req);
+       varyOnProxyPath(res);
+       const socialMetaHtml = renderSocialMeta({
+diff --git a/src/node/hooks/express/webaccess.ts b/src/node/hooks/express/webaccess.ts
+--- a/src/node/hooks/express/webaccess.ts
++++ b/src/node/hooks/express/webaccess.ts
+@@ -586,6 +586,10 @@
+ };
+
+ exports.userCanModify = (padId: string, req: SocketClientRequest) => {
++  if (process.env.SANDSTORM) {
++    const permissions = decodeURIComponent(req.headers['x-sandstorm-permissions'] || '').split(',');
++    if (!permissions.includes('modify')) return false;
++  }
+   if (readOnlyManager.isReadOnlyId(padId)) return false;
+   if (!settings.requireAuthentication) return true;
+   const {session: {user} = {}} = req;
+diff --git a/src/node/handler/APIHandler.ts b/src/node/handler/APIHandler.ts
+--- a/src/node/handler/APIHandler.ts
++++ b/src/node/handler/APIHandler.ts
+@@ -166,6 +166,9 @@
+  */
+ exports.handle = async function (apiVersion: string, functionName: string, fields: APIFields,
+                                  req: Http2ServerRequest) {
++  if (process.env.SANDSTORM) {
++    throw new createHTTPError.Unauthorized('Etherpad API not supported for Sandstorm');
++  }
+   // say goodbye if this is an unknown API version
+   if (!(apiVersion in version)) {
+     throw new createHTTPError.NotFound('no such api version');

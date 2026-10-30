@@ -1,8 +1,8 @@
 //! `mini job` — a Nock job between two friends, adjudicated by one `ran` turn
-//! (COMPUTE, the J-JOB floor).
+//! (docs/COMPUTE.md §2, journey J-JOB).
 //!
 //! A job is one declared cell born in a room under the job law
-//! (`deploy/shell/templates/job/law.job`, `Kernel/Job.lean`), bound here at
+//! (`native/resource-client/templates/job/law.job`, `Kernel/Job.lean`), bound here at
 //! CALLER = this workspace's subject, PROGRAM, WINDOW. Its money is the Book's,
 //! moved by the job-money receiver (ops 160-163, `Kernel/JobMoneyReceiver.lean`):
 //!
@@ -31,9 +31,9 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 /// The job law's JSON (`scripts/gen-joblaw.py` keeps it equal to `Kernel/Job.lean` §2).
-const LAW: &str = include_str!("../../../deploy/shell/templates/job/law.job.json");
+const LAW: &str = include_str!("../templates/job/law.job.json");
 /// The same law, one clause per line, as the Host renders a refused clause.
-const LAW_SHELL: &str = include_str!("../../../deploy/shell/templates/job/law.job.shell");
+const LAW_SHELL: &str = include_str!("../templates/job/law.job.shell");
 
 const STATES: [&str; 7] = ["open", "claimed", "answered", "upheld", "slashed", "void", "closed"];
 const NAMES: [&str; 16] = [
@@ -80,7 +80,7 @@ fn invoke(ws: &Ws, operation: u8, payload: &[u8]) -> Result<Vec<u8>> {
     let frame = session_invoke(&ws.host, &ws.socket, &ws.config, operation, payload)?;
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255 | 254, body)) => Err(format!(
+        Some((&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), body)) => Err(format!(
             "refused: op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(400)..]).split_whitespace().collect::<Vec<_>>().join(" ")
         )),
@@ -96,21 +96,13 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 }
 
 fn author(ws: &Ws, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, value.to_string().as_bytes()))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, value.to_string().as_bytes()))
 }
 
 fn inspect(ws: &Ws, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("job: invalid Host inspection of {kind}: {error}"))
 }
-
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
-}
-
 
 fn int(value: &Value, what: &str) -> Result<i128> {
     value
@@ -153,7 +145,7 @@ fn name_ok(name: &str) -> Result<()> {
 
 /// The deployment clock (op 129).
 fn now(ws: &Ws) -> Result<i128> {
-    let view = inspect(ws, "clock-view", &invoke(ws, 129, &[])?)?;
+    let view = inspect(ws, "clock-view", &invoke(ws, mini_sdk::host_operations::CLOCK_VIEW, &[])?)?;
     int(view.get("now").ok_or("job: clock view lacks now")?, "clock now")
 }
 
@@ -169,7 +161,7 @@ fn client(command: &str, flags: &[(&str, OsString)]) -> Result<()> {
     // A Host refusal is reported as the Host decoded it (the law's clause, by name).
     result.map_err(|error| {
         let decided = match take_host_decision() {
-            Some(HostDecision::RefusedFrame { decoded: Some(outcome), .. }) | Some(HostDecision::Outcome(outcome)) => {
+            Some(HostDecision::Frame { decoded: Some(outcome), .. }) | Some(HostDecision::Outcome(outcome)) => {
                 refusal_line(&outcome)
             }
             _ => None,
@@ -332,14 +324,14 @@ fn money(
     job_capability: &str,
 ) -> Result<Value> {
     fs::create_dir_all(dir).map_err(|error| format!("job: {}: {error}", dir.display()))?;
-    let view = inspect(ws, "pay-view", &invoke(ws, 107, &[])?)?;
+    let view = inspect(ws, "pay-view", &invoke(ws, mini_sdk::host_operations::PAY_VIEW, &[])?)?;
     let authority = view.get("authorityRoot").and_then(Value::as_str).ok_or("job: pay view lacks authorityRoot")?;
     let command = json!({"subject":ws.subject,"capability":capability,"jobCapability":job_capability,
         "job":job,"action":action.to_string(),
         "account":account,"amount":amount,"nonce":crate::fsio::random_nonce()?,"expectedAuthorityRoot":authority});
     crate::shell::session_fs::replace(&ws.root, &dir.join("command.json"), command.to_string().as_bytes())?;
     let command_bytes = author(ws, "job-money", &command)?;
-    let plan = match invoke(ws, 160, &command_bytes) {
+    let plan = match invoke(ws, mini_sdk::host_operations::JOB_MONEY_PLAN, &command_bytes) {
         Ok(plan) => plan,
         Err(refused) => {
             let named = refused
@@ -355,8 +347,8 @@ fn money(
     crate::shell::session_fs::replace(&ws.root, &dir.join("plan.bin"), &plan)?;
     let header = inspect(ws, "pay-plan", &plan)?;
     let canonical = header.pointer("/header/canonical").and_then(Value::as_str).ok_or("job: plan lacks a header")?;
-    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&crate::decode_hex(canonical).map_err(|e| format!("job: {e}"))?).to_bytes();
-    let ingress = invoke(ws, 161, &pair(&plan, &signature))?;
+    let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&mini_sdk::hex::decode(canonical).map_err(|e| format!("job: {e}"))?).to_bytes();
+    let ingress = invoke(ws, mini_sdk::host_operations::JOB_MONEY_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     retain_new_ingress(ws, dir, &ingress)?;
     submit_ingress(ws, dir, &ingress)
 }
@@ -394,7 +386,7 @@ fn begin_money_submission(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<String>
 
 fn submit_ingress(ws: &Ws, dir: &Path, ingress: &[u8]) -> Result<Value> {
     let id = begin_money_submission(ws, dir, ingress)?;
-    let outcome = inspect(ws, "outcome", &invoke(ws, 162, ingress)?)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::JOB_MONEY_SUBMIT, ingress)?)?;
     retain_money_outcome(ws, dir, outcome, Some(&id))
 }
 
@@ -439,7 +431,7 @@ fn settlement_needs_recovery(ws: &Ws, dir: &Path) -> Result<bool> {
                 .ok_or("job: invalid retained submission name")?;
             // crate::fsio::random_nonce() emits a canonical decimal u128, not a hex identifier.
             // Roundtrip the spelling so aliases cannot pair different sends.
-            if id.parse::<u128>().ok().is_none_or(|value| value.to_string() != id) {
+            if mini_sdk::decimal::parse::<u128>(id).is_none() {
                 return Err("job: invalid retained submission name".into());
             }
             let bytes = crate::shell::session_fs::read(&ws.root, &entry.path(), 1 << 20)?;
@@ -489,7 +481,7 @@ fn recover_settlement(ws: &Ws, dir: &Path, job: &str) -> Result<(Value, bool)> {
     settlement_identity(ws, job, &inspect(ws, "job-money-ingress", &ingress)?)?;
     // Receipt-only lookup cannot create another effect. Absence permits only
     // the exact original ingress, whose current admission/replay stays native.
-    let outcome = inspect(ws, "outcome", &invoke(ws, 163, &ingress)?)?;
+    let outcome = inspect(ws, "outcome", &invoke(ws, mini_sdk::host_operations::JOB_MONEY_LOOKUP, &ingress)?)?;
     if outcome.get("type").and_then(Value::as_str) == Some("absent") {
         submit_ingress(ws, dir, &ingress).map(|value| (value, true))
     } else {
@@ -511,7 +503,7 @@ fn operation_capability(reference: &Value) -> Result<String> {
 /// claim a truth turn carries, and the writes it names.
 fn dry_run(ws: &Ws, job: &str, fields: &BTreeMap<u32, String>) -> Result<(Value, Value)> {
     let program = fields.get(&1).ok_or("job: no program field")?;
-    let show: Value = serde_json::from_slice(&invoke(ws, 132, program.as_bytes())?)
+    let show: Value = serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::NOCK_PROGRAM_SHOW, program.as_bytes())?)
         .map_err(|error| format!("job: program show: {error}"))?;
     let sample = show.pointer("/abi/sample").and_then(Value::as_array).ok_or("job: program ABI lacks sample")?;
     let mut values = Vec::new();
@@ -528,7 +520,7 @@ fn dry_run(ws: &Ws, job: &str, fields: &BTreeMap<u32, String>) -> Result<(Value,
         values.push(json!([slot.get("target").cloned().unwrap_or(json!("0")), name, value]));
     }
     let request = json!({"programId":program,"caller":ws.subject,"room":"0","targets":[job],"values":values});
-    let dry: Value = serde_json::from_slice(&invoke(ws, 134, request.to_string().as_bytes())?)
+    let dry: Value = serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::NOCK_DRY_RUN, request.to_string().as_bytes())?)
         .map_err(|error| format!("job: dry run: {error}"))?;
     if dry.get("verdict").and_then(Value::as_str) != Some("ok") {
         return Err(format!("job: the program did not finish on the job's sample: {dry}"));

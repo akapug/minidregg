@@ -9,15 +9,18 @@
 #   bin/grain-provider-bridge                   sandbox inference bridge
 #   bin/spk-host                                application custody and broker
 #   bin/spk-browser-proxy                       TLS browser entrance
-#   bin/mini-spk-broker, bin/spk-hostd          SPK broker and grain host daemon (shipped, not installed by default)
+#   bin/mini-spk-broker                         SPK per-world broker
 #   bin/mini-spk-volume-helper                  per-store root volume helper (deploy/spk-host/install-user-world installs it)
 #   bin/mini-discord                            Discord entrance
+#   bin/mini-discord-mirror                     Discord room mirror (off unless configured)
+#   bin/mini-door, bin/mini-door-process        the self-serve door's form and root processor
 #   bin/mini-keys                               key broker (seal key, provider and Discord secrets)
 #   bin/pay-watcher                             Solana pay watcher
+#   bin/launch-gate                             grain worker launch gate (beside the bwrap launcher)
 # packaged by deploy/candidate/package.py into the one candidate format:
 # provenance.json (source commit, toolchains, hashes, each ELF's glibc needs),
 # SHA256SUMS, and manifest.json (the journey-format manifest: absolute paths +
-# SHA-256 pins). package.py --capsule packages a sealed hbox family the same way.
+# SHA-256 pins). lane-build.sh (an incremental build) packages through the same package.py.
 # Signing needs a locally selected consent pair: MINI_LOCAL_HOST (the native
 # Host, for pure codecs) and MINI_CONSENT_HOST (minidregg-client-consent, which
 # reconstructs every plan before a key signs it), plus MINI_CONSENT_CONFIG.
@@ -184,10 +187,10 @@ cargo_home=$(CDPATH='' cd -- "$cargo_home" && pwd -P)
 export RUSTFLAGS="--remap-path-prefix=$bsrc=/minidregg --remap-path-prefix=$cargo_home=/cargo --remap-path-prefix=$out/work/target=/target"
 export CARGO_INCREMENTAL=0
 build_rust() {
-  crate=$1 bin=$2
+  crate=$1 bin=$2 features=${3:-}
   (cd "$bsrc" && cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
     --manifest-path "$bsrc/native/$crate/Cargo.toml" \
-    --target-dir "$out/work/target" --bin "$bin" \
+    --target-dir "$out/work/target" --bin "$bin" ${features:+--features "$features"} \
     >"$out/logs/cargo-$crate-$bin.log" 2>&1) \
     || { tail -40 "$out/logs/cargo-$crate-$bin.log" >&2; candidate_die "cargo build failed: $crate/$bin"; }
   # The binary must name the pinned compiler (ELF .comment "rustc version ...").
@@ -200,8 +203,8 @@ python3 "$src/deploy/candidate/package.py" --rust-roles >"$out/work/rust-roles.t
   || candidate_die "package.py --rust-roles failed"
 build_rust resource-client mini
 if [ "$client_only" = 0 ]; then
-  while read -r role crate bin; do
-    [ "$role" = mini ] || build_rust "$crate" "$bin" </dev/null
+  while read -r role crate bin features; do
+    [ "$role" = mini ] || build_rust "$crate" "$bin" "$features" </dev/null
   done <"$out/work/rust-roles.txt"
 fi
 

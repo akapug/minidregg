@@ -5,6 +5,7 @@
 //! receipt, exact event, and current pending query. In particular, a generic
 //! resource transaction or caller JSON is never enough to start an app.
 
+use crate::io_context::IoContext;
 use crate::agent_api_lifetime_reverse_v3::VerifiedSettlementV3;
 use crate::rpc_adapter::DispatchFence;
 use crate::sandbox::open_protected_directory;
@@ -21,6 +22,7 @@ use std::process::Command;
 use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::canonical::{decimal as canonical_decimal, hex64};
 
 const VERSION: u32 = 1;
 const MAX_RECORD_BYTES: u64 = 16 * 1024;
@@ -32,10 +34,7 @@ fn invalid(message: impl Into<String>) -> io::Error {
 }
 
 fn canonical_native_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    crate::canonical::decimal(value)
 }
 
 fn deserialize_operation_id<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -56,13 +55,6 @@ where
         return Err(D::Error::custom("operation ID is not canonical decimal"));
     }
     Ok(text)
-}
-
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Opaque physical identity derived from a future native verified BEGIN.
@@ -164,13 +156,14 @@ impl Record {
         if self.phase != Phase::Running {
             return Err(invalid("app journal is not Running"));
         }
-        let current = UnitInstance::current(self.unit())?;
+        // One manager inspection answers both the instance identity and the liveness checks.
+        let manager = systemd_show(self.unit())?;
+        let current = UnitInstance::current_in(self.unit(), &manager)?;
         if self.invocation_id.as_deref() != Some(current.invocation_id.as_str())
             || self.control_group.as_deref() != Some(current.control_group.as_str())
         {
             return Err(invalid("resident app unit invocation drift"));
         }
-        let manager = systemd_show(self.unit())?;
         if property(&manager, "ActiveState")? != "active"
             || !matches!(property(&manager, "Job")?, "0" | "")
             || property(&manager, "MainPID")?
@@ -259,13 +252,6 @@ pub struct DispatchIdentity {
     pub session_generation: String,
     pub dispatch_transaction: String,
     pub dispatch_event: String,
-}
-
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn canonical_digest_decimal(value: &str) -> bool {
@@ -406,7 +392,7 @@ fn bounded_systemctl(args: &[&str], deadline: Duration) -> io::Result<Output> {
                 "systemd manager response uncertain",
             ));
         }
-        std::thread::sleep(Duration::from_millis(10));
+        crate::dispatch_native::wait_for_exit(&child, end);
     }
 }
 
@@ -424,6 +410,11 @@ fn property<'a>(output: &'a str, name: &str) -> io::Result<&'a str> {
 
 impl UnitInstance {
     fn current(unit: &str) -> io::Result<Self> {
+        Self::current_in(unit, &systemd_show(unit)?)
+    }
+
+    /// As `current`, against an inspection (`systemd_show`) the caller already holds.
+    fn current_in(unit: &str, manager: &str) -> io::Result<Self> {
         let invocation_id =
             std::env::var("INVOCATION_ID").map_err(|_| invalid("missing systemd InvocationID"))?;
         let cgroup = crate::os::self_cgroup()?;
@@ -437,12 +428,11 @@ impl UnitInstance {
             control_group,
         };
         instance.validate(unit)?;
-        let manager = systemd_show(unit)?;
-        if property(&manager, "Id")? != unit
-            || property(&manager, "LoadState")? != "loaded"
-            || property(&manager, "InvocationID")? != instance.invocation_id
-            || property(&manager, "ControlGroup")? != instance.control_group
-            || property(&manager, "MainPID")?
+        if property(manager, "Id")? != unit
+            || property(manager, "LoadState")? != "loaded"
+            || property(manager, "InvocationID")? != instance.invocation_id
+            || property(manager, "ControlGroup")? != instance.control_group
+            || property(manager, "MainPID")?
                 .parse::<u32>()
                 .map_err(|_| invalid("invalid systemd MainPID"))?
                 != std::process::id()
@@ -455,11 +445,7 @@ impl UnitInstance {
     }
 
     fn validate(&self, unit: &str) -> io::Result<()> {
-        if self.invocation_id.len() != 32
-            || !self
-                .invocation_id
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        if !crate::canonical::lower_hex_of(&self.invocation_id, 16)
             || !self.control_group.starts_with('/')
             || !self.control_group.ends_with(&format!("/{unit}"))
             || self.control_group.contains("//")
@@ -757,9 +743,9 @@ pub(crate) fn qualification_refuse_spawn(journal: &Path) -> io::Result<()> {
     {
         return Err(invalid("qualification trigger identity refused"));
     }
-    fs::rename(&trigger, journal.join("qualification-fail-spawn-consumed-v1"))?;
-    File::open(app_dir)?.sync_all()?;
-    File::open(journal)?.sync_all()?;
+    fs::rename(&trigger, journal.join("qualification-fail-spawn-consumed-v1")).ctx("rename", &trigger)?;
+    File::open(&app_dir).ctx("open", &app_dir)?.sync_all()?;
+    File::open(&journal).ctx("open", &journal)?.sync_all()?;
     Err(io::Error::other(
         "qualification: unit ExecStart refused after Entered (failed-START fixture)",
     ))
@@ -771,11 +757,11 @@ pub(crate) fn atomic_write_locked(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let directory=path.parent().ok_or_else(|| invalid("atomic custody parent absent"))?;
     let nonce=SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| invalid("clock before epoch"))?.as_nanos();
     let temporary=directory.join(format!(".record-{}-{nonce}.tmp",std::process::id()));
-    let mut file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary)?;
+    let mut file=OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&temporary).ctx("open", &temporary)?;
     let result=(|| {
-        file.write_all(bytes)?;file.sync_all()?;fs::rename(&temporary,path)?;File::open(directory)?.sync_all()
+        file.write_all(bytes)?;file.sync_all()?;fs::rename(&temporary,path).ctx("rename", &temporary)?;File::open(&directory).ctx("open", &directory)?.sync_all()
     })();
-    if result.is_err() { let _=fs::remove_file(&temporary); }
+    if result.is_err() { let _=fs::remove_file(&temporary).ctx("remove", &temporary); }
     result
 }
 
@@ -807,11 +793,14 @@ impl ChildHandle for BoundedChild {
     }
 }
 
-// The mutators are intentionally unreachable from the public binary until
-// native verified BEGIN admission is wired. Keep the physical state machine
-// separately testable without exposing an operator-minted launch command.
-#[allow(dead_code)]
+// The physical state machine's mutators. They are reached only through the
+// resident's source-bound START/STOP and dispatch paths, never a CLI verb.
 impl Journal {
+    /// The generation directory this journal lives in (`apps/<app>/g<N>`).
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+
     /// Read-only recovery evidence for the exact claimed START whose spawn
     /// failed before producing a child. This does not clear a manager failure,
     /// mutate the journal, authorize a launch, or supply Mini's reserved gate.
@@ -902,7 +891,7 @@ impl Journal {
         // Only root or this operator may own a path component. In particular,
         // an app UID cannot rename an otherwise private journal ancestor.
         for ancestor in directory.ancestors() {
-            let meta = fs::symlink_metadata(ancestor)?;
+            let meta = fs::symlink_metadata(&ancestor).ctx("inspect", &ancestor)?;
             if !meta.is_dir()
                 || meta.file_type().is_symlink()
                 || (!crate::namespace_identity::root_owned(ancestor, &meta) && meta.uid() != uid)
@@ -914,7 +903,7 @@ impl Journal {
             }
         }
         let protected = File::from(open_protected_directory(directory, u32::MAX, false)?);
-        let metadata = fs::metadata(directory)?;
+        let metadata = fs::metadata(&directory).ctx("inspect", &directory)?;
         if metadata.uid() != uid
             || metadata.permissions().mode() & 0o777 != 0o700
             || metadata.dev() != protected.metadata()?.dev()
@@ -946,10 +935,6 @@ impl Journal {
         stop_unit(unit)
     }
 
-    pub(crate) fn directory(&self) -> &Path {
-        &self.directory
-    }
-
     fn with_lock<T>(&self, f: impl FnOnce(&Self) -> io::Result<T>) -> io::Result<T> {
         let path = self.directory.join(".lock");
         let lock = OpenOptions::new()
@@ -958,7 +943,7 @@ impl Journal {
             .create(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(path)?;
+            .open(&path).ctx("open", &path)?;
         let metadata = lock.metadata()?;
         if !metadata.is_file()
             || metadata.nlink() != 1
@@ -1036,18 +1021,19 @@ impl Journal {
             if record.phase != Phase::Running || record.dispatch_in_flight.is_some() {
                 return Err(invalid("checkpoint requires settled physical dispatch"));
             }
-            for name in ["dispatch-active.json", "native-dispatch-active.json"] {
-                match fs::symlink_metadata(this.directory.join(name)) {
-                    Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {},
-                    Err(error) => return Err(error),
-                }
+            match fs::symlink_metadata(this.directory.join("dispatch-active.json")) {
+                Ok(_) => return Err(invalid("checkpoint dispatch outcome requires exact recovery")),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {},
+                Err(error) => return Err(error),
             }
-            for entry in fs::read_dir(&this.directory)? {
+            if !crate::dispatch_fence::undecided(&this.directory)?.is_empty() {
+                return Err(invalid("checkpoint dispatch outcome requires exact recovery"));
+            }
+            for entry in fs::read_dir(&this.directory).ctx("list", &this.directory)? {
                 let path = entry?.path();
                 let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
                 if name.starts_with("dispatch-op-") && name.ends_with(".json") {
-                    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path)?;
+                    let file=OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path).ctx("open", &path)?;
                     let mut bytes=Vec::new(); file.take(2049).read_to_end(&mut bytes)?;
                     if bytes.len()>2048 { return Err(invalid("dispatch tombstone exceeds bound")); }
                     let tombstone: DispatchTombstone=serde_json::from_slice(&bytes)?;
@@ -1061,59 +1047,75 @@ impl Journal {
         })
     }
 
+    // Every delivery shares this journal, including agent calls whose IDs
+    // come from controller custody. Establish the human allocator before any
+    // delivery evidence exists, so agent-first use cannot resemble counter loss.
+    // An absent counter beside historical evidence still refuses; it is never reset.
+    fn dispatch_counter_unlocked(&self) -> io::Result<u64> {
+        let path = self.directory.join("dispatch-next-id");
+        let next = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let meta = file.metadata()?;
+                if !meta.is_file()
+                    || meta.nlink() != 1
+                    || meta.uid() != unsafe { libc::geteuid() }
+                    || meta.permissions().mode() & 0o777 != 0o600
+                    || meta.len() > 21
+                {
+                    return Err(invalid("dispatch operation counter identity drift"));
+                }
+                let mut bytes = String::new();
+                file.read_to_string(&mut bytes)?;
+                let value = bytes
+                    .strip_suffix('\n')
+                    .ok_or_else(|| invalid("dispatch operation counter framing"))?;
+                if !canonical_decimal(value) {
+                    return Err(invalid("dispatch operation counter is noncanonical"));
+                }
+                value
+                    .parse::<u64>()
+                    .map_err(|_| invalid("dispatch operation counter overflow"))?
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // Losing an established counter must not rearm old IDs.
+                for entry in fs::read_dir(&self.directory).ctx("list", &self.directory)? {
+                    let name = entry?.file_name();
+                    let name = name.to_string_lossy();
+                    if name.starts_with("dispatch-op-")
+                        || name.starts_with("dispatch-id-")
+                        || name.starts_with("dispatch-permit-")
+                        || name == "dispatch-active.json"
+                    {
+                        return Err(invalid("dispatch operation counter missing after use"));
+                    }
+                }
+                let mut file = OpenOptions::new().write(true).create_new(true)
+                    .mode(0o600).custom_flags(libc::O_NOFOLLOW)
+                    .open(&path).ctx("create", &path)?;
+                file.write_all(b"1\n")?;
+                file.sync_all()?;
+                File::open(&self.directory).ctx("open", &self.directory)?.sync_all()?;
+                1
+            }
+            Err(error) => return Err(error),
+        };
+        if next == 0 {
+            return Err(invalid("dispatch operation counter is zero"));
+        }
+        Ok(next)
+    }
+
     /// Reserve a physical operation number before native authoring. The
     /// counter is advanced and fsynced under the app lock, so a crash may
     /// skip a number but can never reuse one after it was handed to a caller.
     pub(crate) fn allocate_dispatch_operation(&self) -> io::Result<String> {
         self.with_lock(|this| {
             let path = this.directory.join("dispatch-next-id");
-            let next = match OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&path)
-            {
-                Ok(mut file) => {
-                    let meta = file.metadata()?;
-                    if !meta.is_file()
-                        || meta.nlink() != 1
-                        || meta.uid() != unsafe { libc::geteuid() }
-                        || meta.permissions().mode() & 0o777 != 0o600
-                        || meta.len() > 21
-                    {
-                        return Err(invalid("dispatch operation counter identity drift"));
-                    }
-                    let mut bytes = String::new();
-                    file.read_to_string(&mut bytes)?;
-                    let value = bytes
-                        .strip_suffix('\n')
-                        .ok_or_else(|| invalid("dispatch operation counter framing"))?;
-                    if !canonical_decimal(value) {
-                        return Err(invalid("dispatch operation counter is noncanonical"));
-                    }
-                    value
-                        .parse::<u64>()
-                        .map_err(|_| invalid("dispatch operation counter overflow"))?
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    // Losing an established counter must not rearm old IDs.
-                    for entry in fs::read_dir(&this.directory)? {
-                        let name = entry?.file_name();
-                        let name = name.to_string_lossy();
-                        if name.starts_with("dispatch-op-")
-                            || name.starts_with("dispatch-id-")
-                            || name.starts_with("dispatch-permit-")
-                            || name == "dispatch-active.json"
-                        {
-                            return Err(invalid("dispatch operation counter missing after use"));
-                        }
-                    }
-                    1
-                }
-                Err(error) => return Err(error),
-            };
-            if next == 0 {
-                return Err(invalid("dispatch operation counter is zero"));
-            }
+            let next = this.dispatch_counter_unlocked()?;
             let following = next
                 .checked_add(1)
                 .ok_or_else(|| invalid("dispatch operation counter exhausted"))?;
@@ -1125,10 +1127,10 @@ impl Journal {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(&allocated)?;
+                .open(&allocated).ctx("open", &allocated)?;
             writeln!(marker, "{next}")?;
             marker.sync_all()?;
-            File::open(&this.directory)?.sync_all()?;
+            File::open(&this.directory).ctx("open", &this.directory)?.sync_all()?;
             let nonce = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| invalid("clock before epoch"))?
@@ -1141,15 +1143,15 @@ impl Journal {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(&temporary)?;
+                .open(&temporary).ctx("open", &temporary)?;
             let result = (|| {
                 writeln!(file, "{following}")?;
                 file.sync_all()?;
-                fs::rename(&temporary, &path)?;
-                File::open(&this.directory)?.sync_all()
+                fs::rename(&temporary, &path).ctx("rename", &temporary)?;
+                File::open(&this.directory).ctx("open", &this.directory)?.sync_all()
             })();
             if result.is_err() {
-                let _ = fs::remove_file(&temporary);
+                let _ = fs::remove_file(&temporary).ctx("remove", &temporary);
             }
             result?;
             Ok(next.to_string())
@@ -1172,17 +1174,17 @@ impl Journal {
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.dispatch_permit_path(identity))?;
+            .open(self.dispatch_permit_path(identity)).ctx("open", &(self.dispatch_permit_path(identity)))?;
         file.write_all(permit)?;
         file.sync_all()?;
-        File::open(&self.directory)?.sync_all()
+        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
     }
 
     fn verify_dispatch_permit_unlocked(&self, identity: &DispatchIdentity) -> io::Result<()> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.dispatch_permit_path(identity))?;
+            .open(self.dispatch_permit_path(identity)).ctx("open", &(self.dispatch_permit_path(identity)))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1216,17 +1218,17 @@ impl Journal {
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.active_dispatch_path())?;
+            .open(self.active_dispatch_path()).ctx("open", &(self.active_dispatch_path()))?;
         file.write_all(&bytes)?;
         file.sync_all()?;
-        File::open(&self.directory)?.sync_all()
+        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
     }
 
     fn read_active_dispatch_unlocked(&self) -> io::Result<DispatchIdentity> {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.active_dispatch_path())?;
+            .open(self.active_dispatch_path()).ctx("open", &(self.active_dispatch_path()))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1250,8 +1252,8 @@ impl Journal {
         if &self.read_active_dispatch_unlocked()? != identity {
             return Err(invalid("active dispatch marker coordinate drift"));
         }
-        fs::remove_file(self.active_dispatch_path())?;
-        File::open(&self.directory)?.sync_all()
+        fs::remove_file(self.active_dispatch_path()).ctx("remove", &(self.active_dispatch_path()))?;
+        File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
     }
 
     fn read_dispatch_unlocked(&self, identity: &DispatchIdentity) -> io::Result<DispatchTombstone> {
@@ -1259,7 +1261,7 @@ impl Journal {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(self.dispatch_path(identity))?;
+            .open(self.dispatch_path(identity)).ctx("open", &(self.dispatch_path(identity)))?;
         let meta = file.metadata()?;
         if !meta.is_file()
             || meta.nlink() != 1
@@ -1301,10 +1303,10 @@ impl Journal {
                 .create_new(true)
                 .mode(0o600)
                 .custom_flags(libc::O_NOFOLLOW)
-                .open(path)?;
+                .open(&path).ctx("open", &path)?;
             file.write_all(&bytes)?;
             file.sync_all()?;
-            return File::open(&self.directory)?.sync_all();
+            return File::open(&self.directory).ctx("open", &self.directory)?.sync_all();
         }
         let old = self.read_dispatch_unlocked(&tombstone.identity)?;
         if !matches!(
@@ -1327,15 +1329,15 @@ impl Journal {
             .create_new(true)
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
-            .open(&temporary)?;
+            .open(&temporary).ctx("open", &temporary)?;
         let result = (|| {
             file.write_all(&bytes)?;
             file.sync_all()?;
-            fs::rename(&temporary, path)?;
-            File::open(&self.directory)?.sync_all()
+            fs::rename(&temporary, path).ctx("rename", &temporary)?;
+            File::open(&self.directory).ctx("open", &self.directory)?.sync_all()
         })();
         if result.is_err() {
-            let _ = fs::remove_file(&temporary);
+            let _ = fs::remove_file(&temporary).ctx("remove", &temporary);
         }
         result
     }
@@ -1374,8 +1376,11 @@ impl Journal {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
             }
-            // This marker is fsynced first. If any later file or record write
-            // fails, an operator must audit it before unrelated requests run.
+            // Establish the allocator before the first delivery marker, even
+            // when this operation ID came from external controller custody.
+            this.dispatch_counter_unlocked()?;
+            // If any later file or record write fails, the active marker must
+            // be audited before unrelated requests run.
             this.create_active_dispatch_unlocked(&identity)?;
             this.capture_dispatch_permit_unlocked(&identity, committed_permit)?;
             let tombstone = DispatchTombstone {
@@ -1701,7 +1706,10 @@ impl Journal {
     }
 
     /// Tombstone first; only then call the unit manager. An uncertain manager
-    /// response retains Fenced and requires another exact-unit audit.
+    /// response retains Fenced and requires another exact-unit audit. The
+    /// production STOP takes `fence_and_stop_manager_checked`; this unchecked
+    /// form remains as the tests' model of the tombstone ordering.
+    #[cfg(test)]
     pub(crate) fn fence_and_stop(
         &self,
         stop: impl FnOnce(&str) -> io::Result<()>,
@@ -1742,30 +1750,6 @@ impl Journal {
             record.child_pid = None;
             this.write_unlocked(&record)
         })
-    }
-
-    /// Production stop path. The durable tombstone precedes the systemd stop;
-    /// a missing/mismatched unit or manager failure retains Fenced.
-    pub(crate) fn fence_and_stop_manager(&self) -> io::Result<()> {
-        self.fence_and_stop(
-            |unit| {
-                let record = self
-                    .read()?
-                    .ok_or_else(|| invalid("missing fenced record"))?;
-                // A prior stop may have succeeded just before the Stopped
-                // record fsync failed. Systemd then clears InvocationID. A
-                // complete exact post-stop audit permits this idempotent retry.
-                if UnitStopAudit::inspect(&record)
-                    .and_then(|audit| audit.prove(&record))
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-                UnitStopAudit::before_stop(&record)?;
-                self.stop_unit(unit)
-            },
-            UnitStopAudit::inspect,
-        )
     }
 
     /// Source-bound STOP uses the exact retained running incarnation and a
@@ -1885,6 +1869,25 @@ impl Journal {
                 return Err(invalid("STOP requires Running or Fenced journal"));
             }
             if record.phase == Phase::Running {
+                // Physical cleanup may already have stopped this incarnation
+                // and cleared systemd's InvocationID. A fresh source STOP is
+                // still required, but there is no live unit to signal. Use the
+                // complete post-stop predicate, never merely an empty ID.
+                if let Ok(audit) = inspect(&record) {
+                    if audit.prove(&record).is_ok() {
+                        record.phase = Phase::Fenced;
+                        this.write_unlocked(&record)?;
+                        verify_volume()?;
+                        // A replacement or new manager job appearing across
+                        // the durable fence leaves Fenced and receives no stop.
+                        let audit = inspect(&record)?;
+                        audit.prove(&record)?;
+                        record.phase = Phase::Stopped;
+                        record.child_pid = None;
+                        this.write_unlocked(&record)?;
+                        return Ok(audit);
+                    }
+                }
                 before_stop(&record)?;
                 record.phase = Phase::Fenced;
                 this.write_unlocked(&record)?;
@@ -2100,6 +2103,51 @@ mod tests {
         );
         fs::remove_file(path.join("dispatch-next-id")).unwrap();
         assert!(reopened.allocate_dispatch_operation().is_err());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn external_dispatch_before_first_local_allocation_keeps_ids_and_fences() {
+        let (path, journal, _) = running_journal();
+        let mut agent = dispatch_identity('1');
+        agent.operation_id = "183".into();
+        journal.request_dispatch(agent.clone(), committed_permit()).unwrap();
+        journal.finish_dispatch(&agent, true).unwrap();
+        assert_eq!(fs::read_to_string(path.join("dispatch-next-id")).unwrap(), "1\n");
+        let mut human = dispatch_identity('2');
+        human.session_resource = "6209".into();
+        human.operation_id = journal.allocate_dispatch_operation().unwrap();
+        assert_eq!(human.operation_id, "1");
+        journal.request_dispatch(human.clone(), committed_permit()).unwrap();
+        journal.finish_dispatch(&human, true).unwrap();
+        assert!(journal.request_dispatch(agent, committed_permit()).is_err());
+        assert!(journal.request_dispatch(human, committed_permit()).is_err());
+        assert_eq!(journal.allocate_dispatch_operation().unwrap(), "2");
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn external_dispatch_counter_loss_refuses_both_routes_before_delivery() {
+        let (path, journal, _) = running_journal();
+        let agent = dispatch_identity('1');
+        journal.request_dispatch(agent.clone(), committed_permit()).unwrap();
+        journal.finish_dispatch(&agent, true).unwrap();
+        fs::remove_file(path.join("dispatch-next-id")).unwrap();
+        assert!(journal.allocate_dispatch_operation().is_err());
+        assert!(journal.request_dispatch(dispatch_identity('2'), committed_permit()).is_err());
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(!path.join("dispatch-next-id").exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn incomplete_initial_dispatch_counter_never_arms_delivery() {
+        let (path, journal, _) = running_journal();
+        OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(path.join("dispatch-next-id")).unwrap();
+        assert!(journal.allocate_dispatch_operation().is_err());
+        assert!(journal.request_dispatch(dispatch_identity('1'), committed_permit()).is_err());
+        assert!(!journal.active_dispatch_path().exists());
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -2342,15 +2390,17 @@ mod tests {
     }
 
     /// The human path after DeliveryRequested: a worker fence releases the
-    /// shared slot and the generation-wide native marker, the operation
+    /// shared slot and settles the call's own submit marker, the operation
     /// stays terminally Uncertain and is never dispatchable again, and the
     /// next participant proceeds.
     #[test]
     fn human_post_commit_failure_releases_slot_and_native_marker_with_fence() {
         let (path, journal, _) = running_journal();
-        let first = dispatch_identity('9');
-        let native = path.join("native-dispatch-active.json");
-        fs::write(&native, b"native submit marker").unwrap();
+        let mut first = dispatch_identity('9');
+        first.operation_id = journal.allocate_dispatch_operation().unwrap();
+        let attempt = path.join(format!("dispatch-op-{}", first.operation_id));
+        std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
             .request_dispatch(first.clone(), committed_permit())
             .unwrap();
@@ -2391,9 +2441,11 @@ mod tests {
     #[test]
     fn human_failure_without_matching_fence_keeps_every_marker() {
         let (path, journal, _) = running_journal();
-        let first = dispatch_identity('9');
-        let native = path.join("native-dispatch-active.json");
-        fs::write(&native, b"native submit marker").unwrap();
+        let mut first = dispatch_identity('9');
+        first.operation_id = journal.allocate_dispatch_operation().unwrap();
+        let attempt = path.join(format!("dispatch-op-{}", first.operation_id));
+        std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
+        let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
             .request_dispatch(first.clone(), committed_permit())
             .unwrap();
@@ -2790,6 +2842,107 @@ mod tests {
             queued_job: false,
             exact_cgroup_empty: true,
         })
+    }
+
+    fn stop_identity(record: &Record) -> StopIdentity {
+        StopIdentity {
+            app: record.app(), generation: record.generation(), unit: record.unit().into(),
+            image_identity: record.image_identity().into(),
+            invocation_id: record.invocation_id().unwrap().into(),
+            control_group: record.control_group().unwrap().into(),
+        }
+    }
+
+    #[test]
+    fn source_stop_reconciles_already_inactive_running_without_manager_command() {
+        use std::cell::Cell;
+        let (path, journal, _) = running_journal();
+        let original = journal.read().unwrap().unwrap();
+        let expected = stop_identity(&original);
+        let observations = Cell::new(0);
+        let volumes = Cell::new(0);
+        let audit = journal.fence_and_stop_checked_with(
+            &expected, || { volumes.set(volumes.get() + 1); Ok(()) },
+            |_| panic!("already-stopped incarnation must not require a live invocation"),
+            |_| panic!("already-stopped incarnation must not receive a manager command"),
+            |record| {
+                assert_eq!(record.phase, if observations.get() == 0 { Phase::Running } else { Phase::Fenced });
+                assert_eq!(journal.read_unlocked()?.unwrap().phase, record.phase);
+                observations.set(observations.get() + 1);
+                stopped(record)
+            },
+        ).unwrap();
+        assert_eq!((observations.get(), volumes.get()), (2, 2));
+        let result = journal.read().unwrap().unwrap();
+        assert_eq!(result.phase, Phase::Stopped);
+        assert_eq!(result.child_pid, None);
+        assert_eq!(result.identity, original.identity);
+        assert_eq!(result.invocation_id, original.invocation_id);
+        assert_eq!(result.control_group, original.control_group);
+        audit.source_stop_audit(&expected).unwrap();
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn source_stop_inactive_reconciliation_refuses_identity_volume_and_replacement() {
+        use std::cell::Cell;
+        for changed in ["app", "generation", "unit", "image", "invocation", "group", "volume"] {
+            let (path, journal, _) = running_journal();
+            let original = journal.read().unwrap().unwrap();
+            let mut expected = stop_identity(&original);
+            match changed {
+                "app" => expected.app += 1, "generation" => expected.generation += 1,
+                "unit" => expected.unit.push('x'), "image" => expected.image_identity.push('x'),
+                "invocation" => expected.invocation_id = "e".repeat(32),
+                "group" => expected.control_group.push('x'), _ => {},
+            }
+            assert!(journal.fence_and_stop_checked_with(&expected,
+                || if changed == "volume" { Err(invalid("volume changed")) } else { Ok(()) },
+                |_| panic!("identity/volume refusal must precede manager inspection"),
+                |_| panic!("no manager stop"), stopped).is_err(), "{changed}");
+            assert_eq!(journal.read().unwrap().unwrap(), original);
+            fs::remove_dir_all(path).unwrap();
+        }
+        for change_after_fence in [false, true] {
+            for changed in ["unit", "invocation", "group", "missing", "active", "pid", "job", "populated", "volume"] {
+                let (path, journal, _) = running_journal();
+                let original = journal.read().unwrap().unwrap();
+                let expected = stop_identity(&original);
+                let observations = Cell::new(0);
+                let volumes = Cell::new(0);
+                let result = journal.fence_and_stop_checked_with(&expected,
+                    || {
+                        volumes.set(volumes.get() + 1);
+                        if changed == "volume" && (!change_after_fence || volumes.get() == 2) { Err(invalid("volume changed")) } else { Ok(()) }
+                    },
+                    |_| Err(invalid("current live incarnation is not the selected one")),
+                    |_| panic!("replacement must never receive a manager stop"),
+                    |record| {
+                        observations.set(observations.get() + 1);
+                        let mut audit = stopped(record)?;
+                        if !change_after_fence || observations.get() == 2 {
+                            match changed {
+                                "unit" => audit.unit.push('x'),
+                                "invocation" => audit.invocation_id = Some("e".repeat(32)),
+                                "group" => audit.control_group = Some("/replacement".into()),
+                                "missing" => audit.unit_loaded = false,
+                                "active" => audit.inactive = false,
+                                "pid" => audit.main_pid = 123,
+                                "job" => audit.queued_job = true,
+                                "populated" => audit.exact_cgroup_empty = false,
+                                _ => {},
+                            }
+                        }
+                        Ok(audit)
+                    });
+                assert!(result.is_err(), "{changed}, after fence {change_after_fence}");
+                let retained = journal.read().unwrap().unwrap();
+                assert_eq!(retained.phase, if change_after_fence { Phase::Fenced } else { Phase::Running });
+                assert_eq!(retained.identity, original.identity);
+                assert_eq!(retained.child_pid, original.child_pid);
+                fs::remove_dir_all(path).unwrap();
+            }
+        }
     }
 
     #[test]
@@ -3197,10 +3350,77 @@ mod tests {
     }
 
     #[test]
-    fn installed_user_unit_stop_audit_probe() {
-        if std::env::var("MINI_SPK_SYSTEMD_AUDIT_PROBE").as_deref() != Ok("1") {
-            return;
+    #[ignore = "needs the operator harness's disposable running user unit mini-spk-s0123456789abcdef-a991007-g1.service; run with --run-ignored only-ignored"]
+    fn source_stop_already_inactive_actual_manager_probe() {
+        // The operator harness installs/starts only this disposable fixture.
+        // This exercises the real manager/cgroup receiver, not Mini admission.
+        assert_ne!(unsafe { libc::geteuid() }, 0);
+        let unit = "mini-spk-s0123456789abcdef-a991007-g1.service";
+        let manager = systemd_show(unit).unwrap();
+        assert_eq!(property(&manager, "LoadState").unwrap(), "loaded");
+        assert_eq!(property(&manager, "ActiveState").unwrap(), "active");
+        struct Cleanup(&'static str);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = bounded_systemctl(&["--user", "stop", self.0], Duration::from_secs(10)); }
         }
+        let cleanup = Cleanup(unit);
+        let instance = UnitInstance {
+            invocation_id: property(&manager, "InvocationID").unwrap().into(),
+            control_group: property(&manager, "ControlGroup").unwrap().into(),
+        };
+        instance.validate(unit).unwrap();
+        let original = Record {
+            version: VERSION,
+            identity: VerifiedBegin {
+                app: 991007, generation: 1, operation_id: "1".into(), transaction_id: "123".into(), event_id: "456".into(),
+                package_sha256: "c".repeat(64), image_identity: "already-inactive-manager-probe".into(),
+                process_identity: "installed-unit".into(), unit: unit.into(),
+            },
+            phase: Phase::Running,
+            child_pid: Some(property(&manager, "MainPID").unwrap().parse().unwrap()),
+            invocation_id: Some(instance.invocation_id), control_group: Some(instance.control_group),
+            dispatch_in_flight: None,
+        };
+        original.validate().unwrap();
+        let expected = stop_identity(&original);
+        UnitStopAudit::before_stop(&original).unwrap();
+        assert!(bounded_systemctl(&["--user", "stop", unit], Duration::from_secs(10)).unwrap().status.success());
+        let inactive = systemd_show(unit).unwrap();
+        assert_eq!(property(&inactive, "InvocationID").unwrap(), "");
+        assert_eq!(property(&inactive, "MainPID").unwrap(), "0");
+        assert!(UnitStopAudit::before_stop(&original).unwrap_err().to_string().contains("invocation drift"));
+        UnitStopAudit::inspect(&original).unwrap().prove(&original).unwrap();
+        let path = scratch();
+        let journal = Journal::open(&path).unwrap();
+        journal.with_lock(|this| this.write_unlocked(&original)).unwrap();
+        journal.fence_and_stop_manager_checked(&expected, || Ok(())).unwrap()
+            .source_stop_audit(&expected).unwrap();
+        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
+        println!("already-inactive-running-source-stop=pass");
+
+        // A new invocation of this same unit is not the source-selected old
+        // incarnation. It must remain live and untouched by reconciliation.
+        assert!(bounded_systemctl(&["--user", "start", unit], Duration::from_secs(10)).unwrap().status.success());
+        let replacement = systemd_show(unit).unwrap();
+        assert_eq!(property(&replacement, "ActiveState").unwrap(), "active");
+        assert_ne!(property(&replacement, "InvocationID").unwrap(), expected.invocation_id);
+        let replacement_path = scratch();
+        let retained = Journal::open(&replacement_path).unwrap();
+        retained.with_lock(|this| this.write_unlocked(&original)).unwrap();
+        assert!(retained.fence_and_stop_manager_checked(&expected, || Ok(())).is_err());
+        assert_eq!(retained.read().unwrap().unwrap(), original);
+        let still_running = systemd_show(unit).unwrap();
+        assert_eq!(property(&still_running, "ActiveState").unwrap(), "active");
+        assert_eq!(property(&still_running, "InvocationID").unwrap(), property(&replacement, "InvocationID").unwrap());
+        println!("replacement-invocation-refused-without-stop=pass");
+        drop(cleanup);
+        fs::remove_dir_all(path).unwrap();
+        fs::remove_dir_all(replacement_path).unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the operator harness's installed disposable user unit (app 991005); run with --run-ignored only-ignored"]
+    fn installed_user_unit_stop_audit_probe() {
         assert_ne!(unsafe { libc::geteuid() }, 0);
         let identity = VerifiedBegin {
             app: 991005,
@@ -3240,25 +3460,11 @@ mod tests {
             .unwrap()
             .prove(&record)
             .unwrap();
-        // Simulate a crash after systemd stop but before Stopped fsync. The
-        // production retry must recognize the exact cleared manager/cgroup
-        // state and finish the durable tombstone without a second stop.
-        let path = Path::new("/run/user").join(unsafe { libc::geteuid() }.to_string()).join(format!("mini-spk-stop-audit-{}", std::process::id()));
-        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
-        let journal = Journal::open(&path).unwrap();
-        journal
-            .with_lock(|this| this.write_unlocked(&record))
-            .unwrap();
-        journal.fence_and_stop_manager().unwrap();
-        assert_eq!(journal.read().unwrap().unwrap().phase, Phase::Stopped);
-        fs::remove_dir_all(path).unwrap();
     }
 
     #[test]
+    #[ignore = "must run inside the disposable user unit mini-spk-s0123456789abcdef-a991006-g1.service; run with --run-ignored only-ignored"]
     fn unit_process_matches_manager_invocation_probe() {
-        if std::env::var("MINI_SPK_UNIT_INSTANCE_PROBE").as_deref() != Ok("1") {
-            return;
-        }
         assert_ne!(unsafe { libc::geteuid() }, 0);
         let instance = UnitInstance::current("mini-spk-s0123456789abcdef-a991006-g1.service").unwrap();
         assert_eq!(instance.invocation_id.len(), 32);

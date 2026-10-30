@@ -2,8 +2,8 @@
 //! derives signing headers from the current image; this module compares every
 //! source slot to an operator-pinned key before signing exact header bytes.
 //! Neither an HTTP request nor a Host plan chooses a new signer.
-#![allow(dead_code)] // Joined operator broker/supervisor route is in progress.
 
+use crate::io_context::IoContext;
 use crate::dispatch_inspection::{app_route_path, HttpProjection, Route};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::Deserialize;
@@ -12,45 +12,14 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use crate::canonical::{decimal as canonical_decimal, hex, hex_matches};
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
-fn canonical_decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(result, "{byte:02x}").expect("writing to String");
-    }
-    result
-}
-
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return Err(invalid("noncanonical lowercase hex"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            let text = std::str::from_utf8(pair).map_err(|_| invalid("invalid hex pair"))?;
-            u8::from_str_radix(text, 16).map_err(|_| invalid("invalid hex pair"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| invalid("noncanonical lowercase hex"))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -190,16 +159,24 @@ impl FixedAuthoring {
             .get("request")
             .and_then(Value::as_object)
             .ok_or_else(|| invalid("source plan lacks decoded request"))?;
-        let mut comparable_request = source_request.clone();
-        let request_type = comparable_request.remove("type");
-        let canonical_request = comparable_request.remove("canonicalRequest");
+        let request_type = source_request.get("type");
+        let canonical_request = source_request.get("canonicalRequest");
+        // The decoded request, less the two plan-added members, is exactly the request we sent.
+        let echoes_request = request.as_object().is_some_and(|sent| {
+            let others = source_request
+                .iter()
+                .filter(|(name, _)| !matches!(name.as_str(), "type" | "canonicalRequest"));
+            others.clone().count() == sent.len()
+                && others.into_iter().all(|(name, value)| sent.get(name) == Some(value))
+        });
         if field(&plan, "type")? != "application-dispatch-author-plan-v1"
-            || field(&plan, "canonicalPlan")? != hex(plan_bytes)
-            || request_type.as_ref().and_then(Value::as_str)
+            || !hex_matches(field(&plan, "canonicalPlan")?, plan_bytes)
+            || request_type.and_then(Value::as_str)
                 != Some("application-dispatch-author-request-v1")
-            || canonical_request.as_ref().and_then(Value::as_str)
-                != Some(hex(request_bytes).as_str())
-            || Value::Object(comparable_request) != *request
+            || !canonical_request
+                .and_then(Value::as_str)
+                .is_some_and(|text| hex_matches(text, request_bytes))
+            || !echoes_request
             || field(&plan, "appResource")? != self.app
             || field(&plan, "sessionResource")? != self.session
             || field(&plan, "subject")? != self.subject
@@ -258,9 +235,9 @@ pub(crate) fn private_signing_key(path: &Path) -> io::Result<SigningKey> {
     let parent = path
         .parent()
         .ok_or_else(|| invalid("signer has no parent"))?;
-    let dir = fs::symlink_metadata(parent)?;
-    let named = fs::symlink_metadata(path)?;
-    let mut file = File::open(path)?;
+    let dir = fs::symlink_metadata(&parent).ctx("inspect", &parent)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
+    let mut file = File::open(&path).ctx("open", &path)?;
     let opened = file.metadata()?;
     let uid = unsafe { libc::geteuid() };
     if !path.is_absolute()

@@ -3,7 +3,6 @@
 //! A future native adapter must recheck current app generation, session,
 //! subject-derived identity and effective bits for every request. Pending
 //! lifecycle receipts and caller HTTP headers cannot authorize calls here.
-#![allow(dead_code)] // Staged until Mini exposes a checked current-session projection.
 
 use crate::hostd::DispatchIdentity;
 use crate::web_socket::{pump, switching_protocols, Limits, Slot, StreamLease, WeakStreamLease};
@@ -68,6 +67,7 @@ pub(crate) struct SessionBinding {
     pub app: u64,
     pub process_generation: u64,
     pub session_resource: u64,
+    pub session_generation: String,
     pub subject: u64,
     pub projection_fingerprint: [u8; 32],
     /// Human grant identity supplied by fixed custody after source projection.
@@ -190,7 +190,6 @@ fn oldest_by_use<K: Copy>(entries: impl Iterator<Item = (K, u64)>) -> Option<K> 
 async fn session_for(
     supervisor: &SupervisorConnection,
     sessions: &mut HashMap<SessionKey, CachedSession>,
-    sessions_created: &mut u64,
     use_clock: &mut u64,
     binding: &SessionBinding,
     deadline: Instant,
@@ -244,9 +243,6 @@ async fn session_for(
                 last_use: *use_clock,
             },
         );
-        *sessions_created = sessions_created
-            .checked_add(1)
-            .ok_or_else(|| invalid("SPK session creation counter exhausted"))?;
         client
     };
     Ok(session)
@@ -283,11 +279,13 @@ enum Command {
     Dispatch {
         binding: Box<SessionBinding>,
         request: Box<WebRequest>,
+        hosted: Option<crate::hosted_conversation::Custody>,
         max_response_bytes: usize,
         deadline: Instant,
         cancelled: Arc<AtomicBool>,
         reply: sync_mpsc::SyncSender<io::Result<WebResponse>>,
     },
+    #[cfg(test)]
     Stats {
         reply: sync_mpsc::SyncSender<RpcStats>,
     },
@@ -306,9 +304,10 @@ enum Command {
     },
 }
 
+/// Test-only view of the worker's session cache.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct RpcStats {
-    pub sessions_created: u64,
     pub cached_sessions: usize,
 }
 
@@ -319,6 +318,8 @@ pub(crate) struct RpcStats {
 /// successful commands may retain it for another separately admitted request.
 pub(crate) struct DispatchFence {
     identity: DispatchIdentity,
+    /// Which proof the fence carries; read by the tests that assert it.
+    #[cfg_attr(not(test), allow(dead_code))]
     worker_released: bool,
 }
 
@@ -327,6 +328,7 @@ impl DispatchFence {
         self.identity == *expected
     }
 
+    #[cfg(test)]
     pub(crate) fn worker_released(&self) -> bool {
         self.worker_released
     }
@@ -368,6 +370,13 @@ impl PrequeueGuard<'_> {
             identity: self.identity,
             worker_released: false,
         }
+    }
+
+    pub(crate) fn dispatch_hosted(
+        self,binding:SessionBinding,request:WebRequest,max_response_bytes:usize,
+        timeout:Duration,cancelled:Arc<AtomicBool>,custody:crate::hosted_conversation::Custody,
+    ) -> Result<(WebResponse,DispatchFence),CancellableFailure> {
+        self.driver.dispatch_cancellable_retained(binding,request,max_response_bytes,timeout,self.identity,cancelled,Some(custody))
     }
 
     pub(crate) fn dispatch(
@@ -505,10 +514,22 @@ impl RpcDriver {
         })
     }
 
+    /// Identity tokens live as long as the connection (tests, audits).
     pub(crate) fn from_connected_stream(
         app: u64,
         generation: u64,
         stream: UnixStream,
+    ) -> io::Result<Self> {
+        Self::from_connected_stream_at(app, generation, stream, None)
+    }
+
+    /// The production shape: saved identities persist under `identities`
+    /// (the app's directory, across generations; `identity_custody`).
+    pub(crate) fn from_connected_stream_at(
+        app: u64,
+        generation: u64,
+        stream: UnixStream,
+        identities: Option<std::path::PathBuf>,
     ) -> io::Result<Self> {
         let (sender, mut receiver) = mpsc::channel::<Command>(8);
         let (ready_tx, ready_rx) = sync_mpsc::sync_channel(1);
@@ -521,7 +542,13 @@ impl RpcDriver {
                     let (supervisor, rpc) = {
                         let _entered = runtime.enter();
                         let stream = tokio::net::UnixStream::from_std(stream)?;
-                        SupervisorConnection::from_connected_stream(stream)
+                        let custody: std::rc::Rc<dyn minidregg_spk_rpc::IdentityCustody> = match identities {
+                            Some(directory) => std::rc::Rc::new(
+                                crate::identity_custody::FileIdentityCustody::open(directory)?,
+                            ),
+                            None => std::rc::Rc::new(minidregg_spk_rpc::MemoryIdentityCustody::default()),
+                        };
+                        SupervisorConnection::from_connected_stream_with_custody(stream, custody)
                     };
                     Ok((runtime, supervisor, rpc))
                 })();
@@ -536,12 +563,12 @@ impl RpcDriver {
                 let _ = ready_tx.send(Ok(()));
                 local.block_on(&runtime, async move {
                     let mut sessions: HashMap<SessionKey, CachedSession> = HashMap::new();
-                    let mut sessions_created = 0_u64;
                     let mut use_clock = 0_u64;
+                    let mut conversations = crate::hosted_conversation::Pool::default();
                     tokio::task::spawn_local(async move {
                         let _ = rpc.await;
                     });
-                    while let Some(command) = receiver.recv().await {
+                    while let Some(command) = conversations.receive_command(&mut receiver).await {
                         match command {
                             Command::View { deadline, reply } => {
                                 let result = async {
@@ -562,6 +589,7 @@ impl RpcDriver {
                             Command::Dispatch {
                                 binding,
                                 request,
+                                hosted,
                                 max_response_bytes,
                                 deadline,
                                 cancelled,
@@ -578,7 +606,6 @@ impl RpcDriver {
                                     let session = session_for(
                                         &supervisor,
                                         &mut sessions,
-                                        &mut sessions_created,
                                         &mut use_clock,
                                         &binding,
                                         deadline,
@@ -592,6 +619,15 @@ impl RpcDriver {
                                         ));
                                     }
                                     let left = remaining(deadline)?;
+                                    if request.method == minidregg_spk_rpc::Method::HostedConversation {
+                                        let custody = hosted.as_ref().ok_or_else(|| invalid("hosted retention custody absent"))?;
+                                        return tokio::select! {
+                                            biased;
+                                            _ = wait_cancelled(&cancelled) => Err(invalid("hosted caller disconnected; completion uncertain")),
+                                            result = tokio::time::timeout(left, conversations.execute(&session,&binding,&request,custody,deadline)) =>
+                                                result.map_err(|_| invalid("hosted command timeout; completion uncertain"))?,
+                                        };
+                                    }
                                     tokio::select! {
                                         biased;
                                         _ = wait_cancelled(&cancelled) => Err(io::Error::new(io::ErrorKind::Interrupted,
@@ -639,8 +675,7 @@ impl RpcDriver {
                                         result = session_for(
                                             &supervisor,
                                             &mut sessions,
-                                            &mut sessions_created,
-                                            &mut use_clock,
+                                                &mut use_clock,
                                             &binding,
                                             deadline,
                                             &not_cancelled,
@@ -677,9 +712,9 @@ impl RpcDriver {
                                     }
                                 }
                             }
+                            #[cfg(test)]
                             Command::Stats { reply } => {
                                 let _ = reply.send(RpcStats {
-                                    sessions_created,
                                     cached_sessions: sessions.len(),
                                 });
                             }
@@ -819,25 +854,6 @@ impl RpcDriver {
         self.receive(reply_rx, deadline)
     }
 
-    /// One already-admitted operation. The same app-side WebSession survives
-    /// requests under an unchanged source projection; any effective permission
-    /// or identity drift discards it before another call.
-    pub(crate) fn dispatch(
-        &mut self,
-        binding: SessionBinding,
-        request: WebRequest,
-        max_response_bytes: usize,
-        timeout: Duration,
-    ) -> io::Result<WebResponse> {
-        self.dispatch_inner(
-            binding,
-            request,
-            max_response_bytes,
-            timeout,
-            Arc::new(AtomicBool::new(false)),
-        )
-    }
-
     /// One admitted caller whose hard EOF fences only its command and cached
     /// app-side session. A release witness is returned only after the worker
     /// has left that command; it says nothing about app-side effect rollback.
@@ -850,6 +866,13 @@ impl RpcDriver {
         timeout: Duration,
         identity: DispatchIdentity,
         cancelled: Arc<AtomicBool>,
+    ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
+        self.dispatch_cancellable_retained(binding,request,max_response_bytes,timeout,identity,cancelled,None)
+    }
+    fn dispatch_cancellable_retained(
+        &mut self, binding: SessionBinding, request: WebRequest,
+        max_response_bytes: usize, timeout: Duration, identity: DispatchIdentity,
+        cancelled: Arc<AtomicBool>, hosted: Option<crate::hosted_conversation::Custody>,
     ) -> Result<(WebResponse, DispatchFence), CancellableFailure> {
         if cancelled.load(Ordering::Acquire) {
             return Err(CancellableFailure::no_enqueue(
@@ -882,6 +905,7 @@ impl RpcDriver {
             .try_send(Command::Dispatch {
                 binding: Box::new(binding),
                 request: Box::new(request),
+                hosted,
                 max_response_bytes,
                 deadline,
                 cancelled: Arc::clone(&cancelled),
@@ -894,43 +918,6 @@ impl RpcDriver {
                 )
             })?;
         self.receive_cancellable(reply_rx, deadline, &cancelled, identity)
-    }
-
-    fn dispatch_inner(
-        &mut self,
-        binding: SessionBinding,
-        request: WebRequest,
-        max_response_bytes: usize,
-        timeout: Duration,
-        cancelled: Arc<AtomicBool>,
-    ) -> io::Result<WebResponse> {
-        if cancelled.load(Ordering::Acquire) {
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "SPK caller disconnected before enqueue",
-            ));
-        }
-        let deadline = self.check_bound(timeout)?;
-        if binding.app != self.app
-            || binding.process_generation != self.generation
-            || max_response_bytes == 0
-            || max_response_bytes > MAX_RESPONSE_BYTES
-        {
-            return Err(invalid("SPK dispatch response bound refused"));
-        }
-        let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
-        self.leases.observe(&binding);
-        self.sender
-            .try_send(Command::Dispatch {
-                binding: Box::new(binding),
-                request: Box::new(request),
-                max_response_bytes,
-                deadline,
-                cancelled: Arc::clone(&cancelled),
-                reply: reply_tx,
-            })
-            .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
-        self.receive(reply_rx, deadline)
     }
 
     /// One already-admitted WebSocket open. On success the worker has written
@@ -1050,6 +1037,7 @@ impl RpcDriver {
     }
 
     /// Internal fixture/operations diagnostic; it conveys no authority.
+    #[cfg(test)]
     pub(crate) fn stats(&self) -> io::Result<RpcStats> {
         let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
         self.sender
@@ -1085,6 +1073,7 @@ mod tests {
             app: 91,
             process_generation: 2,
             session_resource: 6208,
+            session_generation: "1".into(),
             subject: 8,
             projection_fingerprint: [7; 32],
             ticket_resource: Some("6408".into()),
@@ -1467,19 +1456,29 @@ mod tests {
         assert_eq!(zero.key().app, 0);
         // The disconnected bridge fails as transport, not because an
         // incidental fixture-era nonzero check rejected native Nat values.
-        assert!(driver
-            .dispatch(
+        let mut identity = dispatch_identity();
+        identity.app = 0;
+        identity.app_generation = 0;
+        identity.session_resource = "0".into();
+        let failure = driver
+            .dispatch_cancellable(
                 zero,
                 WebRequest {
                     method: minidregg_spk_rpc::Method::Get,
                     path_and_query: "".into(),
                     context: minidregg_spk_rpc::RequestContext::default(),
                     body: None,
+                    dav: Default::default(),
                 },
                 1,
-                Duration::from_millis(100)
+                Duration::from_millis(100),
+                identity,
+                Arc::new(AtomicBool::new(false)),
             )
-            .is_err());
+            .err()
+            .expect("a disconnected bridge cannot answer");
+        let (error, _) = failure.into_parts();
+        assert_ne!(error.to_string(), "SPK dispatch identity or response bound refused");
     }
 
     #[test]
@@ -1529,6 +1528,7 @@ mod tests {
                 path_and_query: String::new(),
                 context: minidregg_spk_rpc::RequestContext::default(),
                 body: None,
+                dav: Default::default(),
             },
             1024,
             Duration::from_secs(1),
@@ -1555,6 +1555,7 @@ mod tests {
                 path_and_query: "repo.git/info/refs".into(),
                 context: minidregg_spk_rpc::RequestContext::default(),
                 body: None,
+                dav: Default::default(),
             },
             1024,
             Duration::from_secs(2),

@@ -12,7 +12,21 @@ cell with 1000 bytes and spending one nullifier. Then, timed (compiled code):
 * `append`: one more record through `receiveLoaded` on the fresh opening;
 * `light open`: `DurableServed.openHead` (checkpoint + the records after it);
 * `light open+append`: one more record through `DurableServed.receiveServed` on it.
-Best of three for each. Not part of the umbrella gate.
+Best of three for each (the past reads too). Not part of the umbrella gate.
+`KN2_BENCH_CREATES=1`: each record instead births a fresh cell, so N records hold
+N cells (the axis the world root's cost grows on).
+
+With `KN2_BENCH_AT=1`, also the past reads (`at h`) on the cold opening, at
+heights near a quarter, a half and three quarters of the way up, each 32 records
+past a kept checkpoint (each below the
+opening's base): `at kept` = `Loaded.keptAt` (the nearest kept checkpoint) +
+`atPrefixFrom`; `at genesis` = `atPrefixFrom none` (the genesis fold), only when
+N ≤ `KN2_BENCH_GENESIS_MAX` (default 3000). Each read is forced by summing the
+cell's bytes inside `IO.lazyPure` (a pure `let` floats out of the timed span).
+
+With `KN2_BENCH_STORE=DIR`, the Store for N lives in DIR/N and is kept: a later
+run reuses it (grown only by the records it lacks), so a representation change
+is measured on the same bytes without regrowing.
 
 usage: kn2-store-bench STORE-HELPER N...
 -/
@@ -38,41 +52,87 @@ def seed : Seed := { absentBytes := [], cells := [(⟨3⟩, cellBytes 0)], avail
 
 def nullifier (number : Nat) : StableNullifier := ⟨1, ⟨700⟩, ⟨number⟩, [UInt8.ofNat number]⟩
 
-def step (number : Nat) : DataIntent rootBytes where
+/-- Record `number`: an update of cell 3, or (`creates`) the birth of cell `1000 + number`,
+so the Store holds `number` cells after `number` records (the cell-count axis). -/
+def step (creates : Bool) (number : Nat) : DataIntent rootBytes where
   transactionId := ⟨1000000 + number⟩
-  writes := [⟨⟨3⟩, rootBytes (cellBytes (number - 1)), rootBytes (cellBytes number), cellBytes number⟩]
+  writes := if creates then [⟨⟨1000 + number⟩, rootBytes [], rootBytes (cellBytes number), cellBytes number⟩]
+    else [⟨⟨3⟩, rootBytes (cellBytes (number - 1)), rootBytes (cellBytes number), cellBytes number⟩]
   readGuards := []
   nullifiers := [nullifier number]
   exactCharge := fun _ => 1
   event := ⟨1, ⟨800⟩, ⟨number⟩, [UInt8.ofNat number]⟩
   subject := none
-  postRootsBound := by simp
+  postRootsBound := by split <;> simp
   guardsReadOnly := by simp
 
 def ms (start : Nat) : IO Nat := return (← IO.monoMsNow) - start
 
-def grow (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
+def force (snapshot : Option (DataSnapshot rootBytes)) : Nat :=
+  match snapshot with
+  | some snapshot => (snapshot.canonicalBytes ⟨3⟩).foldl (fun total byte => total + byte.toNat) 0
+  | none => 0
+
+/-- `at h` over a cold opening, the kept-checkpoint way and (bounded) the genesis way. -/
+def pastReads (transport : Transport) (count : Nat) : IO Unit := do
+  let genesisMax := ((← IO.getEnv "KN2_BENCH_GENESIS_MAX").bind String.toNat?).getD 3000
+  let key ← match ← transport.key with
+    | .ok key => pure key
+    | .error detail => throw (IO.userError s!"key: {detail}")
+  let loaded ← match ← load transport rootBytes with
+    | .ok loaded => pure loaded
+    | .error detail => throw (IO.userError s!"open: {detail}")
+  for quarter in [1, 2, 3] do
+    -- 32 records past a checkpoint (every 64): the replayed suffix is the same
+    -- length at every height, so the curve isolates the dependence on `h`.
+    let height := (quarter * count / 4) / 64 * 64 + 32
+    let mut keptMs := 1000000000
+    let mut keptSum := 0
+    let mut kept := none
+    for _ in [0:3] do
+      let t0 ← IO.monoMsNow
+      kept ← match ← loaded.keptAt transport key height with
+        | .ok found => pure found
+        | .error detail => throw (IO.userError s!"at {height}: {detail}")
+      keptSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom kept height)
+      keptMs := min keptMs (← ms t0)
+    let base := match kept with | some base => base.height | none => 0
+    if count ≤ genesisMax then
+      let t1 ← IO.monoMsNow
+      let genesisSum ← IO.lazyPure fun _ => force (loaded.atPrefixFrom none height)
+      let genesisMs ← ms t1
+      unless genesisSum == keptSum do throw (IO.userError s!"at {height}: kept and genesis disagree")
+      IO.println s!"records {count}: at {height} (open base {loaded.baseHeight}, kept {base}): kept {keptMs} ms, genesis {genesisMs} ms"
+    else
+      IO.println s!"records {count}: at {height} (open base {loaded.baseHeight}, kept {base}): kept {keptMs} ms (sum {keptSum})"
+
+def grow (creates : Bool) (transport : Transport) (count : Nat) : IO (Loaded rootBytes) := do
   let initial ← match ← load transport rootBytes with
     | .ok opened => pure opened
     | .error detail => throw (IO.userError s!"open: {detail}")
   let mut loaded := initial
   for number in List.range' (loaded.image.accepted.length + 1) (count - loaded.image.accepted.length) do
-    match ← receiveLoadedDetailed transport rootBytes loaded (step number) with
+    match ← receiveLoadedDetailed transport rootBytes loaded (step creates number) with
     | .exact _ appended => loaded := appended.next
     | .ordinary _ => throw (IO.userError s!"append {number} did not confirm")
   return loaded
 
-def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) : IO Unit := do
+def run (creates : Bool) (binary : System.FilePath) (directory : System.FilePath) (count : Nat)
+    (reuse : Bool := false) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 64 }
   let transport := { config.transport (fun _ => ⟨7⟩) ⟨999⟩ with systemCell := none }
-  match ← bootstrap transport rootBytes seed with
-  | .error message => throw (IO.userError message)
-  | .ok () => pure ()
+  unless reuse do
+    match ← bootstrap transport rootBytes seed with
+    | .error message => throw (IO.userError message)
+    | .ok () => pure ()
   let growStart ← IO.monoMsNow
-  let _ ← grow transport count
+  let grown ← grow creates transport count
   let growMs ← ms growStart
+  -- a reused Store already holds the measured appends of earlier runs
+  let tip := grown.image.accepted.length
+  if (← IO.getEnv "KN2_BENCH_AT") == some "1" then pastReads transport count
   let mut openBest := 1000000000
   let mut readBest := 1000000000
   for _ in [0:3] do
@@ -100,31 +160,44 @@ def run (binary : System.FilePath) (directory : System.FilePath) (count : Nat) :
     match ← DurableServed.openHead transport rootBytes with
     | .error detail => throw (IO.userError s!"light open: {detail}")
     | .ok opening =>
-        unless opening.head.height == count do throw (IO.userError "light open: wrong head")
+        unless opening.head.height == tip do throw (IO.userError "light open: wrong head")
     lightBest := min lightBest (← ms t)
   let t2 ← IO.monoMsNow
   let loaded ← match ← load transport rootBytes with
     | .ok loaded => pure loaded
     | .error detail => throw (IO.userError s!"open: {detail}")
-  match ← receiveLoadedDetailed transport rootBytes loaded (step (count + 1)) with
+  let tAppend ← IO.monoMsNow
+  match ← receiveLoadedDetailed transport rootBytes loaded (step creates (tip + 1)) with
   | .exact _ _ => pure ()
   | .ordinary _ => throw (IO.userError "the measured append did not confirm")
+  let appendOnlyMs ← ms tAppend
   let appendMs ← ms t2
   let t3 ← IO.monoMsNow
   match ← DurableServed.openHead transport rootBytes with
   | .error detail => throw (IO.userError s!"light open: {detail}")
   | .ok opening =>
-      match ← DurableServed.receiveServed transport rootBytes opening (step (count + 2)) with
+      match ← DurableServed.receiveServed transport rootBytes opening (step creates (tip + 2)) with
       | .appended .. => pure ()
       | _ => throw (IO.userError "the measured light append did not confirm")
   let lightAppendMs ← ms t3
-  IO.println s!"records {count}: open {openBest} ms, first read (reader + 1 record + 1 byTx) {readBest} ms, open+append {appendMs} ms, light open {lightBest} ms, light open+append {lightAppendMs} ms (grown in {growMs} ms)"
+  IO.println s!"records {count}{if creates then " (each a cell birth)" else ""}: open {openBest} ms, first read (reader + 1 record + 1 byTx) {readBest} ms, open+append {appendMs} ms (the append alone {appendOnlyMs} ms), light open {lightBest} ms, light open+append {lightAppendMs} ms (grown in {growMs} ms)"
 
 end Kn2StoreBench
 
 def main (arguments : List String) : IO Unit := do
   match arguments with
   | binary :: counts =>
+      let creates := (← IO.getEnv "KN2_BENCH_CREATES") == some "1"
       for count in counts.filterMap String.toNat? do
-        IO.FS.withTempDir fun directory => Kn2StoreBench.run binary directory count
-  | _ => throw (IO.userError "usage: kn2-store-bench STORE-HELPER N...")
+        match ← IO.getEnv "KN2_BENCH_STORE" with
+        | some keep =>
+            let directory : System.FilePath := keep / toString count
+            let reuse ← (directory / "store").pathExists
+            IO.FS.createDirAll directory
+            Kn2StoreBench.run creates binary directory count reuse
+        | none => IO.FS.withTempDir fun directory => Kn2StoreBench.run creates binary directory count
+  | _ => throw (IO.userError "With `KN2_BENCH_STORE=DIR`, the Store for N lives in DIR/N and is kept: a later
+run reuses it (grown only by the records it lacks), so a representation change
+is measured on the same bytes without regrowing.
+
+usage: kn2-store-bench STORE-HELPER N...")

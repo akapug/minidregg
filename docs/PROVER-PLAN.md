@@ -1,8 +1,9 @@
 # Native compute and proof construction plan
 
-Status: 2026-08-10. [`PROJECT.md`](../PROJECT.md) is the design constitution and
-[`GOAL.md`](../GOAL.md) is the evidence ledger. This file tracks the proof-controller/native
-boundary and the ordered joins to one honest proof system.
+Written 2026-08-10 and not re-checked since; the code it names is in `prover/src/`
+(crate `minidregg-prover`). [`PROJECT.md`](../PROJECT.md) is the design constitution. This file
+tracks the boundary between the Lean proof controller and the native prover, and the order in
+which they were to be joined into one proof system.
 
 ## Maturity labels
 

@@ -5,8 +5,27 @@ completion is the only path allowed to install the created-volume marker;
 the receiver must re-admit the v3 BEGIN and claim at their exact prefixes,
 verify current signed authority and compare the full physical report.
 -/
-import Kernel.ApplicationLifecycleCompletionV2Report
-import Kernel.ApplicationLifecycleCompletionSource
+module
+
+public import Kernel.ApplicationLifecycleCompletionV2Report
+public import Kernel.ApplicationLifecycleCompletionSource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionV2Source
 
@@ -132,7 +151,7 @@ def Source.command (domain semantics : Digest) (source : Source) :
     else [appTarget]
   { subject := begin.managementSubject
     nonce := (Sp800185Cshake256.hash
-      "DREGG/APPLICATION/LIFECYCLE-COMPLETION-COMMAND/v2".toUTF8.toList
+      "DREGG/APPLICATION/LIFECYCLE-COMPLETION-COMMAND/v3".toUTF8.toList
       ((StreamCodec.product digestStream
         (StreamCodec.product digestStream bytesStream)).encode
         (domain, semantics, source.physical.report.canonicalBytes))).digest.value

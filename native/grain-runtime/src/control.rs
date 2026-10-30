@@ -17,6 +17,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const MAX_LINE: u64 = 16_384;
+/// The admin socket speaks length-prefixed frames: a u32 big-endian byte
+/// count, then exactly that many UTF-8 bytes. The bound is the same on both
+/// sides and is checked before any allocation, so a long reply (a delivery
+/// plan, an inventory) can never be written by the controller and then
+/// refused by the reader.
+pub const MAX_ADMIN_FRAME: usize = 4 << 20;
 const MAX_TOOL_FRAME: usize = 262_144;
 const QUEUE: usize = 128;
 
@@ -106,14 +112,25 @@ pub fn start_admin(path: &Path) -> Result<AdminServer, String> {
     })
 }
 
+fn admin_action_timeout(command: &str) -> Duration {
+    // Leave thirty seconds inside the installer's 1800-second outer bound
+    // for the framed reply and process exit. Idle preparation shares this bound. Other admin actions keep 300s.
+    let exact_session = command.strip_prefix("recover foreground session ")
+        .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+    Duration::from_secs(if exact_session || command == "prepare idle" { 1770 } else { 300 })
+}
+
 fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) {
+    // The listener is nonblocking; an accepted stream inherits that on BSDs.
+    let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-    let response = match read_line(&mut stream) {
+    let response = match admin_read_frame(&mut stream) {
         Ok(command) => {
             let (reply, recv) = mpsc::channel();
             let phase = Arc::new(AtomicU8::new(0));
-            let deadline = Instant::now() + Duration::from_secs(300);
+            let timeout = admin_action_timeout(&command);
+            let deadline = Instant::now() + timeout;
             if tx
                 .try_send(AdminRequest {
                     command,
@@ -125,7 +142,7 @@ fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) 
             {
                 "admin queue full".to_owned()
             } else {
-                match recv.recv_timeout(Duration::from_secs(300)) {
+                match recv.recv_timeout(timeout) {
                     Ok(value) => value,
                     Err(_)
                         if phase
@@ -143,19 +160,58 @@ fn serve_admin_connection(mut stream: UnixStream, tx: SyncSender<AdminRequest>) 
         }
         Err(error) => format!("invalid admin request: {error}"),
     };
-    let _ = writeln!(stream, "{response}");
+    // A reply over the frame bound is replaced by a bounded refusal rather
+    // than being cut: the caller never sees a truncated plan.
+    let response = if response.len() > MAX_ADMIN_FRAME {
+        "error: admin reply exceeds the admin frame bound".to_owned()
+    } else {
+        response
+    };
+    let _ = admin_write_frame(&mut stream, &response);
+}
+
+/// Write one admin frame. Refuses (without writing) a body over the bound.
+pub fn admin_write_frame(stream: &mut impl Write, body: &str) -> io::Result<()> {
+    if body.len() > MAX_ADMIN_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "admin frame exceeds bound",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(4 + body.len());
+    bytes.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    bytes.extend_from_slice(body.as_bytes());
+    stream.write_all(&bytes)?;
+    stream.flush()
+}
+
+/// Read one admin frame. The declared length is checked against the bound
+/// before the body buffer is allocated.
+pub fn admin_read_frame(stream: &mut impl Read) -> io::Result<String> {
+    let mut prefix = [0u8; 4];
+    stream.read_exact(&mut prefix)?;
+    let len = u32::from_be_bytes(prefix) as usize;
+    if len > MAX_ADMIN_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "admin frame length exceeds bound",
+        ));
+    }
+    let mut body = vec![0u8; len];
+    stream.read_exact(&mut body)?;
+    String::from_utf8(body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 pub fn admin_call(path: &Path, command: &str) -> Result<String, String> {
-    if !path.is_absolute() || command.contains('\n') || command.len() > MAX_LINE as usize {
+    if !path.is_absolute() || command.contains('\n') || command.len() > MAX_ADMIN_FRAME {
         return Err("admin socket/command invalid".into());
     }
     let mut stream = UnixStream::connect(path).map_err(|e| format!("admin connect: {e}"))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(310)))
+        .set_read_timeout(Some(admin_action_timeout(command) + Duration::from_secs(10)))
         .map_err(|e| e.to_string())?;
-    writeln!(stream, "{command}").map_err(|e| e.to_string())?;
-    read_line(&mut stream).map_err(|e| e.to_string())
+    admin_write_frame(&mut stream, command).map_err(|e| e.to_string())?;
+    admin_read_frame(&mut stream).map_err(|e| e.to_string())
 }
 
 struct Attachment {
@@ -625,11 +681,35 @@ pub fn tool_connect(
         .write_all(format!("tool-v1 {}\n", request.len()).as_bytes())
         .and_then(|_| stream.write_all(request))
         .map_err(|e| format!("tool frame send: {e}; outcome unknown"))?;
-    loop {
-        let line = read_line_bounded(&mut stream, 1_048_576)
+    receive_tool_completion(&mut stream, request_id, &mut io::stderr())
+}
+
+/// Keep bounded controller output for failures such as a failed Mini attach.
+/// Text is diagnostic only: completion identity and admission remain determined
+/// by the existing structured frames and controller checks.
+fn receive_tool_completion(
+    stream: &mut UnixStream,
+    request_id: &str,
+    diagnostics: &mut impl Write,
+) -> Result<Value, String> {
+    const MAX_DIAGNOSTICS: usize = 16_384;
+    let mut captured = String::new();
+    let mut truncated = false;
+    let result = (|| loop {
+        let line = read_line_bounded(stream, 1_048_576)
             .map_err(|e| format!("tool result lost: {e}; inspect retained operation"))?;
         let frame: Value = serde_json::from_str(&line)
             .map_err(|e| format!("tool result frame: {e}; inspect retained operation"))?;
+        if frame.get("type").and_then(Value::as_str) == Some("output") {
+            if let Some(text) = frame.get("text").and_then(Value::as_str) {
+                let mut end = text.len().min(MAX_DIAGNOSTICS - captured.len());
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                captured.push_str(&text[..end]);
+                truncated |= end < text.len();
+            }
+        }
         if frame.get("type").and_then(Value::as_str) == Some("tool-complete") {
             if frame.get("requestId").and_then(Value::as_str) != Some(request_id) {
                 return Err(format!(
@@ -638,7 +718,18 @@ pub fn tool_connect(
             }
             return Ok(frame);
         }
+    })();
+    let failed = result.as_ref().map_or(true, |frame| {
+        frame.get("isError").and_then(Value::as_bool) != Some(false)
+    });
+    if failed && !captured.is_empty() {
+        // A diagnostics sink failure must not alter the retained tool outcome.
+        let _ = writeln!(diagnostics, "grain-runtime tool controller output:\n{captured}");
+        if truncated {
+            let _ = writeln!(diagnostics, "[controller output truncated at {MAX_DIAGNOSTICS} bytes]");
+        }
     }
+    result
 }
 
 pub fn tool_result_connect(path: &Path, request_id: &str) -> Result<Value, String> {
@@ -699,6 +790,57 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn tool_completion_preserves_failure_diagnostics_without_changing_outcome() {
+        for outcome in ["refused", "success", "lost", "wrong-id"] {
+            let (mut reader, mut writer) = UnixStream::pair().unwrap();
+            let expected = json!({"type":"tool-complete","requestId":
+                if outcome == "wrong-id" {"other"} else {"request"},
+                "operationId":null,"isError":outcome != "success"});
+            let sent = expected.clone();
+            let thread = thread::spawn(move || {
+                writeln!(writer, "{}", json!({"type":"output",
+                    "text":"grain-runtime: actual parent read refused\n"})).unwrap();
+                if outcome != "lost" {
+                    writeln!(writer, "{sent}").unwrap();
+                }
+            });
+            let mut diagnostics = Vec::new();
+            let result = receive_tool_completion(&mut reader, "request", &mut diagnostics);
+            thread.join().unwrap();
+            if outcome == "lost" || outcome == "wrong-id" {
+                assert!(result.is_err());
+            } else {
+                assert_eq!(result.unwrap(), expected);
+            }
+            if outcome == "success" {
+                assert!(diagnostics.is_empty());
+            } else {
+                assert!(String::from_utf8(diagnostics).unwrap().contains("actual parent read refused"));
+            }
+        }
+    }
+
+    #[test]
+    fn tool_completion_diagnostics_are_bounded_utf8_and_ignore_other_frames() {
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        let thread = thread::spawn(move || {
+            writeln!(writer, "{}", json!({"type":"unrelated","text":"not diagnostic"})).unwrap();
+            writeln!(writer, "{}", json!({"type":"output","text":"x"})).unwrap();
+            writeln!(writer, "{}", json!({"type":"output","text":"é".repeat(20_000)})).unwrap();
+            writeln!(writer, "{}", json!({"type":"output","text":"later"})).unwrap();
+            writeln!(writer, "{}", json!({"type":"tool-complete","requestId":"request","isError":true})).unwrap();
+        });
+        let mut diagnostics = Vec::new();
+        assert!(receive_tool_completion(&mut reader, "request", &mut diagnostics).is_ok());
+        thread.join().unwrap();
+        let text = String::from_utf8(diagnostics).unwrap();
+        assert!(text.len() < 16_600);
+        assert!(text.contains("truncated at 16384 bytes"));
+        assert!(!text.contains("not diagnostic"));
+        assert!(!text.contains("later"));
+    }
 
     #[test]
     fn foreground_frame_exceeds_line_limit_and_inspect_is_read_only() {
@@ -944,5 +1086,52 @@ mod tests {
         drop(admin);
         drop(ordinary);
         fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn admin_frame_reply_over_the_old_line_bound_round_trips() {
+        let dir = PathBuf::from("/tmp").join(format!("gaf-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let admin_path = dir.join("admin.sock");
+        let admin = start_admin(&admin_path).unwrap();
+        let path = admin_path.clone();
+        let caller = thread::spawn(move || admin_call(&path, "resident delivery-plan"));
+        let request = admin.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+        // A delivery plan embedding a long final once was 3x 12 KiB: past the
+        // 16 KiB line bound the old reader enforced (H14).
+        let long = format!("{{\"plan\":\"{}\nsecond line\"}}", "x".repeat(40_000));
+        request.reply.send(long.clone()).unwrap();
+        assert_eq!(caller.join().unwrap().unwrap(), long);
+        drop(admin);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn admin_frame_oversize_length_is_refused_before_allocation() {
+        let mut declared = Vec::new();
+        declared.extend_from_slice(&u32::MAX.to_be_bytes());
+        let error = admin_read_frame(&mut io::Cursor::new(declared)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        let mut just_over = Vec::new();
+        just_over.extend_from_slice(&((MAX_ADMIN_FRAME + 1) as u32).to_be_bytes());
+        assert!(admin_read_frame(&mut io::Cursor::new(just_over)).is_err());
+        let mut sink = Vec::new();
+        assert!(admin_write_frame(&mut sink, &"y".repeat(MAX_ADMIN_FRAME + 1)).is_err());
+        assert!(sink.is_empty(), "an oversize reply writes nothing");
+        admin_write_frame(&mut sink, "ok").unwrap();
+        assert_eq!(admin_read_frame(&mut io::Cursor::new(sink)).unwrap(), "ok");
+    }
+}
+
+#[cfg(test)]
+mod session_recovery_deadline_tests {
+    use super::*;
+    #[test]
+    fn only_exact_recovery_or_idle_preparation_gets_extended_admin_deadline() {
+        assert_eq!(admin_action_timeout("recover foreground session 839a6731941b62b1179b4de9c076f0df"), Duration::from_secs(1770));
+        assert_eq!(admin_action_timeout("prepare idle"), Duration::from_secs(1770));
+        for command in ["prepare idle extra", "prepare", "reconcile effects", "recover foreground session", "recover foreground session bad", "recover foreground session 839A6731941b62b1179b4de9c076f0df", "recover foreground session 839a6731941b62b1179b4de9c076f0df extra"] {
+            assert_eq!(admin_action_timeout(command), Duration::from_secs(300));
+        }
     }
 }

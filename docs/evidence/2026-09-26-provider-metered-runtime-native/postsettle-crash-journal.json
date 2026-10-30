@@ -1,0 +1,77 @@
+{
+  "connection": "soft",
+  "child": {
+    "operationId": 11,
+    "pid": 1968178,
+    "program": "/tmp/mini-hermes-gateway-codec/deploy/grain-host/bwrap",
+    "pgid": 1968178,
+    "unit": "mini-grain-t7201-o11",
+    "launchGateProtocol": "mini-grain-launch-gate-v1"
+  },
+  "providerAttempt": {
+    "id": 13,
+    "promptOperationId": 11,
+    "parentGeneration": "1",
+    "model": "mini-hermes-protocol-fixture",
+    "requestPath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-0000000000000013.controller-request",
+    "requestBytes": 37069,
+    "requestSha256": "e96c821a4f616a74ae71fe6654bd5995d8a69567a8dea35c38010734893f92d4",
+    "sendStarted": true,
+    "outcomePath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-0000000000000013.controller-outcome",
+    "outcomeBytes": 775,
+    "outcomeSha256": "67493405007adbb32e96e81a235db4953a33ae1929e31fdc84b1843a7670389c",
+    "outcome": "received:200:text/event-stream",
+    "responseStatus": 200,
+    "responseContentType": "text/event-stream",
+    "responseHeadersPath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-0000000000000013.controller-response-headers",
+    "responseHeadersBytes": 96,
+    "responseHeadersSha256": "b9d7344f1668c081101e579f2f633455e4e79fed9e86f6d48a6f5a6f04dc0d6c",
+    "meteringPin": {
+      "providerResourceId": "7204",
+      "model": "mini-hermes-protocol-fixture",
+      "tariffVersion": "1",
+      "tariffDigest": "53031313001255559760487189251062546394318675101431160549090574078503637496084"
+    },
+    "meterReportPath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-meter-0000000000000025/meter.json",
+    "meterReportSha256": "107f868e547e1f12d207e385f06b3bc01a21f88e7c67840888e01786c24535a3",
+    "meteredCharge": "3"
+  },
+  "providerHold": null,
+  "providerSettlement": {
+    "providerAttemptId": 13,
+    "operationId": 28,
+    "operation": "provider settle",
+    "attempt": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/attempt-0000000000000028",
+    "charge": "3",
+    "sourceSha256": "86ef825e3ed3f3613ab52f9b73cb2f8c80f32bd14aaa65510a0829adee52e02e",
+    "callSha256": "9d050564cc65d4036f1f753c44c64bb17cf55ed40448fc6e6910a9f18aefa70f",
+    "outcomePath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/attempt-0000000000000028/outcome.json",
+    "outcomeSha256": "2492df8e6abe48a0e040b628eb62fa21b8b111c986e97e04a618eeda99954f18",
+    "receipt": {
+      "transactionId": "51879040175625216601779282371399170034658679599612363715668805465402966002726",
+      "eventId": "53352937532130911484087115839725321248536130633196922120766572688558163312424",
+      "acceptedCount": "11",
+      "imageBoundary": "33781459058597264050366543980100617595401182497923393151643704459997819780411"
+    }
+  },
+  "providerReplays": [
+    {
+      "promptOperationId": 11,
+      "parentGeneration": "1",
+      "requestPath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-0000000000000013.controller-request",
+      "requestBytes": 37069,
+      "requestSha256": "e96c821a4f616a74ae71fe6654bd5995d8a69567a8dea35c38010734893f92d4",
+      "responsePath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-0000000000000013.controller-outcome",
+      "responseBytes": 775,
+      "responseSha256": "67493405007adbb32e96e81a235db4953a33ae1929e31fdc84b1843a7670389c",
+      "status": 200,
+      "contentType": "text/event-stream",
+      "responseHeadersPath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-0000000000000013.controller-response-headers",
+      "responseHeadersBytes": 96,
+      "responseHeadersSha256": "b9d7344f1668c081101e579f2f633455e4e79fed9e86f6d48a6f5a6f04dc0d6c",
+      "meterReportPath": "/tmp/mga-meter-native-20260926/provision-provider-postsettle/runtime-state/provider-meter-0000000000000025/meter.json",
+      "meterReportSha256": "107f868e547e1f12d207e385f06b3bc01a21f88e7c67840888e01786c24535a3",
+      "meteredCharge": "3"
+    }
+  ]
+}

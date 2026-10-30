@@ -242,3 +242,11 @@ fn cold_entry_get_has_no_body_and_cleans_spool() {
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(),0);
     std::fs::remove_dir(dir).unwrap();
 }
+
+#[test]
+fn a_full_newest_n_window_is_a_refusal_not_a_clean_read() {
+    // Dust can push an unreceipted transfer out of a per-payer window (scheduler-pay-linkstore
+    // F11); the run must say so with exit 3, not 0.
+    assert!(Reason::PageBound.is_refusal());
+    assert!(!Reason::PageBound.is_note());
+}

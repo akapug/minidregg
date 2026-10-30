@@ -4,9 +4,30 @@ does not decide which article the fn server offered. A Host route must form
 the canonical selected or empty spec from an authenticated pinned poll, and
 Replay must match the event to an admitted predecessor and release receipt.
 -/
-import Kernel.FnGatewayPolicy
-import Kernel.ResourceObservationAdmission
-import Kernel.PhysicalResourceReadGuard
+module
+
+public import Kernel.FnGatewayPolicy
+public import Kernel.ResourceObservationAdmission
+public import Kernel.PhysicalResourceReadGuard
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnConsumerFrontierGateway
 
@@ -103,6 +124,16 @@ structure Prepared (context : Context deployment)
   domainExact : proposal.domain = deployment.domain
   semanticsExact : proposal.semantics = profile.semantics
   pinExact : proposal.matchesPin pin = true
+omit [DecidableEq F] in
+theorem Prepared.sound {context : Context deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
+    {height : Nat} {pin : FnGatewayPolicy.Pin} {proposal : Proposal}
+    (prepared : Prepared context profile federation height pin proposal) :
+    ResourceBirthCodec.physicalRoot (.live prepared.observed.before) =
+      context.view.model.roots ⟨proposal.target⟩ ∧
+    proposal.domain = deployment.domain ∧ proposal.semantics = profile.semantics ∧
+    proposal.matchesPin pin = true :=
+  ⟨prepared.physicalCurrent, prepared.domainExact, prepared.semanticsExact, prepared.pinExact⟩
 
 def prepare (context : Context deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
@@ -257,6 +288,15 @@ structure CheckedOpened (config : NativeHost.Config)
   prepared : Prepared (contextOf opened) config.profile config.federation
     (NativeHost.logicalHeight config opened.durable) pin proposal
   signature : Checked prepared envelope
+theorem CheckedOpened.sound {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {proposal : Proposal} {envelope : List UInt8}
+    (checked : CheckedOpened config opened proposal envelope) :
+    config.fnGateway = some checked.pin ∧
+    FnGatewayPolicy.checkCurrent config opened checked.pin = .ok () ∧
+    checked.signature.signature.envelopeBytes = envelope ∧
+    authorize checked.prepared checked.signature.signature = some checked.signature.authorization :=
+  ⟨checked.pinExact, checked.current, checked.signature.envelopeExact,
+    checked.signature.authorized⟩
 
 def checkOpened (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (proposal : Proposal) (envelope : List UInt8) :

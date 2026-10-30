@@ -67,16 +67,7 @@ def Specification.require {A : Type} (spec : Specification A) (requirement : A â
 def Specification.enforce {A : Type} (spec : Specification A) (law : A â†’ Prop) : Specification A :=
   { spec with laws := spec.laws ++ [law] }
 
-theorem mix_append {A : Type} (first second : List (Extension A)) (self inherited : A) :
-    mix (first ++ second) self inherited = mix second self (mix first self inherited) := by
-  exact List.foldl_append
-
 theorem mix_identity {A : Type} (self inherited : A) : mix [] self inherited = inherited := rfl
-
-theorem composition_associative {A : Type} (a b c : Specification A) :
-    (a.compose b).compose c = a.compose (b.compose c) := by
-  cases a; cases b; cases c
-  simp [Specification.compose, List.append_assoc]
 
 /-- Law retention has teeth: later replacement cannot erase an earlier law. -/
 theorem composed_law_retained {A : Type} (first second : Specification A)

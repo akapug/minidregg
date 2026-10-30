@@ -1,0 +1,17 @@
+{
+  "type": "apps-request-fields-v1",
+  "fields": {
+    "state": "1",
+    "packageHi": "2",
+    "packageLo": "3",
+    "app0": "4",
+    "app1": "5",
+    "app2": "6",
+    "app3": "7",
+    "class": "8",
+    "grain": "9",
+    "generation": "10"
+  },
+  "state": { "requested": 0, "running": 1, "refused": 2 },
+  "class": { "S": 1, "M": 2, "L": 3 }
+}

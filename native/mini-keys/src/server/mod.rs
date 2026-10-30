@@ -10,25 +10,24 @@ use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The provider table, the per-member sealed credential store and its seal key:
-/// one source shared with grain-runtime's tests and the `mini key` client's
-/// catalogue, executed for custody only here.
-#[path = "../../../grain-runtime/src/credentials.rs"]
-#[allow(dead_code)]
-pub mod credentials;
+pub use crate::credentials;
 
 pub mod discord;
 pub mod member;
 pub mod native;
 pub mod provider;
+pub mod ticket;
 
 pub const CONFIG_TYPE: &str = "mini-keys-broker-v1";
 const MAX_CONFIG: u64 = 16_384;
-const MAX_CONNECTIONS: usize = 32;
+/// Connection slots, by the highest role a peer holds: one class cannot take
+/// another's, so session accounts can never starve the Hermes controller.
+const SLOTS: [(Class, usize); 4] = [(Class::Provider, 8), (Class::Operator, 2), (Class::Discord, 2), (Class::Member, 20)];
+/// Within the member class, one uid holds at most this many.
+const MEMBER_SLOTS_PER_UID: usize = 4;
 /// Every exchange but a provider forward ends within this.
 pub const EXCHANGE: Duration = Duration::from_secs(30);
 pub const CURL: &str = "/usr/bin/curl";
@@ -61,6 +60,40 @@ impl Role {
     }
 }
 
+/// The slot class of a peer: its highest role.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Class {
+    Provider,
+    Operator,
+    Discord,
+    Member,
+}
+
+impl Class {
+    fn of(roles: &[Role]) -> Option<Class> {
+        [(Role::Provider, Class::Provider), (Role::Operator, Class::Operator), (Role::Discord, Class::Discord), (Role::Member, Class::Member)]
+            .into_iter()
+            .find(|(r, _)| roles.contains(r))
+            .map(|(_, c)| c)
+    }
+}
+
+/// The largest first frame a peer holding `roles` can need. It is read before
+/// the operation is known, so it is sized by role: a session account's first
+/// frame is `{"op":"member-action"}`, never megabytes.
+pub fn first_frame_bound(roles: &[Role]) -> usize {
+    roles
+        .iter()
+        .map(|r| match r {
+            Role::Member => 4096,
+            Role::Operator => 16_384,
+            Role::Discord => 65_536,
+            Role::Provider => 2 * wire::MAX_PROVIDER_REQUEST + 4096,
+        })
+        .max()
+        .unwrap_or(1024)
+}
+
 /// The role an operation needs. An operation not listed here does not exist.
 pub fn role_for(op: &str) -> Option<Role> {
     Some(match op {
@@ -85,8 +118,13 @@ pub struct PeerRule {
 #[derive(Clone, Debug)]
 pub struct Credentials {
     pub host: PathBuf,
+    /// The Host image's SHA-256 from the candidate manifest.
+    pub host_sha256: String,
     pub host_config: PathBuf,
     pub public_socket: PathBuf,
+    /// The only uid whose operation-144 answer the broker accepts: the account
+    /// serving the Host's public socket.
+    pub public_socket_uid: u32,
     pub providers: PathBuf,
     pub root: PathBuf,
     pub key: PathBuf,
@@ -105,8 +143,10 @@ pub struct Config {
     pub socket_group: Option<u32>,
     pub audit: PathBuf,
     pub spool: PathBuf,
-    /// The single-tenancy shape: the broker shares one account with its peers.
-    /// Only a root-owned config can say so, and `hello` and every audit line repeat it.
+    /// The TEST shape: the broker shares one account with its peers (a sandbox
+    /// journey, the crate's tests). A root-owned config (every deployed box's)
+    /// cannot select it, the broker still never runs as root, and `hello` and
+    /// every audit line say so.
     pub single_account: bool,
     pub peers: Vec<PeerRule>,
     pub credentials: Option<Credentials>,
@@ -170,6 +210,9 @@ impl Config {
             Some(Value::Bool(b)) => *b,
             Some(_) => return Err("singleAccount must be a boolean".into()),
         };
+        if single_account && trust_owner == 0 {
+            return Err("singleAccount is the test shape: a root-owned (deployed) broker config cannot select it".into());
+        }
         let mut peers = Vec::new();
         for rule in v.get("peers").and_then(Value::as_array).ok_or("peers must be an array")? {
             fields(rule, &["role", "uids", "gids"], "peer rule")?;
@@ -187,7 +230,7 @@ impl Config {
         let credentials = match v.get("credentials") {
             None => None,
             Some(c) => {
-                fields(c, &["host", "hostConfig", "publicSocket", "providers", "root", "key", "namespaceHelper", "namespaceHelperSha256"], "credentials")?;
+                fields(c, &["host", "hostSha256", "hostConfig", "publicSocket", "publicSocketUid", "providers", "root", "key", "namespaceHelper", "namespaceHelperSha256"], "credentials")?;
                 let root = abs(c, "root")?;
                 let key = abs(c, "key")?;
                 if key.starts_with(&root) {
@@ -201,10 +244,23 @@ impl Config {
                     }
                     _ => return Err("namespaceHelper and namespaceHelperSha256 are pinned together".into()),
                 };
+                let host_sha256 = c
+                    .get("hostSha256")
+                    .and_then(Value::as_str)
+                    .filter(|s| s.len() == 64 && wire::unhex(s).is_ok())
+                    .ok_or("hostSha256 must be the candidate's 64-lowercase-hex Host image digest")?
+                    .to_owned();
+                let public_socket_uid = c
+                    .get("publicSocketUid")
+                    .and_then(Value::as_u64)
+                    .filter(|n| *n <= u32::MAX as u64)
+                    .ok_or("publicSocketUid must be the numeric uid serving the public socket")? as u32;
                 Some(Credentials {
                     host: abs(c, "host")?,
+                    host_sha256,
                     host_config: abs(c, "hostConfig")?,
                     public_socket: abs(c, "publicSocket")?,
+                    public_socket_uid,
                     providers: abs(c, "providers")?,
                     root,
                     key,
@@ -287,20 +343,38 @@ pub fn secret_file(path: &Path, label: &str, bound: u64) -> Result<(), String> {
     steady_dir(path.parent().ok_or("secret file has no directory")?, me, label)
 }
 
-pub struct Ticket {
-    pub peer: u32,
-    pub provider: String,
-    pub endpoint: String,
-    pub body_sha256: String,
-    pub secret: credentials::Secret,
-    pub expires: Instant,
-}
-
 pub struct Broker {
     pub config: Config,
-    pub tickets: Mutex<HashMap<String, Ticket>>,
+    pub tickets: ticket::Tickets,
+    pub host: Option<native::HostPin>,
     audit: Mutex<File>,
-    active: AtomicUsize,
+    slots: Mutex<HashMap<(Class, Option<u32>), usize>>,
+}
+
+/// One held connection slot; released on drop, so a panicking handler cannot leak it.
+struct Slot {
+    broker: Arc<Broker>,
+    keys: Vec<(Class, Option<u32>)>,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        let mut slots = self.broker.slots.lock().unwrap_or_else(|p| p.into_inner());
+        for key in &self.keys {
+            if let Some(n) = slots.get_mut(key) {
+                *n = n.saturating_sub(1);
+            }
+        }
+    }
+}
+
+/// What an audit line records about the request's progress.
+pub enum Outcome<'a> {
+    /// Written, and made durable, before any effect: an operation that cannot
+    /// be audited does not run.
+    Begin,
+    Ok,
+    Refused(&'a Refusal),
 }
 
 /// What one request leaves in the audit log, beside who and which operation.
@@ -341,10 +415,10 @@ impl Broker {
     /// Check every custody premise, then bind the socket. Nothing is served yet.
     pub fn start(config: Config) -> Result<(Arc<Broker>, UnixListener), String> {
         let me = peer::euid();
+        if me == 0 {
+            return Err("the broker never runs as root: run it as its own account (mini-keys)".into());
+        }
         if !config.single_account {
-            if me == 0 {
-                return Err("the broker never runs as root: run it as its own account (mini-keys)".into());
-            }
             if config.peers.iter().any(|r| r.uids.contains(&me)) {
                 return Err(format!("a peer rule names the broker's own uid {me}: a client account must not be the account holding the secrets"));
             }
@@ -352,10 +426,22 @@ impl Broker {
                 return Err("a member rule names the broker's own primary group".into());
             }
         }
+        let mut host = None;
         if let Some(c) = &config.credentials {
             secret_file(&c.key, "the seal key", 32)?;
             credentials::CredentialStore::open(&c.root, &c.key)?;
-            provider_table(&c.providers, config.trust_owner)?;
+            let table = provider_table(&c.providers, config.trust_owner)?;
+            // Ember's ruling (2026-10-26): the provider-side hard cap on the pool
+            // key is never the first line. A deployed broker holds every pool row
+            // to its own spend ceiling.
+            if !config.single_account {
+                if let Some(row) = table.rows.iter().find(|r| r.caps.is_some_and(|c| c.spend.is_none())) {
+                    return Err(format!("pool row {} has no caps.ceilingMicroUsd/callMicroUsd: a deployed broker never spends the operator's key without its own ceiling", row.name));
+                }
+            }
+            let pin = native::HostPin::new(&c.host, &c.host_sha256);
+            pin.current()?;
+            host = Some(pin);
         }
         if let Some(d) = &config.discord {
             discord::Secrets::load(&d.mirror)?;
@@ -371,6 +457,16 @@ impl Broker {
         if !meta.is_dir() || meta.uid() != me || meta.mode() & 0o077 != 0 {
             return Err(format!("spool {} must be the broker's 0700 directory", config.spool.display()));
         }
+        // A crash mid-forward leaves a member's prompt and the reply in the spool,
+        // and a reused pid would then collide with it: nothing in flight survives
+        // a start, so the residue goes.
+        for entry in std::fs::read_dir(&config.spool).map_err(|e| format!("spool: {e}"))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("forward-") || n.starts_with("discord-")) {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        let tickets = ticket::Tickets::open(&config.spool)?;
         steady_dir(config.audit.parent().ok_or("audit has no parent")?, me, "audit directory")?;
         let audit = OpenOptions::new()
             .create(true)
@@ -402,13 +498,14 @@ impl Broker {
                 return Err(format!("socket group {gid}: {}", std::io::Error::last_os_error()));
             }
         }
-        let broker = Arc::new(Broker { config, tickets: Mutex::new(HashMap::new()), audit: Mutex::new(audit), active: AtomicUsize::new(0) });
-        broker.record(&Peer { uid: me, gid: peer::egid(), pid: std::process::id() as i32 }, &[], "start", Ok(()), Note::default().with("configSha256", broker.config.sha256.clone()).with("singleAccount", broker.config.single_account));
+        let broker = Arc::new(Broker { config, tickets, host, audit: Mutex::new(audit), slots: Mutex::new(HashMap::new()) });
+        broker.record(&Peer { uid: me, gid: peer::egid(), pid: std::process::id() as i32 }, &[], "start", Outcome::Ok, Note::default().with("configSha256", broker.config.sha256.clone()).with("singleAccount", broker.config.single_account)).map_err(|r| r.detail)?;
         Ok((broker, listener))
     }
 
-    /// Serve until the listener fails. One thread per connection, at most
-    /// [`MAX_CONNECTIONS`] at once; a connection over the bound is refused `busy`.
+    /// Serve until the listener fails. One thread per connection, within the
+    /// peer's slot class ([`SLOTS`], [`MEMBER_SLOTS_PER_UID`]); a connection over
+    /// its class's bound is refused `busy` without blocking the accept loop.
     pub fn serve(self: Arc<Self>, listener: UnixListener) -> Result<(), String> {
         for stream in listener.incoming() {
             let mut stream = match stream {
@@ -416,32 +513,61 @@ impl Broker {
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(e) => return Err(format!("accept: {e}")),
             };
-            if self.active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                self.active.fetch_sub(1, Ordering::SeqCst);
-                let _ = wire::send(&mut stream, &wire::refusal("busy", "the broker is at its connection bound; retry"), Instant::now() + Duration::from_secs(1));
+            let Ok(peer) = peer::of(&stream) else { continue };
+            let roles = self.config.roles_of(&peer);
+            let Some(class) = Class::of(&roles) else {
+                let r = refuse("peer-not-allowed", format!("uid {} gid {} holds no role at this broker", peer.uid, peer.gid));
+                let _ = self.record(&peer, &roles, "connect", Outcome::Refused(&r), Note::default());
+                refuse_now(&mut stream, &r);
                 continue;
-            }
+            };
+            let Some(slot) = self.take_slot(class, peer.uid) else {
+                refuse_now(&mut stream, &refuse("busy", "the broker is at this account's connection bound; retry"));
+                continue;
+            };
             let broker = self.clone();
             std::thread::spawn(move || {
-                broker.connection(stream);
-                broker.active.fetch_sub(1, Ordering::SeqCst);
+                let _slot = slot;
+                broker.connection(stream, peer, roles);
             });
         }
         Ok(())
     }
 
-    /// One audit line. Never a secret: callers put digests and names in `note`.
-    pub fn record(&self, peer: &Peer, roles: &[Role], op: &str, outcome: Result<(), &Refusal>, note: Note) {
+    fn take_slot(self: &Arc<Self>, class: Class, uid: u32) -> Option<Slot> {
+        let bound = SLOTS.iter().find(|(c, _)| *c == class).map(|(_, n)| *n).unwrap_or(0);
+        let mut keys = vec![(class, None)];
+        if class == Class::Member {
+            keys.push((class, Some(uid)));
+        }
+        let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let held = |k: &(Class, Option<u32>)| slots.get(k).copied().unwrap_or(0);
+        if held(&(class, None)) >= bound || (class == Class::Member && held(&(class, Some(uid))) >= MEMBER_SLOTS_PER_UID) {
+            return None;
+        }
+        for key in &keys {
+            *slots.entry(*key).or_insert(0) += 1;
+        }
+        drop(slots);
+        Some(Slot { broker: self.clone(), keys })
+    }
+
+    /// One audit line, written through to the disk. Never a secret: callers put
+    /// digests and names in `note`. An error is returned, never swallowed.
+    pub fn record(&self, peer: &Peer, roles: &[Role], op: &str, outcome: Outcome<'_>, note: Note) -> Result<(), Refusal> {
         let mut line = note.0;
-        line.insert("at".into(), json!(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)));
+        line.insert("at".into(), json!(ticket::now()));
         line.insert("peer".into(), json!({"uid":peer.uid,"gid":peer.gid,"pid":peer.pid}));
         line.insert("roles".into(), json!(roles.iter().map(|r| r.name()).collect::<Vec<_>>()));
         line.insert("op".into(), json!(op));
         match outcome {
-            Ok(()) => {
+            Outcome::Begin => {
+                line.insert("outcome".into(), json!("begin"));
+            }
+            Outcome::Ok => {
                 line.insert("outcome".into(), json!("ok"));
             }
-            Err(r) => {
+            Outcome::Refused(r) => {
                 line.insert("outcome".into(), json!("refused"));
                 line.insert("refused".into(), json!(r.code));
                 line.insert("detail".into(), json!(r.detail.chars().take(300).collect::<String>()));
@@ -450,31 +576,31 @@ impl Broker {
         if self.config.single_account {
             line.insert("singleAccount".into(), json!(true));
         }
-        let mut bytes = serde_json::to_vec(&Value::Object(line)).unwrap_or_default();
-        bytes.push(b'\n');
-        if let Ok(mut f) = self.audit.lock() {
-            let _ = f.write_all(&bytes);
-        }
+        let written = serde_json::to_vec(&Value::Object(line)).map_err(|e| e.to_string()).and_then(|mut bytes| {
+            bytes.push(b'\n');
+            let mut f = self.audit.lock().map_err(|_| "audit lock poisoned".to_owned())?;
+            f.write_all(&bytes).and_then(|_| f.sync_data()).map_err(|e| e.to_string())
+        });
+        written.map_err(|e| {
+            eprintln!("mini-keys: AUDIT WRITE FAILED ({op}): {e}");
+            refuse("audit-unavailable", format!("the audit log {} cannot be written: {e}", self.config.audit.display()))
+        })
     }
 
-    fn connection(&self, mut stream: UnixStream) {
+    /// Record a request's outcome after its effect: the effect already
+    /// happened, so a failure here is reported loudly (stderr, the journal)
+    /// rather than undone.
+    fn settle(&self, peer: &Peer, roles: &[Role], op: &str, outcome: Outcome<'_>, note: Note) {
+        let _ = self.record(peer, roles, op, outcome, note);
+    }
+
+    fn connection(&self, mut stream: UnixStream, peer: Peer, roles: Vec<Role>) {
         let end = Instant::now() + EXCHANGE;
-        let peer = match peer::of(&stream) {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-        let roles = self.config.roles_of(&peer);
-        if roles.is_empty() {
-            let r = refuse("peer-not-allowed", format!("uid {} gid {} holds no role at this broker", peer.uid, peer.gid));
-            self.record(&peer, &roles, "connect", Err(&r), Note::default());
-            let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
-            return;
-        }
-        let request = match wire::recv(&mut stream, wire::MAX_FRAME, end) {
+        let request = match wire::recv(&mut stream, first_frame_bound(&roles), end) {
             Ok(v) => v,
             Err(e) => {
                 let r = refuse("bad-request", e);
-                self.record(&peer, &roles, "read", Err(&r), Note::default());
+                self.settle(&peer, &roles, "read", Outcome::Refused(&r), Note::default());
                 let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
                 return;
             }
@@ -484,7 +610,7 @@ impl Broker {
             None if op == "hello" => true,
             None => {
                 let r = refuse("op-unknown", format!("the broker has no operation {op:?}"));
-                self.record(&peer, &roles, "unknown", Err(&r), Note::default());
+                self.settle(&peer, &roles, "unknown", Outcome::Refused(&r), Note::default());
                 let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
                 return;
             }
@@ -492,15 +618,26 @@ impl Broker {
         };
         if !granted {
             let r = refuse("op-not-granted", format!("{op} needs role {}; uid {} holds {:?}", role_for(&op).map(Role::name).unwrap_or("?"), peer.uid, roles.iter().map(|r| r.name()).collect::<Vec<_>>()));
-            self.record(&peer, &roles, &op, Err(&r), Note::default());
+            self.settle(&peer, &roles, &op, Outcome::Refused(&r), Note::default());
             let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
             return;
+        }
+        // Law: refusal must be loud. Nothing with an effect runs unaudited.
+        if op != "hello" {
+            if let Err(r) = self.record(&peer, &roles, &op, Outcome::Begin, Note::default()) {
+                if op == "member-action" {
+                    let _ = wire::send(&mut stream, &json!({"type":member::REFUSED,"error":r.detail}), end);
+                } else {
+                    let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
+                }
+                return;
+            }
         }
         let mut note = Note::default();
         // member-action owns its frames (the ssh key-service exchange, verbatim).
         if op == "member-action" {
             let outcome = member::exchange(self, &peer, &mut stream, &mut note);
-            self.record(&peer, &roles, &op, outcome.as_ref().map(|_| ()), note);
+            self.settle(&peer, &roles, &op, outcome.as_ref().map_or_else(Outcome::Refused, |_| Outcome::Ok), note);
             return;
         }
         let result = match op.as_str() {
@@ -513,6 +650,7 @@ impl Broker {
                 };
                 Ok(json!({"ok":true,"broker":CONFIG_TYPE,"peer":{"uid":peer.uid,"gid":peer.gid},
                     "roles":roles.iter().map(|r| r.name()).collect::<Vec<_>>(),"singleAccount":self.config.single_account,
+                    "shape":if self.config.single_account { "test-single-account" } else { "split" },
                     "configSha256":self.config.sha256,"credentials":self.config.credentials.is_some(),"discord":self.config.discord.is_some(),
                     "discordChannel":channel}))
             }
@@ -529,9 +667,24 @@ impl Broker {
             Ok(v) => v.clone(),
             Err(r) => wire::refusal(&r.code, &r.detail),
         };
-        self.record(&peer, &roles, &op, result.as_ref().map(|_| ()), note);
-        // A forward whose caller hung up has nobody to answer.
+        self.settle(&peer, &roles, &op, result.as_ref().map_or_else(Outcome::Refused, |_| Outcome::Ok), note);
+        // A forward whose caller hung up has nobody to answer; its answer is
+        // journaled, so an exact retry replays it.
         let _ = wire::send(&mut stream, &response, Instant::now() + Duration::from_secs(10));
+    }
+}
+
+/// A refusal written without waiting: one non-blocking write of a small frame.
+/// A peer that does not read cannot stall the accept loop.
+fn refuse_now(stream: &mut UnixStream, r: &Refusal) {
+    use std::io::Write as _;
+    if stream.set_nonblocking(true).is_err() {
+        return;
+    }
+    if let Ok(body) = serde_json::to_vec(&wire::refusal(&r.code, &r.detail)) {
+        let mut frame = (body.len() as u32).to_le_bytes().to_vec();
+        frame.extend_from_slice(&body);
+        let _ = stream.write(&frame);
     }
 }
 

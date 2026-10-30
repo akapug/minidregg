@@ -5,9 +5,30 @@ module does not infer a systemd fact from a Boolean supplied by a caller.
 Mini can verify the bytes and key, while truthful observation of the unit,
 process and package remains an explicit host-custody assumption.
 -/
-import Kernel.ApplicationLifecycleBeginV2Ingress
-import Kernel.ApplicationLifecycleClaimProjection
-import Compiler.CredentialSignatureIO
+module
+
+public import Kernel.ApplicationLifecycleBeginV2Ingress
+public import Kernel.ApplicationLifecycleClaimProjection
+public import Compiler.CredentialSignatureIO
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionReport
 
@@ -37,7 +58,7 @@ def Outcome.ofCode : Nat → Outcome
   | _ => .stopped
 
 def outcomeStream : StreamCodec Outcome :=
-  StreamCodec.xmap StreamCodec.nat Outcome.code Outcome.ofCode
+  StreamCodec.retract StreamCodec.nat Outcome.code Outcome.ofCode
     (by intro outcome; cases outcome <;> rfl)
 
 /-- The custodian's signed stop observation records the systemd manager and
@@ -85,6 +106,58 @@ def stopAuditFrame : List UInt8 :=
 
 def stopAuditCodec : LawfulCodec StopAudit :=
   NativeHostCodec.framed stopAuditFrame stopAuditStream
+
+/-- The longest control group a resident unit of ours can have, computed from the naming scheme
+(native/spk-host broker `grains_slice`/`class_slice`/`app_slice` and `parse_resident_unit`):
+
+  /user.slice/user-U.slice/user@U.service          U = uid, at most 10 digits (u32)
+  /s{T}.slice                                      T = Store tag, exactly 16 hex
+  /s{T}-mini.slice
+  /s{T}-mini-grains.slice
+  /s{T}-mini-grains-C.slice                        C = size class name, one letter (S, M, L)
+  /s{T}-mini-grains-C-a{A}.slice                   A = app, at most 20 digits (a u64)
+  /mini-spk-s{T}-a{A}-g{G}.service                 G = generation, at most 20 digits (a u64)
+
+systemd nests a slice under its dash-prefix, so the Store tag recurs five times in the path (it
+reached 260 bytes for a four-digit app on dregg-build, 2026-10-28, against the old bound of 256).
+The sum below is 323: 317 for 18-digit components, plus two bytes for each of the three places a
+20-digit component recurs (the app in the app slice and the unit, the generation in the unit). A member's
+app is a participant-namespace id, which is at least 2^63, so the app is a full u64. Every component is far under NAME_MAX (255; the longest is the 75-byte unit
+file) and the whole path far under PATH_MAX (4096). It assumes the units run under the operator's
+user manager, which is how the broker places them. -/
+def controlGroupBound : Nat :=
+  let uid := 10
+  let tag := 16
+  let digits := 20
+  "/user.slice/user-".length + uid + ".slice/user@".length + uid + ".service".length
+  + ("/s".length + tag + ".slice".length)
+  + ("/s".length + tag + "-mini.slice".length)
+  + ("/s".length + tag + "-mini-grains.slice".length)
+  + ("/s".length + tag + "-mini-grains-C.slice".length)
+  + ("/s".length + tag + "-mini-grains-C-a".length + digits + ".slice".length)
+  + ("/mini-spk-s".length + tag + "-a".length + digits + "-g".length + digits + ".service".length)
+
+/-- A control group a report may carry: present and within the bound derived above. -/
+def controlGroupWithin (group : List UInt8) : Bool :=
+  !group.isEmpty && decide (group.length ≤ controlGroupBound)
+
+example : controlGroupBound = 323 := by decide
+-- The widened component is a u64: its largest value has 20 digits (2^64 also does, so the digit
+-- bound is necessary, not sufficient; the value bound is the Rust decimal check); 10^20 has 21.
+example : (toString (2 ^ 64 - 1)).length = 20 := by decide
+example : (toString (2 ^ 64)).length = 20 := by decide
+example : (toString (10 ^ 20)).length = 21 := by decide
+example : (toString 13827490942341725565).length = 20 := by decide
+-- Far inside the 4096-byte control-group cap.
+example : controlGroupBound < 4096 := by decide
+-- The 260-byte group observed on dregg-build is accepted.
+set_option maxRecDepth 4000 in
+example : controlGroupWithin (List.replicate 260 0) = true := by decide
+set_option maxRecDepth 4000 in
+example : controlGroupWithin (List.replicate controlGroupBound 0) = true := by decide
+set_option maxRecDepth 4000 in
+example : controlGroupWithin (List.replicate (controlGroupBound + 1) 0) = false := by decide
+example : controlGroupWithin [] = false := by decide
 
 def stopAuditValid (unit invocationId controlGroup : List UInt8)
     (bytes : List UInt8) : Bool :=
@@ -174,11 +247,11 @@ def Report.validFor (report : Report)
         report.pid == 0 && report.stopAudit.isEmpty
   | .start, .running =>
       !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        controlGroupWithin report.controlGroup &&
         decide (report.pid > 0) && report.stopAudit.isEmpty
   | .stop, .stopped =>
       !report.invocationId.isEmpty && decide (report.invocationId.length ≤ 256) &&
-        !report.controlGroup.isEmpty && decide (report.controlGroup.length ≤ 256) &&
+        controlGroupWithin report.controlGroup &&
         !report.stopAudit.isEmpty && decide (report.stopAudit.length ≤ 4096) &&
         report.pid == 0 &&
         stopAuditValid report.unit report.invocationId report.controlGroup report.stopAudit
@@ -217,6 +290,19 @@ structure Checked (domain semantics : Digest) (publicKey : List UInt8)
   shape : signed.report.validFor begin = true
   keyLength : publicKey.length = 32
   signatureLength : signed.signature.length = 64
+  /-- The frame the custodian signature was checked over (the question the oracle was asked). -/
+  frame : List UInt8
+  frameExact : frame = signingFrame domain semantics signed.report
+
+/-- A `Checked` records the frame its signature was verified over: the report under exactly these
+`domain` and `semantics`, by the pinned key of the right length. The oracle's verdict itself is a runtime
+fact (`CheckedSignature`'s caveat); only `check` mints. -/
+theorem Checked.asked {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleBeginV2Ingress.Ingress}
+    (checked : Checked domain semantics publicKey begin) :
+    checked.signed.report.validFor begin = true ∧ publicKey.length = 32 ∧
+      checked.frame = signingFrame domain semantics checked.signed.report :=
+  ⟨checked.shape, checked.keyLength, checked.frameExact⟩
 
 def check (native : CredentialSignatureIO.NativeConfig)
     (domain semantics : Digest) (publicKey : List UInt8)
@@ -227,7 +313,7 @@ def check (native : CredentialSignatureIO.NativeConfig)
       if shape : signed.report.validFor begin = true then
         match ← CredentialSignatureIO.verify native publicKey
             (signingFrame domain semantics signed.report) signed.signature with
-        | .ok true => return .ok ⟨signed, shape, keyLength, signatureLength⟩
+        | .ok true => return .ok ⟨signed, shape, keyLength, signatureLength, _, rfl⟩
         | .ok false => return .error "physical custodian signature refused"
         | .error _ => return .error "physical custodian verifier unavailable"
       else return .error "physical report/source mismatch"

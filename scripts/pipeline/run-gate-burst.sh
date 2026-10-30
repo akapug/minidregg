@@ -15,7 +15,7 @@ cd "$G/src" || exit 2; export PATH=$HOME/.elan/bin:$PATH
 trap '[ -f "$G/logs/gate-$TAG.done" ] || echo "ABORTED $(date -Is) rc=$? at ${BASH_COMMAND:0:80}" > "$G/logs/gate-$TAG.aborted"' EXIT
 rm -f "$G/logs/gate-$TAG.aborted"
 TO=$(git rev-parse HEAD)
-{ echo "START $(date -Is) HEAD=$TO"; LEAN_NUM_THREADS=$THREADS $LAKE_WRAP lake build Minidregg +Host.Main:leanArts ObjectiveProofs; echo "UMBRELLA rc=$? $(date -Is)"; } > "$G/logs/gate-$TAG-umbrella.log" 2>&1
+{ echo "START $(date -Is) HEAD=$TO"; bash scripts/build-mini-kernels.sh && LEAN_NUM_THREADS=$THREADS $LAKE_WRAP lake build $(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing); echo "UMBRELLA rc=$? $(date -Is)"; } > "$G/logs/gate-$TAG-umbrella.log" 2>&1
 grep -q "^UMBRELLA rc=0" "$G/logs/gate-$TAG-umbrella.log" && u=PASS || u=RED
 # a `sorry` builds green (a warning): it is RED here, named by count (W20-GATE-MUTATION finding)
 ns=$(grep -c "declaration uses 'sorry'" "$G/logs/gate-$TAG-umbrella.log" || true)

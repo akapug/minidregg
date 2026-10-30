@@ -28,6 +28,9 @@ import_untrusted_tree "$scratch/stage" "$scratch/dest" "$scratch/log"
 [[ -L $scratch/dest/escape && $(readlink "$scratch/dest/escape") == /etc/shadow ]]
 [[ ! -e $scratch/dest/fifo && ! -L $scratch/dest/fifo ]]
 [[ $(stat -c '%u' "$scratch/dest/sub/data") == "$(id -u)" ]]
+# The setuid plant arrives as an ordinary file: content kept, setuid bit gone.
+[[ $(cat "$scratch/dest/suid") == setuid ]]
+[[ $(stat -c '%a' "$scratch/dest/suid") == 755 ]]
 # A damaged image is refused before anything is copied.
 mkdir -m 700 "$scratch/bad" "$scratch/bad-dest"
 cp "$scratch/stage/untrusted.ext4" "$scratch/bad/untrusted.ext4"

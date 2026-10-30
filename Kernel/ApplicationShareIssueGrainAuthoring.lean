@@ -5,9 +5,28 @@ Mini derives their present states/roots, the full ticket birth, the joint
 factory/Book/grain command and every signing header. A detached plan is not
 admission; the event-22 receiver rechecks all branches on a fresh image.
 -/
-import Kernel.ApplicationShareIssueGrainAdmission
-import Kernel.NativeHost
-import Compiler.GrainResourceBirthHostCodec
+module
+
+public import Kernel.ApplicationShareIssueGrainAdmission
+public import Kernel.NativeHost
+public import Compiler.GrainResourceBirthHostCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueGrainAuthoring
 
@@ -110,10 +129,14 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let height := NativeHost.logicalHeight config opened.durable
   let .ok ready := ApplicationShareIssueSource.prepare profile config request.spec
     | throw "grain-backed share source refused"
-  unless opened.pins.tariff == config.tariff do
-    throw "grain-backed share factory tariff differs from loaded host"
-  let tariff ← config.grainBirthTariffValue
-  let birthDraft := ready.expectedDescriptor profile config
+  let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
+      opened.durable
+    | throw "platform cell unavailable: the image holds no platform record to price a share ticket from"
+  unless opened.pins.tariff == record.creation do
+    throw "grain-backed share factory tariff differs from the platform record"
+  let some tariff := GrainResourceBirthAdmission.grainTariffOf record
+    | throw "grain-backed birth tariff: the image's platform record pins none"
+  let birthDraft := ready.expectedDescriptor profile config record
     opened.authority.snapshot.authState height request.payer request.funding
   let (toolRoot, toolBefore) ← currentAgent config opened request.tool.task
   let (parentRoot, parentBefore) ← currentAgent config opened request.parent.task

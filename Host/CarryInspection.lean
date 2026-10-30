@@ -3,10 +3,14 @@ It verifies canonical source-owned signing bytes, preexisting operator authority
 both endpoint openings and artifact pins. It receives no private Store image.
 The operator-local CarriedSegment receiver performs semantic source audit and
 new-profile state validation before the detached edge is signed. -/
-import Kernel.CarriedSegment
-import Host.ReceiptContinuity
-import Compiler.CredentialSignatureIO
-import Compiler.RetainedArtifactIO
+module
+
+public import Kernel.CarriedSegment
+public import Host.ReceiptContinuity
+public import Compiler.CredentialSignatureIO
+public import Compiler.RetainedArtifactIO
+
+@[expose] public section
 
 namespace Minidregg.Host.CarryInspection
 

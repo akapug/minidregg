@@ -1,0 +1,326 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "scrumblr",
+  "interfaceVersion": 1,
+  "appId": "1124qk4mm5zvx294gwn9w23gn2pt96mds6pqkxpn9sxr8w2uwr70",
+  "packageId": "57fa8aab611f5e0ab656e73324d48879",
+  "appVersion": "0.5-1",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "cards.read": {
+      "description": "Read all Redis-backed cards in the exact human browser room path, including leading slash. Empty room is []; bounded complete snapshot, no filtered pagination. Package sanitizes stored values.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "pattern": "^/[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "room"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8192
+            }
+          },
+          "required": [
+            "id",
+            "text"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "conversation",
+        "wire": "socket.io-eio3",
+        "path": [
+          "socket.io/"
+        ],
+        "query": {},
+        "steps": [
+          {
+            "emit": "message",
+            "args": [
+              {
+                "action": "joinRoom",
+                "data": {
+                  "arg": "room"
+                }
+              }
+            ]
+          },
+          {
+            "id": "room",
+            "receive": {
+              "event": "message",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "action"
+                  ],
+                  "equals": "roomAccept"
+                }
+              ]
+            }
+          },
+          {
+            "emit": "message",
+            "args": [
+              {
+                "action": "initializeMe"
+              }
+            ]
+          },
+          {
+            "id": "cards",
+            "receive": {
+              "event": "message",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "action"
+                  ],
+                  "equals": "initCards"
+                }
+              ]
+            }
+          }
+        ],
+        "result": {
+          "result": [
+            "cards",
+            0,
+            "data"
+          ]
+        }
+      }
+    },
+    "card.write": {
+      "description": "Send a card to this room with caller-selected room-scoped ID; existing ID may be replaced. Package broadcasts to roommates, not the sender: sent is no database acknowledgement. Independently cards.read before claiming success. No automatic retry after uncertain dispatch.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "pattern": "^/[A-Za-z0-9_-]{1,128}$"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "colour": {
+            "enum": [
+              "yellow",
+              "blue",
+              "green",
+              "white",
+              "pink"
+            ]
+          },
+          "x": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "y": {
+            "type": "number",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "rot": {
+            "type": "number",
+            "minimum": -360,
+            "maximum": 360
+          }
+        },
+        "required": [
+          "room",
+          "id",
+          "text",
+          "colour",
+          "x",
+          "y",
+          "rot"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "delivery": {
+            "const": "sent"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "delivery",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "conversation",
+        "wire": "socket.io-eio3",
+        "path": [
+          "socket.io/"
+        ],
+        "query": {},
+        "steps": [
+          {
+            "emit": "message",
+            "args": [
+              {
+                "action": "joinRoom",
+                "data": {
+                  "arg": "room"
+                }
+              }
+            ]
+          },
+          {
+            "id": "room",
+            "receive": {
+              "event": "message",
+              "where": [
+                {
+                  "path": [
+                    0,
+                    "action"
+                  ],
+                  "equals": "roomAccept"
+                }
+              ]
+            }
+          },
+          {
+            "emit": "message",
+            "args": [
+              {
+                "action": "createCard",
+                "data": {
+                  "id": {
+                    "arg": "id"
+                  },
+                  "text": {
+                    "arg": "text"
+                  },
+                  "colour": {
+                    "arg": "colour"
+                  },
+                  "x": {
+                    "arg": "x"
+                  },
+                  "y": {
+                    "arg": "y"
+                  },
+                  "rot": {
+                    "arg": "rot"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "result": {
+          "delivery": "sent",
+          "id": {
+            "arg": "id"
+          }
+        }
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "write",
+      "op": "card.write",
+      "args": {
+        "room": {
+          "concat": [
+            "/",
+            {
+              "context": "runId"
+            }
+          ]
+        },
+        "id": {
+          "context": "runId"
+        },
+        "text": "Typed room card",
+        "colour": "yellow",
+        "x": 58,
+        "y": 120,
+        "rot": 3
+      }
+    },
+    {
+      "id": "read",
+      "op": "cards.read",
+      "args": {
+        "room": {
+          "concat": [
+            "/",
+            {
+              "context": "runId"
+            }
+          ]
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "id": {
+              "context": "runId"
+            },
+            "text": "Typed room card"
+          }
+        }
+      ],
+      "await": {
+        "attempts": 6,
+        "intervalSeconds": 1,
+        "retryStatuses": []
+      }
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/ocdtrekkie/scrumblr",
+    "package:57fa8aab611f5e0ab656e73324d48879/server.js",
+    "package:57fa8aab611f5e0ab656e73324d48879/node_modules/socket.io/node_modules/engine.io/node_modules/engine.io-parser/lib/index.js"
+  ]
+}

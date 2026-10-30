@@ -6,7 +6,26 @@ logical root. It does not assume scalar-page representation, and cannot select
 internal authority, Book, receipt-history or policy-source roles by coercing
 all object-like registry entries into ordinary resources.
 -/
-import Compiler.CanonicalCellRegistry
+module
+
+public import Compiler.CanonicalCellRegistry
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ResourceTargetAdmission
 
@@ -38,6 +57,8 @@ def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   | .objectiveActivity => none
   -- A seat cell is read through the seat view, never observed as a resource.
   | .seat => none
+  -- The platform cell is read through its lookup, never observed as a resource.
+  | .platform => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

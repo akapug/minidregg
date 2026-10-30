@@ -28,9 +28,28 @@ check. That is the "no read path returns unverified bytes" property, enforced
 by the compiler; `verifyAt_included`, `verifyAt_bytes` and `verifyAt_sound`
 state what a `Verified` value means.
 -/
-import Compiler.DurableCheckpointCodec
-import Theory.LogAccumulator
-import Compiler.DurableIndex
+module
+
+public import Compiler.DurableCheckpointCodec
+public import Theory.LogAccumulator
+public import Compiler.DurableIndex
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.DurableHistory
 
@@ -254,7 +273,9 @@ theorem verifyAt_sound (leaves : Nat → Digest) {frontier : List (Nat × Digest
     (honest : Honest nodeDigest leaves n frontier)
     {entry : RawEntry} {nodes : List RawNode} {read : Verified frontier n height}
     (ok : verifyAt frontier n height entry nodes = .ok read) :
-    leafDigest height read.record read.chain read.root = leaves height ∨ NodeCollision nodeDigest := by
+    leafDigest height read.record read.chain read.root = leaves height ∨
+      ∃ k e d, LogAccumulator.locate height n frontier = some (k, e, d) ∧
+        LogAccumulator.NodeCollisionBelow nodeDigest leaves k e := by
   have within : 1 ≤ height ∧ height ≤ n := by
     unfold verifyAt at ok
     split at ok

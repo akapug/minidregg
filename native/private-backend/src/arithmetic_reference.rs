@@ -1,46 +1,17 @@
-//! Public two-bit addition program over the SAME constant/XOR/AND network.
-//! This is an explicit reference program, not a claim that the new Objective
-//! source compiler/type/demand semantics have been refined to this graph.
+//! Test-only drivers that run the Lean-emitted two-bit addition plan
+//! (`fixtures/addition-network-2-plan.bin`) over the SAME constant/XOR/AND
+//! network, with every party honest.
+#[cfg(any(test, feature = "demo"))]
 use crate::circuit_batch::{Network, Op};
-pub fn two_bit_addition() -> Network {
-    let mut net = Network {
-        input_count: 4,
-        gates: vec![Op::Constant(true)],
-        outputs: vec![],
-    };
-    // Counted input Boolean qualification precedes all arithmetic and consumes
-    // the SAME full Plan; failure never returns those rows.
-    for input in 0..4 {
-        let x = emit(&mut net, Op::Xor(input, 4));
-        emit(&mut net, Op::And(input, x));
-    }
-    let mut carry = emit(&mut net, Op::Constant(false));
-    let mut sums = vec![];
-    for bit in 0..2 {
-        let (a, b) = (bit, bit + 2);
-        let p = emit(&mut net, Op::Xor(a, b));
-        sums.push(emit(&mut net, Op::Xor(p, carry)));
-        let ab = emit(&mut net, Op::And(a, b));
-        let pc = emit(&mut net, Op::And(p, carry));
-        carry = emit(&mut net, Op::Xor(ab, pc));
-    }
-    sums.push(carry);
-    net.outputs = sums;
-    net
-}
-fn emit(n: &mut Network, op: Op) -> u64 {
-    let wire = n.input_count + n.gates.len() as u64;
-    n.gates.push(op);
-    wire
-}
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use crate::{
         acss_id::{self, AcssId},
         codec::Generation,
         entropy::Entropy,
-        field_network::{binding, Engine, InputRef, Send, TripleManifest},
+        field_network::{Engine, InputRef, Send, TripleManifest},
         field_network_layers::LayerEngine,
         reconstruction::Field,
         transcript::{Tap, Wire},
@@ -177,7 +148,7 @@ pub(crate) mod tests {
         stocks: &[Vec<CheckedTriples>],
         label: &str,
         tap: &mut Tap,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         let (engines, anchors, _) =
             completed_private_inputs_with_states(parties, network, source_binding, g, stocks, label, tap);
         (engines, anchors)
@@ -194,7 +165,7 @@ pub(crate) mod tests {
         tap: &mut Tap,
     ) -> (
         Vec<LayerEngine>,
-        Vec<triple_king::tests::AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<Vec<AcssId>>,
     ) {
         let input_count = network.input_count as usize;
@@ -229,11 +200,8 @@ pub(crate) mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(rows.len(), count);
             let single = checked.len() == 1;
-            let binding_bytes = if single {
-                binding(&TripleManifest::from_checked(checked[0]), &refs, source_binding).unwrap()
-            } else {
-                crate::field_network::binding_many(&checked, &refs, source_binding).unwrap()
-            };
+            let binding_bytes =
+                crate::field_network::binding_many(&checked, &refs, source_binding).unwrap();
             let plan = crate::circuit_batch::Plan {
                 generation: g.clone(),
                 network: network.clone(),
@@ -282,14 +250,13 @@ pub(crate) mod tests {
         left: u8,
         right: u8,
         instance: u64,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
-        completed_network(
-            left,
-            right,
-            instance,
-            two_bit_addition(),
-            b"REFERENCE.NAT2.ADD/carry.retained/qualified4bits",
-        )
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
+        // The Lean-emitted two-bit addition plan with its counted Boolean
+        // input qualification: the one addition network.
+        let bytes = include_bytes!("../fixtures/addition-network-2-plan.bin");
+        let plan = crate::circuit_batch::Plan::decode(bytes).unwrap();
+        let network = crate::field_network::with_boolean_inputs(&plan.network).unwrap();
+        completed_network(left, right, instance, network, bytes)
     }
     pub(crate) fn completed_network(
         left: u8,
@@ -297,7 +264,7 @@ pub(crate) mod tests {
         instance: u64,
         network: Network,
         source_binding: &[u8],
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         completed_word_network(left as u64, right as u64, instance, network, source_binding)
     }
     pub(crate) fn completed_word_network(
@@ -306,7 +273,7 @@ pub(crate) mod tests {
         instance: u64,
         network: Network,
         source_binding: &[u8],
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         completed_word_network_generation(left, right, instance, network, source_binding, None)
     }
     /// Two input parties: holder 0 privately deals `left`, holder 2 privately
@@ -319,7 +286,7 @@ pub(crate) mod tests {
         network: Network,
         source_binding: &[u8],
         generation: Option<&Generation>,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         let input_count = network.input_count as usize;
         // Two parties, each an even-count ACSS instance of width bits.
         assert!(input_count > 0 && input_count % 4 == 0);
@@ -362,7 +329,7 @@ pub(crate) mod tests {
         network: Network,
         source_binding: &[u8],
         g: &Generation,
-    ) -> (Vec<LayerEngine>, Vec<triple_king::tests::AnchorFixture>) {
+    ) -> (Vec<LayerEngine>, Vec<crate::custody::AnchorHandle>) {
         assert!(!bits.is_empty() && bits.len() <= 256);
         assert_eq!(network.input_count as usize, bits.len());
         let count = network

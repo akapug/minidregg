@@ -19,8 +19,29 @@ The configured signature helper must have stable semantics for this session.
 Host.Main installs an executable snapshot in a private directory for the
 stdio lifetime.
 -/
-import Kernel.NativeHost
-import Kernel.NativeObservationOpeningCache
+module
+
+public import Kernel.NativeHost
+public import Kernel.NativeObservationOpeningCache
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostSession
 
@@ -62,7 +83,7 @@ def Session.rememberReadback {config : Config} (session : Session config)
   if session.durable.image = old.opened.durable.image then
     { session with
       opened := readback.after
-      walked := some ⟨NativeHostReplay.exactCandidate old readback.derived readback.ready,
+      walked := some ⟨NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag,
         NativeHostReplay.extendExact reader old readback⟩ }
   else session
 
@@ -95,7 +116,7 @@ theorem Session.rememberReadback_image {config : Config} (session : Session conf
     (readback : NativeHostReplay.ExactReadback config old)
     (current : session.durable.image = old.opened.durable.image) :
     (session.rememberReadback reader old readback).durable.image =
-      (NativeHostReplay.exactCandidate old readback.derived readback.ready).image := by
+      (NativeHostReplay.exactCandidate old readback.derived readback.ready readback.tag).image := by
   unfold Session.durable
   rw [Session.rememberReadback_opened session reader old readback current]
   exact (NativeHostReplay.extendExact reader old readback).image_exact
@@ -122,7 +143,7 @@ theorem Session.rememberReadback_newer {config : Config} (session : Session conf
   intro same
   have heights := congrArg (fun image : DurableReceiver.Image => image.accepted.length) same
   dsimp only at heights
-  unfold DurableReceiverIO.Loaded.height at newer
+  simp only [DurableReceiverIO.Loaded.height_eq] at newer
   omega
 
 /-- Rendering facts remain representation-only; all per-query scope/current
@@ -167,6 +188,11 @@ def refresh (config : Config) (session : Session config) :
       session.durable with
   | .error detail => return .error detail
   | .ok ⟨durable, _⟩ =>
+      -- Nothing new on the Store's log, and the light opening is at the same head:
+      -- the Store is not read a second time to learn it.
+      if durable.height = session.durable.height ∧
+          session.light.opening.head.height = session.durable.height then
+        return .ok session
       -- The light opening reads the same new entries, verified as its open verifies them.
       let light ← match ← session.light.refresh with
         | .error detail => return .error detail

@@ -1,0 +1,25 @@
+# Davros repackaging state
+
+- [x] **1. plan** — upstream version `0.33.4` (2026-10-25), pinned to maintained source snapshot `d323f746f3ab1ff47a2879bf79982c19cb96d5ca` (2026-10-22), not old tag `v0.13.1`.
+  - Source: https://github.com/mnutt/davros/commit/d323f746f3ab1ff47a2879bf79982c19cb96d5ca
+  - Fetch archive: https://github.com/mnutt/davros/archive/d323f746f3ab1ff47a2879bf79982c19cb96d5ca.tar.gz
+  - Build approach: plain build dir on `dregg-forge` at `/srv/spk-build/davros`, using the Sandstorm 308 toolchain (no vagrant-spk); root/x86, leave `demo` and `nano` containers untouched.
+  - Manifest: set `bridgeConfig.apiPath = "/"` so the package descriptor exposes both `web` and `api` interfaces.
+- [x] **2. fetch+build** — recovered and verified the successful detached build on `dregg-forge` (exit `0`); no rebuild needed.
+  - Source/app tree: `/srv/spk-build/davros/upstream` at `d323f746f3ab1ff47a2879bf79982c19cb96d5ca`; built client `/srv/spk-build/davros/upstream/output/app.js`, helper `/srv/spk-build/davros/upstream/sandstorm-integration/bin/getPublicId`, and server directory `/srv/spk-build/davros/upstream/server` verified.
+  - Build environment: `/srv/spk-build/davros/rootfs`; script `/srv/spk-build/davros/build.sh`; log `/srv/spk-build/davros/build.log`; finished PID `136153` (`/srv/spk-build/davros/build.pid`); exit status `/srv/spk-build/davros/build.exit`.
+  - The same script already emitted `/srv/spk-build/davros/out/davros.spk` (63,515,824 bytes); required signing/key checks remain step 3.
+- [x] **3. pack+sign** — the existing package was verified with `spk verify`; its signing keyring matches the required local key `/Users/ember/.dregg-secrets/spk-keys/davros.key` (128 bytes, mode `0600`, secret not printed). The build checked `bridgeConfig.apiPath = "/"` before packing.
+  - Signed package: `dregg-forge:/srv/spk-build/davros/out/davros.spk` (63,515,824 bytes); remote keyring `/srv/spk-build/davros/davros.keyring`.
+  - Package ID: `5485d227d04a1af26e08358dcb92accf` (as reported by `spk verify`); full SHA-256: `5485d227d04a1af26e08358dcb92accf37b3a8855194caae3ad8b5919396155d`.
+  - App ID: `g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh`; verification output `/srv/spk-build/davros/out/verified-app-id`.
+- [x] **4. qualify** — recovered and verified the completed hbox qualification for package `5485d227d04a1af26e08358dcb92accf` (SHA-256 matches step 3); both rows PASS.
+  - hbox lane: `/tank/lanes/spk-fresh-davros`; one-row table `/tank/lanes/spk-fresh-davros/davros.tsv`; run log `/tank/lanes/spk-fresh-davros/qualification-run.log`; results `/tank/lanes/spk-fresh-davros/qualify-2/rows.tsv`.
+  - Passed create/install/share/start/enrol/page `/` in 279 s and the typed `davros` declaration write/read-back beneath the HTML; result `/tank/lanes/spk-fresh-davros/qualify-2/interface-davros-1588654-10887/result.json` (Hermes `NOT_RUN`).
+  - World `1249a29e004c1223` was torn down: `/tank/lanes/spk-fresh-davros/world-down-2.log` ends `WORLD DOWN store=1249a29e004c1223 removal_assertions=0`; `/tank/lanes/spk-fresh-davros/world-down.exit` is `0`.
+- [x] **5. land** — complete and pushed as `44e19c51cefaadf494d38dbc90e0ed9dc99ec142` (`Point FEATURED at the repackaged Davros app`).
+  - `apps/interfaces/davros.json` was already re-pinned in `0f20b83f3` to app `g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh` and package `5485d227d04a1af26e08358dcb92accf`; no further declaration edit was needed.
+  - Replaced Davros's old FEATURED app ID in `native/resource-client/src/apps.rs` and minimally normalized its qualified row in `docs/SPK-FRESH-2026-10-29.md`; committed those named files with `git commit -F`.
+  - `git pull --rebase` refused because of unrelated unstaged lane changes; no stash was used. `git fetch` confirmed local `1` ahead / remote `0` behind, so no rebase was needed and `git push origin lane/spk-fresh` succeeded (`105833c38..44e19c51c`).
+  - Appended `- 44e19c51cefaadf494d38dbc90e0ed9dc99ec142 — Davros: qualified` to `/private/tmp/claude-501/-Users-ember-dev-minidregg/698fc87d-1ed5-4b8d-a00d-67388a9da60b/scratchpad/kimi-spk/landings.md`.
+  - All five steps are complete; nothing is next.

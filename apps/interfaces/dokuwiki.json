@@ -1,0 +1,67 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "dokuwiki",
+  "interfaceVersion": 1,
+  "appId": "f3c9rjszvmqgvnhan8c6m5cpwkqmwu6t6de0qxa8vnx0rqreafqh",
+  "packageId": "f6af420324fd459439330089819c9c27",
+  "appVersion": "2026-07-14c",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "page.read": {
+      "description": "Read raw wiki markup by namespace-qualified page ID. No HTML decoding. The default pinned package disables its remote API; typed page mutation is not advertised.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[a-z0-9_:-]+$"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "doku.php"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ],
+        "query": {
+          "id": {
+            "arg": "id"
+          },
+          "do": "export_raw"
+        }
+      }
+    }
+  },
+  "qualification": [],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/johnbintz/dokuwiki-sandstorm",
+    "package:f6af420324fd459439330089819c9c27/opt/app/dokuwiki/conf.orig/dokuwiki.php",
+    "package:f6af420324fd459439330089819c9c27/opt/app/local.protected.php"
+  ]
+}

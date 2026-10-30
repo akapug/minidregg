@@ -32,9 +32,28 @@ row is a subtype only of a row naming exactly the same fields (each member a
 subtype, in any order); a sum is a subtype of a sum with at least its cases
 (each payload a subtype). It is defined on first-order types only and refuses
 arrows, custody, computations, variables, specifications and prototypes. -/
-import Kernel.ObjectiveActivityWire
-import Theory.ObjectiveBendTypes
-import Theory.AssertAxioms
+module
+
+public import Kernel.ObjectiveActivityWire
+public import Theory.ObjectiveBendTypes
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectStateType
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -55,6 +74,12 @@ def reuseOfTag : Nat → Option Reuse
 theorem reuseOfTag_reuseTag (reuse : Reuse) : reuseOfTag (reuseTag reuse) = some reuse := by
   cases reuse <;> rfl
 
+/-- `reuseOfTag` reads only the tags `reuseTag` writes. -/
+theorem reuseTag_reuseOfTag {tag : Nat} {reuse : Reuse} (read : reuseOfTag tag = some reuse) :
+    reuseTag reuse = tag := by
+  unfold reuseOfTag at read
+  split at read <;> first | (cases read; rfl) | cases read
+
 def quantityTag : Quantity → Nat
   | .erased => 0 | .affine => 1 | .linear => 2 | .unrestricted => 3
 
@@ -64,6 +89,12 @@ def quantityOfTag : Nat → Option Quantity
 theorem quantityOfTag_quantityTag (quantity : Quantity) :
     quantityOfTag (quantityTag quantity) = some quantity := by
   cases quantity <;> rfl
+
+/-- `quantityOfTag` reads only the tags `quantityTag` writes. -/
+theorem quantityTag_quantityOfTag {tag : Nat} {quantity : Quantity}
+    (read : quantityOfTag tag = some quantity) : quantityTag quantity = tag := by
+  unfold quantityOfTag at read
+  split at read <;> first | (cases read; rfl) | cases read
 
 /-- `Reuse` as a one-byte-tag stream (via the natural codec). -/
 def reuseStream : StreamCodec Reuse where
@@ -75,6 +106,21 @@ def reuseStream : StreamCodec Reuse where
   decodePrefix_encode := by
     intro reuse suffix
     simp [StreamCodec.decodePrefix_encode, reuseOfTag_reuseTag]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases tagOk : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [tagOk] at decoded
+    | some pair =>
+      obtain ⟨tag, rest⟩ := pair
+      cases read : reuseOfTag tag with
+      | none => simp [tagOk, read] at decoded
+      | some reuse =>
+        simp only [tagOk, read, bind, Option.bind, pure, Option.pure_def, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode (reuseTag _) ++ _ = _
+        rw [reuseTag_reuseOfTag read]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ tagOk
 
 def quantityStream : StreamCodec Quantity where
   encode quantity := StreamCodec.nat.encode (quantityTag quantity)
@@ -85,6 +131,21 @@ def quantityStream : StreamCodec Quantity where
   decodePrefix_encode := by
     intro quantity suffix
     simp [StreamCodec.decodePrefix_encode, quantityOfTag_quantityTag]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases tagOk : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [tagOk] at decoded
+    | some pair =>
+      obtain ⟨tag, rest⟩ := pair
+      cases read : quantityOfTag tag with
+      | none => simp [tagOk, read] at decoded
+      | some quantity =>
+        simp only [tagOk, read, bind, Option.bind, pure, Option.pure_def, Option.some.injEq,
+          Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        show StreamCodec.nat.encode (quantityTag _) ++ _ = _
+        rw [quantityTag_quantityOfTag read]
+        exact StreamCodec.nat.encode_decodePrefix _ _ _ tagOk
 
 def encodeTy : Ty → Tokens
   | .natural => [.nat 0]
@@ -187,6 +248,46 @@ theorem decodeTy_encodeTy (type : Ty) : ∀ (fuel : Nat) (rest : Tokens),
           simp [encodeTy, decodeTy, List.append_assoc, ihp fuel _ (by omega), ihr fuel _ (by omega),
             ihs fuel rest (by omega)]
 
+/-- `decodeTy` is canonical: what it accepts is the encoding of the type it
+returns, followed by the tokens it leaves. -/
+theorem encodeTy_decodeTy (fuel : Nat) : ∀ {tokens : Tokens} {type : Ty} {rest : Tokens},
+    decodeTy fuel tokens = some (type, rest) → encodeTy type ++ rest = tokens := by
+  induction fuel with
+  | zero => intro tokens type rest decoded; simp [decodeTy] at decoded
+  | succ fuel ih =>
+      intro tokens type rest decoded
+      unfold decodeTy at decoded
+      split at decoded
+      all_goals try (have sameFuel := Nat.succ.inj ‹fuel + 1 = Nat.succ _›; subst sameFuel)
+      all_goals first
+        | (cases decoded; done)
+        | (simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+           obtain ⟨rfl, rfl⟩ := decoded
+           rfl)
+        | (simp only [Option.bind_eq_bind, Option.pure_def, Option.bind_eq_some_iff,
+             Option.some.injEq, Prod.mk.injEq, Prod.exists] at decoded
+           first
+             | (obtain ⟨reuse, reuseRead, quantity, quantityRead, first, afterFirst, firstOk, second,
+                  afterSecond, secondOk, rfl, rfl⟩ := decoded
+                obtain rfl := reuseTag_reuseOfTag reuseRead
+                obtain rfl := quantityTag_quantityOfTag quantityRead
+                obtain rfl := ih firstOk
+                obtain rfl := ih secondOk
+                simp [encodeTy, List.append_assoc])
+             | (obtain ⟨first, afterFirst, firstOk, second, afterSecond, secondOk, third, afterThird,
+                  thirdOk, rfl, rfl⟩ := decoded
+                obtain rfl := ih firstOk
+                obtain rfl := ih secondOk
+                obtain rfl := ih thirdOk
+                simp [encodeTy, List.append_assoc])
+             | (obtain ⟨first, afterFirst, firstOk, second, afterSecond, secondOk, rfl, rfl⟩ := decoded
+                obtain rfl := ih firstOk
+                obtain rfl := ih secondOk
+                simp [encodeTy, List.append_assoc])
+             | (obtain ⟨first, afterFirst, firstOk, rfl, rfl⟩ := decoded
+                obtain rfl := ih firstOk
+                simp [encodeTy, List.append_assoc]))
+
 /-- A type as one prefix stream: its token list. -/
 def tyStream : StreamCodec Ty where
   encode type := tokensStream.encode (encodeTy type)
@@ -199,6 +300,29 @@ def tyStream : StreamCodec Ty where
     have decoded := decodeTy_encodeTy type ((encodeTy type).length + 1) [] (by omega)
     rw [List.append_nil] at decoded
     simp [StreamCodec.decodePrefix_encode, decoded]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases tokensOk : tokensStream.decodePrefix bytes with
+    | none => simp [tokensOk] at decoded
+    | some pair =>
+      obtain ⟨tokens, afterTokens⟩ := pair
+      cases typeOk : decodeTy (tokens.length + 1) tokens with
+      | none => simp [tokensOk, typeOk] at decoded
+      | some pair =>
+        obtain ⟨type, left⟩ := pair
+        simp only [tokensOk, typeOk, bind, Option.bind] at decoded
+        split at decoded
+        · rename_i empty
+          simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+          obtain ⟨rfl, rfl⟩ := decoded
+          have noneLeft : left = [] := by simpa using empty
+          subst noneLeft
+          have spelled := encodeTy_decodeTy _ typeOk
+          rw [List.append_nil] at spelled
+          show tokensStream.encode (encodeTy _) ++ _ = _
+          rw [spelled]
+          exact tokensStream.encode_decodePrefix _ _ _ tokensOk
+        · cases decoded
 
 def tyBytes (type : Ty) : Bytes := tyStream.encode type
 

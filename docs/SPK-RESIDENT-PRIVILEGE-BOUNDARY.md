@@ -9,14 +9,28 @@ uncompromised.
 
 ## Fixed bootstrap, two unprivileged parsers
 
-The root broker renders a fixed generation unit. Its trusted environment
-selects separate operator and app UID/GID pairs; app packets cannot select
-either. The unit begins with only SETUID, SETGID and SETPCAP in its capability
-bounding set, no ambient capabilities, and no_new_privs. Its executable enters
-`resident-bootstrap`, which forks before reading resident configuration or app
-bytes. This small bootstrap parses only the broker-selected numeric identities.
+The broker renders a fixed generation unit in the operator's user manager. The
+unit runs as the operator UID with `AmbientCapabilities=` empty and
+`NoNewPrivileges=no`: the setuid `newuidmap`/`newgidmap` must still work, and the
+bootstrap sets no_new_privs itself before any parser runs. Its trusted
+environment selects separate operator and app UID/GID pairs and the physical
+bubblewrap, by path and SHA-256 (broker config v3 `bwrap`/`bwrapSha256`, rendered
+as `MINI_SPK_BWRAP`/`MINI_SPK_BWRAP_SHA256`). App packets can select none of
+them. Its executable enters `resident-bootstrap`, which parses only those
+broker-selected values and the root-owned world registry before reading resident
+configuration or app bytes.
 
-The parent retains the unit’s MainPID, switches to the operator identity, clears
+The bootstrap never creates a namespace itself. bubblewrap creates the user
+namespace. It is the one sandboxing binary the host provides for grains:
+`deploy/grain-host/resolve-bwrap` picks the AppArmor-profiled
+`/usr/local/libexec/mini-grain-bwrap` when present and usable, else
+`/usr/bin/bwrap`. newuidmap/newgidmap map exactly the two identities into it.
+The bootstrap then joins it by `setns` and stays the unit MainPID (`hostd`
+compares MainPID with its own PID). Running the resident *inside* bwrap would
+make bwrap's monitor the MainPID and hide the resident's exit status from
+systemd, so the namespace is joined, not wrapped.
+
+The parent retains the unit's MainPID, switches to the operator identity, clears
 supplementary groups and all five capability sets (including bounding and
 ambient), and verifies real/effective/saved UID and GID plus no_new_privs.
 It denies unshare, setns, namespace-bearing clone and clone3 before the
@@ -30,11 +44,41 @@ five inherited descriptors, then only bounded wait/stop commands. UID/GID are
 absent from that packet schema.
 
 The worker intentionally does not inherit the operator namespace-denial filter:
-the pinned bubblewrap executable must create the app sandbox. Its host identity
-is already the separate app UID, with no host capability or supplementary group
-that can map another host UID or reach operator custody. This is a distinct
-physical boundary from the operator parser. The sandbox’s own namespace and
-seccomp floor remains necessary and unchanged.
+the pinned bubblewrap executable must create the app sandbox. It is the same
+bwrap build that created the resident namespace: the resident refuses a
+`resident.json` whose `bwrapSha256` differs from the broker-rendered one. Its
+path may differ (a per-app-identity copy, `sandbox-launcher-stage.py`); the spawn
+gate refuses one the app identity cannot execute after the drop, deciding by the
+mode bits or, when the file has one, its POSIX access ACL, and names which of its
+conditions failed. On a host shipping the profiled copy `root:hbox 0750`,
+`install-user-world` grants the operator and the world's app identities named
+`r-x` ACL entries and revokes the ones it added at removal.
+Its host identity is already the separate app UID, with no host capability or
+supplementary group that can map another host UID or reach operator custody.
+This is a distinct physical boundary from the operator parser. The sandbox’s own
+namespace and seccomp floor remains necessary and unchanged.
+
+### Each claim, and what establishes it
+
+bwrap flags establish the namespace and nothing else. Its capability flags
+(`--cap-add`/`--cap-drop`) govern bwrap's own child, which here is a namespace
+holder that runs `/usr/bin/true` and exits. They cannot reach a process that
+joins afterwards, so the credential floor stays in the bootstrap's code.
+
+| Claim | Established by |
+|---|---|
+| A new user namespace, made by the host's permitted creator | `bwrap --unshare-user`, with the bwrap resolved and pinned by path and SHA-256. On a host with `kernel.apparmor_restrict_unprivileged_userns=1`, the profiled copy's `userns` rule is what permits creating it with capabilities |
+| Exactly two identities, operator and app, mapped | `--userns-block-fd 4` with the required `--info-fd 3`: bwrap writes no uid/gid map, reports `child-pid` and waits. Then `newuidmap`/`newgidmap PID op op 1 app app 1` run under the operator's `/etc/subuid`/`/etc/subgid` grant, and `/proc/self/{uid,gid}_map` must be exactly those two rows. A non-setuid bwrap can map only its caller's own UID, so a second identity needs this hook |
+| The namespace is the one bwrap made, held before bwrap is released | `child-pid`'s `PPid` is the bwrap process, and `/proc/PID/ns/user` is opened (and differs from the caller's) before the block fd is written |
+| bwrap leaves nothing running | `--die-with-parent`. Its child runs `/usr/bin/true` under `--ro-bind / /`, and the bootstrap requires bwrap to exit 0 before it joins |
+| The resident is the unit MainPID | `setns(CLONE_NEWUSER)` by the single-threaded bootstrap itself, not an exec under bwrap |
+| No supplementary groups | `setgroups(0)` right after joining (newgidmap leaves `setgroups` allowed), re-checked by `holds_exactly_identity` |
+| Bounding, ambient and all five capability sets empty; real/effective/saved UID/GID exact; no_new_privs | `os::drop_to_identity` and `os::holds_exactly_identity` in both parent and worker. This is bootstrap code, because no bwrap flag reaches a joining process |
+| No unit-level ambient capabilities | `AmbientCapabilities=` in the rendered unit |
+| The operator parser cannot create or enter namespaces | the parser seccomp filter (unshare, setns, namespace clone flags, clone3) |
+| One launch over the private channel; no identity selector in packets | the bootstrap channel wire (`deny_unknown_fields`, bounded frames, tags 1/2/3/4, and 6 after the launch) |
+| The operator reads only what the app published | tag 6 carries checked path components and no descriptor: the worker, as the app, opens `www` under the grain's own `/var` and each component beneath it with `O_NOFOLLOW` (`www_publish::valid_components`, `open_beneath`), and returns one read-only descriptor of a regular file of at most 64 MiB, or a named refusal; the resident only reads it; nothing is written, no directory or path outside `www` is reachable |
+| The app sandbox runs the same bwrap build | `ResidentBound::validate` (resident config `bwrapSha256` must equal the broker-rendered one) and the spawn gate's name/inode/SHA pin and its mode/ACL execute decision for the app identity |
 
 ## Source admission still selects the work
 
@@ -68,9 +112,13 @@ is not this fence, and a portable archive acknowledgment cannot replace it.
 
 The focused wire checks reject packet identity selectors, unbounded frames and
 false reap success after channel loss, and check descriptor close-on-exec. The
-explicit root fixture changes credentials only in disposable forked children.
-It checks all capability sets, groups and no_new_privs, namespace refusal and
-ordinary threading, then launches a harmless inode/SHA-pinned executable and
+unprivileged fixture (`tenancy_bootstrap_actual_zero_capabilities_namespace_refusal_and_eof_reap`)
+changes credentials only in disposable forked children: it enters through the
+resolved bwrap (MINI_BWRAP selects) with the first identity of the caller's
+`/etc/subuid` grant as the app. On a host that restricts unprivileged user
+namespaces it fails with `/usr/bin/bwrap` ("Failed to make / slave") and passes
+with the profiled copy. It checks all capability sets, groups and no_new_privs,
+namespace refusal and ordinary threading, then launches a harmless inode/SHA-pinned executable and
 verifies actual EOF-driven app/worker reaping with an independent root observation.
 This fixture does not author a native launch receipt or qualify hosted app
 readiness, real browser interaction or provider completion.

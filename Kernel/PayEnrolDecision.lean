@@ -1,5 +1,5 @@
 /-
-# Kernel.PayEnrolDecision — what an enrollment-index payment decides (PAY §11.3–§11.4)
+# Kernel.PayEnrolDecision — what an enrollment-index payment decides (docs/PAY.md §11.3–§11.4)
 
 One finalized transfer to the enrollment index (`Tariff.enrolIndex`) is
 decided here, purely, over the pay cell:
@@ -29,7 +29,26 @@ cell's answer for `subjectOf miniKey` (the receiver, P3b-2, reads it).
 Time is the chain hour `tip.hour = tip.blockTime / 3600`, the unit of the public
 enrollment view's `clock.hour` and `lease.expiresAt`.
 -/
-import Kernel.PayObservation
+module
+
+public import Kernel.PayObservation
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayEnrolDecision
 
@@ -47,7 +66,7 @@ structure Price where
   birthFee : Nat
   deriving DecidableEq, Repr
 
-/-- One node week plus the birth fee; derived, never stored (PAY §11.4). -/
+/-- One node week plus the birth fee; derived, never stored (docs/PAY.md §11.4). -/
 def enrolPrice (tariff : Tariff) (price : Price) : Nat := price.birthFee + tariff.nodeWeekRate
 
 /-- The native verifier's two answers for the observation's memo. -/
@@ -276,7 +295,7 @@ theorem classify_renew {store : PayStore} {tariff : Tariff} {price : Price} {tip
             · cases accepted
             · split at accepted <;> cases accepted
 
-/-! ## The named theorems (PAY §11.4) -/
+/-! ## The named theorems (docs/PAY.md §11.4) -/
 
 /-- **An enrollment is paid for**: the payment's credit covers the birth fee
 and one node week. -/
@@ -390,7 +409,7 @@ theorem enrol_lease_at_least_a_week {store : PayStore} {price : Price} {tip : Ch
 
 /-- **The decision does not depend on which transaction carried the memo**:
 a replay of a published memo in a new transaction is decided exactly as the
-original (so it renews its owner, a gift; PAY §11.3).  The transaction
+original (so it renews its owner, a gift; docs/PAY.md §11.3).  The transaction
 identity only enters through the nullifier, which the durable preflight
 spends once. -/
 theorem decide_deterministic (store : PayStore) (price : Price) (tip : ChainTip) (o : Observation)

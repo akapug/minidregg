@@ -11,7 +11,8 @@ usage() {
   exit 2
 }
 
-# Invoked by mini-spk-broker (root) with its configured grains root. Every
+# Run as root by mini-spk-volume-helper (admitted through sudoers by
+# install-user-world) for the operator's per-world broker. Every
 # name is <store>-<resource>: two Stores on one host never share a volume.
 (( $# >= 5 )) && [[ $1 == --root ]] || usage
 root=$2

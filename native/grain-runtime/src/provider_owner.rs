@@ -36,20 +36,21 @@ pub(crate) fn observe(
         .ok_or_else(|| credentials::refused("owner-status-needs-socket"))?;
     let pins = || -> Result<Value> {
         Ok(json!({
-            "miniSha256":sha256_file(&config.mini)?, "hostSha256":sha256_file(&config.host)?,
+            "miniSha256":sha256_pinned_file(&config.mini)?, "hostSha256":sha256_pinned_file(&config.host)?,
             "configSha256":sha256_file(&config.host_config)?, "socket":socket,
         }))
     };
     let before = pins()?;
-    let output = Command::new(&config.mini)
+    let mut command = Command::new(&config.mini);
+    command
         .args(["key", "--action", "owner-status", "--host"])
         .arg(&config.host)
         .arg("--config")
         .arg(&config.host_config)
         .arg("--socket")
         .arg(socket)
-        .args(["--subject", subject, "--public-key", public_key])
-        .output()
+        .args(["--subject", subject, "--public-key", public_key]);
+    let output = crate::deadline::output(&mut command, crate::deadline::NATIVE_CALL)
         .map_err(|_| credentials::refused("owner-status-unavailable"))?;
     if !output.status.success() || output.stdout.len() > 16_384 {
         return Err(credentials::refused("owner-not-current"));
@@ -144,7 +145,7 @@ fn source_height(config: &Config) -> Result<(u64, Value)> {
         "purpose":{"type":"query","kind":"object","target":task.task,"view":"resource"},
         "grants":[{"kind":"object","target":task.task,"capability":task.query_capability}]});
     write_new(&intent, &serde_json::to_vec(&source).unwrap())?;
-    let output = Command::new(&config.mini)
+    let output = crate::deadline::output(Command::new(&config.mini)
         .arg("query")
         .arg("--host")
         .arg(&config.host)
@@ -163,8 +164,7 @@ fn source_height(config: &Config) -> Result<(u64, Value)> {
         .arg(&task.custody_key)
         .args(["--view", "resource"])
         .arg("--dir")
-        .arg(&attempt)
-        .output()
+        .arg(&attempt), crate::deadline::NATIVE_CALL)
         .map_err(|_| "native owner resource observation unavailable")?;
     if !output.status.success() {
         return Err("native owner resource observation refused".into());

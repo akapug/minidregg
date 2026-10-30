@@ -1,0 +1,285 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "rocket-chat",
+  "interfaceVersion": 1,
+  "appId": "vfnwptfn02ty21w715snyyczw0nqxkv3jvawcah10c6z7hj1hnu0",
+  "packageId": "5198a2ec87bcc4b29e787b77079ba590",
+  "appVersion": "0.53.0-develop",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 1048576,
+    "replyBytes": 4194304,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "operations": {
+    "channels.list": {
+      "description": "Find accessible public channels by text, with a bounded result count.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "filter",
+          "limit"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "channels": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "properties": {
+                "_id": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "t": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "_id",
+                "name"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "channels"
+        ],
+        "additionalProperties": false
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "channelsList",
+        "params": [
+          {
+            "arg": "filter"
+          },
+          "public",
+          {
+            "arg": "limit"
+          },
+          "name"
+        ],
+        "result": "json"
+      }
+    },
+    "messages.send": {
+      "description": "Send a bounded message to an accessible room; readback uses the messages publication.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 16384
+          }
+        },
+        "required": [
+          "roomId",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": [
+          "object",
+          "boolean",
+          "null"
+        ]
+      },
+      "write": true,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "method",
+        "method": "sendMessage",
+        "params": [
+          {
+            "_id": {
+              "context": "operationId"
+            },
+            "rid": {
+              "arg": "roomId"
+            },
+            "msg": {
+              "arg": "text"
+            }
+          }
+        ],
+        "result": "json"
+      }
+    },
+    "messages.read": {
+      "description": "Read the latest 50 visible messages in an accessible room.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "roomId"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "rid": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "msg": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "u": {
+              "type": "object",
+              "properties": {
+                "_id": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "username": {
+                  "type": "string",
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "_id"
+              ],
+              "additionalProperties": true
+            },
+            "ts": {}
+          },
+          "required": [
+            "id",
+            "rid"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "write": false,
+      "binding": {
+        "protocol": "ddp",
+        "kind": "snapshot",
+        "publication": "messages",
+        "params": [
+          {
+            "arg": "roomId"
+          }
+        ],
+        "collections": [
+          "rocketchat_message"
+        ]
+      },
+      "projection": {
+        "collection": "rocketchat_message",
+        "where": {
+          "rid": {
+            "arg": "roomId"
+          }
+        }
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "channels",
+      "op": "channels.list",
+      "args": {
+        "filter": "",
+        "limit": 100
+      }
+    },
+    {
+      "id": "send",
+      "op": "messages.send",
+      "args": {
+        "roomId": {
+          "result": [
+            "channels",
+            "channels",
+            0,
+            "_id"
+          ]
+        },
+        "text": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "read",
+      "op": "messages.read",
+      "args": {
+        "roomId": {
+          "result": [
+            "channels",
+            "channels",
+            0,
+            "_id"
+          ]
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "msg": {
+              "context": "runId"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "sandstorm-rendezvous",
+    "websocket": "/websocket",
+    "method": "loginWithSandstorm",
+    "postPath": "/.sandstorm-login",
+    "contentType": "application/x-sandstorm-login-token",
+    "userIdField": "userId"
+  },
+  "sources": [
+    "package:5198a2ec87bcc4b29e787b77079ba590/programs/server/packages/kenton_accounts-sandstorm.js",
+    "package:5198a2ec87bcc4b29e787b77079ba590/programs/server/packages/rocketchat_lib.js",
+    "package:5198a2ec87bcc4b29e787b77079ba590/programs/server/app/app.js"
+  ],
+  "$defs": {}
+}

@@ -11,9 +11,31 @@ Stable replay identity retains exact ingress bytes and the complete descriptor;
 matching a recorded ingress precedes any new nullifier or state-root admission.
 A replay returns the recorded receipt and performs no new semantic execution.
 -/
-import Kernel.ResourceBirthPolicyController
-import Compiler.DurableReceiverIO
-import Compiler.CredentialAuthorityReplay
+module
+
+public import Kernel.ResourceBirthPolicyController
+public import Compiler.DurableReceiverIO
+public import Compiler.CredentialAuthorityReplay
+public import Kernel.PlatformCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ResourceBirthReceiver
 
@@ -153,12 +175,32 @@ def sourceReadGuards {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) : List ReadGuard :=
   accepted.sourceReadGuards.map guardOfPair
 
+/-- The platform cell as a read dependency of every ordinary birth: the birth is priced from
+the platform record of the image it commits against (`Pending.priced`), so an install landing in
+between makes the birth's commit stale instead of letting it land at the old price. -/
+def platformGuards (deployment : CanonicalCellRegistry.Deployment)
+    (durable : ResourceBirthController.Concrete.Durable) : List ReadGuard :=
+  match PlatformCellDomain.load deployment durable.snapshot with
+  | none => []
+  | some loaded => [loaded.readGuard]
+
+theorem platformGuards_exact (deployment : CanonicalCellRegistry.Deployment)
+    (durable : ResourceBirthController.Concrete.Durable) (guard : ReadGuard)
+    (member : guard ∈ platformGuards deployment durable) :
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+  unfold platformGuards at member
+  split at member
+  · simp at member
+  · rw [List.mem_singleton] at member
+    subst member
+    rfl
+
 /-- Duplicate observations retain their exact source roots. If a dependency
 is already a guarded write, it does not become a second read-only participant. -/
 def readGuards {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) : List ReadGuard :=
   accepted.prepared.readGuards ++
-    (sourceReadGuards accepted).filter fun guard =>
+    (sourceReadGuards accepted ++ platformGuards deployment durable).filter fun guard =>
       guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId
 
 private theorem branch_read_exact {height : Height}
@@ -189,7 +231,9 @@ theorem readGuards_exact {height : Height}
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
   rcases List.mem_append.mp member with authority | source
   · exact accepted.prepared.readGuards_exact guard authority
-  · exact sourceReadGuards_exact accepted guard (List.mem_filter.mp source).1
+  · rcases List.mem_append.mp (List.mem_filter.mp source).1 with fromSource | fromPlatform
+    · exact sourceReadGuards_exact accepted guard fromSource
+    · exact platformGuards_exact deployment durable guard fromPlatform
 
 theorem readGuards_readonly {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
@@ -206,7 +250,87 @@ theorem source_reads_covered {height : Height}
   by_cases written : guard.cellId ∈ accepted.prepared.writes.map DataWrite.cellId
   · exact Or.inl written
   · exact Or.inr (List.mem_append_right _ (List.mem_filter.mpr
-      ⟨member, by simpa using written⟩))
+      ⟨List.mem_append_left _ member, by simpa using written⟩))
+
+/-- The directory slot at an identifier is the live cell the image holds there. -/
+private theorem slot_of_live {durable : ResourceBirthController.Concrete.Durable}
+    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable) (identifier : Nat)
+    (packed : CellRegistry.PackedCell CanonicalCellRegistry.registry)
+    (holds : durable.snapshot.canonicalBytes ⟨identifier⟩ =
+      LifecycleImage.bytes CanonicalCellRegistry.registry (.live packed)) :
+    directory.directory.slots identifier = .present packed := by
+  have decoded := congrArg (LifecycleImage.rawDecode CanonicalCellRegistry.registry)
+    ((directory.bytes_exact identifier).trans holds)
+  rw [LifecycleImage.rawDecode_bytes, LifecycleImage.rawDecode_bytes] at decoded
+  rw [← LifecycleImage.view_slot CanonicalCellRegistry.registry directory.directory identifier]
+  rw [Option.some.inj decoded]
+  try rfl
+
+omit [DecidableEq F] in
+/-- **No birth writes the platform cell.** Every write a birth commits is a fresh allocation
+(its identifier unused in the loaded directory), the factory cell, the resource book or the
+credential-authority cell; the platform cell is live in the same directory with kind
+`.platform`, which none of them has. No identifier arithmetic or digest premise is used. -/
+theorem platform_unwritten
+    (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment
+      pins durable descriptor)
+    (loaded : PlatformCellDomain.Loaded deployment durable.snapshot) :
+    PlatformCellDomain.cellIdOf deployment ∉ prepared.writes.map DataWrite.cellId := by
+  have platform := slot_of_live prepared.directory (PlatformCellDomain.cellIdOf deployment).value
+    (PlatformCellDomain.packedCell loaded.cell) loaded.observed
+  intro written
+  obtain ⟨write, member, same⟩ := List.mem_map.mp written
+  have ids := congrArg (fun cell => cell.value) same
+  simp only [ResourceBirthController.Concrete.PreparedBirth.writes,
+    ResourceBirthController.Concrete.planWrites, ResourceBirthController.allocationWrites,
+    List.mem_append, List.mem_cons,
+    List.not_mem_nil, or_false] at member
+  rcases member with (born | factory | book) | authority
+  · obtain ⟨request, inRequests, rfl⟩ := List.mem_map.mp born
+    have fresh := allocate_success_fresh CanonicalCellRegistry.registry _ _ _
+      prepared.allocated.accepted request inRequests
+    change request.cellId = (PlatformCellDomain.cellIdOf deployment).value at ids
+    rw [← ids] at platform
+    exact fresh (prepared.directory.directory.present_used platform)
+  · subst factory
+    have present := prepared.factory.present
+    change deployment.factoryId = (PlatformCellDomain.cellIdOf deployment).value at ids
+    rw [← ids] at platform
+    rw [platform] at present
+    simp [PlatformCellDomain.packedCell] at present
+  · subst book
+    have present := prepared.book.present
+    change deployment.resourceBookId = (PlatformCellDomain.cellIdOf deployment).value at ids
+    rw [← ids] at platform
+    rw [platform] at present
+    simp [PlatformCellDomain.packedCell] at present
+  · simp only [CredentialAuthorityDomainReceiver.PreparedGrantBatch.writes,
+      CredentialAuthorityDomainReceiver.Loaded.writes, List.mem_singleton] at authority
+    subst authority
+    have present := slot_of_live prepared.directory deployment.authorityCellId
+      (CredentialAuthorityDomainReceiver.packedCell prepared.authority.snapshot.cell)
+      prepared.authority.observed
+    change deployment.authorityCellId = (PlatformCellDomain.cellIdOf deployment).value at ids
+    rw [← ids] at platform
+    rw [platform] at present
+    simp [PlatformCellDomain.packedCell, CredentialAuthorityDomainReceiver.packedCell] at present
+
+/-- **The platform cell guards every ordinary birth**: a birth committed against an image
+holding the platform cell carries that cell's exact root as a read guard. No birth writes
+the platform cell (`platform_unwritten`), so the guard is never filtered out. -/
+theorem readGuards_platform {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height)
+    (loaded : PlatformCellDomain.Loaded deployment durable.snapshot)
+    (found : PlatformCellDomain.load deployment durable.snapshot = some loaded) :
+    loaded.readGuard ∈ readGuards accepted := by
+  have inPlatform : loaded.readGuard ∈ platformGuards deployment durable := by
+    unfold platformGuards
+    rw [found]
+    exact List.mem_singleton_self _
+  exact List.mem_append_right _ (List.mem_filter.mpr
+    ⟨List.mem_append_right _ inPlatform, by
+      simpa [PlatformCellDomain.Loaded.readGuard] using
+        platform_unwritten accepted.prepared loaded⟩)
 
 /-- The strict signed ingress contains the complete frame-two descriptor and
 all exact native envelopes in source order. It is retained privately for replay,
@@ -215,7 +339,7 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 2
   domain := domain
   eventId := commitmentBytes
-    ("DREGG.RESOURCE.BIRTH.EVENT/v2".toUTF8.toList ++
+    ("DREGG.RESOURCE.BIRTH.EVENT/v3".toUTF8.toList ++
       digestStream.encode domain ++ ingress.bytes)
   canonicalBytes := ingress.bytes
 
@@ -241,9 +365,7 @@ def charge {height : Height}
   | .proofWork => 2 + accepted.descriptor.createRequests.length +
       accepted.descriptor.resourceBatch.operations.length +
       (match accepted.ingress.ownerConsentEnvelopes with | none => 0 | some owners => owners.length)
-  | .storageBytes =>
-      (accepted.prepared.writes.map fun write => write.canonicalPostBytes.length).sum +
-        accepted.ingress.bytes.length
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot accepted.prepared.writes (event deployment.domain accepted.ingress)
   | .sideEffectCount => 1
   | .feeDebit => accepted.descriptor.fee.amount
   | .networkBytes | .leaseByteBlocks => 0
@@ -490,6 +612,64 @@ theorem replay_wrong_event_refused (domain : Digest)
     (different : recorded.event.event ≠ event domain ingress) :
     replay domain durable ingress = some (.error .transactionConflict) := by
   simp [replay, found, different]
+
+#assert_axioms platformGuards_exact platform_unwritten readGuards_platform
+
+/-! ## Births read the current platform record (deployed keystone)
+
+Scope: births admitted by this receiver (ordinary, reserve and lifetime-grant methods). The
+share issue, lifetime-grant source, grain births, provisioning, PayEnrolV2 and the completion
+keys are owed families (`scripts/platform-field-readers.json`). -/
+
+/-- **Births through the resource-birth receiver read the current platform record**: every
+admitted birth is priced from the record of the image it commits against (the factory pins
+carry its creation tariff and the fee is bounded by it), is bound by that record's owner
+budget and lifetime (`templateAt`, enforced through `RootGrantShape`/`BirthWindow`), and
+read-guards the platform cell at that image's exact root. -/
+def ReceiverReadsCurrent (profile : CanonicalRuntimeProfile.Profile F)
+    (deployment : CanonicalCellRegistry.Deployment) : Prop :=
+  ∀ (pins : FactoryPins) (durable : ResourceBirthController.Concrete.Durable) (height : Height)
+    (accepted : AcceptedBirth profile deployment pins durable height),
+    ∃ record, platformRecordAt deployment durable = some record ∧
+      pins.tariff = record.creation ∧
+      accepted.descriptor.FeeBound record.creation ∧
+      accepted.pending.template = templateAt profile.template record ∧
+      ({ cellId := PlatformCellDomain.cellIdOf deployment
+         expectedRoot := durable.snapshot.model.roots (PlatformCellDomain.cellIdOf deployment) } :
+          ReadGuard) ∈ (intent accepted).readGuards
+
+theorem receiverReadsCurrent : ReceiverReadsCurrent profile deployment := by
+  intro pins durable height accepted
+  cases found : PlatformCellDomain.load deployment durable.snapshot with
+  | none =>
+      have recorded := accepted.pending.recordExact
+      simp [platformRecordAt, PlatformCellDomain.recordOn_load, found] at recorded
+  | some loaded =>
+      refine ⟨accepted.pending.record, accepted.pending.recordExact, accepted.pending.priced,
+        ?_, rfl, readGuards_platform accepted loaded found⟩
+      rw [← accepted.pending.priced]
+      exact accepted.pending.checked.feeBound
+
+/-- No record, no birth: an image whose platform cell or record is missing admits none. -/
+theorem unpriced_empty {height : Height}
+    (missing : platformRecordAt deployment durable = none) :
+    IsEmpty (AcceptedBirth profile deployment pins durable height) :=
+  ⟨fun accepted => by
+    have recorded := accepted.pending.recordExact
+    rw [missing] at recorded
+    cases recorded⟩
+
+/-- Teeth: pins carrying any tariff other than the record's admit no birth. In particular,
+pins built from the genesis `config.tariff` admit nothing once an install changed the
+creation tariff. -/
+theorem stale_unadmitted {height : Height} (record : PlatformCellLayout.Platform)
+    (recorded : platformRecordAt deployment durable = some record)
+    (stale : pins.tariff ≠ record.creation) :
+    IsEmpty (AcceptedBirth profile deployment pins durable height) :=
+  ⟨fun accepted => (pending_stale_empty accepted.prepared height record recorded stale).false
+    accepted.pending⟩
+
+#assert_axioms receiverReadsCurrent unpriced_empty stale_unadmitted
 
 /-- Admit against the exact snapshot already validated by the host. The native
 receiver performs one compare-and-swap against this image and returns contention

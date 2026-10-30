@@ -1,7 +1,7 @@
 //! Source-authored v2 physical report for a retained v3 BEGIN and committed claim.
 //! Rust supplies physical observations and signs only Mini's exact signing frame.
-#![allow(dead_code)] // Physical INSTALL/START caller awaits linked v3 Host and STOP.
 
+use crate::io_context::IoContext;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use std::fs::{DirBuilder, File};
 use std::io::{self, Read};
 use std::os::unix::fs::DirBuilderExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const MAX_REPORT: usize = 12_102_759;
 
@@ -34,7 +34,6 @@ pub(crate) enum PhysicalMode<'a> {
 
 pub(crate) struct SignedLaunchPhysicalReport {
     pub signed_report: Vec<u8>,
-    pub attempt_dir: PathBuf,
 }
 
 pub(crate) struct ReportInput<'a> {
@@ -46,7 +45,7 @@ pub(crate) struct ReportInput<'a> {
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let value = u128::from_le_bytes(bytes);
     if value == 0 {
         return Err(invalid("v3 physical nonce zero"));
@@ -304,7 +303,6 @@ pub(crate) fn prepare_once(
     }
     Ok(SignedLaunchPhysicalReport {
         signed_report: signed,
-        attempt_dir: attempt_dir.to_path_buf(),
     })
 }
 

@@ -25,9 +25,30 @@ The decision proper is the pure `decideChange`:
   absent index (`book_write_once`).
 There is no clock in the pay cell; time is the clock cell's (`Kernel.ClockCell`).
 -/
-import Compiler.DurableReceiverIO
-import Kernel.CapabilityRevocationController
-import Kernel.PayCellDomain
+module
+
+public import Compiler.DurableReceiverIO
+public import Kernel.CapabilityRevocationController
+public import Kernel.PayCellDomain
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayBookReceiver
 
@@ -91,7 +112,7 @@ inductive Reject where
   deriving DecidableEq, Repr
 
 /-- A tariff that turns self-enrollment on names an index already assigned
-(to the enrollment float, PAY §11.2); `none` is always ready. -/
+(to the enrollment float, docs/PAY.md §11.2); `none` is always ready. -/
 def enrolReady (store : PayStore) (next : Tariff) : Bool :=
   match next.enrolIndex with
   | none => true
@@ -319,6 +340,11 @@ structure DecodedIngress where
   envelope : CredentialSignedEnvelopeController.SignedEnvelope
   envelopeExact : CredentialSignatureAdmission.canonicalEnvelopeCodec.decode ingress.sponsorEnvelope =
     some envelope
+theorem DecodedIngress.sound (decoded : DecodedIngress) :
+    commandCodec.encode decoded.command = decoded.ingress.commandBytes ∧
+      CredentialSignatureAdmission.canonicalEnvelopeCodec.decode decoded.ingress.sponsorEnvelope =
+        some decoded.envelope :=
+  ⟨decoded.canonical, decoded.envelopeExact⟩
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let ingress ← ingressCodec.decode bytes
@@ -365,7 +391,7 @@ def declarationStream : StreamCodec Declaration :=
     (by intro d; cases d; rfl)
 
 def declarationCodec : LawfulCodec Declaration :=
-  ResourceBirthCodec.strictCodec declarationStream.toLawful
+  declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) (plan : Plan) : Declaration :=
   ⟨plan, command.expectedPayRoot, marker domain semantics command⟩
@@ -583,6 +609,14 @@ structure Accepted [DecidableEq F]
   receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot
   envelopeExact : receipt.envelopeBytes = ingress.ingress.sponsorEnvelope
   semantic : prepared.SemanticAccepted
+theorem Accepted.sound [DecidableEq F]
+    {prepared : Prepared deployment profile ambient durable command} {ingress : DecodedIngress}
+    (accepted : Accepted prepared ingress) :
+    accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      Nonempty (Authorized (policyConfig prepared).portal prepared.authority.snapshot.authState
+        (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command
+          prepared.plan)) :=
+  ⟨accepted.envelopeExact, ⟨accepted.semantic.authorization⟩⟩
 
 def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared deployment profile ambient durable command)
@@ -685,6 +719,17 @@ structure AcceptedChange [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient durable ingress.command
   accepted : PayBookReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedChange.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedChange deployment profile ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.sponsorEnvelope ∧
+      decideChange accepted.prepared.pay.cell.logical ingress.command.bookStart ingress.command.book
+        ingress.command.tariff = .ok accepted.prepared.plan ∧
+      Nonempty (Authorized (policyConfig accepted.prepared).portal accepted.prepared.authority.snapshot.authState
+        (request deployment accepted.prepared.authority.snapshot accepted.prepared.pay.cell profile.semantics ambient
+          ingress.command accepted.prepared.plan)) ∧
+      PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.prepared.decided, ⟨accepted.accepted.semantic.authorization⟩,
+    accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -706,7 +751,9 @@ def charge (accepted : AcceptedChange deployment profile ambient durable ingress
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.sponsorEnvelope.length
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -718,7 +765,7 @@ def intent (accepted : AcceptedChange deployment profile ambient durable ingress
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical

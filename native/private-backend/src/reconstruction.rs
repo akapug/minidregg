@@ -1,16 +1,15 @@
-//! Hash-bound reconstruction of an already committed, coherently shared vector.
-//! This is NOT AVSS qualification, a common coin, or an AMPC implementation:
-//! those protocols must establish binding, hiding and availability of the exact
-//! manifest before admitting it. Exhaustive subsets are bounded to n<=16.
-use crate::{
-    codec::{bad, Generation},
-    custody::hash,
-};
-use std::io::{Error, ErrorKind, Result};
+//! The GF(2^128) reference field the protocols share.
+use crate::codec::bad;
+use std::io::Result;
 /// GF(2^128), reduction x^128+x^7+x^2+x+1. This reference arithmetic is
 /// functional, not a constant-time implementation for online secret computation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Field(pub u128);
+impl zeroize::Zeroize for Field {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
 impl Field {
     pub fn add(self, b: Self) -> Self {
         Self(self.0 ^ b.0)
@@ -47,255 +46,101 @@ impl Field {
         Ok(x)
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Share {
-    pub generation: Generation,
-    pub holder: u16,
-    pub words: Vec<Field>,
+/// Horner evaluation of the coefficient vector `p` (lowest degree first) at `x`.
+pub fn eval(p: &[Field], x: Field) -> Field {
+    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
 }
-/// The complete native descriptor remains exact opaque source canonical bytes;
-/// its cryptographic fingerprint is not used as equality or authority.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecoveryBinding {
-    pub generation: Generation,
-    pub descriptor_bytes: Vec<u8>,
-    pub holders: Vec<u16>,
-    pub f: usize,
-    pub word_count: usize,
-    pub secret_commitment: [u8; 32],
-}
-impl RecoveryBinding {
-    pub fn validate(&self) -> Result<()> {
-        let n = self.holders.len();
-        if n != 3 * self.f + 1
-            || n > 16
-            || self.word_count < 2
-            || self.word_count > 4096
-            || self.descriptor_bytes.is_empty()
-            || self
-                .holders
-                .iter()
-                .enumerate()
-                .any(|(i, x)| self.holders[..i].contains(x))
-        {
-            return Err(bad("unsupported/invalid recovery access structure"));
+/// The Lagrange basis weight of node `k` at `t` over `xs`: the product over
+/// j != k of (t - x_j) / (x_k - x_j). The field has characteristic 2, so
+/// subtraction is addition. Refuses (rather than panics) on a repeated node.
+pub fn lagrange(xs: &[Field], k: usize, t: Field) -> Result<Field> {
+    let (mut num, mut den) = (Field(1), Field(1));
+    for (j, x) in xs.iter().enumerate() {
+        if j != k {
+            num = num.mul(t.add(*x));
+            den = den.mul(xs[k].add(*x));
         }
-        Ok(())
     }
-    fn commitment(&self, words: &[Field]) -> [u8; 32] {
-        let mut b = b"DREGG.PRIVATE.COMMITTED.VECTOR\x01".to_vec();
-        self.generation.put(&mut b);
-        crate::codec::bytes(&self.descriptor_bytes, &mut b);
-        b.extend((self.f as u64).to_le_bytes());
-        b.extend((self.holders.len() as u64).to_le_bytes());
-        for h in &self.holders {
-            b.extend(h.to_le_bytes());
-        }
-        b.extend((words.len() as u64).to_le_bytes());
-        for w in words {
-            b.extend(w.0.to_le_bytes());
-        }
-        hash(&b)
-    }
+    Ok(num.mul(den.inv()?))
 }
-/// Used by provisioning experiments only. The coefficients must come from a real
-/// jointly generated high-entropy sharing before this can qualify private custody.
-pub fn dealer_shares(
-    binding: &mut RecoveryBinding,
-    polynomials: &[Vec<Field>],
-) -> Result<Vec<Share>> {
-    binding.validate()?;
-    if polynomials.len() != binding.word_count
-        || polynomials.iter().any(|p| p.len() != binding.f + 1)
-    {
-        return Err(bad("polynomial dimensions"));
-    }
-    let secret: Vec<_> = polynomials.iter().map(|p| p[0]).collect();
-    binding.secret_commitment = binding.commitment(&secret);
-    Ok(binding
-        .holders
-        .iter()
-        .map(|h| {
-            let x = Field(*h as u128 + 1); // Never the dangerous zero-based replica seam.
-            let words = polynomials
-                .iter()
-                .map(|p| p.iter().rev().fold(Field(0), |z, c| z.mul(x).add(*c)))
-                .collect();
-            Share {
-                generation: binding.generation.clone(),
-                holder: *h,
-                words,
-            }
-        })
-        .collect())
+fn nodes<V>(points: &[(u16, V)]) -> Vec<Field> {
+    points.iter().map(|(h, _)| Field(*h as u128 + 1)).collect()
 }
-fn interpolate(shares: &[&Share], words: usize) -> Result<Vec<Field>> {
-    let mut out = vec![Field(0); words];
-    for (i, s) in shares.iter().enumerate() {
-        let xi = Field(s.holder as u128 + 1);
-        let mut coefficient = Field(1);
-        for (j, t) in shares.iter().enumerate() {
-            if i != j {
-                let xj = Field(t.holder as u128 + 1);
-                coefficient = coefficient.mul(xj).mul(xi.add(xj).inv()?);
-            }
+/// The vector-valued interpolation at `at` of the points `(holder, values)`
+/// placed at x = holder + 1, each of `count` components.
+pub fn interpolate_at<V: AsRef<[Field]>>(
+    points: &[(u16, V)],
+    at: Field,
+    count: usize,
+) -> Result<Vec<Field>> {
+    let xs = nodes(points);
+    let mut out = vec![Field(0); count];
+    for (i, (_, values)) in points.iter().enumerate() {
+        let values = values.as_ref();
+        if values.len() != count {
+            return Err(bad("point vector"));
         }
-        for (k, w) in s.words.iter().enumerate() {
-            out[k] = out[k].add(coefficient.mul(*w));
+        let weight = lagrange(&xs, i, at)?;
+        for (o, v) in out.iter_mut().zip(values) {
+            *o = o.add(weight.mul(*v));
         }
     }
     Ok(out)
 }
-/// Unique committed payload from n-f arrivals tolerates f arbitrary corrupt
-/// vectors IF at least f+1 honest arrivals lie on the same degree-f sharing.
-/// Collision resistance binds payload; it does not manufacture that premise.
-/// The first two words are secret entropy for hiding (256-bit random salt), not
-/// an omitted/default-zero pad. Qualified generation must certify that entropy.
-pub fn recover(binding: &RecoveryBinding, shares: &[Share]) -> Result<Vec<Field>> {
-    binding.validate()?;
-    let n = binding.holders.len();
-    if shares.len() < n - binding.f {
-        return Err(Error::new(
-            ErrorKind::WouldBlock,
-            "recover same generation: wait for n-f shares",
-        ));
-    }
-    if shares.len() > n {
-        return Err(bad("too many holders"));
-    }
-    for (i, s) in shares.iter().enumerate() {
-        if s.generation != binding.generation
-            || s.words.len() != binding.word_count
-            || !binding.holders.contains(&s.holder)
-            || shares[..i].iter().any(|t| t.holder == s.holder)
-        {
-            return Err(bad(
-                "mixed generation, dimensions, or duplicate/foreign holder",
-            ));
+/// The coefficient vectors (lowest degree first), one per component, of the
+/// polynomials through the points `(holder, values)` placed at x = holder + 1.
+pub fn polynomial<V: AsRef<[Field]>>(
+    points: &[(u16, V)],
+    count: usize,
+) -> Result<Vec<Vec<Field>>> {
+    let xs = nodes(points);
+    let mut out = vec![vec![Field(0); points.len()]; count];
+    for (i, (_, values)) in points.iter().enumerate() {
+        let values = values.as_ref();
+        if values.len() != count {
+            return Err(bad("polynomial vector"));
         }
-    }
-    let threshold = binding.f + 1;
-    let mut recovered = None;
-    // Finite physical bound. No first-threshold raw interpolation.
-    for mask in 0u32..(1u32 << shares.len()) {
-        if mask.count_ones() as usize != threshold {
-            continue;
-        }
-        let subset: Vec<_> = shares
-            .iter()
-            .enumerate()
-            .filter_map(|(i, s)| if mask & (1 << i) != 0 { Some(s) } else { None })
-            .collect();
-        let candidate = interpolate(&subset, binding.word_count)?;
-        if binding.commitment(&candidate) == binding.secret_commitment {
-            if recovered.as_ref().is_some_and(|old| old != &candidate) {
-                return Err(bad("commitment collision/equivocation"));
+        let mut basis = vec![Field(1)];
+        let mut denominator = Field(1);
+        for (j, xj) in xs.iter().enumerate() {
+            if i != j {
+                denominator = denominator.mul(xs[i].add(*xj));
+                let mut next = vec![Field(0); basis.len() + 1];
+                for (k, c) in basis.iter().enumerate() {
+                    next[k] = next[k].add(c.mul(*xj));
+                    next[k + 1] = next[k + 1].add(*c);
+                }
+                basis = next;
             }
-            recovered = Some(candidate);
+        }
+        let inverse = denominator.inv()?;
+        for (row, value) in out.iter_mut().zip(values) {
+            let scale = value.mul(inverse);
+            for (slot, c) in row.iter_mut().zip(&basis) {
+                *slot = slot.add(c.mul(scale));
+            }
         }
     }
-    recovered.ok_or_else(|| bad("no coherent committed secret; custody not qualified"))
+    Ok(out)
 }
-/// Stock exhaustion is explicit. Refresh/repair never becomes a new generation
-/// simply by relabeling the same binding or spent correlation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StockState {
-    Available,
-    AwaitIndependentRefill,
-}
-pub fn stock_state(unspent: usize) -> StockState {
-    if unspent == 0 {
-        StockState::AwaitIndependentRefill
-    } else {
-        StockState::Available
-    }
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::Nat;
-    fn fixture() -> (RecoveryBinding, Vec<Share>, Vec<Field>) {
-        let g = Generation {
-            invocation: Nat::new(7),
-            command: vec![9],
-            attempt: Nat::new(2),
-            generation: Nat::new(3),
-            configuration: Nat::new(4),
-        };
-        let mut b = RecoveryBinding {
-            generation: g,
-            descriptor_bytes: vec![5, 6, 7],
-            holders: vec![0, 1, 2, 3],
-            f: 1,
-            word_count: 3,
-            secret_commitment: [0; 32],
-        };
-        let secret = vec![Field(0x1234567), Field(0x898989), Field(42)];
-        let p = vec![
-            vec![secret[0], Field(1)],
-            vec![secret[1], Field(7)],
-            vec![secret[2], Field(17)],
+    #[test]
+    fn pin_horner_eval() {
+        let p = [
+            Field(0x0123456789abcdeffedcba9876543210),
+            Field(0x00112233445566778899aabbccddeeff),
+            Field(0xdeadbeefcafebabe0badf00dfeedface),
         ];
-        let shares = dealer_shares(&mut b, &p).unwrap();
-        (b, shares, secret)
-    }
-    #[test]
-    fn field_inverse_and_points() {
-        for v in [1, 2, 7, 255, u128::MAX] {
-            assert_eq!(Field(v).mul(Field(v).inv().unwrap()), Field(1));
-        }
-        assert!(Field(0).inv().is_err());
-    }
-    #[test]
-    fn vanished_dealer_and_byzantine_withhold() {
-        let (b, s, secret) = fixture();
-        assert_eq!(recover(&b, &s[1..]).unwrap(), secret);
-    }
-    #[test]
-    fn corrupt_first_share_refused_or_corrected() {
-        let (b, mut s, secret) = fixture();
-        s[0].words[2] = Field(100);
-        let raw = interpolate(&[&s[0], &s[1]], 3).unwrap();
-        assert_ne!(raw, secret);
-        assert_eq!(recover(&b, &s[..3]).unwrap(), secret);
-    }
-    #[test]
-    fn mixed_generation_and_descriptor_refuse() {
-        let (b, mut s, _) = fixture();
-        s[0].generation.generation = Nat::new(4);
-        assert!(recover(&b, &s[..3]).is_err());
-        let (b, s, _) = fixture();
-        let mut different = b.clone();
-        different.descriptor_bytes.push(8);
-        assert!(recover(&different, &s[..3]).is_err());
-    }
-    #[test]
-    fn omitted_or_default_zero_pad_refuses() {
-        let (b, mut s, _) = fixture();
-        s[0].words.clear();
-        assert!(recover(&b, &s[..3]).is_err());
-        let (b, mut s, _) = fixture();
-        for share in &mut s {
-            share.words = vec![Field(0); 3];
-        }
-        assert!(recover(&b, &s[..3]).is_err());
-        assert_eq!(stock_state(0), StockState::AwaitIndependentRefill);
-    }
-    #[test]
-    fn zero_based_coin_is_replica_zero_share() {
-        let (b, s, secret) = fixture();
-        let wrong = s[0].words.clone();
-        assert_ne!(wrong, secret);
-        assert_eq!(wrong[2], secret[2].add(Field(17)));
-        assert_eq!(recover(&b, &s[..3]).unwrap(), secret);
-    }
-    #[test]
-    fn duplicate_and_waiting_are_explicit() {
-        let (b, s, _) = fixture();
+        assert_eq!(eval(&p, Field(0)), Field(0x0123456789abcdeffedcba9876543210));
+        assert_eq!(eval(&p, Field(1)), Field(0xdf9fd9bb070011267de8e02e44642621));
+        assert_eq!(eval(&p, Field(2)), Field(0x7bb7fabe2afbebf8c1582fd81458055f));
         assert_eq!(
-            recover(&b, &s[..2]).unwrap_err().kind(),
-            ErrorKind::WouldBlock
+            eval(&p, Field(0xabcdef0123456789abcdef0123456789)),
+            Field(0xcd0a51e834041f78337648c29524d3cc)
         );
-        assert!(recover(&b, &[s[0].clone(), s[0].clone(), s[1].clone()]).is_err());
+        assert_eq!(eval(&[], Field(5)), Field(0));
     }
 }

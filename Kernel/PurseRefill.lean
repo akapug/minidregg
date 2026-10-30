@@ -1,5 +1,5 @@
 /-
-# Kernel.PurseRefill — a Book burn funds an AgentGrain purse (PAY §2.7, lane P6)
+# Kernel.PurseRefill — a Book burn funds an AgentGrain purse (docs/PAY.md §2.7, lane P6)
 
 A friend's Book account `A` funds the purse of an AgentGrain task `T` in one
 joint turn over two cells:
@@ -31,9 +31,28 @@ exceeds its start plus the sum of the burns that funded it.  The Book's side,
 `−well` moving by exactly the credits minted minus the credits burned (into
 purses and into jobs) plus the jobs' payouts, is `PayLedger.ledger_identity`.
 -/
-import Kernel.AgentGrain
-import Kernel.PayAssignmentReceiver
-import Kernel.PayObservationProofs
+module
+
+public import Kernel.AgentGrain
+public import Kernel.PayAssignmentReceiver
+public import Kernel.PayObservationProofs
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PurseRefill
 
@@ -185,14 +204,14 @@ theorem burn_payer (plan : Plan) (book : Book) (notIssuer : plan.account ≠ pla
     (plan.batch.apply book).balance plan.account plan.asset =
       book.balance plan.account plan.asset - Int.ofNat plan.amount := by
   rw [batch_apply]
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Book.applyPosting,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting,
     Book.balance, DFinsupp.single_apply, notIssuer, Ne.symm notIssuer, sub_eq_add_neg]
 
 /-- A burn in one asset leaves every other asset's well untouched. -/
 theorem burn_other_well (plan : Plan) (book : Book) (well : AssetId) (other : plan.asset ≠ well) :
     (plan.batch.apply book).balance well well = book.balance well well := by
   rw [batch_apply]
-  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Book.applyPosting,
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting,
     Book.balance, DFinsupp.single_apply, other, Ne.symm other]
 
 /-- The Book leg's delta: circulating credit falls by exactly the burn. -/
@@ -292,16 +311,17 @@ theorem refill_requires_owner {tariff : Option Tariff} {stored : Option (StoredC
     OwnerGrant stored subject account :=
   (decideRefill_ok accepted).2.1
 
-/-- **A refill requires the balance**: the payer held at least the burn. -/
-theorem refill_requires_balance {tariff : Option Tariff}
+/-- **A refill stays within the payer's floor**: the payer held at least the
+burn less its floor (zero for an ordinary account). -/
+theorem refill_within_floor {tariff : Option Tariff}
     {stored : Option (StoredCapability .account)} {subject : SubjectId} {book : Book}
     {purse : Option AgentGrain.State} {account amount gain : Nat} {plan : Plan}
     (accepted : decideRefill tariff stored subject book purse account amount gain = .ok plan) :
-    Int.ofNat amount ≤ book.balance account plan.asset := by
+    Int.ofNat amount ≤ book.balance account plan.asset + Int.ofNat (book.floor account plan.asset) := by
   obtain ⟨_, _, _, _, _, acct, amt, _, admitted, _⟩ := decideRefill_ok accepted
   subst acct amt
-  have solvent := admitted.2.1.1.sourceSolvent
-  simpa [Plan.batch, registerAccounts, Operation.isIssuerMint, Operation.posting] using solvent
+  have within := admitted.2.1.1.sourceWithinFloor
+  simpa [Plan.batch, registerAccounts, Operation.posting] using within
 
 /-! ## The audit statements -/
 
@@ -345,9 +365,11 @@ theorem purse_never_mints {start final : AgentGrain.State} {burns : List Nat}
 
 def fixtureTariff : Tariff := PayTariff.exampleTariff
 
-/-- Account 108 (owner subject 8) holds 60 credits of asset 0; well 0 is at −60. -/
+/-- Account 108 (owner subject 8) holds 60 credits of asset 0; well 0 is at −60
+of its issuance cap 1000. -/
 def fixtureBook : Book :=
-  ⟨{0, 108}, DFinsupp.single (108, 0) 60 + DFinsupp.single (0, 0) (-60), 0⟩
+  ⟨{0, 108}, DFinsupp.single (108, 0) 60 + DFinsupp.single (0, 0) (-60), 0,
+    DFinsupp.single (0, 0) 1000⟩
 
 def ownerCap : StoredCapability .account := PayAssignmentReceiver.ownerCapability 8 108
 def fixturePurse : AgentGrain.State := ⟨3, 1, 5, 0⟩
@@ -389,7 +411,7 @@ theorem fixture_genesis_tariff_refused :
 #assert_axioms refill_gain_is_burn
 #assert_axioms refill_conserves
 #assert_axioms refill_requires_owner
-#assert_axioms refill_requires_balance
+#assert_axioms refill_within_floor
 #assert_axioms purse_never_mints
 #assert_axioms fixture_refill_accepted
 #assert_axioms fixture_overclaim_unbalanced

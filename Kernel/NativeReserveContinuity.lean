@@ -9,7 +9,26 @@ settle or re-reserve may restore the same visible coordinates. This checker
 establishes reservation continuity, not all effective provider rights:
 the physical controller must also check fresh signed parent/provider state.
 -/
-import Kernel.NativeHostSession
+module
+
+public import Kernel.NativeHostSession
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeReserveContinuity
 
@@ -144,7 +163,7 @@ structure Continuity {config : Config} (session : NativeHostSession.Walked confi
     (anchor : NativeHostCodec.Receipt) (reserveCall : List UInt8)
     (providerCell : CellId) : Type where
   positive : 0 < anchor.acceptedCount
-  receiptExact : session.verified.receipts[anchor.acceptedCount - 1]? = some anchor
+  receiptExact : session.verified.receiptAt (anchor.acceptedCount - 1) = some anchor
   ingress : List UInt8
   reserveParsed : reserveIngress? config reserveCall = some ingress
   callExact :
@@ -176,7 +195,7 @@ def check {config : Config} (session : NativeHostSession.Walked config)
     (providerCell : CellId) : Except String (Continuity session anchor reserveCall providerCell) := do
   if positive : 0 < anchor.acceptedCount then
     if receiptExact :
-        session.verified.receipts[anchor.acceptedCount - 1]? = some anchor then
+        session.verified.receiptAt (anchor.acceptedCount - 1) = some anchor then
       match parsed : reserveIngress? config reserveCall with
       | none => .error "reserve call is not a canonical signed invocation"
       | some ingress =>

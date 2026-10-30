@@ -1,11 +1,11 @@
 //! Versioned controller transport for lifetime agent dispatch. These bytes are
 //! not a Mini permit; only a fresh installed op76 callback can open fd3.
-#![allow(dead_code)] // Shared resident v3 listener is wired in a later source cut.
 
 use crate::agent_api_lifetime_v3::LifetimeBinding;
 use crate::agent_api_lifetime_v3::ReceiptPin;
 use serde::{Deserialize, Serialize};
 use std::io;
+use crate::canonical::{decimal, lower_hex as hex};
 
 pub(crate) const PROTOCOL: &str = "mini-spk-agent-api-v3";
 pub(crate) const MAX_FRAME: usize = 262_144;
@@ -14,20 +14,6 @@ const MAX_BODY: usize = 65_536;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-fn hex(value: &str) -> bool {
-    value.len().is_multiple_of(2)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn sha256(value: &str) -> bool {
@@ -40,28 +26,9 @@ fn control_free(value: &str) -> bool {
         .any(|byte| byte == 0 || byte == b'\r' || byte == b'\n' || byte < 0x20 || byte == 0x7f)
 }
 
+/// Lean's `ordinaryHeaderName`, generated (protocol/host-operations.json `ordinary_headers`).
 fn allowed_header(name: &str) -> bool {
-    matches!(
-        name,
-        "cookie"
-            | "accept"
-            | "accept-encoding"
-            | "content-type"
-            | "user-agent"
-            | "if-match"
-            | "if-none-match"
-            | "x-requested-with"
-            | "x-csrftoken"
-            | "x-csrf-token"
-            | "oc-total-length"
-            | "oc-chunk-size"
-            | "x-oc-mtime"
-            | "oc-fileid"
-            | "oc-chunked"
-            | "oc-checksum"
-            | "oc-chunk-offset"
-            | "oc-lazyops"
-    )
+    crate::host_operations::ordinary_header_name(name)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -144,10 +111,10 @@ impl Request {
             } => {
                 if !decimal(operation_id)
                     || !sha256(binding_sha256)
-                    || !matches!(
+                    || !(matches!(
                         method.as_str(),
                         "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
-                    )
+                    ) || crate::host_operations::dav_method(method) || method == crate::hosted_conversation::METHOD)
                     || minidregg_signed_api_path::route("/", path).is_err()
                     || query.len() > 8192
                     || query.contains('#')
@@ -155,13 +122,20 @@ impl Request {
                     || headers.len() > 128
                     || !hex(body_hex)
                     || body_hex.len() / 2 > MAX_BODY
-                    || (matches!(method.as_str(), "GET" | "HEAD" | "DELETE")
-                        && !body_hex.is_empty())
+                    || (matches!(
+                        method.as_str(),
+                        "GET" | "HEAD" | "DELETE" | "COPY" | "MOVE" | "UNLOCK" | "OPTIONS"
+                    ) && !body_hex.is_empty())
                 {
                     return Err(refused("lifetime HTTP request refused"));
                 }
+                if method == crate::hosted_conversation::METHOD {
+                    let body = crate::canonical::unhex(body_hex).ok_or_else(|| refused("hosted body hex refused"))?;
+                    crate::hosted_conversation::descriptor(&body).map_err(refused)?;
+                }
                 for header in headers {
-                    if !allowed_header(&header.name)
+                    if !(allowed_header(&header.name)
+                        || crate::host_operations::dav_header_allowed(method, &header.name, &header.value))
                         || header.name.len() > 128
                         || header.value.len() > 8192
                         || !control_free(&header.value)

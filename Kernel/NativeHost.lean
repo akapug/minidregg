@@ -7,16 +7,37 @@ Logical height and admission share one Loaded image, and the receiver's CAS is
 against that exact image. Contention requires preparation/signing against the
 new state. Exact historical replay is looked up before fresh authorization.
 -/
-import Kernel.NativeHostContext
-import Kernel.ObjectiveBendAuthenticatedInputs
-import Kernel.NativeHostGrainBirth
-import Kernel.GrainResourceBirthReceiver
-import Kernel.NativeObservationController
-import Kernel.NativeHostReplay
-import Compiler.DurableHistoryStore
-import Kernel.FnConsumerProgressHistory
-import Kernel.PreparedInvocationDiagnostics
-import Kernel.NativeHostLight
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.ObjectiveBendAuthenticatedInputs
+public import Kernel.NativeHostGrainBirth
+public import Kernel.GrainResourceBirthReceiver
+public import Kernel.NativeObservationController
+public import Kernel.NativeHostReplay
+public import Compiler.DurableHistoryStore
+public import Kernel.FnConsumerProgressHistory
+public import Kernel.PreparedInvocationDiagnostics
+public import Kernel.NativeHostLight
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHost
 
@@ -33,14 +54,24 @@ set_option autoImplicit false
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
 /-- Ordinary open only reads and validates; it never installs a missing seed.
-It trusts the host's own MAC'd checkpoint and log (DATAMODEL §6 Q1): the latest
+It trusts the host's own MAC'd checkpoint and log (docs/DATAMODEL.md §6 Q1): the latest
 checkpoint is materialized and only the records after it are replayed through
 the shared executor (`DurableCheckpoint.resume`, sound by `resume_sound`). No
 signed ingress is re-admitted here; `audit` does that. -/
 def openExisting (config : Config) : IO (Except String (Opened config)) := do
+  -- Operator measurement control (as `DurableReceiverIO.loadChained`): MINI_OPEN_TIMING=1 prints
+  -- the load's and the validation's elapsed time to stderr.
+  let timing := (← IO.getEnv "MINI_OPEN_TIMING") == some "1"
+  let started ← IO.monoMsNow
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
-  | .ok durable => return validateLoaded config durable
+  | .ok durable =>
+      if timing then IO.eprintln s!"full open load: {(← IO.monoMsNow) - started} ms"
+      match validateLoaded config durable with
+      | .error detail => return .error detail
+      | .ok opened =>
+          if timing then IO.eprintln s!"full open validate: {(← IO.monoMsNow) - started} ms"
+          return .ok opened
 
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
@@ -111,12 +142,23 @@ def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
 
 /-- A refusal at the durable boundary.  The tail bound is named (`tailBound`,
 with the head, the certified height and `L`): it is a fact about the public
-chain head, not about the request.  Every other durable reason is the
+chain head, not about the request.  A static bound is named (`overBound`, with
+`over-bound NAME VALUE > LIMIT`).  Every other durable reason is the
 receiver's `operationRejected`. -/
 def durableRefusal : DurableDataIntent.RejectReason → Outcome
   | .tailBound head certified bound =>
       refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}"
+  | .overBound name value limit =>
+      refused .overBound "bound" (Kernel.Bounds.Refusal.overBound name value limit).render
   | reason => refused .operationRejected "durable" s!"{repr reason}"
+
+/-- A static bound's refusal names `overBound` and renders the bound, the value
+and the limit. -/
+theorem durableRefusal_overBound (name : Kernel.Bounds.Name) (value limit : Nat) :
+    durableRefusal (.overBound name value limit) =
+      refused .overBound "bound" (Kernel.Bounds.Refusal.overBound name value limit).render := rfl
+
+#assert_axioms durableRefusal_overBound
 
 /-- The tail bound's refusal names `tailBound` and the three heights. -/
 theorem durableRefusal_tailBound (head certified bound : Nat) :
@@ -146,6 +188,7 @@ private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .transactionConflict => .conflict
   | .admission _ => .operationRejected
   | .durable (.tailBound ..) => .tailBound
+  | .durable (.overBound ..) => .overBound
   | .durable _ => .operationRejected
 
 private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role index : Nat)
@@ -499,7 +542,7 @@ def provisionPlanLoaded (config : Config) (opened : Opened config)
     opened.durable command).mapError (fun reason => s!"provisioning preparation: {repr reason}")
   let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
     (ParticipantFactoryProvisioning.marker config.deployment.domain config.profile.semantics command)
-    ⟨.program, ParticipantFactoryProvisioning.request config.deployment config.profile.template
+    ⟨.program, ParticipantFactoryProvisioning.request config.deployment prepared.template
       prepared.authority.snapshot config.profile.semantics ambient command⟩).mapError
         (fun reason => s!"provisioning sponsor key: {repr reason}")
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
@@ -806,6 +849,61 @@ def invokeRefusal (config : Config) (opened : Opened config)
           legs.firstLawRefusal fieldsOf
   | _ => none
 
+/-- An ordinary birth's factory law, judged on the signed observation's channel at plan time,
+as `invokeRefusal` judges an invocation's target laws. A grain-backed (application) birth is
+judged by its own preparation; an ordinary birth's factory law was otherwise met only at the
+blind submission, whose refusal is `undisclosed`, so a member refused by the factory law
+learned nothing (L13, 2026-10-27; law 10). The verdict is the factory branch's plan verdict
+(`Pending.factoryRefusal`: the compiler's support, range and cast verdicts and the law's own,
+on the law the branch configuration resolves and the very step `Pending.admitBranch` admits
+on), so a plan refusal is one admission of the same image makes
+(`ResourceBirthPolicyController.Concrete.planRefusalSound`) and every law refusal at
+admission is disclosed here (`lawRefusalDisclosed`). A draft that does not decode, prepare
+or bind its pending admission is refused by name, never passed silently. Disclosure is
+through the slots the requester's grant on the factory names. -/
+def birthRefusal (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) : Draft → Option Refusal
+  | .birth bytes _ =>
+      if (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome then none else
+      match CanonicalCellRegistry.sourceEncoding.codec.decode bytes with
+      | none => some ⟨.operationRejected, "noncanonical birth draft", none⟩
+      | some descriptor =>
+          let height := logicalHeight config opened.durable
+          match ResourceBirthController.Concrete.prepareDraft config.profile.compilerProfile
+              config.profile.disabledEvaluators config.deployment opened.pins opened.durable
+              descriptor height with
+          | .error reason => some ⟨.operationRejected, s!"birth preparation: {repr reason}", none⟩
+          | .ok prepared =>
+              match ResourceBirthPolicyController.Concrete.preparePending
+                  (profile := config.profile) prepared.prepared height with
+              | .error reason =>
+                  some ⟨.operationRejected, s!"birth admission: {repr reason}", none⟩
+              | .ok pending =>
+                  match pending.factoryRefusal with
+                  | none => none
+                  | some none => some ⟨.operationRejected, "birth factory law unavailable", none⟩
+                  | some (some law) => some (ComposedLawDiagnostics.publicRefusal
+                      (grantFields config opened grants config.deployment.factoryId) law)
+  | _ => none
+
+/-- Only an ordinary birth is judged here; every other draft passes to its own diagnosis. -/
+theorem birthRefusal_only_birth (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) (draft : Draft)
+    (notBirth : ∀ bytes capabilities, draft ≠ .birth bytes capabilities) :
+    birthRefusal config opened grants draft = none := by
+  cases draft <;> first | rfl | exact absurd rfl (notBirth _ _)
+
+/-- A grain-backed birth is never judged here (its own preparation judges it). -/
+theorem birthRefusal_grain_none (config : Config) (opened : Opened config)
+    (grants : List NativeObservationCodec.GrantRef) (bytes : List UInt8)
+    (capabilities : List CapabilityId)
+    (grain : (GrainResourceBirthHostCodec.sourceCodec.decode bytes).isSome) :
+    birthRefusal config opened grants (.birth bytes capabilities) = none := by
+  simp [birthRefusal, grain]
+
+#assert_axioms birthRefusal_only_birth
+#assert_axioms birthRefusal_grain_none
+
 /-- An installation's plan on the light route: the served state's authority (a basis
 declaring nothing) fixes the marker, a basis declaring its nullifier answers it. -/
 def prepareInstallLight (config : Config) (light : NativeHostLight.Light config) (subject : SubjectId)
@@ -838,7 +936,8 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config) (light : 
       | .prepare draft =>
           if let some steps := draftOverSyncBudget config draft then
             return .error ⟨.operationRejected, overSyncBudgetDetail config.nockFSync steps, none⟩
-          match invokeRefusal config opened signed.challenge.intent.grants draft with
+          match (invokeRefusal config opened signed.challenge.intent.grants draft).orElse
+              fun _ => birthRefusal config opened signed.challenge.intent.grants draft with
           | some refusal => return .error refusal
           | none =>
               match draft with
@@ -897,6 +996,24 @@ def prepare (config : Config) (bytes : List UInt8) : IO (Except Refusal SigningP
   let light ← IO.ofExcept (← NativeHostLight.start config)
   prepareAuthorizedLoaded config opened light bytes
 
+/-- The kept checkpoint an admitted `at h` query resumes from
+(`Loaded.keptAt`: the Store's latest checkpoint at or below `h`, when the
+opening's own base is above `h`). Every other view reads none. A kept
+checkpoint that fails a check refuses the query by name; it never falls back to
+another base. -/
+def keptFor (config : Config) (durable : Durable) (purpose : NativeObservationCodec.Purpose) :
+    IO (Except Refusal (Option durable.Kept)) := do
+  let .query query := purpose | return .ok none
+  let .atHeight height := query.view | return .ok none
+  unless config.genesisHeight ≤ height ∧ height - config.genesisHeight ≤ durable.height do
+    return .ok none
+  let key ← match ← config.transport.key with
+    | .error message => return .error ⟨.operationRejected, message, none⟩
+    | .ok key => pure key
+  match ← durable.keptAt config.transport key (height - config.genesisHeight) with
+  | .error detail => return .error ⟨.operationRejected, detail, none⟩
+  | .ok kept => return .ok kept
+
 /-- The controller projects the authorized logical resource/account cut. Raw
 snapshots, whole Books, and unrelated authority pages never escape this API. -/
 def queryLoaded (config : Config) (opened : Opened config)
@@ -907,8 +1024,11 @@ def queryLoaded (config : Config) (opened : Opened config)
       config.profile config.federation config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok token =>
+      let kept ← match ← keptFor config opened.durable signed.challenge.intent.purpose with
+        | .error refusal => return .error refusal
+        | .ok kept => pure kept
       -- History queries read the opening's own image (the context's source image).
-      match token.queryResult opened.durable rfl with
+      match token.queryResult opened.durable rfl kept with
       | .ok view => return .ok view
       | .error reason => return .error (.of reason)
 
@@ -1067,7 +1187,7 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
 through record `index` (at the head, the served root). -/
 def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest :=
   if index + 1 = durable.height then durable.worldRoot
-  else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+  else worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))
 
 /-- The world root after accepted record `index`: at the head the served
 image's cached root; below it the root the record's log entry kept at append
@@ -1077,16 +1197,16 @@ def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
   if index + 1 = durable.height then durable.worldRoot
   else match durable.rootLog[index]? with
     | some (some root) => root
-    | _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+    | _ => worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))
 
 /-- Every root the log keeps is its prefix's specification root. This is the
-trust the host places in its own past execution under its MAC key (DATAMODEL
+trust the host places in its own past execution under its MAC key (docs/DATAMODEL.md
 §6 Q1 (ii)), the trust its checkpoints already carry: `load` reads the roots
 from MAC-verified tags and refuses a head root that differs from the replayed
 one; `extend` keeps the root it served (`RootLogHonest.extend`). -/
 def RootLogHonest (config : Config) (durable : Durable) : Prop :=
   ∀ index root, durable.rootLog[index]? = some (some root) →
-    root = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+    root = worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))
 
 /-- **Refinement**: over an honest root log, the kept root IS the specification root. -/
 theorem receiptRoot_eq_spec (config : Config) (durable : Durable)
@@ -1106,7 +1226,7 @@ serves differs from the specification there. -/
 theorem receiptRoot_ne_spec_of_wrong (config : Config) (durable : Durable) (index : Nat)
     (notHead : index + 1 ≠ durable.image.accepted.length) (root : Digest)
     (kept : durable.rootLog[index]? = some (some root))
-    (wrong : root ≠ worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩) :
+    (wrong : root ≠ worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))) :
     ¬ RootLogHonest config durable ∧
       receiptRoot config durable index ≠ receiptRootSpec config durable index := by
   refine ⟨fun honest => wrong (honest index root kept), ?_⟩
@@ -1143,8 +1263,9 @@ theorem RootLogHonest.extend (config : Config) {loaded : Durable}
   by_cases earlier : index < loaded.image.accepted.length
   · rw [DurableReceiverIO.Loaded.extend_rootLog_prefix loaded ready index earlier] at kept
     rw [honest index root kept, imageEq]
-    simp only [DurableReceiver.Image.append]
+    simp only [DurableReceiver.Image.accepted_append]
     rw [List.take_append_of_le_length (by omega)]
+    rfl
   · have sizeEq : (loaded.extend ready).rootLog.size = loaded.image.accepted.length + 1 := by
       rw [(loaded.extend ready).rootLogSize, imageEq]
       simp [DurableReceiver.Image.append]
@@ -1158,8 +1279,7 @@ theorem RootLogHonest.extend (config : Config) {loaded : Durable}
     rw [Array.back?_eq_getElem?, sizeEq, Nat.add_sub_cancel, kept] at back
     cases back
     rw [loadedRoot_eq_worldRoot config (loaded.extend ready) restored rooted, imageEq]
-    simp only [DurableReceiver.Image.append]
-    rw [List.take_of_length_le (by simp)]
+    rw [List.take_of_length_le (by simp), DurableReceiver.Image.ofAccepted_accepted]
 
 #assert_axioms receiptRoot_eq_spec
 #assert_axioms receiptRoot_ne_spec_of_wrong
@@ -1194,7 +1314,7 @@ the cache; the selection is `findIdx?`'s, by `Loaded.firstIndex_eq`. -/
 
 #assert_axioms historicalReceipt_eq_cached
 
-/-- **Receipt binding (DATAMODEL §3.4).**  A sealed receipt names its
+/-- **Receipt binding (docs/DATAMODEL.md §3.4).**  A sealed receipt names its
 transaction's accepted prefix, and carries exactly that prefix's world root and
 height. -/
 theorem historicalReceipt_bound (config : Config) (durable : Durable)
@@ -1204,7 +1324,7 @@ theorem historicalReceipt_bound (config : Config) (durable : Durable)
         (fun record => record.transactionId == transactionId) = some index ∧
       receipt.worldRoot = receiptRoot config durable index ∧
       receipt.acceptedCount =
-        NativeHostCodec.height ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩ := by
+        NativeHostCodec.height (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1))) := by
   unfold historicalReceipt at sealed
   rcases hidx : durable.image.accepted.findIdx?
       (fun record => record.transactionId == transactionId) with _ | index
@@ -1230,20 +1350,24 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
     (derived : NativeHostReplay.Derived config old.opened)
     (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
       old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
-      old.opened.durable.snapshot derived.intent)
+      old.opened.durable.snapshot derived.intent) (tag : List UInt8)
     (fresh : old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) = none) :
-    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready)
+    historicalReceipt config (NativeHostReplay.exactCandidate old derived ready tag)
       derived.intent.transactionId derived.intent.event.eventId =
       some ⟨derived.intent.transactionId, derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
+        (NativeHostReplay.exactCandidate old derived ready tag).worldRoot⟩ := by
   simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
     DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, DurableReceiverIO.Loaded.height]
 
-def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
-    (transactionId eventId : Digest) : IO Outcome := do
+/-- How a submit route reads its committed receipt back. A one-shot process
+passes `confirmed config` (a cold open); a session passes its own readback
+over the opening it holds, so a submit never re-opens the Store. -/
+abbrev Confirm := DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome
+
+def confirmed (config : Config) : Confirm := fun kind transactionId eventId => do
   match ← openExisting config with
   | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
   | .ok opened =>
@@ -1252,22 +1376,20 @@ def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
       | some receipt => return .confirmed kind receipt
 
 /-- Seal the original prefix of a committed charged failure without erasing
-its typed source cause. -/
-def charged (config : Config) (kind : DurableReceiverIO.Confirmation)
+its typed source cause: the receipt `confirm` reads back, as a charge. -/
+def chargedVia (confirm : Confirm) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) (cause : ObjectiveActivityReceiver.Reject) : IO Outcome := do
-  match ← openExisting config with
-  | .error detail => return .uncertain s!"receipt readback: {detail}".toUTF8.toList
-  | .ok opened =>
-      match historicalReceipt config opened.durable transactionId eventId with
-      | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-      | some receipt => return .charged kind receipt (ObjectiveActivityReceiver.rejectCodec.encode cause)
+  match ← confirm kind transactionId eventId with
+  | .confirmed kind receipt =>
+      return .charged kind receipt (ObjectiveActivityReceiver.rejectCodec.encode cause)
+  | other => return other
 
-def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
+def enrollmentSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantKeyEnrollmentReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "enroll-key" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -1278,7 +1400,7 @@ def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
 def enrollmentSubmit (config : Config) (bytes : List UInt8) : IO Outcome := do
   match ← openExisting config with
   | .error detail => return .unavailable detail.toUTF8.toList
-  | .ok opened => enrollmentSubmitLoaded config opened bytes
+  | .ok opened => enrollmentSubmitLoaded config (confirmed config) opened bytes
 
 /-- Receipt-only historical lookup. Absence never submits fresh work. -/
 def enrollmentLookupLoaded (config : Config) (opened : Opened config)
@@ -1302,27 +1424,27 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 
 /-- The Host settlement of every `Kernel.Receiving` family, one copy: a
 confirmed outcome is sealed against its original accepted prefix. -/
-def receivingOutcome (config : Config) (family : Receiving.Family) (label : String)
+def receivingOutcome (config : Config) (confirm : Confirm) (family : Receiving.Family) (label : String)
     {laws : ReceivingLaw.Laws Durable} {native : CredentialSignatureIO.NativeConfig}
     {env : family.Env} {durable : Durable} :
     family.Outcome laws native env durable → IO Outcome
   | .replayed (transactionId, (event : DurableDataIntent.StableEvent)) =>
-      confirmed config .replayed transactionId event.eventId
+      confirm .replayed transactionId event.eventId
   | .conflict => return refused .conflict "replay" "transaction identity conflict"
   | .refused reason => return refused .operationRejected label s!"{repr reason}"
   | .committed ingress _ witness =>
-      confirmed config witness.kind (family.txId env ingress) (family.event env ingress).eventId
+      confirm witness.kind (family.txId env ingress) (family.event env ingress).eventId
   | .durable ingress (.journaled kind) =>
-      confirmed config kind (family.txId env ingress) (family.event env ingress).eventId
+      confirm kind (family.txId env ingress) (family.event env ingress).eventId
   | .durable _ (.rejected reason) => return durableRefusal reason
   | .durable _ .contention => return .contention
   | .durable _ (.unavailable detail) => return .unavailable detail.toUTF8.toList
   | .durable _ (.uncertain detail) => return .uncertain detail.toUTF8.toList
 
 /-- Fresh submission through a `Kernel.Receiving` family. -/
-def receivingSubmitLoaded (config : Config) (opened : Opened config) (family : Receiving.Family)
+def receivingSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (family : Receiving.Family)
     (env : family.Env) (label : String) (bytes : List UInt8) : IO Outcome := do
-  receivingOutcome config family label
+  receivingOutcome config confirm family label
     (← family.receiveLoaded config.profile.compilerProfile config.deployment config.signature
       config.transport env opened.durable bytes)
 
@@ -1341,12 +1463,12 @@ def receivingLookupLoaded (config : Config) (opened : Opened config) (family : R
     | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
 
-def provisionSubmitLoaded (config : Config) (opened : Opened config)
+def provisionSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantFactoryProvisioningReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "provision-factory-observe" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -1367,12 +1489,12 @@ def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
       { publication with sequence := head.nextSeq }
     else publication
-  { draft with fee := config.tariff.base, publication := publication }
+  { draft with fee := opened.pins.tariff.base, publication := publication }
 
 def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
     Except String FleetTurn.SigningPlan := do
   let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
-  let prepared ← (FleetTurn.prepare config.deployment config.profile config.tariff ambient
+  let prepared ← (FleetTurn.prepare config.deployment config.profile opened.pins.tariff ambient
     opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
   let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
     (FleetTurn.marker config.deployment.domain config.profile.semantics command)
@@ -1429,7 +1551,7 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
     IO Outcome := do
-  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
+  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile opened.pins.tariff
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
@@ -1694,7 +1816,7 @@ so a payee cannot read who paid it from any topic of its own. Its ledger is a
 read of the accepted journal: every fleet turn whose transfer names the
 observed account as its destination, at the height that record took, released
 behind a current signed observation of that account (the same gate as poll and
-head). A room's concierge renews member windows from this view (PLACE §2.10:
+head). A room's concierge renews member windows from this view (docs/PLACE.md §2.10:
 the room account's `renew` ledger). It is a read; nothing is admitted here. -/
 
 /-- One accepted fleet turn that paid the observed account. `topic` and
@@ -1898,13 +2020,13 @@ def payAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
     pure (PayAssignmentReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical pay plan command"
 
-def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def paySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   if (PayBookReceiver.decodeIngress bytes).isSome then
     match ← PayBookReceiver.receiveLoaded config.deployment config.profile
         ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+    | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-book" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
     | .durableRejected reason => return durableRefusal reason
@@ -1914,7 +2036,7 @@ def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UIn
   else
     match ← PayAssignmentReceiver.receiveLoaded config.deployment config.profile
         ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+    | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-assign" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
     | .durableRejected reason => return durableRefusal reason
@@ -1946,6 +2068,119 @@ def payLookupLoaded (config : Config) (opened : Opened config) (bytes : List UIn
   | _, _, some (.error _) => refused .conflict "replay" "transaction identity conflict"
   | _, _, none => .absent
 
+/-! ## The platform cell (GENESIS-COUPLING L1): session operations 240–243
+
+The controller's install of a new platform record: plan, assembly, submission and a
+receipt-only lookup, as the pay quartet (103–106). -/
+
+/-- The signing plan for a platform install on one opened image. It discloses no decision;
+a signer key the authority cell does not hold is refused. -/
+def platformPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PlatformCellDomain.SigningPlan := do
+  let some command := PlatformInstallReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical platform install command"
+  let header ← PlatformInstallReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports the controller's detached signature and, for a custodian rotation,
+the current custodian's cosignature, both over the plan's header (the frame the native
+verifier receives, `PlatformInstallReceiver.Moment.frame`); submission rechecks both, the
+signed `validUntil`, the current law, the exact roots and the whole decision. -/
+def platformAssemble (plan : PlatformCellDomain.SigningPlan) (signature : List UInt8)
+    (cosign : Option (List UInt8)) : Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "platform signature must be 64 bytes"
+  check (decide (∀ s ∈ cosign, s.length = 64)) "custodian cosignature must be 64 bytes"
+  check (PlatformInstallReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical platform plan command"
+  let header ← need "noncanonical platform header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PlatformInstallReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope, cosign⟩)
+
+def platformSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← PlatformInstallReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "platform-install" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a platform install. Absence never submits fresh work. -/
+def platformLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match PlatformInstallReceiver.decodeIngress bytes with
+  | none => refused .malformed "platform-install" "noncanonical signed ingress"
+  | some ingress =>
+      match PlatformInstallReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-! ## The seed-meter refill (M2): session operations 244–247
+
+The controller's refill of the commit protocol's meter: plan, assembly, submission and a
+receipt-only lookup, as the platform install (240–243). The plan reuses the platform
+signing-plan frame (domain, semantics, command bytes, header). -/
+
+def meterRefillPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PlatformCellDomain.SigningPlan := do
+  let some command := MeterRefillReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical meter refill command"
+  let header ← MeterRefillReceiver.signingHeader config.deployment config.profile.semantics
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports the controller's detached signature over the plan's header;
+submission rechecks the signature, the capability, the controller and the exact authority
+root. -/
+def meterRefillAssemble (plan : PlatformCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "meter refill signature must be 64 bytes"
+  check (MeterRefillReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical meter refill plan command"
+  let header ← need "noncanonical meter refill header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (MeterRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def meterRefillSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← MeterRefillReceiver.receiveLoaded config.deployment config.profile.semantics
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "meter-refill" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a meter refill. Absence never submits fresh work. -/
+def meterRefillLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  match MeterRefillReceiver.decodeIngress bytes with
+  | none => refused .malformed "meter-refill" "noncanonical signed ingress"
+  | some ingress =>
+      match MeterRefillReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
 /-- The public view of the pay cell (no assignment map). -/
 def payViewLoaded (config : Config) (opened : Opened config) : Except String PayCellDomain.View := do
   let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
@@ -1958,13 +2193,13 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
 
 /-! ## Realm wells (lane K-WELL): session operations 123–125
 
-123 = signing plan for a `DREGG/WELL/COMMAND/v1` command (`DREGG/WELL/PLAN/v1`),
+123 = signing plan for a `DREGG/WELL/COMMAND/v2` command (`DREGG/WELL/PLAN/v1`),
 124 = detached assembly `pair(plan, sig64)` → `DREGG/WELL/SIGNED/v1` ingress,
 125 = submit (an exact resubmission of an accepted ingress returns its original
 receipt as `replayed`). The well ledger is the operator-local CLI `well-ledger`. -/
 
 def wellAmbient (config : Config) (opened : Opened config) : RealmWellReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+  ⟨config.federation, logicalHeight config opened.durable, opened.pins.tariff.asset⟩
 
 /-- The header the subject signs over this opened image. It discloses no
 decision; a signer key the authority cell does not hold is refused. -/
@@ -1987,11 +2222,11 @@ def wellAssemble (plan : RealmWellCodec.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (RealmWellCodec.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def wellSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def wellSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← RealmWellReceiver.receiveLoaded config.deployment config.profile
       (wellAmbient config opened) config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "realm-well" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2036,7 +2271,7 @@ def wellLedgerLoaded (config : Config) (opened : Opened config) : Except String 
     let holdersSum := (holders.map Prod.snd).sum
     ({ asset, realm, well := logical.balance asset asset, holders, holdersSum,
        total := logical.balance asset asset + holdersSum } : WellLedgerRow)
-  let credit := config.tariff.asset
+  let credit := opened.pins.tariff.asset
   pure ⟨book.payload.root, credit, logical.balance credit credit, logical.totalAsset credit, wells⟩
 
 def wellLedger (config : Config) : IO (Except String WellLedger) := do
@@ -2071,12 +2306,12 @@ def clockAssemble (plan : ClockTickReceiver.SigningPlan) (signature : List UInt8
     pure (ClockTickReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical clock plan command"
 
-def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def clockSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   match ← ClockTickReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "clock-tick" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -2128,9 +2363,9 @@ def payObservationAssemble (plan : PayCellDomain.SigningPlan) (signature : List 
 
 /-- Fresh submission of a report: the `Kernel.Receiving` family, verified by the
 pinned process, judged by the deployment's laws. -/
-def payObservationSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def payObservationSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome :=
-  receivingSubmitLoaded config opened
+  receivingSubmitLoaded config confirm opened
     (PayObservationReceiver.family config.deployment config.profile)
     ⟨config.federation, logicalHeight config opened.durable⟩ "pay-observation" bytes
 
@@ -2150,8 +2385,6 @@ P6's.)  The plan asks the Receiver's verifier about the memo's two possession
 signatures (`PayEnrolReceiver.observations`), because the decision the observer
 signs depends on both bits. -/
 
-def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
 
 def payEnrolPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     IO (Except String PayCellDomain.SigningPlan) := do
@@ -2174,9 +2407,9 @@ def payEnrolAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8)
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (PayEnrolReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def payEnrolSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def payEnrolSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome :=
-  receivingSubmitLoaded config opened
+  receivingSubmitLoaded config confirm opened
     (PayEnrolReceiver.payEnrolFamily config.deployment config.profile)
     (payEnrolAmbient config opened) "pay-enrol" bytes
 
@@ -2253,12 +2486,12 @@ def payRefillAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (PurseRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def payRefillSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def payRefillSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← PurseRefillReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
       opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "pay-refill" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2306,12 +2539,12 @@ def jobMoneyAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8)
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (JobMoneyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def jobMoneySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def jobMoneySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   match ← JobMoneyReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
       opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "job-money" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2344,25 +2577,26 @@ lookup quartet; the signed ingress is `DREGG/OBJECTIVE/ACTIVITY/SIGNED/v1`;
 every activity cell is public (op 214), so the reason discloses nothing the
 view does not. -/
 
-def activityAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+/-- The moment a turn is decided in, with the package replays the deciding Host holds (`held`;
+a memo, so it changes no decision: `ObjectiveActivity.LoadMemo.replay_eq`). -/
+def activityAmbient (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo) :
+    ObjectiveKernelConfig.Ambient :=
+  { federation := config.federation, height := logicalHeight config opened.durable,
+    asset := opened.pins.tariff.asset, collector := opened.pins.tariff.collector, held }
 
-def activityPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
-    Except String ObjectiveActivityReceiver.SigningPlan := do
+def activityPlanLoaded (config : Config) (opened : Opened config) (held : ObjectiveActivity.LoadMemo)
+    (commandBytes : List UInt8) : Except String ObjectiveActivityReceiver.SigningPlan := do
   let command ← need "noncanonical activity command"
     (ObjectiveActivityReceiver.commandCodec.decode commandBytes)
-  let header ← ObjectiveActivityReceiver.signingHeader config.deployment config.profile
-    (activityAmbient config opened) opened.durable command
+  let ambient := activityAmbient config opened held
+  -- one decision, five projections (`ObjectiveActivityReceiver.planDecision_*`)
+  let decision := ObjectiveActivityReceiver.planDecision config.deployment config.profile ambient
+    opened.durable command
+  let header ← ObjectiveActivityReceiver.signingHeaderFor config.deployment config.profile ambient
+    opened.durable command decision.outcome
   pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
     CredentialSignedEnvelopeController.headerCodec.encode header,
-    ObjectiveActivityReceiver.planReport config.deployment config.profile (activityAmbient config opened)
-      opened.durable command,
-    ObjectiveActivityReceiver.planOutcome config.deployment config.profile (activityAmbient config opened)
-      opened.durable command,
-    (ObjectiveActivityReceiver.planVerdict config.deployment config.profile (activityAmbient config opened)
-      opened.durable command).toUTF8.toList,
-    ObjectiveActivityReceiver.planFrontEnd config.deployment config.profile (activityAmbient config opened)
-      opened.durable command⟩
+    decision.report, decision.outcome, decision.verdict.toUTF8.toList, decision.frontEnd⟩
 
 def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
@@ -2374,13 +2608,13 @@ def activityAssemble (plan : ObjectiveActivityReceiver.SigningPlan) (signature :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (ObjectiveActivityReceiver.ingressCodec.encode ⟨plan.commandBytes, plan.outcome, envelope⟩)
 
-def activitySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    IO Outcome := do
+def activitySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config)
+    (held : ObjectiveActivity.LoadMemo) (bytes : List UInt8) : IO Outcome := do
   match ← ObjectiveActivityReceiver.receiveLoaded config.deployment config.profile
-      (activityAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+      (activityAmbient config opened held) config.signature config.kernelTransport opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .charged kind receipt cause =>
-      charged config kind receipt.transactionId receipt.eventId cause
+      chargedVia confirm kind receipt.transactionId receipt.eventId cause
   | .rejected reason => return refused .operationRejected "activity" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2427,12 +2661,12 @@ structure ActivityView where
 
 def activityViewLoaded (config : Config) (opened : Opened config) (cells : List Nat)
     (quotes : List (Nat × Nat)) : Except String ActivityView := do
-  let authority ← need "authority unavailable"
-    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  -- The opening holds its authority load (`Loaded.unique`: the one `loadDeployment` returns).
+  let authority := opened.authority
   let snapshot := opened.durable.snapshot
   let height := logicalHeight config opened.durable
-  let extractTicks := match ObjectiveKernelConfig.configOf config.deployment config.profile
-      (activityAmbient config opened) with
+  let kernel? := ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened {})
+  let extractTicks := match kernel? with
     | .ok kernel => some kernel.maxExtractTicks
     | .error _ => none
   let cells := (cells ++ cells.flatMap fun cell =>
@@ -2455,7 +2689,7 @@ def activityViewLoaded (config : Config) (opened : Opened config) (cells : List 
     | none => []).dedup
   let quoted := quotes.map fun (record, await) =>
     (record, await,
-      match ObjectiveKernelConfig.configOf config.deployment config.profile (activityAmbient config opened) with
+      match kernel? with
       | .error reason => .error s!"{repr reason}"
       | .ok kernel =>
         match ObjectiveActivity.resumeQuote kernel snapshot height ⟨record⟩ ⟨await⟩ with
@@ -2475,7 +2709,8 @@ to the signer: every seat cell is public (op 219), so the reason discloses
 nothing the view does not. -/
 
 def seatAmbient (config : Config) (opened : Opened config) : ObjectiveKernelConfig.Ambient :=
-  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset, config.tariff.collector⟩
+  { federation := config.federation, height := logicalHeight config opened.durable,
+    asset := opened.pins.tariff.asset, collector := opened.pins.tariff.collector }
 
 def seatPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String SeatReceiver.SigningPlan := do
@@ -2494,10 +2729,10 @@ def seatAssemble (plan : SeatReceiver.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (SeatReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
-def seatSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
+def seatSubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) : IO Outcome := do
   match ← SeatReceiver.receiveLoaded config.deployment config.profile
       (seatAmbient config opened) config.signature config.kernelTransport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "seat" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -2629,12 +2864,12 @@ def certifyAssemble (plan : CertifyReceiver.SigningPlan) (signature : List UInt8
     pure (CertifyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
   else .error "noncanonical certify plan command"
 
-def certifySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+def certifySubmitLoaded (config : Config) (confirm : Confirm) (opened : Opened config) (bytes : List UInt8) :
     IO Outcome := do
   let ambient := logicalHeight config opened.durable
   match ← CertifyReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "certify" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
   | .durableRejected reason => return durableRefusal reason
@@ -3050,7 +3285,7 @@ def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
         config.signature light.opening (light.basisVia transport) bytes confirm
   | .birth bytes =>
       if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
-        let tariff := config.grainBirthTariffValue.toOption
+        let tariff := GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
             opened.pins tariff ambient config.signature transport

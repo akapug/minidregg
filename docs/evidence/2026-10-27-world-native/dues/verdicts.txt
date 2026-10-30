@@ -1,0 +1,21 @@
+candidate 0ce31391790a7e2ed9f83eb1b8bb85d6556a0de3  method world/dues/StandingDues.obend  entry dues  flags none
+extract-quote-is-the-policy-ceiling          check     ok {"published": {"extractTicks": "3200000"}, "policy": 3200000}
+publish                                      installed confirmed  
+create                                       installed confirmed  
+birth                                        installed confirmed  
+{"record": {"activity": "101260841681863752836208302735694739546914722218569425551831404429072933085924", "checkpointBytes": "16868", "checkpointDecodes": true, "checkpointDigest": "60481732296378221495748336374060048510212426911007355849489470593582958460116", "escrow": {"account": "7", "payer": "7", "resume": {"coreBytes": "67286", "domainWork": "0", "extractTicks": "3200000", "feeDebit": "0", "heap": "200000", "incidences": "0", "inputBytes": "0", "leaseByteBlocks": "0", "memoryTouches": "0", "networkBytes": "0", "outputBytes": "200000", "outputNodes": "20000", "proofWork": "0", "replayByte
+born-awaiting-the-keeper-ledger-0            check     ok {"source": {"decider": "40", "kind": "reply", "slot": "89634224557012154990595125222021360552530650409493953115230032406652866852218", "slotCell": "139747600229
+discharge-0                                  installed confirmed  
+deliver-discharge-0                          installed confirmed  
+period-0-paid-exactly-amount-from-the-purse  check     ok {"source": {"kind": "performed", "reason": null, "verdict": "settled"}, "room": [100000000000, 100200000000], "state": {"fields": [{"name": "paid", "value": {"t
+deliver-settled-0                            installed confirmed  
+replay-0                                     installed confirmed  
+deliver-replay-0                             installed confirmed  
+replayed-period-pays-nothing                 check     ok {"source": {"decider": "40", "kind": "reply", "slot": "44295376877213084664358621567555596838255894512967227180314426257231648407371", "slotCell": "146584882575
+discharge-1                                  installed confirmed  
+deliver-discharge-1                          installed confirmed  
+period-1-refused-unfunded-moves-nothing      check     ok {"source": {"kind": "performed", "reason": "unfunded", "verdict": "refused"}, "room": 100200000000, "state": {"fields": [{"name": "paid", "value": {"tag": "natu
+deliver-refused-1                            installed confirmed  
+period-1-still-owed-awaiting                 check     ok {"source": {"decider": "40", "kind": "reply", "slot": "15818509692603467033193484139521258052338368256560280130196704022344614132238", "slotCell": "202056702983
+{"rows": 17, "failed": []}
+overall rc=0

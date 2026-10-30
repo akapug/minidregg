@@ -1,7 +1,7 @@
 /-
 # Assurance.SheetLaw — the MUD sheet law, as written, judged by the kernel
 
-`deploy/shell/templates/mud/sheet/law.sheet.json` (branch `mud-law-fix`, commit `8280b8d7`), composed
+`native/resource-client/templates/mud/sheet/law.sheet.json` (branch `mud-law-fix`, commit `8280b8d7`), composed
 as the templates' README says: `all [law.management, clause 1, …, clause 33]`. §2 is that JSON written
 out as a `Pred` term, one `def` per clause, placeholder `{X}` ↦ `p.X`; nothing is re-sorted, dropped or
 simplified. §2 is generated, not hand-edited: the mechanical embed (one recursive render of the JSON
@@ -676,7 +676,7 @@ theorem dead_stays_dead_without_clock (p : Params) :
     exact dead_stays_dead_without_clock p t.post ts acc.tail
       (fun s hs => noClock s (by simp [stepsOf, hs])) post0
 
-/-- **`owner_alive_monotone_over_history`** (MUD.md §5 item 6): along any accepted history of the
+/-- **`owner_alive_monotone_over_history`** (docs/MUD.md §5 item 6): along any accepted history of the
 sheet, `deaths` is monotone, and `alive` rises only through clause 23's revive. -/
 theorem owner_alive_monotone_over_history (p : Params) (v : Values) (ts : List Turn)
     (acc : Accepted (sheetLaw p) v ts) :
@@ -1031,7 +1031,7 @@ theorem owner_revive_history_refused :
     ¬ Accepted (sheetLaw tidewrack) live [strikeTurn, prayTurn, ownerReviveTurn] := by
   decide
 
-/-- **`death_is_reachable`** (MUD.md §2.3 / §5 item 6). A live sheet can be killed by an admitted
+/-- **`death_is_reachable`** (docs/MUD.md §2.3 / §5 item 6). A live sheet can be killed by an admitted
 turn (the strike above), and no admitted turn raises `alive` except clause 23's revive by the
 referee (for every realm's constants and every pair of views). -/
 theorem death_is_reachable :

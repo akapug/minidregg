@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use std::time::{Duration, Instant};
 
-const STATUS_OP: u8 = 181;
-const QUOTE_OP: u8 = 182;
+const STATUS_OP: u8 = mini_sdk::host_operations::PAY_CLAIM_VIEW;
+const QUOTE_OP: u8 = mini_sdk::host_operations::PAY_CLAIM_QUOTE;
 
 fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
@@ -18,19 +18,13 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("missing string {name}"))
 }
 fn number(text: &str, name: &str) -> Result<u64> {
-    let n = text
-        .parse::<u64>()
-        .map_err(|_| format!("{name} must be u64 decimal"))?;
-    if n.to_string() != text {
-        return Err(format!("{name} must be canonical decimal"));
-    }
-    Ok(n)
+    mini_sdk::decimal::parse(text).ok_or_else(|| format!("{name} must be a canonical u64 decimal"))
 }
 fn scalar(value: &Value, name: &str) -> Result<u64> {
     number(field(value, name)?, name)
 }
 fn fixed<const N: usize>(text: &str, name: &str) -> Result<[u8; N]> {
-    decode_hex(text)?
+    mini_sdk::hex::decode(text).map_err(|e| e.0)?
         .try_into()
         .map_err(|_| format!("{name} must be {N} bytes"))
 }
@@ -396,12 +390,41 @@ fn print_quote(pin: &Pin, quote: &ValidatedQuote) -> Result<()> {
     println!("price is not reserved; changed terms or processing after expiry retain a pending claim for explicit recovery. Wallet, Mini identity and SSH key are publicly linked by this payment.");
     std::io::stdout().flush().map_err(|e| e.to_string())
 }
+/// How the ssh possession is signed: by `ssh-keygen -Y sign` with the private key here, or
+/// DETACHED, when this process holds only the public key (a hosted account whose login key
+/// is the stranger's: the door, deploy/door/README.md). Detached, the first run retains the
+/// validated quote and prints the statement to sign; the second run takes the signature.
+#[derive(Clone, Copy)]
+enum SshKey<'a> {
+    Private(&'a Path),
+    Detached { public: &'a Path, signature: Option<&'a Path> },
+}
+
+impl SshKey<'_> {
+    fn public_path(&self) -> PathBuf {
+        match self {
+            SshKey::Private(private) => PathBuf::from(format!("{}.pub", private.display())),
+            SshKey::Detached { public, .. } => public.to_path_buf(),
+        }
+    }
+    fn retained_path(&self) -> &Path {
+        match self {
+            SshKey::Private(private) => private,
+            SshKey::Detached { public, .. } => public,
+        }
+    }
+}
+
+const DETACHED: &str = "detached-quote.json";
+const DETACHED_TYPE: &str = "minidregg-join-solana-v2-detached";
+
+#[allow(clippy::too_many_arguments)]
 fn prepare_payment(
     common: &Common,
     pin: &Pin,
     identity: [u8; 32],
     key: &Path,
-    ssh_private: &Path,
+    ssh_key: SshKey,
     next_public: Option<&Path>,
     epoch: u64,
     mode: PurchaseMode,
@@ -412,7 +435,10 @@ fn prepare_payment(
     check_pins(common)?;
     let signing = read_secret(key)?;
     let current = signing.verifying_key().to_bytes();
-    let ssh_public = PathBuf::from(format!("{}.pub", ssh_private.display()));
+    if let SshKey::Detached { signature: Some(signature), .. } = ssh_key {
+        return finish_detached(common, pin, &signing, signature, initial);
+    }
+    let ssh_public = ssh_key.public_path();
     let ssh = join_solana::ssh_public_key(
         &fs::read_to_string(&ssh_public).map_err(|e| format!("SSH public key: {e}"))?,
     )?;
@@ -482,6 +508,30 @@ fn prepare_payment(
     let quote = pay_memo_v2::validate_purchase_quote(&value, &expected)?;
     check_pins(common)?;
     print_quote(pin, &quote)?;
+    let ssh_private = match ssh_key {
+        SshKey::Private(private) => private,
+        SshKey::Detached { .. } => {
+            // Retain everything the second run needs to re-validate this exact quote, and the
+            // statement the ssh key's holder signs. Nothing is signed here.
+            let message = quote.signing_message()?;
+            let state = json!({"type":DETACHED_TYPE,"quote":value,"sourceContext":context,"bootstrapMetadata":meta,
+                "miniKey":hex(&identity),"authorizingKey":hex(&current),"authorityEpoch":epoch.to_string(),
+                "sshKey":hex(&ssh),"sshKeyFile":absolute(ssh_key.retained_path())?,
+                "nextKeyDigest":expected.next_digest.map(|d|hex(&d)),"nextPublicFile":next_public.map(absolute).transpose()?,
+                "mode":if mode==PurchaseMode::Enrol{"enrol"}else{"renew"},"weeks":common.weeks.to_string(),
+                "starter":starter.to_string(),"expiryHour":expiry.to_string(),"name":name,"keyFile":absolute(key)?,
+                "birthContext":birth_context.map(absolute).transpose()?,"message":hex(&message)});
+            crate::fsio::replace_private(&common.directory.join("sshsig-message.bin"), &message)?;
+            crate::fsio::replace_private(&common.directory.join(DETACHED),
+                &serde_json::to_vec_pretty(&state).map_err(|e| e.to_string())?)?;
+            println!("sign {} (namespace {}, before processing-chain hour {expiry})",
+                common.directory.join("sshsig-message.bin").display(), pay_memo_v2::SSH_NAMESPACE);
+            println!("with   ssh-keygen -Y sign -n {} -f ~/.ssh/id_ed25519 sshsig-message.bin",
+                pay_memo_v2::SSH_NAMESPACE);
+            println!("then   the same command with --ssh-signature sshsig-message.bin.sig. No payment was submitted.");
+            return Ok(());
+        }
+    };
     let dir = scratch(common)?;
     let message = dir.join("sshsig-message.bin");
     create_private(&message, &quote.signing_message()?)?;
@@ -506,7 +556,7 @@ fn prepare_payment(
         None
     };
     let record = json!({"type":"minidregg-join-solana-v2","name":name,"miniKey":hex(&identity),"authorizingKey":hex(&current),"authorityEpoch":epoch.to_string(),
-        "miniKeyFile":absolute(key)?,"sshKey":hex(&ssh),"sshKeyFile":absolute(ssh_private)?,"nextPublicFile":next_public.map(absolute).transpose()?,
+        "miniKeyFile":absolute(key)?,"sshKey":hex(&ssh),"sshKeyFile":absolute(ssh_key.retained_path())?,"nextPublicFile":next_public.map(absolute).transpose()?,
         "memo":memo,"enrolAddress":hex(&pin.context.recipient),"mint":hex(&pin.context.mint),"tokenProgram":hex(&pin.context.token_program),"login":pin.login,
         "enrolPin":pin.value,"quote":value,"sourceContext":context,"amountAtomic":quote.split().amount_atomic.to_string(),"bootstrapUrl":common.bootstrap,"bootstrapMetadata":meta,
         "hostSha256":common.host_sha256,"configSha256":config_sha256(common),"birthContextPin":context_pin});
@@ -521,6 +571,73 @@ fn prepare_payment(
     println!("then mini join --memo-version v2 --wait --dir {} --signature TX (with the same --host and --config)",common.directory.display());
     Ok(())
 }
+/// The second run of a detached preparation: the retained quote, re-validated against the same
+/// expected purchase, still inside its processing-chain hour; the pasted signature verified
+/// over exactly the retained statement; then the memo, recorded as a normal v2 payment.
+fn finish_detached(common: &Common, pin: &Pin, signing: &ed25519_dalek::SigningKey,
+    signature: &Path, initial: bool) -> Result<()> {
+    let state_path = common.directory.join(DETACHED);
+    let state = workspace::bounded_json(&state_path)
+        .map_err(|_| "no retained detached quote: run --solana without --ssh-signature first")?;
+    same(field(&state, "type")? == DETACHED_TYPE, "retained detached quote has another type")?;
+    let identity: [u8; 32] = fixed(field(&state, "miniKey")?, "identity")?;
+    let current = signing.verifying_key().to_bytes();
+    same(hex(&current) == field(&state, "authorizingKey")?, "--key differs from the retained quote's signer")?;
+    let mode = match field(&state, "mode")? { "enrol" => PurchaseMode::Enrol, "renew" => PurchaseMode::Renew, _ => return Err("retained mode".into()) };
+    let expected = ExpectedPurchase {
+        identity_key: identity,
+        current_key: current,
+        authority_epoch: scalar(&state, "authorityEpoch")?,
+        ssh_key: fixed(field(&state, "sshKey")?, "SSH key")?,
+        next_digest: state["nextKeyDigest"].as_str().map(|d| fixed(d, "nextKeyDigest")).transpose()?,
+        mode,
+        weeks: u32::try_from(scalar(&state, "weeks")?).map_err(|_| "weeks")?,
+        starter: scalar(&state, "starter")?,
+        expiry_hour: scalar(&state, "expiryHour")?,
+        context: pin.context.clone(),
+        deployment_commitment: fixed(field(&state["sourceContext"], "deploymentCommitment")?, "deploymentCommitment")?,
+    };
+    let quote = pay_memo_v2::validate_purchase_quote(&state["quote"], &expected)?;
+    same(hex(&quote.signing_message()?) == field(&state, "message")?, "retained statement differs from the quote")?;
+    // A memo processed after its expiry hour retains a pending claim, so refuse to hand out
+    // one that is already late: the stranger asks for a fresh quote instead.
+    let now = status(common, &identity, None)?;
+    let hour = now.as_of.as_ref().ok_or("source status has no chain hour")?.hour.to_u64()?;
+    if hour > expected.expiry_hour {
+        let _ = fs::remove_file(&state_path);
+        return Err(format!("the quote expired at processing-chain hour {} (now {hour}); run --solana again for a fresh statement to sign", expected.expiry_hour));
+    }
+    let armour = fs::read_to_string(signature).map_err(|e| format!("--ssh-signature: {e}"))?;
+    check_pins(common)?;
+    let memo = pay_memo_v2::sign_and_assemble(&quote, signing, &armour)?.encode()?;
+    pay_memo_v2::SignedMemo::parse_and_verify(&memo, &pin.context)?;
+    let birth = state["birthContext"].as_str().map(PathBuf::from);
+    let context_pin = if let Some(path) = &birth {
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        Some(json!({"path":path,"sha256":format!("{:x}",Sha256::digest(bytes))}))
+    } else {
+        None
+    };
+    let record = json!({"type":"minidregg-join-solana-v2","name":field(&state,"name")?,"miniKey":hex(&identity),"authorizingKey":hex(&current),
+        "authorityEpoch":expected.authority_epoch.to_string(),"miniKeyFile":field(&state,"keyFile")?,"sshKey":field(&state,"sshKey")?,
+        "sshKeyFile":field(&state,"sshKeyFile")?,"nextPublicFile":state["nextPublicFile"].clone(),
+        "memo":memo,"enrolAddress":hex(&pin.context.recipient),"mint":hex(&pin.context.mint),"tokenProgram":hex(&pin.context.token_program),"login":pin.login,
+        "enrolPin":pin.value,"quote":state["quote"].clone(),"sourceContext":state["sourceContext"].clone(),"amountAtomic":quote.split().amount_atomic.to_string(),
+        "bootstrapUrl":common.bootstrap,"bootstrapMetadata":state["bootstrapMetadata"].clone(),
+        "hostSha256":common.host_sha256,"configSha256":config_sha256(common),"birthContextPin":context_pin,"sshSignature":"detached",
+        "asOfHour":hour.to_string()});
+    check_pins(common)?;
+    save_payment(common, &record, initial)?;
+    let _ = fs::remove_file(&state_path);
+    println!("recipient {}", bs58::encode(pin.context.recipient).into_string());
+    println!("amount {} atomic", quote.split().amount_atomic);
+    println!("expires at processing-chain hour {} (now {hour})", expected.expiry_hour);
+    println!("memo {memo}");
+    println!("pay from your wallet; preflight the whole signed transaction, including wallet wrappers. No payment was submitted.");
+    println!("then mini join --memo-version v2 --wait --dir {} --signature TX (with the same --host and --config)",common.directory.display());
+    Ok(())
+}
+
 fn check_birth_context(record: &Value, selected: Option<&Path>) -> Result<Option<PathBuf>> {
     let retained = record.get("birthContextPin").filter(|v| !v.is_null());
     let path = selected
@@ -715,17 +832,30 @@ fn wait(
         );
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn initial(
     common: &Common,
     pin: &Pin,
     key: Option<PathBuf>,
     ssh: Option<PathBuf>,
+    ssh_public: Option<PathBuf>,
+    ssh_signature: Option<PathBuf>,
     next: Option<PathBuf>,
     name: &str,
     birth: Option<&Path>,
 ) -> Result<()> {
     let preparation = common.directory.join("preparation.json");
-    let (key, ssh, next) = if common.directory.exists() {
+    let detached = ssh_public.is_some();
+    same(ssh_signature.is_none() || detached || common.directory.join(DETACHED).exists() || preparation.exists(),
+        "--ssh-signature finishes a detached preparation (--ssh-public)")?;
+    let ssh = ssh.or(ssh_public);
+    // A box-held key (`--key`, the door's hosted account) may prepare inside its existing
+    // private session directory; anything else gets a new directory, as before.
+    let adopt = common.directory.exists() && !preparation.exists() && key.is_some() && detached;
+    if adopt {
+        workspace::private_dir(&common.directory)?;
+    }
+    let (key, ssh, next, detached) = if common.directory.exists() && !adopt {
         workspace::private_dir(&common.directory)?;
         let saved = workspace::bounded_json(&preparation)?;
         same(saved["pins"] == preparation_pins(common,pin)?,
@@ -747,9 +877,13 @@ fn initial(
             !common.directory.join("join.json").exists(),
             "a signed payment is already retained; use --wait or --renew",
         )?;
-        (saved_key, saved_ssh, saved_next)
+        let saved_detached = saved["sshDetached"].as_bool().unwrap_or(false);
+        same(!detached || saved_detached, "--ssh-public differs from the retained preparation's ssh custody")?;
+        (saved_key, saved_ssh, saved_next, saved_detached)
     } else {
-        workspace::make_private_dir(&common.directory)?;
+        if !adopt {
+            workspace::make_private_dir(&common.directory)?;
+        }
         let key = match key {
             Some(key) => absolute(&key)?,
             None => {
@@ -770,7 +904,13 @@ fn initial(
         };
         key_rotation::public_file(&next)?;
         let ssh = match ssh {
-            Some(ssh) => absolute(&ssh)?,
+            Some(ssh) => {
+                let ssh = absolute(&ssh)?;
+                if detached {
+                    join_solana::ssh_public_key(&fs::read_to_string(&ssh).map_err(|e| format!("--ssh-public: {e}"))?)?;
+                }
+                ssh
+            }
             None => {
                 let ssh = common.directory.join("id_ed25519");
                 join_solana::run_ssh_keygen(&[
@@ -787,19 +927,25 @@ fn initial(
                 ssh
             }
         };
-        retain_json(
-            &preparation,
-            &json!({"key":key,"ssh":ssh,"nextPublic":next,"pins":preparation_pins(common,pin)?}),
-        )?;
-        (key, ssh, next)
+        let mut retained = json!({"key":key,"ssh":ssh,"nextPublic":next,"pins":preparation_pins(common,pin)?});
+        if detached {
+            retained["sshDetached"] = json!(true);
+        }
+        retain_json(&preparation, &retained)?;
+        (key, ssh, next, detached)
     };
     let identity = read_secret(&key)?.verifying_key().to_bytes();
+    let ssh_key = if detached {
+        SshKey::Detached { public: &ssh, signature: ssh_signature.as_deref() }
+    } else {
+        SshKey::Private(&ssh)
+    };
     prepare_payment(
         common,
         pin,
         identity,
         &key,
-        &ssh,
+        ssh_key,
         Some(&next),
         1,
         PurchaseMode::Enrol,
@@ -868,6 +1014,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let pin = Pin::load(&path(args.required("enrol")?))?;
             let key = args.optional("key").map(path);
             let ssh = args.optional("ssh-key").map(path);
+            let ssh_public = args.optional("ssh-public").map(path);
+            let ssh_signature = args.optional("ssh-signature").map(path);
+            same(ssh.is_none() || ssh_public.is_none(), "choose --ssh-key (sign here) or --ssh-public (sign detached)")?;
             let next = args.optional("next-public").map(path);
             let name = args
                 .optional("name")
@@ -886,7 +1035,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 "initial enrollment epoch is 1",
             )?;
             args.finish()?;
-            initial(&common, &pin, key, ssh, next, &name, birth.as_deref())
+            initial(&common, &pin, key, ssh, ssh_public, ssh_signature, next, &name, birth.as_deref())
         }
         "renew" => {
             let pin = Pin::load(&path(args.required("enrol")?))?;
@@ -939,7 +1088,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &pin,
                 fixed(field(&record, "miniKey")?, "identity")?,
                 &key,
-                Path::new(field(&record, "sshKeyFile")?),
+                if record["sshSignature"] == "detached" {
+                    return Err("a detached payment renews through the door (the ssh secret is not here)".into());
+                } else {
+                    SshKey::Private(Path::new(field(&record, "sshKeyFile")?))
+                },
                 next.as_deref(),
                 epoch,
                 PurchaseMode::Renew,
@@ -1016,10 +1169,15 @@ mod tests {
         let base = format!("http://{}/mini/v2", listener.local_addr().unwrap());
         let thread = std::thread::spawn(move || {
             listener.set_nonblocking(true).unwrap();
-            let deadline = Instant::now() + Duration::from_secs(8);
+            // The test ends the mock with `/stop`; this bound only reaps a mock whose test died first.
+            // It must outlast the test under a loaded box (an 8 s bound refused the test's own late
+            // requests on dregg-build: curl exit 7, then the wrong status), so it is far above any run.
+            let deadline = Instant::now() + Duration::from_secs(300);
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // On the BSDs an accepted socket inherits the listener's O_NONBLOCK.
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(Duration::from_secs(3)))
                             .unwrap();
@@ -1161,6 +1319,9 @@ mod tests {
         assert!(expiry(&wrong, &status_fixture("fresh")).is_err());
     }
     fn mock_payment(enrol: bool, starter: Option<u64>) {
+        mock_payment_with(enrol, starter, false)
+    }
+    fn mock_payment_with(enrol: bool, starter: Option<u64>, detached: bool) {
         let root = temp();
         let pin = Pin::parse(pin_value()).unwrap();
         let key = root.join("mini.key");
@@ -1261,6 +1422,10 @@ mod tests {
         let directory = root.join("join");
         let pin_file = root.join("enrol.json");
         retain_json(&pin_file, &pin.value).unwrap();
+        if detached {
+            // The door's hosted account: the session directory exists, empty and private.
+            workspace::make_private_dir(&directory).unwrap();
+        }
         if !enrol {
             workspace::make_private_dir(&directory).unwrap();
             // A v1 member can renew using mode3 without inventing a NEXT commitment.
@@ -1294,18 +1459,52 @@ mod tests {
         if let Some(starter) = starter {
             options.push(("starter-credit", OsString::from(starter.to_string())));
         }
-        if enrol {
+        if enrol && !detached {
             options.push(("ssh-key", ssh.as_os_str().to_owned()));
+        }
+        if detached {
+            options.push(("ssh-public", root.join("ssh.pub").into_os_string()));
+        }
+        if enrol {
             options.push(("next-public", next.as_os_str().to_owned()));
         }
-        run(Args {
+        let args = |extra: Option<(&str, OsString)>| Args {
             command: OsString::from("join"),
             values: options
-                .into_iter()
+                .iter()
+                .cloned()
+                .chain(extra)
                 .map(|(k, v)| (OsString::from(format!("--{k}")), v))
                 .collect(),
-        })
-        .unwrap();
+        };
+        run(args(None)).unwrap();
+        if detached {
+            // Nothing is signed or recorded yet: the retained quote and the statement only.
+            assert!(!directory.join("latest-payment.json").exists());
+            assert!(directory.join(DETACHED).exists());
+            let message = directory.join("sshsig-message.bin");
+            // A signature by another ssh key is refused, and the quote stays retained.
+            let other = root.join("other");
+            join_solana::run_ssh_keygen(&[OsStr::new("-q"), OsStr::new("-t"), OsStr::new("ed25519"),
+                OsStr::new("-N"), OsStr::new(""), OsStr::new("-f"), other.as_os_str()]).unwrap();
+            let sign = |key: &Path, out: &Path| {
+                let copy = out.with_extension("msg");
+                fs::copy(&message, &copy).unwrap();
+                join_solana::run_ssh_keygen(&[OsStr::new("-Y"), OsStr::new("sign"), OsStr::new("-n"),
+                    OsStr::new(pay_memo_v2::SSH_NAMESPACE), OsStr::new("-f"), key.as_os_str(), copy.as_os_str()]).unwrap();
+                fs::rename(copy.with_extension("msg.sig"), out).unwrap();
+            };
+            let wrong = root.join("wrong.sig");
+            sign(&other, &wrong);
+            assert!(run(args(Some(("ssh-signature", wrong.into_os_string())))).is_err());
+            assert!(directory.join(DETACHED).exists());
+            // The stranger's own signature finishes the memo; the quote is consumed.
+            let right = root.join("right.sig");
+            sign(&ssh, &right);
+            run(args(Some(("ssh-signature", right.into_os_string())))).unwrap();
+            assert!(!directory.join(DETACHED).exists());
+            calls.fetch_sub(2, std::sync::atomic::Ordering::SeqCst); // the two finishing status reads
+        }
         let common = Common {
             host_sha256: host_image_sha256(&host).unwrap(),
             config_bytes: fs::read(&config).unwrap(),
@@ -1384,6 +1583,10 @@ mod tests {
         mock_payment(false, Some(347))
     }
     #[test]
+    fn a_box_held_key_with_a_detached_ssh_signature_retains_a_valid_memo() {
+        mock_payment_with(true, Some(347), true)
+    }
+    #[test]
     fn source_recommendation_is_used_only_when_starter_is_omitted() {
         mock_payment(true, None);
         mock_payment(true, Some(0));
@@ -1415,12 +1618,12 @@ mod tests {
         assert!(check_pins(&common).is_err());
         let mut changed = common.clone();
         changed.config_bytes = fs::read(&changed.config).unwrap();
-        assert!(initial(&changed, &pin, None, None, None, "fixture", None)
+        assert!(initial(&changed, &pin, None, None, None, None, None, "fixture", None)
             .unwrap_err()
             .contains("existing preparation differs"));
         let mut changed = common.clone();
         changed.bootstrap = Some("https://other.example/mini/v2".into());
-        assert!(initial(&changed, &pin, None, None, None, "fixture", None)
+        assert!(initial(&changed, &pin, None, None, None, None, None, "fixture", None)
             .unwrap_err()
             .contains("existing preparation differs"));
         fs::write(&common.config, &common.config_bytes).unwrap();

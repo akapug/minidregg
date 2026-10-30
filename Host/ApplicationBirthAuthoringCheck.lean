@@ -18,7 +18,7 @@ private def meter : Json := object <| ["incidences", "turnBytes", "memoryTouches
   "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
   "feeDebit", "leaseByteBlocks"].map fun key => (key, number 100000)
 
-private def operator : NativeHost.Config := {
+private def operator : NativeHost.Config := NativeHost.Config.ofInputs {
   deployment := ⟨⟨8501⟩, 10, 11, 12⟩
   federation := ⟨9⟩
   template := ⟨⟨5⟩, 100000, 10000, 64⟩
@@ -29,7 +29,7 @@ private def operator : NativeHost.Config := {
   signature := ⟨""⟩ }
 
 private def grainOperator : NativeHost.Config :=
-  { operator with grainBirthTariff := some ⟨5, 2⟩ }
+  NativeHost.Config.ofInputs { operator.toInputs with grainBirthTariff := some ⟨5, 2⟩ }
 
 private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("domain", number 8501), ("factoryId", number 10),
@@ -41,7 +41,12 @@ private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("issuerEpoch", number 2), ("genesisHeight", number 10),
   ("factoryPredicate", emptyRule), ("enrollments", .arr #[]),
   ("factoryControllerSubject", number 8),
-  ("factoryControllerCapability", number 53), ("tailBound", number 256),
+  ("factoryControllerCapability", number 53), ("payControlCapability", number 54),
+  ("clockControlCapability", number 55),
+  ("platform", object [("ownerBudget", number 100000), ("lifetime", number 10000),
+    ("grainBirthTariff", .null), ("completionCustodianKey", .null)]),
+  ("tailBound", number 256),
+  ("issuanceCap", number 1000000000000000),
   ("clockGenesisNow", number 0), ("clockMaxStepSeconds", number 300),
   ("meterAllowance", meter), ("clockTickers", .arr #[])]
 
@@ -176,7 +181,8 @@ private def mismatchedCompositeTariff : Json :=
   composite "applicationBirth" mismatched
 
 private def custodyOperator : NativeHost.Config :=
-  { grainOperator with completionCustodianKey := some (List.replicate 32 7) }
+  NativeHost.Config.ofInputs
+    { grainOperator.toInputs with completionCustodianKey := some (List.replicate 32 7) }
 
 private def configuredRequest (fieldName : String) (spec : Json) : Json := object [
   ("genesis", genesisWithSemantics custodyOperator.profile.semantics.value),
@@ -216,18 +222,23 @@ private def configuredChecks : IO Unit := do
     | .error _ => pure ()
     | .ok _ => throw (IO.userError s!"{kind}: accepted wrong custodian profile")
   for changed in [
-      { custodyOperator with federation := ⟨10⟩ },
-      { custodyOperator with genesisHeight := 11 },
-      { custodyOperator with template := ⟨⟨6⟩, 100000, 10000, 64⟩ },
-      { custodyOperator with tariff := ⟨4, 2, 1, 0, 99, 0⟩ },
-      { custodyOperator with deployment := ⟨⟨8502⟩, 10, 11, 12⟩ },
-      { custodyOperator with completionCustodianKey := some (List.replicate 32 8) }] do
+      NativeHost.Config.ofInputs { custodyOperator.toInputs with federation := ⟨10⟩ },
+      NativeHost.Config.ofInputs { custodyOperator.toInputs with genesisHeight := 11 },
+      NativeHost.Config.ofInputs
+        { custodyOperator.toInputs with template := ⟨⟨6⟩, 100000, 10000, 64⟩ },
+      NativeHost.Config.ofInputs
+        { custodyOperator.toInputs with tariff := ⟨4, 2, 1, 0, 99, 0⟩ },
+      NativeHost.Config.ofInputs
+        { custodyOperator.toInputs with deployment := ⟨⟨8502⟩, 10, 11, 12⟩ },
+      NativeHost.Config.ofInputs
+        { custodyOperator.toInputs with completionCustodianKey := some (List.replicate 32 8) }] do
     match Minidregg.Host.Json.author "application-birth" app (some changed) with
     | .error _ => pure ()
     | .ok _ => throw (IO.userError "accepted mismatched deployment profile")
   match Minidregg.Host.Json.author "application-grain-birth-intent"
       (composite "applicationBirth" app)
-      (some { custodyOperator with grainBirthTariff := some ⟨6, 2⟩ }) with
+      (some (NativeHost.Config.ofInputs
+        { custodyOperator.toInputs with grainBirthTariff := some ⟨6, 2⟩ })) with
   | .error _ => pure ()
   | .ok _ => throw (IO.userError "accepted mismatched enclosing tariff")
   let (context, _) ← IO.ofExcept <| Minidregg.Host.Json.applicationBirthContext

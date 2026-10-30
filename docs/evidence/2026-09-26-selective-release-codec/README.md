@@ -73,7 +73,7 @@ It exited zero in the same independent warm copy; bounded log
 `/tmp/minidregg-fn-selective-signature-narrow.log` SHA-256
 `325f4ad2d3a7ecc3368cb8e3df240f4bd2e780bafcb72bc69313a394201c0c2f`
 contains only package-local-change warnings. An external importing-module
-probe, `Kernel/FnSelectiveReleaseForgeProbe.lean` in that independent copy
+probe, `Kernel.FnSelectiveReleaseForgeProbe [not in tree]` in that independent copy
 (SHA-256 `12cd7bcd04a280f3da4a4465563227eae7d934b1c1a8dfc39ef0a97ba045895f`),
 attempted `{ checked with verifier := ... }`; Lean refused with
 `constructor for Checked is marked as private`. The probe log is

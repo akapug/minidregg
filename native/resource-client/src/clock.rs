@@ -29,6 +29,12 @@
 //! `--abandon-after-submit true` submits and exits without reading the reply (the
 //! lost-reply probe).
 //!
+//! A tick refused `staleAuthority` or `staleClock` (another turn moved a root it pinned
+//! between the view and the submit) is journaled like any refusal, then re-observed and
+//! re-authored within the same run by the client's re-plan loop (`--replan-max`, default
+//! 5 re-plans); the reply lists each such refusal under `staleRefusals`, and when the
+//! re-plans are spent the last one fails the run as before.
+//!
 //! `mini clock --action view --workspace DIR` prints the clock view.
 
 use crate::agent_reserve::field;
@@ -83,7 +89,7 @@ fn workspace(directory: &Path) -> Result<Workspace> {
 fn reply(frame: Vec<u8>, operation: u8) -> Result<Vec<u8>> {
     match frame.split_first() {
         Some((actual, body)) if *actual == operation && !body.is_empty() => Ok(body.to_vec()),
-        Some((255 | 254, body)) => Err(format!(
+        Some((&(crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD | crate::RESPONSE_NEVER_FORWARDED), body)) => Err(format!(
             "clock: Host refused op{operation}: {}",
             String::from_utf8_lossy(&body[body.len().saturating_sub(300)..])
         )),
@@ -104,20 +110,13 @@ fn with_kind(kind: &str, body: &[u8]) -> Vec<u8> {
 
 /// Host op 7: source-owned authoring of a JSON value into canonical bytes.
 fn author(ws: &Workspace, kind: &str, value: &Value) -> Result<Vec<u8>> {
-    invoke(ws, 7, &with_kind(kind, &serde_json::to_vec(value).map_err(|e| e.to_string())?))
+    invoke(ws, mini_sdk::host_operations::AUTHOR, &with_kind(kind, &serde_json::to_vec(value).map_err(|e| e.to_string())?))
 }
 
 /// Host op 8: source-owned inspection of canonical bytes as JSON.
 fn inspect(ws: &Workspace, kind: &str, bytes: &[u8]) -> Result<Value> {
-    serde_json::from_slice(&invoke(ws, 8, &with_kind(kind, bytes))?)
+    serde_json::from_slice(&invoke(ws, mini_sdk::host_operations::INSPECT, &with_kind(kind, bytes))?)
         .map_err(|error| format!("clock: invalid Host inspection of {kind}: {error}"))
-}
-
-fn pair(first: &[u8], second: &[u8]) -> Vec<u8> {
-    let mut bytes = (first.len() as u32).to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    bytes
 }
 
 fn decimal_arg(args: &mut Args, name: &str) -> Result<Option<String>> {
@@ -144,7 +143,7 @@ fn bool_arg(args: &mut Args, name: &str) -> Result<bool> {
 }
 
 fn view(ws: &Workspace) -> Result<Value> {
-    let bytes = invoke(ws, 129, &[])?;
+    let bytes = invoke(ws, mini_sdk::host_operations::CLOCK_VIEW, &[])?;
     inspect(ws, "clock-view", &bytes)
 }
 
@@ -202,7 +201,7 @@ fn attempts(ws: &Workspace) -> Result<PathBuf> {
 fn submit(ws: &Workspace, attempt: &Path) -> Result<Value> {
     let ingress = fs::read(attempt.join("ingress.bin"))
         .map_err(|error| format!("cannot read {}: {error}", attempt.display()))?;
-    let outcome = invoke(ws, 128, &ingress)?;
+    let outcome = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_SUBMIT, &ingress)?;
     inspect(ws, "outcome", &outcome)
 }
 
@@ -243,6 +242,39 @@ fn resolve_pending(ws: &Workspace) -> Result<Vec<Value>> {
     Ok(resolved)
 }
 
+/// The tick pins the credential-authority root and the clock root it observed
+/// (`ClockTickReceiver.prepare`); the authority cell moves with every birth, grant,
+/// enrolment, delegation and policy install, so under load another turn often lands
+/// between the view (op 129) and the submit (op 128). The tick asserts only wall time,
+/// never anything derived from that authority state, so a fresh view and a fresh command
+/// is the same proposal against the new roots: the client's one re-plan loop
+/// (`replan::replan`, `--replan-max`) runs it again. A revoked `C_tick` or a
+/// non-advancing clock then refuses by its own name.
+const STALE_PREFIX: &str = "clock tick refused stale ";
+
+/// The pin a refused tick names, read from the Host's rendering of
+/// `ClockTickReceiver.Reject` at phase `clock-tick`; any other refusal is not stale.
+fn stale_pin(outcome: &Value) -> Option<&'static str> {
+    if outcome.get("type").and_then(Value::as_str) != Some("refused") {
+        return None;
+    }
+    let text = |name: &str| {
+        outcome
+            .get(name)
+            .and_then(Value::as_str)
+            .and_then(|hex| mini_sdk::hex::decode(hex).ok())
+            .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+    };
+    if text("phase").as_deref() != Some("clock-tick") {
+        return None;
+    }
+    match text("detail")?.as_str() {
+        "Minidregg.Kernel.ClockTickReceiver.Reject.staleAuthority" => Some("staleAuthority"),
+        "Minidregg.Kernel.ClockTickReceiver.Reject.staleClock" => Some("staleClock"),
+        _ => None,
+    }
+}
+
 fn tick(
     ws: &Workspace,
     capability: &str,
@@ -252,11 +284,56 @@ fn tick(
     catch_up: bool,
 ) -> Result<Value> {
     let resolved = resolve_pending(ws)?;
-    let current = view(ws)?;
     let now = match now {
         Some(now) => now,
         None => unix_now()?.to_string(),
     };
+    // Every stale refusal is definite and journaled by `resolve`, so there is no attempt
+    // to retire; it is reported in `staleRefusals`. Only the two pins re-plan.
+    let mut stale = Vec::new();
+    let mut last = None;
+    let replanned = crate::replan::replan(
+        "clock tick",
+        || {
+            let value = tick_once(ws, capability, &now, slot.clone(), abandon, catch_up)?;
+            match stale_pin(&value) {
+                Some(pin) => {
+                    stale.push(json!({"pin": pin, "asserted": value.get("asserted")}));
+                    let error = format!("{STALE_PREFIX}{pin}: {value}");
+                    last = Some(value);
+                    Err(error)
+                }
+                None => Ok(value),
+            }
+        },
+        |error, _| error.starts_with(STALE_PREFIX),
+        |_| Ok(()),
+    );
+    let mut value = match (replanned, last) {
+        (Ok(value), _) => value,
+        // Exhausted: the last stale refusal is the run's answer, and fails it.
+        (Err(error), Some(value)) if error.contains(STALE_PREFIX) => value,
+        (Err(error), _) => return Err(error),
+    };
+    if !stale.is_empty() {
+        value["staleRefusals"] = json!(stale);
+    }
+    if !resolved.is_empty() {
+        value["resolvedRetained"] = json!(resolved);
+    }
+    Ok(value)
+}
+
+/// One observation, one authored tick, one submission.
+fn tick_once(
+    ws: &Workspace,
+    capability: &str,
+    now: &str,
+    slot: Option<String>,
+    abandon: bool,
+    catch_up: bool,
+) -> Result<Value> {
+    let current = view(ws)?;
     // A bounded candidate is only a proposal. The Lean receiver is the sole judge;
     // explicit --now remains unmodified so it can be refused by name.
     let now = if catch_up {
@@ -267,7 +344,7 @@ fn tick(
             .map_err(|_| "clock view step bound exceeds u64")?;
         target.min(current_now.saturating_add(bound)).to_string()
     } else {
-        now
+        now.to_string()
     };
     let slot = slot.unwrap_or(field(&current, "slot")?.to_string());
     let command = author(
@@ -280,16 +357,16 @@ fn tick(
             "now": now, "slot": slot,
         }),
     )?;
-    let plan = invoke(ws, 126, &command)?;
+    let plan = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_PLAN, &command)?;
     let header = inspect(ws, "clock-plan", &plan)?;
     let canonical = header
         .get("header")
         .and_then(|h| h.get("canonical"))
         .and_then(Value::as_str)
         .ok_or("clock plan lacks a canonical header")?;
-    let header_bytes = decode_hex(canonical).map_err(|_| "clock plan header is not hex")?;
+    let header_bytes = mini_sdk::hex::decode(canonical).map_err(|_| "clock plan header is not hex")?;
     let signature = crate::fsio::read_secret_in_private_dir(&ws.key)?.sign(&header_bytes).to_bytes();
-    let ingress = invoke(ws, 127, &pair(&plan, &signature))?;
+    let ingress = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_ASSEMBLE, &mini_sdk::local::pair(&plan, &signature)?)?;
     // Retained before submission: a lost reply is resolved by the next run.
     let attempt = attempts(ws)?.join(format!("t-{}", crate::fsio::random_nonce()?));
     make_private_dir(&attempt)?;
@@ -297,14 +374,10 @@ fn tick(
     create_private(&attempt.join("tick.json"), asserted.to_string().as_bytes())?;
     create_private(&attempt.join("ingress.bin"), &ingress)?;
     if abandon {
-        let _ = invoke(ws, 128, &ingress)?;
+        let _ = invoke(ws, mini_sdk::host_operations::CLOCK_TICK_SUBMIT, &ingress)?;
         return Ok(json!({"type": "abandoned", "attempt": attempt, "asserted": asserted}));
     }
-    let mut value = resolve(ws, &attempt)?;
-    if !resolved.is_empty() {
-        value["resolvedRetained"] = json!(resolved);
-    }
-    Ok(value)
+    resolve(ws, &attempt)
 }
 
 fn init(mut args: Args) -> Result<Value> {
@@ -398,4 +471,30 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         return Err(format!("clock tick not confirmed: {value}").into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refused(phase: &str, detail: &str) -> Value {
+        json!({"type": "refused", "reason": "operationRejected",
+            "phase": mini_sdk::hex::encode(phase.as_bytes()),
+            "detail": mini_sdk::hex::encode(detail.as_bytes())})
+    }
+
+    #[test]
+    fn stale_pins_are_read_from_the_clock_receivers_rendering_only() {
+        let stale = |name: &str| format!("Minidregg.Kernel.ClockTickReceiver.Reject.{name}");
+        assert_eq!(stale_pin(&refused("clock-tick", &stale("staleAuthority"))), Some("staleAuthority"));
+        assert_eq!(stale_pin(&refused("clock-tick", &stale("staleClock"))), Some("staleClock"));
+        // Teeth: every other refusal is final for the run.
+        for other in ["clockNotAdvancing", "clockStepExceeded", "capabilityRejected", "replayedMarker"] {
+            assert_eq!(stale_pin(&refused("clock-tick", &stale(other))), None, "{other}");
+        }
+        assert_eq!(stale_pin(&refused("durable", &stale("staleAuthority"))), None);
+        assert_eq!(stale_pin(&refused("clock-tick", "Minidregg.Kernel.PayBookReceiver.Reject.staleAuthority")), None);
+        assert_eq!(stale_pin(&json!({"type": "confirmed", "phase": "", "detail": ""})), None);
+        assert_eq!(stale_pin(&json!({"type": "contention"})), None);
+    }
 }

@@ -106,9 +106,9 @@ try:
             dirs.append(str(d))
             for rel, body in ep.files.items():
                 gen.dump(str(d / rel), body)
-        env = dict(os.environ, MINI=a.mini, PAY_WATCHER=a.watcher, PAY_STATE=str(out / 'watcher-state'), PAY_OBSERVER_WS=str(f / 'ws/30'), PAY_OBSERVER_CAPABILITY='4030', PAY_ENROL_INDEX='0', PAY_JOURNAL_FLOOR='1000000', PAY_ENROL_CAPABILITY='4032', PAY_OPERATOR_SOCKET=str(private), PAY_RPC_FIXTURES=' '.join(dirs))
+        env = dict(os.environ, MINI=a.mini, PAY_WATCHER=a.watcher, PAY_STATE=str(out / 'watcher-state'), PAY_OBSERVER_WS=str(f / 'ws/30'), PAY_OBSERVER_CAPABILITY='4030', PAY_WATCH_ENROL='yes', PAY_ENROL_CAPABILITY='4032', PAY_OPERATOR_SOCKET=str(private), PAY_RPC_FIXTURES=' '.join(dirs))
         env.pop('PAY_RPC_ENDPOINTS', None)
-        baseline = run([a.mini, 'enrollment-view', '--socket', public])
+        baseline = run([a.mini, 'enrollment-view', '--socket', public, '--host', a.host])
         baseline.check_returncode()
         before = len(json.loads(baseline.stdout)['journal'])
         expected_signatures = {sig.hex() for sig, _ in history}
@@ -123,7 +123,7 @@ try:
                 growth = subprocess.run(['sh', str(Path(a.source) / 'deploy/pay/mini-pay-watcher')], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300)
             if growth.returncode:
                 raise RuntimeError('growth tick failed; see growth.log')
-            after = run([a.mini, 'enrollment-view', '--socket', public])
+            after = run([a.mini, 'enrollment-view', '--socket', public, '--host', a.host])
             after.check_returncode()
             matched = {j['signature'] for j in json.loads(after.stdout)['journal']} & expected_signatures
             if len(matched) == a.grow_count:
@@ -140,7 +140,7 @@ try:
     wait_for(port, q, 'bootstrap')
     n = port()
     key = json.loads((f / 'join/alice/join.json').read_text())['miniKey']
-    view = run([a.mini, 'enrollment-view', '--socket', public])
+    view = run([a.mini, 'enrollment-view', '--socket', public, '--host', a.host])
     view.check_returncode()
     v = json.loads(view.stdout)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-E3 (PAY.md §11.9 P3b-2): the self-enrollment RECEIVER on a fresh Store.
+# J-PAY-E3 (docs/PAY.md §11.9 P3b-2): the self-enrollment RECEIVER on a fresh Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
 # MINI, STORE, VERIFIER and JOURNEY_STEP_DIR exported; it starts its OWN Host on
@@ -18,7 +18,7 @@
 #
 # Checked: the enrollment's subject, account, funding, book index, lease and ssh
 # row; the renewal; the consumed nullifier; every journal reason with the Book
-# unchanged; a verifier failure refused (not journaled); the new subject reading
+# unchanged; a broken legacy verifier path ignored by the linked kernel; the new subject reading
 # its own account (admitted) and another friend's (refused); the observer's
 # factory policy install and factory observation refused by the confined factory law
 # (the install never reaches the install receiver: its plan must first observe the
@@ -41,6 +41,10 @@ resolve_params_sh "$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)" || e
 exec python3 - "$DIR" <<'PY'
 import base64, json, os, struct, subprocess, sys, time
 import nacl.signing
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 
 DIR = sys.argv[1]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
@@ -101,12 +105,16 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "factoryControllerSubject": str(EMBER),
            "factoryControllerCapability": str(FACTORY_CONTROL),
            "clockTickers": [],
-           "tailBound": "1000000",
+           "tailBound": "1000000", "issuanceCap":"1000000000000000",
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
+           "payControlCapability": str(PAY_CONTROL),
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(PAY_CONTROL), "enrolCapability": str(ENROL_CAP)}}
+                           "enrolCapability": str(ENROL_CAP)}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out, indent=1)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
@@ -364,7 +372,8 @@ led3 = ledger()
 row("the journal mints nothing", "well and every payer unchanged by the 7 journaled payments",
     f"well {led2['well']}->{led3['well']}", led3["well"] == led2["well"] and led3["payers"] == led2["payers"])
 
-# A verifier that cannot answer `verify-sshsig`: the payment is REFUSED, not journaled.
+# The legacy verifier path is not a live dependency: even a broken helper is
+# ignored, and the linked native kernel accepts a valid payment.
 broken = path("verifier-broken.sh")
 with open(broken, "w") as out:
     out.write(f"#!/bin/sh\nif [ \"$1\" = verify-sshsig ]; then echo 'verifier offline' >&2; exit 70; fi\n"
@@ -379,9 +388,10 @@ before = enrolment_view(host)
 carol, _, carol_memo = make_memo("carol")
 r, _ = enrol(host, record(PRICE, carol_memo))
 after = enrolment_view(host)
-row("verifier unavailable for the ssh-sig", "refused (verifier), nothing journaled or enrolled",
-    f"{show(r)} journal {len(before.get('journal', []))}->{len(after.get('journal', []))}",
-    refused(r, "verifier") and after.get("journal") == before.get("journal") and after["entries"] == before["entries"])
+row("a broken legacy verifier path is not consulted", "confirmed by the linked kernel, enrolment added",
+    f"{show(r)} entries {len(before.get('entries', []))}->{len(after.get('entries', []))}",
+    r.get("type") == "confirmed" and after.get("journal") == before.get("journal")
+    and len(after["entries"]) == len(before["entries"]) + 1)
 host.stop()
 
 # ---------------------------------------------------------------- the observer is confined
@@ -392,7 +402,7 @@ def mini_submit(name, intent, signer):
                            "--key", path(f"subject-{signer}.key"), "--dir", path(f"{name}-attempt")],
                           capture_output=True)
     result_path = path(f"{name}-attempt/outcome.json")
-    result = json.load(open(result_path)) if os.path.exists(result_path) else {}
+    result = attempt_answer(result_path) if os.path.exists(result_path) else {}
     return done.returncode, result, (done.stdout + done.stderr).decode("utf-8", "replace")[-400:]
 def factory_policy(name):
     intent = {"subject": str(EMBER), "nonce": fresh(),

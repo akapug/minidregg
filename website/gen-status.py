@@ -1,48 +1,51 @@
 #!/usr/bin/env python3
-"""Generate website/status.html from the "Honest state" section of README.md.
+"""Generate website/status.html from the What is live table in docs/STATUS.md.
 
     python3 website/gen-status.py           write website/status.html
-    python3 website/gen-status.py --check   exit 1 if status.html is not what the README
+    python3 website/gen-status.py --check   exit 1 if status.html is not what docs/STATUS.md
                                             generates, or if a <pre data-source=PATH> block
                                             on any page is not text of PATH
 
 The page's header and footer are copied from website/index.html, so the status page
-cannot drift from the hand-written pages' navigation. Relative README links become
-links into the repository on GitHub. The README is the only source: edit it, then
+cannot drift from the hand-written pages' navigation. Links relative to docs/ become
+links into the repository on GitHub. docs/STATUS.md is the only source: edit it, then
 regenerate. A missing section or a malformed table refuses; nothing is guessed.
 
 --check also runs two controls, so that a check that cannot go red does not read green:
-a README with one table cell changed must render differently, and a source block with
+a STATUS.md with one table cell changed must render differently, and a source block with
 one character changed must be refused.
 """
 import difflib
 import html
+import posixpath
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "website"
-README = ROOT / "README.md"
+STATUS = ROOT / "docs" / "STATUS.md"
+STATUS_PATH = "docs/STATUS.md"
+HEADING = "# What is live"
 OUT = SITE / "status.html"
 BLOB = "https://github.com/emberian/minidregg/blob/main/"
 TREE = "https://github.com/emberian/minidregg/tree/main/"
-HEADINGS = ["Component", "Evidence", "Boundary"]
+HEADINGS = ["surface", "state", "evidence"]
 
 
 class Refuse(Exception):
     pass
 
 
-def section(readme: str) -> list[str]:
-    lines = readme.splitlines()
+def section(status: str) -> list[str]:
+    lines = status.splitlines()
     try:
-        start = lines.index("## Honest state")
+        start = lines.index(HEADING)
     except ValueError:
-        raise Refuse('README.md has no "## Honest state" heading')
+        raise Refuse(f'{STATUS_PATH} has no "{HEADING}" heading')
     body = []
     for line in lines[start + 1:]:
-        if line.startswith("## "):
+        if line.startswith("#"):
             break
         body.append(line)
     return body
@@ -53,15 +56,38 @@ def href(target: str) -> str:
         return target
     path, _, frag = target.partition("#")
     base = TREE if path.endswith("/") else BLOB
-    return base + path + ("#" + frag if frag else "")
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(STATUS_PATH), path))
+    if resolved.startswith("..") or resolved.startswith("/"):
+        raise Refuse(f"link {target} leaves the repository")
+    if path.endswith("/"):
+        resolved += "/"
+    return base + resolved + ("#" + frag if frag else "")
 
 
 def inline(text: str) -> str:
-    """The inline Markdown the README uses: code spans, links, **strong**, *em*."""
+    """The inline Markdown the status table uses: code spans, links, **strong**, *em*."""
+    out, pos = [], 0
+    for m in re.finditer(r"`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)", text):
+        out.append(prose(text[pos:m.start()]))
+        if m.group(1) is not None:
+            out.append(code(m.group(1)))
+        else:
+            out.append(f'<a href="{html.escape(href(m.group(3)))}">{link_text(m.group(2))}</a>')
+        pos = m.end()
+    out.append(prose(text[pos:]))
+    return "".join(out)
+
+
+def code(text: str) -> str:
+    return "<code>" + html.escape(text, quote=False) + "</code>"
+
+
+def link_text(text: str) -> str:
+    """A link's text: code spans and emphasis, no nested links."""
     out, pos = [], 0
     for m in re.finditer(r"`([^`]+)`", text):
         out.append(prose(text[pos:m.start()]))
-        out.append("<code>" + html.escape(m.group(1), quote=False) + "</code>")
+        out.append(code(m.group(1)))
         pos = m.end()
     out.append(prose(text[pos:]))
     return "".join(out)
@@ -69,8 +95,6 @@ def inline(text: str) -> str:
 
 def prose(text: str) -> str:
     text = html.escape(text, quote=False)
-    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)",
-                  lambda m: f'<a href="{html.escape(href(m.group(2)))}">{m.group(1)}</a>', text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"(?<![\w*])\*([^*]+)\*(?![\w*])", r"<em>\1</em>", text)
     return text
@@ -85,8 +109,8 @@ def cells(row: str) -> list[str]:
     return [c.strip() for c in row[1:-1].split("|")]
 
 
-def render_body(readme: str) -> str:
-    body = section(readme)
+def render_body(status: str) -> str:
+    body = section(status)
     blocks, para, table = [], [], []
     before, after = [], []
     for line in body + [""]:
@@ -102,7 +126,7 @@ def render_body(readme: str) -> str:
         else:
             para.append(line.strip())
     if len(table) < 3:
-        raise Refuse("the Honest state section has no table with at least one row")
+        raise Refuse("the What is live section has no table with at least one row")
     head = cells(table[0])
     if head != HEADINGS:
         raise Refuse(f"table headings are {head}, expected {HEADINGS}")
@@ -127,7 +151,7 @@ def render_body(readme: str) -> str:
     return "\n".join(blocks)
 
 
-def render(readme: str, index: str) -> str:
+def render(status: str, index: str) -> str:
     try:
         header = index[:index.index('<main id="main">')]
         footer = index[index.index("</main>"):]
@@ -139,17 +163,17 @@ def render(readme: str, index: str) -> str:
     header = header.replace('<a href="status.html">', '<a href="status.html" aria-current="page">')
     header = re.sub(r"<title>[^<]*</title>", "<title>Status · Mini</title>", header)
     header = re.sub(r'<meta name="description" content="[^"]*">',
-                    '<meta name="description" content="The state of each Mini component, by evidence class, '
-                    'generated from the Honest state table of the repository README.">', header)
+                    '<meta name="description" content="What is live on the Mini demo box, '
+                    'generated from docs/STATUS.md in the repository.">', header)
     intro = (
         "<h1>Status</h1>\n"
-        "<p class=\"lede\">Each component of Mini, graded by the strongest evidence for it.</p>\n"
-        "<p class=\"small muted\">This page is generated from the Honest state table of the "
-        f"repository <a href=\"{BLOB}README.md#honest-state\">README</a> by "
+        "<p class=\"lede\">What is live on the demo box and what is not, each row with the run it rests on.</p>\n"
+        "<p class=\"small muted\">This page is generated from "
+        f"<a href=\"{BLOB}{STATUS_PATH}\">{STATUS_PATH}</a> by "
         "<code>website/gen-status.py</code>, and a gate fails when it is stale. "
-        "Edit the README, not this page.</p>\n"
+        f"Edit {STATUS_PATH}, not this page.</p>\n"
     )
-    main = '<main id="main">\n<div class="wrap wide">\n' + intro + render_body(readme) + "\n\n</div>\n"
+    main = '<main id="main">\n<div class="wrap wide">\n' + intro + render_body(status) + "\n\n</div>\n"
     return header + main + footer
 
 
@@ -167,22 +191,22 @@ def source_errors(name: str, text: str) -> list[str]:
 
 
 def check() -> int:
-    readme, index = README.read_text(), (SITE / "index.html").read_text()
-    want = render(readme, index)
+    status, index = STATUS.read_text(), (SITE / "index.html").read_text()
+    want = render(status, index)
     have = OUT.read_text() if OUT.exists() else ""
     red = 0
     if want != have:
         sys.stdout.writelines(difflib.unified_diff(
-            have.splitlines(True), want.splitlines(True), "status.html (on disk)", "status.html (from README.md)", n=1))
-        print("website: status.html is stale against README.md; run python3 website/gen-status.py")
+            have.splitlines(True), want.splitlines(True), "status.html (on disk)", f"status.html (from {STATUS_PATH})", n=1))
+        print(f"website: status.html is stale against {STATUS_PATH}; run python3 website/gen-status.py")
         red += 1
     # Control 1: a changed table cell must change the page.
-    lines = readme.splitlines()
-    first_row = lines.index("## Honest state") + next(
-        i for i, l in enumerate(section(readme)) if l.startswith("|")) + 3
+    lines = status.splitlines()
+    first_row = lines.index(HEADING) + next(
+        i for i, l in enumerate(section(status)) if l.startswith("|")) + 3
     lines[first_row] = lines[first_row].replace(" |", " CONTROL-MUTATION |", 1)
     if "CONTROL-MUTATION" not in render("\n".join(lines), index):
-        print("website: CONTROL FAILED: a mutated README row did not change the generated page")
+        print("website: CONTROL FAILED: a mutated status row did not change the generated page")
         red += 1
     errors = [e for page in sorted(SITE.glob("*.html")) for e in source_errors(page.name, page.read_text())]
     for e in errors:
@@ -201,9 +225,9 @@ def check() -> int:
             print("website: CONTROL FAILED: a mutated source block still matched its file")
             red += 1
     if red == 0:
-        rows = sum(1 for l in section(readme) if l.startswith("|")) - 2
+        rows = sum(1 for l in section(status) if l.startswith("|")) - 2
         blocks = sum(text.count('<pre data-source="') for text in (p.read_text() for p in SITE.glob("*.html")))
-        print(f"website: PASS: status.html matches README.md ({rows} rows); {blocks} source blocks match; both controls refused")
+        print(f"website: PASS: status.html matches {STATUS_PATH} ({rows} rows); {blocks} source blocks match; both controls refused")
     return 1 if red else 0
 
 
@@ -214,7 +238,7 @@ def main() -> int:
         if sys.argv[1:]:
             print(__doc__.strip().splitlines()[2], file=sys.stderr)
             return 2
-        OUT.write_text(render(README.read_text(), (SITE / "index.html").read_text()))
+        OUT.write_text(render(STATUS.read_text(), (SITE / "index.html").read_text()))
         print(f"wrote {OUT.relative_to(ROOT)}")
         return 0
     except Refuse as e:

@@ -53,6 +53,11 @@ if [ -f "$out/READY" ]; then
   for l in $labels; do pipeline_label "$l" "$tip"; done; pipeline_log "$tip already READY; labelled $label"; exit 0
 fi
 t0=$(date +%s)
+# The native builder reuses objects by content (MINIDREGG_NATIVE_OBJECT_CACHE, scripts/build-native-host.sh
+# cc-object.sh; a hit is touched). Entries no build has used for PIPELINE_OBJECT_CACHE_DAYS (14) days go.
+if [ -n "${MINIDREGG_NATIVE_OBJECT_CACHE:-}" ] && [ -d "$MINIDREGG_NATIVE_OBJECT_CACHE" ]; then
+  find "$MINIDREGG_NATIVE_OBJECT_CACHE" -name '*.o' -type f -mtime +"${PIPELINE_OBJECT_CACHE_DAYS:-14}" -delete 2>/dev/null || true
+fi
 from=$(pipeline_find_tree "$tip" "$tree")
 moved=""
 if [ -z "$from" ]; then
@@ -77,6 +82,7 @@ else
 fi
 cd "$W/src"
 t_clone=$(date +%s)
+pipeline_cache_audit "$W/src" || pipeline_die "lake-cache-audit could not run: not publishing from an unguarded cache"
 pipeline_log "building $tip ($label) from $from$moved"
 
 # --- the build chain, one slot, one memory cap ------------------------------------------------
@@ -88,7 +94,7 @@ export LANE_DIR="$W" MINI_CANDIDATE_CARGO_JOBS=\${MINI_CANDIDATE_CARGO_JOBS:-8}
 [ -f "$PIPELINE_ROOT/sccache.env" ] && . "$PIPELINE_ROOT/sccache.env"
 if [ -n "$moved" ] && [ ! -f "$W/logs/umbrella.done" ]; then   # not a gated tree: compile the delta in parallel first (the native builder serializes Lean)
   s=\$(date +%s)
-  LEAN_NUM_THREADS=\${PIPELINE_LEAN_THREADS:-\${LEAN_NUM_THREADS:-8}} lake build Minidregg +Host.Main:leanArts ObjectiveProofs >"$W/logs/umbrella.log" 2>&1
+  LEAN_NUM_THREADS=\${PIPELINE_LEAN_THREADS:-\${LEAN_NUM_THREADS:-8}} lake build \$(bash scripts/pipeline/umbrella-targets || echo umbrella-targets-missing) >"$W/logs/umbrella.log" 2>&1
   printf 'umbrella\t%s\n' \$(( \$(date +%s) - s )) >>"$W/logs/timings.tsv"; touch "$W/logs/umbrella.done"
 fi
 for step in host consent prime rust; do

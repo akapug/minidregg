@@ -1,4 +1,4 @@
-//! `can [NAME] [--all]` (P-AFFORDANCES; DEOS §1.3, deos's `project_for(held)`).
+//! `can [NAME] [--all]` (P-AFFORDANCES; docs/DEOS.md §1.3, deos's `project_for(held)`).
 //!
 //! For each resource this workspace names (or NAME): read, from the Host, the
 //! capability record behind each capability the reference names (a signed
@@ -374,7 +374,7 @@ fn resource(run: &mut Run<'_>, me: &str, name: &str, all: bool) -> Result<()> {
                     continue;
                 };
                 if *verb == "edit" {
-                    let text = String::from_utf8_lossy(&crate::decode_hex(&payload).unwrap_or_default()).into_owned();
+                    let text = String::from_utf8_lossy(&mini_sdk::hex::decode(&payload).unwrap_or_default()).into_owned();
                     let request = invoke(
                         name,
                         json!({"type":"document",

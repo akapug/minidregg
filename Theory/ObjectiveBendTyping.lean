@@ -1,6 +1,28 @@
-import Theory.ObjectiveBendTypes
-import Theory.ObjectiveBendOpenRecursion
-import Theory.AxiomPin
+module
+
+public import Theory.ObjectiveBendTypes
+public import Theory.ObjectiveBendOpenRecursion
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Theory.ObjectiveBendTyping
 open ObjectiveBendTypes ObjectiveBendOpenRecursion
 set_option autoImplicit false
@@ -632,12 +654,8 @@ theorem checked_erasure (source : AnnotatedTerm) (context : Context)
     (result : Checked source context) :
     PartialTyping source.assumptions context source.erase result.type result.uses := result.derivation
 
-/-- Total proof judgments inhabit Lean Prop, including laws of partial runtime
-syntax. No Typing constructor can convert arbitrary Fix into a total proof. -/
-def TotalProof (law : Prop) := law
-
 theorem partial_beta_law (body argument : Term) :
-    TotalProof (Step (.app (.lam body) argument) (instantiate body argument)) := .beta body argument
+    Step (.app (.lam body) argument) (instantiate body argument) := .beta body argument
 
 /-- Inherited/required/provided annotations all feed checking. Requirements are
 finite structural row contracts, independently checked against future Self;
@@ -672,7 +690,7 @@ theorem reusable_lambda_capture_rule {assumptions : Assumptions} {context : Cont
 /-- Total logic proves a contextual reduction law despite the discarded
 argument being any partial computation, including a divergent Fix. -/
 theorem ignores_any_partial_argument (argument : Term) :
-    TotalProof (Evaluates (.app (.lam (.nat 7)) argument) (.nat 7)) :=
+    Evaluates (.app (.lam (.nat 7)) argument) (.nat 7) :=
   by
     refine ⟨.next (.beta _ _) ?_, .natural 7⟩
     simpa [instantiate, Term.substitute] using (Steps.refl (.nat 7))

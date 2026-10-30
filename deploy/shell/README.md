@@ -13,8 +13,10 @@ the box only relays its frames. A proxy key's session is a byte pipe to the
 public socket: `mini socket-proxy` accepts socket frames that name the
 deployment's pinned config and a public-socket operation, relays each on its own
 socket connection, and closes the pipe on anything else (a stray byte, a wrong
-config pin, an operator operation). It never runs a shell; `ssh friend@host
-'cmd'` exits 64. There is no workspace or home on the box for a proxy key.
+config pin, an operator operation; the module header of `native/resource-client/src/proxy.rs`). The
+one other thing a proxy key can ask for is a signed provider-credential exchange,
+relayed to the box's key broker (`mini-socket-proxy`). It never runs a shell;
+`ssh friend@host 'cmd'` exits 64. There is no workspace or home on the box for a proxy key.
 
 `render-shell-key mode=proxy ABS_PROXY_WRAPPER ABS_MINI ABS_PUBLIC_SOCKET FRIEND.pub`
 prints the proxy line; `render-shell-key [mode=shell] ...` (below) the hosted one.
@@ -72,17 +74,43 @@ consent executables, the verifier and the Store helper; `provenance.json`
 the three paths when it is made and refuses a different selection later in the
 same process.
 
-What this does **not** yet give a proxy friend: the provider is a full peer. It
-replays the Store named by `storageRoot` from genesis and refuses a rollback or
-a rewritten prefix, and there is no command that hands a friend such a Store;
-so on a friend's own machine signing stays refused until one exists. The macOS
-client has no consent pair (`consent: null` in provenance) and cannot sign.
+The default (full) provider reads a locally admitted Store, which a friend's own machine does not have. Thin consent is the mode that needs none. With
+`MINI_THIN_CONSENT=1` the client uses consent frames 230-232, which read no Store:
+the provider checks what custody signs against its own command and the target
+views the Host served under the member's observe grants, and refuses a turn it
+cannot display, naming the unsigned input (`thin_mode` and `thin_plan` in
+`native/resource-client/src/client_consent.rs`; the statement is `Kernel/NativeThinConsent.lean`).
+It displays invocations and delegations. A birth (`create`) signs through its own thin arm,
+frames 234/235: the provider re-authors the member's retained source at the coordinates the
+Host's draft carries and checks the plan against it, still reading no Store (`birth` in
+`native/resource-client/src/workspace.rs`, `set_thin_birth_source`; the statement is
+`Kernel/NativeThinBirth.lean`).
+Status: **exists** (code and unit tests). It is **not journeyed**: the scripts are
+`native/resource-client/journey.d/jpriv2.sh` (enrol, then write and read over
+`--remote`, with a consent config naming no Store) and
+`native/resource-client/journey.d/jthin-consent.sh`, and no recorded passing run of
+either is in `docs/evidence/`. The macOS client has no consent pair
+(`consent: null` in its `clients_json` provenance entry, `deploy/candidate/build.sh`) and cannot sign.
 When the client is given a Host path and `MINI_CONSENT_HOST` is unset, it takes
 `minidregg-client-consent` beside that Host (the hosted shell's case, since the
-candidate ships both in `bin/`), and the provider then reads the deployment
-config and its Store with the session's own permissions.
+candidate ships both in `bin/`; `with_consent` in `client_consent.rs`), and the provider then
+reads the deployment config and its Store with the session's own permissions.
 
-The sponsor's side, in their (hosted) shell:
+Under split tenancy a hosted member's account (`mini-s-NAME`) cannot read the Store, which the
+Store operator owns. That is the isolation boundary, so the member's full consent runs box-side,
+delegated (`native/resource-client/src/consent_proxy.rs`). Per member, a socket-activated `mini
+serve-controller-consent` runs as the Store operator, holds the verifier that replays the Store,
+and answers only that member's consent frames (220-227). Its listener is owned by the member and
+sits in the member's own 0700 directory. The member's session selects it with
+`MINI_CONSENT_SOCKET`, `MINI_CONSENT_PEER_UID` (0: systemd creates the listener),
+`MINI_CONSENT_SHA256` (the provider) and `MINI_CONSENT_CONFIG_SHA256` (the pinned config),
+alongside the three variables above. The client refuses a peer, provider or config that differs
+from these pins before it sends a frame. The member gains no read access: what comes back is the
+consent answer for its own request. The service ends after `--idle-seconds` (600) with no
+connection and restarts from its retained frontier on the next connection. The unit pair is the
+one `deploy/spk-host/controller-world.py` renders for controllers.
+
+The sponsor's side, in their (hosted) shell (grammar: `ENROLL` and `PROVISION` in `native/resource-client/src/shell_grammar.rs`):
 
 ```
 enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX   # the three lines `mini join --key` printed
@@ -92,6 +120,12 @@ enroll submit NAME
 provision NAME SUBJECT FUNDING PREDICATE   # optional: an account + factory grant so they can create
 enroll welcome NAME > welcome.json   # hand to the friend
 ```
+
+This is the friend-keeps-the-key procedure. The other procedure the operator has is
+the hosted account, where the member's key is made by their own `keygen` on the box
+and enrolled by `mini-reenroll` (`OPERATOR.md`; the door runs the same steps for
+strangers, `deploy/door/README.md`). In both, no process on the box holds a secret
+the member did not make there.
 
 `mini shell` is one participant's session over the client contract. Each verb
 is exactly one `mini` client operation, run in-process through the same
@@ -137,27 +171,38 @@ ssh newcomer@host "import shared $ref"
 
 (This is the form `native/resource-client/shell-journey.sh` runs in J3.)
 
+## Templates
+
+The files shell verbs compile in or load unchanged (room templates, the chat,
+private-room, job, market and story laws, the Hermes roles, the MUD sheets) live
+with the client that embeds them, in `native/resource-client/templates/`
+(its README maps each verb to its files). They moved there from
+`deploy/shell/templates/` so that one home holds them; nothing on a box reads
+them from disk.
+
 ## Endings
 
 stdout carries the client's own output. stderr ends every failed verb with one
-line whose first word says who decided:
+line whose first word says who decided (the reply bytes are `RESPONSE_NO_RECORD`, `RESPONSE_NEVER_FORWARDED` and `RESPONSE_HOST_OUTCOME` in `native/host-operations.rs`):
 
 | exit | first word | meaning |
 |---|---|---|
 | 0 | | done |
 | 1 | `error:` | the client stopped; the Host was not asked or did not answer |
 | 2 | `usage:` | the line did not parse |
-| 3 | `refused:` | the Host refused; its outcome is decoded by the Host's own `inspect outcome` and the frame kept in `HOME/refusals/` |
-| 4 | `undecided:` | the Host answered uncertain, contention, unavailable or absent; `lookup ID` asks again |
+| 3 | `refused:` / `charged:` | the Host answered with no record (reply byte 253: decided before any append, so nothing happened; its outcome decoded by the Host's own `inspect outcome`, the frame kept in `HOME/refusals/`), the socket never forwarded the request (reply byte 254), or the Host admitted a charged failure (only the price posted) |
+| 4 | `undecided:` | the Host answered under its outcome envelope (reply byte 255, whatever it decodes to), or uncertain, contention, unavailable or absent as an answer: the effect is unknown; `lookup ID` asks again, and nothing is repeated |
 
-A refusal is recognised from the Host's reply byte or outcome type, recorded by
-the client where the Host answered, never from error text.
+A refusal is recognised only from the Host's no-record marker (253), recorded by
+the client where the Host answered: never from a 255 frame, whatever it decodes
+to, and never from error text. `pay` and `topup` keep a record per request: a rerun after a lost
+reply looks the payment up instead of paying again; `again` pays once more.
 
-## Known limit
+## Key files in `enroll plan`
 
-`enroll plan NAME KEYFILE NEXT-PUB-HEX COSIGN-HEX` (a secret key file in the
-sponsor's session home) still signs with both keys in one process; it is kept for
-hosted sessions whose keys are on the box anyway. The next key and its
-co-signature are the friend's words, never a file in the sponsor's home. A newcomer
-who keeps their key uses `enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX COSIGN-HEX`
-and `mini join` (above); no process on the box ever holds their secret.
+`enroll plan NAME KEYFILE NEXT-PUBLIC-KEY-HEX COSIGN-HEX` names a secret key file under
+the sponsor's session home (`keys/KEYFILE`); it is for keys that already live on the
+box. The hex form above never puts the newcomer's secret on the box. Both need the
+newcomer's next public key and its co-signature (their words, never a file in the
+sponsor's home), or `--no-prerotation` to enrol without one
+(the `enroll plan` grammar in `shell_grammar.rs` and its `--no-prerotation` flag).

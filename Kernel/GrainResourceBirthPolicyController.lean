@@ -4,10 +4,30 @@ admit a request: the complete birth credential bundle and the signed grain
 target, observation, and authority envelopes must still be checked against
 one current loaded image and one joint candidate before any durable intent.
 -/
-import Compiler.GrainResourceBirthController
-import Compiler.GrainResourceBirthHostCodec
-import Kernel.ResourceBirthPolicyController
-import Kernel.DeclaredResourceController
+module
+
+public import Compiler.GrainResourceBirthController
+public import Compiler.GrainResourceBirthHostCodec
+public import Kernel.ResourceBirthPolicyController
+public import Kernel.DeclaredResourceController
+public import Kernel.Bounds
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.GrainResourceBirthPolicyController
 
@@ -33,27 +53,15 @@ def ingressStream : StreamCodec SignedIngress :=
 def ingressFrame : List UInt8 :=
   "DREGG/GRAIN-RESOURCE-BIRTH/SIGNED-INGRESS/v2".toUTF8.toList
 
-def ingressRawCodec : LawfulCodec SignedIngress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
 def ingressCodec : LawfulCodec SignedIngress :=
-  ResourceBirthCodec.strictCodec ingressRawCodec
-
-/-- The new source carrier is bounded before nested descriptor decoding. This
-cap applies only to grain-backed birth, not to the legacy bare-birth route. -/
-def maxSourceBytes : Nat := 8 * 1024 * 1024
+  (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   raw : SignedIngress
-  sourceSizeBound : raw.sourceBytes.length ≤ maxSourceBytes
+  /-- The source carrier is bounded by one cell's bytes (`Kernel.Bounds.cellBytesMax`)
+  before nested descriptor decoding. -/
+  sourceSizeBound : raw.sourceBytes.length ≤ Kernel.Bounds.cellBytesMax
   source : GrainResourceBirthController.Source
   birth : ResourceBirthPolicyController.Concrete.DecodedIngress
   grain : DeclaredResourceController.SignedIngress
@@ -67,7 +75,7 @@ structure DecodedIngress where
 
 def decodeIngress (bytes : List UInt8) : Option DecodedIngress := do
   let raw ← ingressCodec.decode bytes
-  if size : raw.sourceBytes.length ≤ maxSourceBytes then
+  if size : raw.sourceBytes.length ≤ Kernel.Bounds.cellBytesMax then
   match sourceDecoded : GrainResourceBirthHostCodec.sourceCodec.decode raw.sourceBytes with
   | none => none
   | some source =>
@@ -104,7 +112,7 @@ theorem decodeIngress_canonical {bytes : List UInt8} {ingress : DecodedIngress}
       split at decoded <;> try contradiction
       split at decoded <;> try contradiction
       cases Option.some.inj decoded
-      exact ResourceBirthCodec.strictCodec_canonical ingressRawCodec parsed
+      exact (StreamCodec.framed ingressFrame ingressStream).toLawful_canonical _ _ parsed
 
 /-- This binds the three strict carriers to the source-derived command and
 receiver domain/semantics. The caller obtains `source` from the canonical

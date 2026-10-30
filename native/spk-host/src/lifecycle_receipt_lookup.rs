@@ -3,12 +3,13 @@
 //! the governed repeat (v4) lifecycle lanes.
 //!
 //! The Host answers op23/op27/op39 for either lane with one frame
-//! (`DREGG/NATIVE-HOST/OUTCOME/v5`, `confirmed replayed`): it selects the
+//! (`DREGG/NATIVE-HOST/OUTCOME/v7`, `confirmed replayed`): it selects the
 //! lane by the ingress tag. So the lookup is one function, and a lane differs
 //! only in which retained attempt directory, markers and ingress file it
 //! names. A lookup reads the exact ingress the one original submit carried;
 //! it never submits, assembles or signs anything.
 
+use crate::io_context::IoContext;
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::lifecycle_v3_native::{decimal, framed_payload, hex, text};
 use serde_json::Value;
@@ -18,7 +19,7 @@ use std::io::{self, Read};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
-pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
+pub(crate) const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 const MAX_FRAME: u64 = 12_102_760;
 
 fn invalid(reason: &'static str) -> io::Error {
@@ -28,31 +29,7 @@ fn invalid(reason: &'static str) -> io::Error {
 /// Read one retained private file: regular, single-link, operator-owned,
 /// mode 0600, non-empty, at most `max` bytes, and unchanged while read.
 pub(crate) fn retained(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.nlink() != 1
-        || metadata.uid() != unsafe { libc::geteuid() }
-        || metadata.permissions().mode() & 0o777 != 0o600
-        || metadata.len() == 0
-        || metadata.len() > max
-    {
-        return Err(invalid("retained lifecycle artifact identity refused"));
-    }
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let opened = file.metadata()?;
-    if opened.dev() != metadata.dev() || opened.ino() != metadata.ino() {
-        return Err(invalid("retained lifecycle artifact changed"));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.by_ref().take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != metadata.len() {
-        return Err(invalid("retained lifecycle artifact length changed"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "retained lifecycle artifact identity refused")
 }
 
 /// `[transactionId, eventId, acceptedCount, worldRoot]` of a confirmed outcome
@@ -120,20 +97,22 @@ pub(crate) fn retained_submitted_ingress(
 
 /// Read-only lookup of one retained exact ingress: opcode `lookup` with the
 /// same bytes the one submit carried. Each probe owns fresh output paths, so a
-/// lookup may be repeated after another lost reply.
-pub(crate) fn lookup_retained(
+/// lookup may be repeated after another lost reply. Returns Lean's decoded
+/// outcome (`confirmed replayed`, `absent`, or a refusal) and the probe's
+/// directory name.
+pub(crate) fn lookup_view(
     operator: &PrivateOperator,
     attempt_dir: &Path,
     lookup: u8,
     ingress: &[u8],
-) -> io::Result<RecoveredReceipt> {
+) -> io::Result<(Value, String, Vec<u8>)> {
     let mut nonce = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut nonce)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut nonce)?;
     let lookup_dir = attempt_dir.join(format!("op{lookup}-lookup-{}", hex(&nonce)));
     DirBuilder::new().mode(0o700).create(&lookup_dir)?;
     let reply = operator.invoke(lookup, ingress)?;
     write_new(&lookup_dir, "frame.bin", &reply)?;
-    let payload = framed_payload(&reply, lookup, OUTCOME_TAG)?;
+    let payload = framed_payload("receipt lookup", &reply, lookup, OUTCOME_TAG)?;
     let payload_path = write_new(&lookup_dir, "outcome.bin", payload)?;
     let inspected = operator.tool(
         "inspect",
@@ -142,12 +121,24 @@ pub(crate) fn lookup_retained(
         &lookup_dir.join("outcome.json"),
     )?;
     let view: Value = serde_json::from_slice(&inspected)?;
-    let [transaction_id, event_id, accepted_count, world_root] =
-        outcome_receipt(&view, "replayed")?;
     let lookup_name = lookup_dir
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| invalid("lifecycle lookup name absent"))?;
+        .ok_or_else(|| invalid("lifecycle lookup name absent"))?
+        .to_owned();
+    Ok((view, lookup_name, inspected))
+}
+
+/// As `lookup_view`, requiring Lean's original receipt.
+pub(crate) fn lookup_retained(
+    operator: &PrivateOperator,
+    attempt_dir: &Path,
+    lookup: u8,
+    ingress: &[u8],
+) -> io::Result<RecoveredReceipt> {
+    let (view, lookup_name, inspected) = lookup_view(operator, attempt_dir, lookup, ingress)?;
+    let [transaction_id, event_id, accepted_count, world_root] =
+        outcome_receipt(&view, "replayed")?;
     Ok(RecoveredReceipt {
         transaction_id,
         event_id,

@@ -2,7 +2,7 @@
 """The fixed performance workload: one scratch native Store, every phase timed per operation.
 
   scripts/perf/workload.py --bin CANDIDATE/bin --root NEW_DIR [--births N] [--updates M] [--reads K]
-                           [--seed S] [--budget-s B]
+                           [--seed S] [--budget-s B] [--births-only]
 
 The world is native/resource-client/activity_world.py (the same client path every Objective journey drives:
 newparticipant-acceptance.sh genesis with the Objective policy, every turn a signed `mini activity` command).
@@ -20,6 +20,10 @@ Phases (docs/PERF-WORKLOAD.md):
               sponsor) and one inbox send (poster.post(sink)) delivered by the second subject
   reopen      stop the Host by its PID file, start it on the same Store, time to the first answered read, then
               one more read
+
+--births-only runs genesis, setup, births and reopen and nothing else (the `births` journey row,
+scripts/pipeline/journey-rows: THE BAR is on births and the reopen after them). Cadence certifies keep firing
+inside births (N large); their samples print under `checkpoint` even though that phase is not entered.
 
 Inputs are deterministic for a SEED (object order, amounts, read heights); keys and op ids are fresh per run.
 Writes ROOT/results.tsv (phase, op, count, p50_ms, p99_ms, max_ms, total_s), ROOT/table.txt, ROOT/summary.json,
@@ -40,11 +44,15 @@ ap.add_argument('--births', type=int, default=20)
 ap.add_argument('--updates', type=int, default=16)
 ap.add_argument('--reads', type=int, default=8)
 ap.add_argument('--seed', type=int, default=20261013)
+ap.add_argument('--births-only', action='store_true',
+                help='genesis, setup, births, reopen only (no updates, reads, checkpoint or judgment phase)')
 ap.add_argument('--certify-every', type=int, default=192,
                 help='certify when this many records are uncertified (must stay under the tail bound 256)')
 a = ap.parse_args()
 if a.births < 1 or a.updates < 0 or a.reads < 1:
     raise SystemExit('need --births >= 1, --updates >= 0, --reads >= 1')
+PHASES = (['genesis', 'setup', 'births', 'reopen'] if a.births_only else
+          ['genesis', 'setup', 'births', 'updates', 'reads', 'checkpoint', 'judgment', 'reopen'])
 rng = random.Random(a.seed)
 
 T0 = time.monotonic()
@@ -159,8 +167,9 @@ def total(name, label, phase=None, op=None):
 
 
 def query(name, view, height=None, phase=None, op=None):
-    """A signed query of NAME's resource (`mini query`, answered by a cold open of the Store): VIEW `resource`
-    (current) or `at` HEIGHT (absolute, K-HISTORY-READ). Returns the query directory (challenge.json)."""
+    """A signed query of NAME's resource (`mini query --workspace`, answered by the serving session: ops 4/5):
+    VIEW `resource` (current) or `at` HEIGHT (absolute, K-HISTORY-READ). Returns the query directory
+    (challenge.json)."""
     wsd = json.loads((w.sponsor / 'workspace.json').read_text())
     target = str(w.objects[name]['object'])
     req = w.root / 'queries'
@@ -173,8 +182,7 @@ def query(name, view, height=None, phase=None, op=None):
     tag = f'{view}-{name}-{height if height is not None else "now"}-{time.time_ns()}'
     f = req / f'{tag}.json'
     f.write_text(json.dumps(intent))
-    args = (tag, w.mini, 'query', '--host', wsd['host'], '--config', wsd['config'], '--intent', f, '--key',
-            wsd['key'], '--view', view, '--dir', req / tag)
+    args = (tag, w.mini, 'query', '--workspace', w.sponsor, '--intent', f, '--view', view, '--dir', req / tag)
     r = timed(phase, op, w.sh, *args, ok=(0, 1, 2, 3)) if phase else w.sh(*args, ok=(0, 1, 2, 3))
     query.last = r
     return req / tag
@@ -217,53 +225,54 @@ try:
             resource('births', name)
             create('births', name, CPIN, start=rng.randrange(0, 1000))
 
-    with Phase('updates'):
-        for i in range(a.updates):
-            maybe_certify('updates', f'u{i}')
-            name = born[i % len(born)]
-            amount = rng.randrange(1, 100)
-            turn('updates', 'invoke', f'u{i:04d}-{name}', w.sponsor, invoke_body(name, 'deposit', nat(amount)),
+    if not a.births_only:
+        with Phase('updates'):
+            for i in range(a.updates):
+                maybe_certify('updates', f'u{i}')
+                name = born[i % len(born)]
+                amount = rng.randrange(1, 100)
+                turn('updates', 'invoke', f'u{i:04d}-{name}', w.sponsor, invoke_body(name, 'deposit', nat(amount)),
+                     'installed')
+        height_after_updates = records['count']
+
+        with Phase('reads'):
+            picks = [born[rng.randrange(len(born))] for _ in range(a.reads)]
+            for i, name in enumerate(picks):
+                t, _ = total(name, f'r{i:04d}-{name}', 'reads', 'read-current')
+                w.check(f'r{i:04d}-{name}-has-state', t is not None, t)
+            # past heights are absolute (genesis height G + log height): G from the current height a query answers at
+            probe = query(picks[0], 'resource')
+            G = int(json.loads((probe / 'challenge.json').read_text())['height']) - records['count']
+            for i, name in enumerate(picks):
+                h = G + rng.randrange(born_at[name], records['count'] + 1)   # within the object's life: its grant exists
+                rc, r = query_at('reads', name, h)
+                w.check(f'at{i:04d}-{name}-h{h}', rc == 0, {'rc': rc, 'err': r.stderr.decode(errors='replace')[-200:]})
+
+        with Phase('checkpoint'):
+            w.check('history-crossed-64', records['count'] > 64, records['count'])
+            certify('checkpoint', 'phase-certify')
+
+        with Phase('judgment'):
+            # call: the vault admits only the sponsor as `request/subject`; a nested frame carries none, so the
+            # forward lands only under a scoped grant {vault, deposit, exact 4, 1 use}
+            g = {'object': w.objects['vault']['object'], 'method': 'deposit', 'code': CPIN, 'args': {'exact': nat(4)},
+                 'uses': '1'}
+            hop = record(target=nat(w.objects['vault']['object']), amount=nat(4))
+            turn('judgment', 'call-granted', 'call-granted', w.sponsor, invoke_body('relayA', 'forward', hop, grants=[g]),
                  'installed')
-    height_after_updates = records['count']
-
-    with Phase('reads'):
-        picks = [born[rng.randrange(len(born))] for _ in range(a.reads)]
-        for i, name in enumerate(picks):
-            t, _ = total(name, f'r{i:04d}-{name}', 'reads', 'read-current')
-            w.check(f'r{i:04d}-{name}-has-state', t is not None, t)
-        # past heights are absolute (genesis height G + log height): G from the current height a query answers at
-        probe = query(picks[0], 'resource')
-        G = int(json.loads((probe / 'challenge.json').read_text())['height']) - records['count']
-        for i, name in enumerate(picks):
-            h = G + rng.randrange(born_at[name], records['count'] + 1)   # within the object's life: its grant exists
-            rc, r = query_at('reads', name, h)
-            w.check(f'at{i:04d}-{name}-h{h}', rc == 0, {'rc': rc, 'err': r.stderr.decode(errors='replace')[-200:]})
-
-    with Phase('checkpoint'):
-        w.check('history-crossed-64', records['count'] > 64, records['count'])
-        certify('checkpoint', 'phase-certify')
-
-    with Phase('judgment'):
-        # call: the vault admits only the sponsor as `request/subject`; a nested frame carries none, so the
-        # forward lands only under a scoped grant {vault, deposit, exact 4, 1 use}
-        g = {'object': w.objects['vault']['object'], 'method': 'deposit', 'code': CPIN, 'args': {'exact': nat(4)},
-             'uses': '1'}
-        hop = record(target=nat(w.objects['vault']['object']), amount=nat(4))
-        turn('judgment', 'call-granted', 'call-granted', w.sponsor, invoke_body('relayA', 'forward', hop, grants=[g]),
-             'installed')
-        v, _ = total('vault', 'vault-after-call')
-        w.check('call-landed', v == 4, v)
-        # send: poster.post(sink, 3) queues a message; the second subject delivers it
-        post = record(target=nat(w.objects['sink']['object']), amount=nat(3))
-        sent = turn('judgment', 'send', 'send-post', w.sponsor, invoke_body('poster', 'post', post, postage=TICKS),
-                    'installed')
-        mid = (sent.get('report') or {}).get('value')  # the message id is the post's report
-        w.check('send-queued', mid is not None, sent.get('report'))
-        turn('judgment', 'deliver', 'send-deliver', w.second,
-             {'kind': 'deliverMessage', 'sender': w.objects['poster']['object'], 'target': w.objects['sink']['object'],
-              'message': str(mid)}, 'installed')
-        s, _ = total('sink', 'sink-after-deliver')
-        w.check('send-delivered', s == 3, s)
+            v, _ = total('vault', 'vault-after-call')
+            w.check('call-landed', v == 4, v)
+            # send: poster.post(sink, 3) queues a message; the second subject delivers it
+            post = record(target=nat(w.objects['sink']['object']), amount=nat(3))
+            sent = turn('judgment', 'send', 'send-post', w.sponsor, invoke_body('poster', 'post', post, postage=TICKS),
+                        'installed')
+            mid = (sent.get('report') or {}).get('value')  # the message id is the post's report
+            w.check('send-queued', mid is not None, sent.get('report'))
+            turn('judgment', 'deliver', 'send-deliver', w.second,
+                 {'kind': 'deliverMessage', 'sender': w.objects['poster']['object'], 'target': w.objects['sink']['object'],
+                  'message': str(mid)}, 'installed')
+            s, _ = total('sink', 'sink-after-deliver')
+            w.check('send-delivered', s == 3, s)
 
     with Phase('reopen'):
         pidfile = w.W / 'public' / 'server.pid'
@@ -324,12 +333,13 @@ for ph in order:
         if p == ph:
             rows.append((ph, op, len(xs), ms(nearest(xs, 50)), ms(nearest(xs, 99)), ms(max(xs)), f'{sum(xs):.2f}'))
     rows.append((ph, 'TOTAL', '', '', '', '', f'{phase_wall.get(ph, 0):.2f}'))
+for (p, op), xs in samples.items():   # samples of a phase not entered (cadence certifies under --births-only)
+    if p not in order:
+        rows.append((p, op, len(xs), ms(nearest(xs, 50)), ms(nearest(xs, 99)), ms(max(xs)), f'{sum(xs):.2f}'))
 store_bytes = int(subprocess.run(['du', '-sb', str(w.W / 'store')], stdout=subprocess.PIPE).stdout.split()[0]) \
     if (w.W / 'store').exists() else -1
-completed = [p for p in ['genesis', 'setup', 'births', 'updates', 'reads', 'checkpoint', 'judgment', 'reopen']
-             if phase_ok.get(p)]
-missing = [p for p in ['genesis', 'setup', 'births', 'updates', 'reads', 'checkpoint', 'judgment', 'reopen']
-           if p not in completed]
+completed = [p for p in PHASES if phase_ok.get(p)]
+missing = [p for p in PHASES if p not in completed]
 header = ('phase', 'op', 'count', 'p50_ms', 'p99_ms', 'max_ms', 'total_s')
 (OUT / 'phases.tsv').write_text(''.join(f'{p}\t{phase_epochs[p][0]:.3f}\t{phase_epochs[p][1]:.3f}\n'
                                          for p in order if p in phase_epochs))
@@ -337,7 +347,7 @@ head = samples.get(('births', 'create'), [])
 headline = ({'op': 'births/create', 'count': len(head), 'p50_ms': round(nearest(head, 50) * 1000),
              'p99_ms': round(nearest(head, 99) * 1000), 'max_ms': round(max(head) * 1000)} if head else None)
 (OUT / 'results.tsv').write_text('\n'.join('\t'.join(map(str, r)) for r in [header] + rows) + '\n')
-summary = {'type': 'mini-perf-workload-v1', 'births': a.births, 'updates': a.updates, 'reads': a.reads,
+summary = {'type': 'mini-perf-workload-v1', 'birthsOnly': a.births_only, 'phases': PHASES, 'births': a.births, 'updates': a.updates, 'reads': a.reads,
            'seed': a.seed, 'records': records['count'], 'objectCount': len(w.objects), 'allTurnsOk': all(r['ok'] for r in w.results), 'storeBytes': store_bytes,
            'totalSeconds': round(total_s, 2), 'phasesCompleted': completed, 'phasesFailed': missing,
            'headline': headline, 'certifyEvery': a.certify_every,
@@ -348,7 +358,8 @@ lines = [(f'HEADLINE births/create (an Objective object born): n={headline["coun
          f'{"phase":<11}{"op":<15}{"count":>6}{"p50_ms":>9}{"p99_ms":>9}{"max_ms":>9}{"total_s":>9}']
 for r in rows:
     lines.append(f'{r[0]:<11}{r[1]:<15}{r[2]:>6}{r[3]:>9}{r[4]:>9}{r[5]:>9}{r[6]:>9}')
-lines.append(f'N={a.births} M={a.updates} K={a.reads} seed={a.seed}: {records["count"]} records, '
+lines.append(f'N={a.births} ' + ('births-only' if a.births_only else f'M={a.updates} K={a.reads}') +
+             f' seed={a.seed}: {records["count"]} records, '
              f'{len(w.objects)} objects, store {store_bytes} B, total {total_s:.1f} s; '
              f'phases failed: {",".join(missing) or "none"}')
 (OUT / 'table.txt').write_text('\n'.join(lines) + '\n')

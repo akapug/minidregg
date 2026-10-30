@@ -19,7 +19,7 @@ NativeHostSession source `7d5b9cba`/OLean `de98e0e4`, and the CAS-winner
 receiver closure (`DurableReceiverIO` source `6f13945c`/OLean `2fbf2652`,
 ClaimV3Receiver source `6bbcfc92`/OLean `e4bdd75a`). Mini's two STOP modules
 passed direct Lean with final source-matched OLeans; six dependent Host modules
-then passed serially with `LEAN_NUM_THREADS=2 lake env lean Host/NAME.lean -o
+then passed serially with `LEAN_NUM_THREADS=2 lake env lean Host/<Name>.lean -o
 .lake/build/lib/lean/Host/NAME.olean`. All final logs are empty except Json's
 existing axiom/linter reports; there were no Lean errors. The private broker
 focused `cargo nextest` test passed 1/1 and `cargo fmt --check` passed.

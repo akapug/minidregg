@@ -33,6 +33,7 @@ is postulated here.  The only positive collision price is the existing
 import Assurance.SameCoinGameProduct
 import Assurance.Tower256RawSemanticHistoryCanonicalGame
 import Selvage.CollisionResistanceROM
+import Theory.AxiomPin
 
 namespace Minidregg.Assurance.RawHistorySecurityPrices
 
@@ -549,5 +550,30 @@ theorem fixed_true_predicate_not_bounded_below_one
   #print axioms MarginalTransportTooth.mismatch_probability_one
 
 end
+
+/-! ## Poles of `ExactReceiptCoinRealization` and `ExactRootAttribution`
+
+An identity receipt coin realizes the game coin and a flipped one does not; a
+run whose every tape is a root preimage attributes, and one returning a stray
+tape does not. -/
+
+theorem exactReceiptCoinRealization_identity :
+    ExactReceiptCoinRealization (Omega := Bool) (fun b => some b) id id :=
+  ⟨fun _ _ h => (Option.some.inj h).symm⟩
+
+theorem exactReceiptCoinRealization_flipped_refused :
+    ¬ ExactReceiptCoinRealization (Omega := Bool) (fun b => some b) not id :=
+  fun r => absurd (r.exact true true rfl) (by decide)
+
+theorem exactRootAttribution_all :
+    ExactRootAttribution (Omega := Unit) (fun _ => some ()) (fun _ => True) :=
+  ⟨fun _ _ _ => trivial⟩
+
+theorem exactRootAttribution_stray_refused :
+    ¬ ExactRootAttribution (Omega := Unit) (fun _ => some ()) (fun _ => False) :=
+  fun r => r.exact () () rfl
+
+#assert_axioms exactReceiptCoinRealization_identity exactReceiptCoinRealization_flipped_refused
+  exactRootAttribution_all exactRootAttribution_stray_refused
 
 end Minidregg.Assurance.RawHistorySecurityPrices

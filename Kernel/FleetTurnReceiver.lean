@@ -1,7 +1,28 @@
 /- One fleet turn publishes its Book postings, its optional topic append (the
 stream head and one fresh entry cell) and its operation marker in one CAS, with
 the pinned tariff as the exact fee lane. -/
-import Kernel.FleetTurn
+module
+
+public import Kernel.FleetTurn
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FleetTurnReceiver
 
@@ -99,6 +120,13 @@ structure AcceptedTurn [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile tariff ambient durable ingress.command
   accepted : FleetTurn.Accepted prepared ingress
   physical : PhysicalShape prepared
+theorem AcceptedTurn.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedTurn deployment profile tariff ambient durable ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelope ∧
+    CanonicalResourceKernel.AcceptedBatch accepted.prepared.book.payload
+      (batch tariff ingress.command) ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.prepared.resources, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)
@@ -121,7 +149,9 @@ def charge (accepted : AcceptedTurn deployment profile tariff ambient durable in
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelope.length
   | .proofWork => 1
   | .feeDebit => ingress.command.fee
@@ -134,7 +164,7 @@ def intent (accepted : AcceptedTurn deployment profile tariff ambient durable in
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical

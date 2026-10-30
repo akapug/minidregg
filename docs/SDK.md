@@ -29,11 +29,11 @@ Two nouns:
 | `explain()` over Host-presented JSON, bound to the intent/plan/header digests | `explain` | `explain.ts` | yes |
 | `Presented` / `Confirmation` / `sign_transaction` | `confirm`, `sign` | `confirm.ts` | yes |
 | Attempt custody machine; external `Delivery` custody | `custody` | `custody.ts` (attempts) | yes |
-| Consent-process client (ops 220/221/222/224) | `consent` (feature `native`) | — | no |
-| Local Host codec client (ops 7–11) | `host` (`native`) | — | no |
+| Consent provider: frames 220–233 (thin 230–232; operator plans checked against the registry's `consent_plans`), retained anchors, the resident provider | `consent` (feature `native`) | — | no |
+| Local Host storeless codec (`HOST SETTINGS codec`, frames 7–11), one child per binding, decoding its own refusals | `local` (`native`) | — | no |
 | Operator client (prepare/submit/lookup/challenge) over a unix socket or `ssh:DEST` (host key checking on) | `operator` (`native`) | — | no |
 | Filesystem custody: leased records, retained attempt dirs | `store` (`native`) | — | no |
-| The whole sequence | `flow::Client` (`native`) | — | no |
+| The signing path over one attempt directory (observe, prepare, present, seal, transmit); `mini` signs with it | `flow` (`native`) | — | no |
 
 ## Trust level: CLIENT-LOCAL
 
@@ -51,34 +51,37 @@ Two nouns:
 ## How a client uses it (Rust, native)
 
 ```rust
-use mini_sdk::{contracts::*, custody::{Attempt, Phase}, flow::Client, store::AttemptDir};
+use mini_sdk::flow::{Flow, Member, Request, Source};
 
-let profile = mini_sdk::profile::store::active()?.ok_or("no profile")?;
-let mut client = Client {
-    host: mini_sdk::host::LocalHost::start(&local_host, &settings)?,
-    consent: mini_sdk::consent::Consent::start(&consent_host, &settings)?,
+let mut member = Member {
+    codec: mini_sdk::local::Codec::new(),
+    consent: mini_sdk::consent::Consent(mini_sdk::consent::start(&anchors, consent_host, &settings, settings_bytes)?),
+    image: local_host,          // the member's own semantic Host image
+    settings,
     // `socket` is an absolute unix socket path or `ssh:member@box` (see the ssh route below)
     operator: mini_sdk::operator::Operator::new(mini_sdk::operator::Route::parse(&socket)?, &config, Some(host_sha256))?,
-    key: profile.mini_signer(0, mini_sdk::signer::Scheme::Ed25519),
 };
-let intent = Intent { actor, request_salt, cut: Cut::Invoke { targets, family: None } };
-let attempt = Attempt::first(intent.invocation_id()?, intent_nonce, command_nonce);
-let mut prepared = client.prepare(&intent, attempt, &domain)?;
-show(&prepared.presented.explanation.text);          // the member reads it
-let confirmation = prepared.presented.confirm(ui_nonce)?; // only on their accept
-let dir = AttemptDir(attempt_path);
-let call = client.seal(&mut prepared, &confirmation, &dir)?; // fsynced before any send
-let mut attempt = prepared.attempt;
-match client.transmit(&mut attempt, &call, false)? {
-    Phase::Uncertain { .. } => { client.transmit(&mut attempt, &call, true)?; } // exact lookup
-    Phase::Refused { .. } | Phase::NeverSent { .. } => { /* attempt.successor(fresh, fresh) */ }
-    _ => {}
-}
+let key = profile.mini_signer(0, mini_sdk::signer::Scheme::Ed25519);
+let mut flow = Flow { dir: &attempt_dir, host: &mut member, signer: key.as_ref() };
+let observed = flow.observe(Source::Authored { kind: "intent", path: &intent_json })?;
+let plan = flow.prepare(&observed)?;
+let plan_json = flow.present(&plan, &attempt_dir.join("plan.json"))?;
+flow.seal(&plan, &mut |sealing| {
+    // Show explain() over the intent and `plan_json`; release only on the member's accept.
+    let presented = mini_sdk::Presented::new(invocation, 1, &intent_value, std::fs::read(sealing.intent_bin)?,
+        &plan_json, std::fs::read(sealing.plan_bin)?, sealing.headers.to_vec())?;
+    confirmation_from_ui(&presented)?.check(&presented)
+})?;                                   // call.bin is synced before anything can send it
+let outcome = flow.transmit(Request::Submit, &attempt_dir.join("outcome.bin"), &attempt_dir.join("outcome.json"))?;
+match mini_sdk::custody::outcome_of(&outcome) { /* Confirmed, Charged, Refused, Undecided */ _ => {} }
 ```
 
-Rules the types enforce: a lost reply is answered by `lookup` of the same call bytes, never a
-new nonce; a successor attempt exists only after a Host refusal or a call that certainly never
-left (`NeverSent`), and needs fresh intent and command nonces; a confirmation is for one
+Rules: a lost or undecided reply is answered by `Request::Lookup` of the same `call.bin`
+(into `retry-NNNN.{bin,json}`, `store::AttemptDir::next_retry`), never a new nonce. A
+`confirmed` outcome with `disposition: charged` is `Outcome::Charged`: terminal, and not a
+success. A Host refusal is terminal for the attempt and licenses no automatic successor until
+Lean declares a no-effect class (the Host's positive no-record frame); `custody::Attempt` (and its TS twin `Attempt` in `custody.ts`) allows a
+successor only for a call that was never sealed or never forwarded. A confirmation is for one
 invocation, attempt, intent, plan, header list and reading — change any and nothing signs.
 
 A bot or bridge that posts to an external destination uses `custody::Delivery` with
@@ -89,10 +92,10 @@ started, uncompleted delivery is UNKNOWN and is never re-sent (`mini-discord-mir
 
 `@minidregg/sdk` builds intents, computes `InvocationId`, lowers, renders `explain()`, checks
 confirmations, signs, and runs the attempt machine — byte-identical to the Rust core. It has no
-consent process: a browser is not a full peer. A web page or extension reaches the member's
-local Host and consent process through a native-messaging bridge to a member-held replica (the
-extension precondition, `SDK-DESIGN.md` §8); until that bridge or a thin-peer consent producer
-exists, a browser surface must not sign Mini plans.
+consent process and no transport: a browser is not a full peer, and nothing in the SDK reaches a
+Host. A native-messaging bridge to a member-held replica is the extension precondition
+(`SDK-DESIGN.md` §8) and does not exist; until it or a thin-peer consent producer does, a browser
+surface must not sign Mini plans.
 
 ## Tests and the differential
 
@@ -137,7 +140,7 @@ has no ssh client of its own.
 The route is held end to end by `native/mini-sdk/tests/ssh-e2e.sh ART_DIR` (ART_DIR from
 `scripts/pipeline/fetch-artifacts`): it starts a scratch Store behind the candidate Host, an
 unprivileged sshd on 127.0.0.1 with throwaway host and client keys whose only key is forced to
-`mini socket-proxy`, and runs `tests/ssh_e2e.rs`: DESCRIBE over ssh equals the unix socket on one
+`mini socket-proxy`, and runs `native/mini-sdk/tests/ssh_e2e.rs`: DESCRIBE over ssh equals the unix socket on one
 reused session, a planted wrong or unknown host key and an unauthorised key are refused by name with
 nothing sent, and the proxy refuses an unpinned config and an operator-only operation.
 
@@ -154,6 +157,6 @@ nothing sent, and the proxy refuses an unpinned config and an operator-only oper
 ## Migration (deletion, not addition)
 
 Each consumer that moves deletes its copy: Discord `custody.rs` (done); next
-`app_document.rs`'s status machine, `job.rs`, `selected_exchange.rs`, `publisher.rs`, the
+`app_document.rs`'s status machine, `job.rs`, `selected_exchange.rs`, the
 Hermes step ledger, the provider spool; then `submit_once`/`retry`, then the client half of
 `client_consent.rs` (the ssh client half of `proxy.rs`/`key_service.rs` is done: `operator::SshPool`).

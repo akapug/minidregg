@@ -28,6 +28,7 @@
 # Hook contract (journey.sh header): MINI SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT
 # JOURNEY_STEP_DIR exported; NEWCOMER_WS is initialized by J4. Exit 0 = every row matched; last stdout line = rows.tsv.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 umask 077
 for name in MINI HOST CONFIG SOCKET JOURNEY_WORLD SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT JOURNEY_STEP_DIR; do
   if [ -z "${!name:-}" ]; then echo "jgateway: $name is required" >&2; exit 2; fi
@@ -57,12 +58,12 @@ turn() {  # turn WS ID REQUEST -> 0 iff confirmed
   [ "$(rc "$2-propose")" = 0 ] || return 1
   run "$2-submit" "$MINI" workspace --action submit --dir "$1" \
     --intent "$1/proposals/jgw-$2/intent.json" --attempt "$1/attempts/jgw-$2"
-  [ "$(rc "$2-submit")" = 0 ] && jq -e '.type == "confirmed"' "$1/attempts/jgw-$2/outcome.json" >/dev/null 2>&1
+  [ "$(rc "$2-submit")" = 0 ] && attempt_answer "$1/attempts/jgw-$2/outcome.json" | jq -e '.type == "confirmed"' >/dev/null 2>&1
 }
 refusal() {  # refusal WS ID -> the Host's named refusal for that attempt
   local a=$1/attempts/jgw-$2
-  if [ -f "$a/outcome.json" ] && jq -e '.type == "refused"' "$a/outcome.json" >/dev/null 2>&1; then
-    printf '%s: %s' "$(jq -r '.phase // empty' "$a/outcome.json" | xxd -r -p)" "$(jq -r '.detail // empty' "$a/outcome.json" | xxd -r -p)"
+  if [ -f "$a/outcome.json" ] && attempt_answer "$a/outcome.json" | jq -e '.type == "refused"' >/dev/null 2>&1; then
+    printf '%s: %s' "$(attempt_answer "$a/outcome.json" | jq -r '.phase // empty' | xxd -r -p)" "$(attempt_answer "$a/outcome.json" | jq -r '.detail // empty' | xxd -r -p)"
   elif [ -s "$D/$2-submit.err" ]; then tail -1 "$D/$2-submit.err"
   else printf 'propose: %s' "$(tail -1 "$D/$2-propose.err" 2>/dev/null)"; fi
 }
@@ -123,7 +124,7 @@ jq -n '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:"gw"
   "$D/req/gateway-law.json" >"$D/req/install.json"
 turn "$WS_A" law "$D/req/install.json"; r=$?
 row "A installs the gateway law on gw$([ "$PLANT" = widen ] && echo " (PLANT: widened to admit B)")" installed \
-  "$(jq -r '.type + " " + (.confirmation // "")' "$WS_A/attempts/jgw-law/outcome.json" 2>/dev/null)" "$r"
+  "$(attempt_answer "$WS_A/attempts/jgw-law/outcome.json" | jq -r '.type + " " + (.confirmation // "")' 2>/dev/null)" "$r"
 # What the Host now reports as gw's law (Lean view over A's own signed read). This is the check
 # that the plant, when asked for, is what is installed.
 run inspect-law "$MINI" workspace --action inspect --view law --name gw --dir "$WS_A" --json true

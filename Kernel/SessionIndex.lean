@@ -22,10 +22,29 @@ What the caches do not change: the image, its codec, the log, the world root,
 every receipt. Nothing here is persisted; a reopen rebuilds both in one pass
 over the log (`CellIds.ofImage`, `TxIndex.ofRecords`: linear, not quadratic).
 -/
-import Kernel.DurableReceiver
-import Std.Data.HashMap.Lemmas
-import Std.Data.HashSet.Lemmas
-import Theory.AssertAxioms
+module
+
+public import Kernel.DurableReceiver
+public import Std.Data.HashMap.Lemmas
+public import Std.Data.HashSet.Lemmas
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.SessionIndex
 
@@ -132,18 +151,71 @@ def CellIds.ofImage (image : Image) : CellIds :=
 theorem CellIds.ofImage_exact (image : Image) : (CellIds.ofImage image).Exact (rawIds image) := by
   simpa using CellIds.addAll_exact CellIds.empty_exact (rawIds image)
 
+/-- `List.eraseDups` of a list of cell ids in one hashed pass (linear, not quadratic). -/
+def dedup (raw : List CellId) : List CellId := (CellIds.empty.addAll raw).order.toList
+
+theorem dedup_eq (raw : List CellId) : dedup raw = raw.eraseDups := by
+  have := (CellIds.addAll_exact CellIds.empty_exact raw).order
+  simpa [dedup] using this
+
+/-- `Image.cellIds`, compiled as one hashed pass (every compiled caller that sees
+this module runs it; the definition and every theorem about it are unchanged). -/
+def cellIdsFast (image : Image) : List CellId := dedup (rawIds image)
+
+@[csimp] theorem cellIds_eq_fast : @Image.cellIds = @cellIdsFast := by
+  funext image
+  rw [cellIdsFast, dedup_eq, cellIds_eq_rawIds]
+
+#assert_axioms cellIds_eq_fast
+
+/-- Whether a list of cell ids has no repeat, in one hashed pass (`List.Nodup`'s
+decision is quadratic). -/
+def nodupFrom : List CellId → Std.HashSet CellId → Bool
+  | [], _ => true
+  | id :: rest, seen => if seen.contains id then false else nodupFrom rest (seen.insert id)
+
+def nodupFast (ids : List CellId) : Bool := nodupFrom ids ∅
+
+theorem nodupFrom_iff : ∀ (ids : List CellId) (seen : Std.HashSet CellId),
+    nodupFrom ids seen = true ↔ ids.Nodup ∧ ∀ id ∈ ids, seen.contains id = false
+  | [], seen => by simp [nodupFrom]
+  | id :: rest, seen => by
+      unfold nodupFrom
+      by_cases hit : seen.contains id = true
+      · simp only [hit, if_true, Bool.false_eq_true, false_iff, not_and]
+        intro _ fresh
+        have := fresh id List.mem_cons_self
+        simp [hit] at this
+      · simp only [hit, if_false, Bool.false_eq_true]
+        rw [nodupFrom_iff rest (seen.insert id), List.nodup_cons]
+        simp only [Std.HashSet.contains_insert, Bool.or_eq_false_iff, beq_eq_false_iff_ne,
+          List.mem_cons, forall_eq_or_imp]
+        constructor
+        · rintro ⟨nodup, fresh⟩
+          refine ⟨⟨fun member => (fresh id member).1 rfl, nodup⟩, by simpa using hit,
+            fun other member => (fresh other member).2⟩
+        · rintro ⟨⟨missing, nodup⟩, _, fresh⟩
+          refine ⟨nodup, fun other member => ⟨?_, fresh other member⟩⟩
+          rintro rfl
+          exact missing member
+
+theorem nodupFast_iff (ids : List CellId) : nodupFast ids = true ↔ ids.Nodup := by
+  rw [nodupFast, nodupFrom_iff]
+  simp
+
+#assert_axioms nodupFast_iff
+
 /-- One accepted record's writes, added at append. -/
 def CellIds.admit (ids : CellIds) (record : IntentRecord) : CellIds :=
   ids.addAll (record.writes.map DataWrite.cellId)
 
 theorem rawIds_snoc (image : Image) (record : IntentRecord) :
-    rawIds { image with accepted := image.accepted ++ [record] } =
-      rawIds image ++ record.writes.map DataWrite.cellId := by
+    rawIds (image.snoc record) = rawIds image ++ record.writes.map DataWrite.cellId := by
   simp [rawIds, List.flatMap_append, List.append_assoc]
 
 theorem CellIds.admit_exact {ids : CellIds} {image : Image} (exact : ids.Exact (rawIds image))
     (record : IntentRecord) :
-    (ids.admit record).Exact (rawIds { image with accepted := image.accepted ++ [record] }) := by
+    (ids.admit record).Exact (rawIds (image.snoc record)) := by
   rw [rawIds_snoc]
   exact CellIds.addAll_exact exact _
 
@@ -246,6 +318,146 @@ theorem TxIndex.lookup_eq {txs : TxIndex} {records : List IntentRecord}
     txs[transactionId]? =
       records.findIdx? (fun record => record.transactionId == transactionId) :=
   exact transactionId
+
+/-! ## First index by key (nullifiers, written cell ids)
+
+The same shape as `TxIndex` for a record that carries a LIST of keys: key ↦ the
+first log index whose record carries it. A past read at height `k` asks "was
+this key carried by one of the first `k` records?", which is the cached index
+compared against `k` (`KeyIndex.below_eq`): no pass over the prefix. -/
+
+/-- A record list's first index carrying `key`. -/
+def firstKeyIndex {K : Type} [DecidableEq K] (keys : IntentRecord → List K)
+    (records : List IntentRecord) (key : K) : Option Nat :=
+  records.findIdx? (fun record => (keys record).contains key)
+
+abbrev KeyIndex (K : Type) [BEq K] [Hashable K] := Std.HashMap K Nat
+
+section KeyIndex
+
+variable {K : Type} [DecidableEq K] [Hashable K] [LawfulHashable K]
+
+/-- Every lookup is the log's first index. -/
+def KeyIndex.Exact (index : KeyIndex K) (keys : IntentRecord → List K)
+    (records : List IntentRecord) : Prop :=
+  ∀ key, index[key]? = firstKeyIndex keys records key
+
+theorem KeyIndex.empty_exact (keys : IntentRecord → List K) :
+    (∅ : KeyIndex K).Exact keys [] := by
+  intro key
+  simp [firstKeyIndex]
+
+/-- Each key of the record at index `height` joins, keeping an earlier index. -/
+def KeyIndex.admitAt (index : KeyIndex K) (keys : IntentRecord → List K) (height : Nat)
+    (record : IntentRecord) : KeyIndex K :=
+  (keys record).foldl (fun index key => index.insertIfNew key height) index
+
+theorem KeyIndex.getElem?_foldl (index : KeyIndex K) (height : Nat) (more : List K) (key : K) :
+    (more.foldl (fun index key => index.insertIfNew key height) index)[key]? =
+      index[key]?.or (if more.contains key then some height else none) := by
+  induction more generalizing index with
+  | nil => simp
+  | cons head rest ih =>
+      rw [List.foldl_cons, ih, Std.HashMap.getElem?_insertIfNew]
+      by_cases same : head = key
+      · subst same
+        by_cases present : head ∈ index
+        · have found : (index[head]?).isSome := Std.HashMap.mem_iff_isSome_getElem?.mp present
+          obtain ⟨value, isValue⟩ := Option.isSome_iff_exists.mp found
+          simp [present]
+        · have missing : index[head]? = none := Std.HashMap.getElem?_eq_none present
+          simp [present]
+      · have differs : (head == key) = false := by simp [same]
+        have differs' : key ≠ head := Ne.symm same
+        simp [differs, differs']
+
+theorem firstKeyIndex_snoc (keys : IntentRecord → List K) (records : List IntentRecord)
+    (record : IntentRecord) (key : K) :
+    firstKeyIndex keys (records ++ [record]) key =
+      (firstKeyIndex keys records key).or
+        (if (keys record).contains key then some records.length else none) := by
+  unfold firstKeyIndex
+  rw [List.findIdx?_append]
+  simp [List.findIdx?_cons]
+
+theorem KeyIndex.admitAt_exact {index : KeyIndex K} {keys : IntentRecord → List K}
+    {records : List IntentRecord} (exact : index.Exact keys records) (record : IntentRecord) :
+    (index.admitAt keys records.length record).Exact keys (records ++ [record]) := by
+  intro key
+  unfold KeyIndex.admitAt
+  rw [KeyIndex.getElem?_foldl, firstKeyIndex_snoc, exact key]
+
+/-- Index a suffix whose predecessor log held `height` records. -/
+def KeyIndex.extendFrom (index : KeyIndex K) (keys : IntentRecord → List K) (height : Nat) :
+    List IntentRecord → KeyIndex K
+  | [] => index
+  | record :: rest => KeyIndex.extendFrom (index.admitAt keys height record) keys (height + 1) rest
+
+theorem KeyIndex.extendFrom_exact {index : KeyIndex K} {keys : IntentRecord → List K}
+    {records : List IntentRecord} (exact : index.Exact keys records) (more : List IntentRecord) :
+    (index.extendFrom keys records.length more).Exact keys (records ++ more) := by
+  induction more generalizing index records with
+  | nil => simpa [KeyIndex.extendFrom] using exact
+  | cons record rest ih =>
+      have step := ih (KeyIndex.admitAt_exact exact record)
+      rw [List.length_append, List.length_singleton, List.append_assoc,
+        List.singleton_append] at step
+      exact step
+
+/-- One pass over the log. -/
+def KeyIndex.ofRecords (keys : IntentRecord → List K) (records : List IntentRecord) : KeyIndex K :=
+  (∅ : KeyIndex K).extendFrom keys 0 records
+
+theorem KeyIndex.ofRecords_exact (keys : IntentRecord → List K) (records : List IntentRecord) :
+    (KeyIndex.ofRecords keys records).Exact keys records := by
+  simpa using KeyIndex.extendFrom_exact (KeyIndex.empty_exact keys) records
+
+end KeyIndex
+
+/-- A first index below `height` is a hit in the first `height` elements. -/
+theorem findIdx?_any_lt {α : Type} (p : α → Bool) :
+    ∀ (list : List α) (height : Nat),
+      ((list.findIdx? p).any fun index => decide (index < height)) = (list.take height).any p
+  | [], height => by simp
+  | head :: rest, 0 => by
+      simp only [List.findIdx?_cons, List.take_zero, List.any_nil]
+      split <;> simp
+  | head :: rest, height + 1 => by
+      simp only [List.findIdx?_cons, List.take_succ_cons, List.any_cons]
+      by_cases hit : p head = true
+      · simp [hit]
+      · simp only [hit, Bool.false_or]
+        rw [← findIdx?_any_lt p rest height]
+        cases rest.findIdx? p <;> simp
+
+/-- **A past height's membership, off the index**: the key is carried by one of
+the first `height` records exactly when its cached first index is below `height`. -/
+theorem KeyIndex.below_eq {K : Type} [DecidableEq K] [Hashable K] [LawfulHashable K]
+    {index : KeyIndex K} {keys : IntentRecord → List K} {records : List IntentRecord}
+    (exact : index.Exact keys records) (height : Nat) (key : K) :
+    ((index[key]?).any fun first => decide (first < height)) =
+      decide (key ∈ (records.take height).flatMap keys) := by
+  rw [exact key]
+  unfold firstKeyIndex
+  rw [findIdx?_any_lt]
+  rw [Bool.eq_iff_iff]
+  simp [List.any_eq_true, List.mem_flatMap]
+
+/-- **A past height's transaction ids, off the receipt index.** -/
+theorem TxIndex.below_eq {txs : TxIndex} {records : List IntentRecord}
+    (exact : txs.Exact records) (height : Nat) (transactionId : TransactionId) :
+    ((txs[transactionId]?).any fun first => decide (first < height)) =
+      ((records.take height).map IntentRecord.transactionId).contains transactionId := by
+  rw [exact transactionId]
+  unfold firstIndex
+  rw [findIdx?_any_lt]
+  rw [Bool.eq_iff_iff]
+  simp [List.any_eq_true, -List.map_take]
+
+#assert_axioms KeyIndex.ofRecords_exact
+#assert_axioms KeyIndex.admitAt_exact
+#assert_axioms KeyIndex.below_eq
+#assert_axioms TxIndex.below_eq
 
 /-! ## Poles
 

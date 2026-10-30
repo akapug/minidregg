@@ -4,9 +4,28 @@ unsigned invocation body, excluding this framing and its signatures; signatures
 must bind these statement bytes through the actual authorization request.
 This codec does not itself change a legacy profile or grant any admission.
 -/
-import Theory.AssertAxioms
-import Compiler.Tower256ConcreteBackend
-import Compiler.ResourceBirthCodec
+module
+
+public import Theory.AssertAxioms
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NativeInvocationStatement
 open Minidregg.Theory.TypedAuthorization
@@ -69,18 +88,9 @@ def stream : StreamCodec Statement :=
 def version : Nat := 1
 def frame : List UInt8 := "DREGG/NATIVE/INVOCATION-STATEMENT".toUTF8.toList ++ [1]
 
-def rawCodec : LawfulCodec Statement where
-  encode statement := frame ++ stream.encode statement
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro statement
-    have exact := stream.toLawful.decode_encode statement
-    change stream.toLawful.decode (stream.encode statement) = some statement at exact
-    simp [exact]
-
-/-- Full consumption and exact re-encoding refuse alternate wire spellings. -/
-def codec : LawfulCodec Statement := ResourceBirthCodec.strictCodec rawCodec
+/-- The frame is checked and the stream is canonical, so each statement has one
+spelling (`decoded_canonical`) without re-encoding what was read. -/
+def codec : LawfulCodec Statement := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 
@@ -94,7 +104,7 @@ theorem encode_injective {left right : Statement} (same : encode left = encode r
 
 theorem decoded_canonical {bytes : List UInt8} {statement : Statement}
     (accepted : decode bytes = some statement) : encode statement = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 /-- Every route, the whole context and the whole unsigned body are bound by
 canonical encoding; no digest collision claim is substituted for this fact. -/

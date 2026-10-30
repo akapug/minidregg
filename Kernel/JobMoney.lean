@@ -1,8 +1,8 @@
 /-
 # Kernel.JobMoney — a job's money: escrow, bond and payout as conservation-checked Book turns
-(COMPUTE §2.6, lane C3 K-JOB-MONEY)
+(docs/COMPUTE.md §2.6, lane C3 K-JOB-MONEY)
 
-A job is one declared object (COMPUTE §2.2).  Its credit is held by the
+A job is one declared object (docs/COMPUTE.md §2.2).  Its credit is held by the
 **Book**, in an account whose id is the job cell's own id (`heldAccount`): the
 Book's `held` term.  The job cell's fields `escrow` and `bond` are the law's
 view of it, and every money turn keeps the two equal (`held_agrees`).  Three
@@ -32,15 +32,34 @@ and the well; they sum to zero (`escrow_conserved`), so
 retired credit having gone into the well.
 
 The job cell's FIELDS and its law are C1 JOB-LAW's (`Kernel/Job.lean`,
-`deploy/shell/templates/job/fields.json`: escrow 8, provider 9, providerAcct
+`native/resource-client/templates/job/fields.json`: escrow 8, provider 9, providerAcct
 10, bond 11).  That law gates every money move on `Job.moneySlot`, which only
 this receiver projects (clause 44, `Job.money_frozen_without_slot`); the
 receiver accepts a job only when its installed law IS the job law at some
 parameters (`isJobLaw`, `isJobLaw_sound`), so the law cannot be one that lets
 an ordinary write move the money fields.
 -/
-import Kernel.PurseRefill
-import Kernel.Job
+module
+
+public import Kernel.PurseRefill
+public import Kernel.Job
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.JobMoney
 
@@ -59,7 +78,7 @@ open Minidregg.Pred
 
 set_option autoImplicit false
 
-/-! ## The job cell's money fields (C1 JOB-LAW's `deploy/shell/templates/job/fields.json`) -/
+/-! ## The job cell's money fields (C1 JOB-LAW's `native/resource-client/templates/job/fields.json`) -/
 
 /-- `state`: 0 open · 1 claimed · 2 answered · 3 upheld · 4 slashed · 5 void · 6 closed. -/
 def stateField : Nat := 0
@@ -118,7 +137,7 @@ def actions (job : Nat) (before after : Job) : List Action :=
   (before.fields.zip after.fields).map fun pair =>
     .write (DeclaredFields.key job pair.1.1) (some (Int.ofNat pair.1.2)) (Int.ofNat pair.2.2)
 
-/-! ## Payouts — a pure function of the terminal job (COMPUTE §2.3, last column) -/
+/-! ## Payouts — a pure function of the terminal job (docs/COMPUTE.md §2.6) -/
 
 structure Payouts where
   /-- Paid to `providerAcct`. -/
@@ -505,8 +524,12 @@ def plainOp : Operation → Prop
 theorem apply_balance (op : Operation) (plain : plainOp op) (book : Book) (a : AccountId)
     (asset : AssetId) :
     (op.apply book).balance a asset = book.balance a asset + flowIn a asset op := by
-  cases op <;> simp only [plainOp] at plain <;>
-    simp [Operation.apply, Operation.leaseRecord?, applyPosting_balance, flowIn]
+  have posting : (op.apply book).balance a asset = (book.applyPosting op.posting).balance a asset := by
+    unfold Book.balance
+    congr 1
+    cases op <;> rfl
+  rw [posting]
+  cases op <;> simp only [plainOp] at plain <;> simp [applyPosting_balance, flowIn]
 
 theorem applyOperations_balance (book : Book) (ops : List Operation)
     (plain : ∀ op ∈ ops, plainOp op) (a : AccountId) (asset : AssetId) :
@@ -591,7 +614,7 @@ theorem decideMoney_plan {tariff : Option Tariff} {stored : Option (StoredCapabi
     simp only [Plan.batch, RegistrationsAdmitted, RegistrationAdmission] at absent
     have zero : book.balance job t.asset = 0 := by
       by_contra nonzero
-      exact absent.1.2 (job, t.asset) (DFinsupp.mem_support_iff.mpr nonzero) rfl
+      exact absent.1.2.1 (job, t.asset) (DFinsupp.mem_support_iff.mpr nonzero) rfl
     simp [zero, Job.held, escrow, bond]
   · obtain ⟨rfl, -, -, -, -, -, -, -, payer, held, -, agrees, admitted, balanced⟩ :=
       decideClaim_ok claim
@@ -649,7 +672,7 @@ theorem held_agrees {tariff : Option Tariff} {stored : Option (StoredCapability 
   simp only [Int.ofNat_eq_natCast] at balanced before ⊢
   omega
 
-/-- **Escrow is conserved** (COMPUTE §2.6's rule): every accepted fund, claim
+/-- **Escrow is conserved** (docs/COMPUTE.md §2.6): every accepted fund, claim
 or settle leaves the Book's total in the credit asset (well included)
 unchanged; the change in the job's held credit, the change in circulating
 credit and the change in the well sum to zero; the well moves only by a
@@ -720,7 +743,7 @@ theorem fund_requires_caller {tariff : Option Tariff} {stored : Option (StoredCa
   · exact absurd bad (by decide)
 
 /-- **A claim requires a funded, open, unclaimed job and a bond of at least
-the price** (COMPUTE §9 D3), paid from an account the signer owns. -/
+the price** (docs/COMPUTE.md §9 D3), paid from an account the signer owns. -/
 theorem claim_requires_bond {tariff : Option Tariff} {stored : Option (StoredCapability .account)}
     {subject : SubjectId} {book : Book} {job : Nat} {jo : Option Job} {account amount : Nat}
     {plan : Plan}
@@ -776,7 +799,7 @@ theorem no_double_settle {tariff : Option Tariff} {stored : Option (StoredCapabi
   · have := (decideClaim_ok claim).2.1; omega
   · have := (decideSettle_ok settle).choose_spec.2.2.1; exact this closed
 
-/-! ## Griefing (COMPUTE §2.7): what a challenge that fails costs, and whom -/
+/-! ## Griefing (docs/COMPUTE.md §2.7): what a challenge that fails costs, and whom -/
 
 /-- The Book leg of a `truth` turn: its submitter pays the re-execution fee.
 C4 NOCK-FEE supplies the fee (`run/steps × perStep`, the oracle's count);
@@ -797,7 +820,7 @@ theorem griefing_cost_bounded (split : Nat) (j : Job) (book : Book) (submitter a
       payouts split j = some ⟨j.price + j.bond, j.escrow - j.price, 0⟩ := by
   refine ⟨?_, Batch.conservation book _ admitted asset, ?_⟩
   · simp [truthFee, Batch.apply, registerAccounts, applyOperations, Operation.apply,
-      Operation.posting, Operation.leaseRecord?, Book.applyPosting, Book.balance,
+      Operation.posting, Operation.leaseRecord?, Operation.floorSetting?, Book.applyPosting, Book.balance,
       DFinsupp.single_apply, Ne.symm notWell, sub_eq_add_neg]
   · simp [payouts, upheld, Nat.min_eq_left funded]
 
@@ -877,11 +900,11 @@ theorem isJobLaw_refuses_trimmed :
 def fixtureTariff : Tariff := PayTariff.exampleTariff
 
 /-- Account 108 (subject 8, the caller) and 109 (subject 9, the provider) hold
-60 credits each of asset 0; the well 0 is at −120.  Job 50's held account does
+60 credits each of asset 0; the well 0 is at −120 of its issuance cap 1000.  Job 50's held account does
 not exist yet. -/
 def fixtureBook : Book :=
   ⟨{0, 108, 109}, DFinsupp.single (108, 0) 60 + DFinsupp.single (109, 0) 60 +
-    DFinsupp.single (0, 0) (-120), 0⟩
+    DFinsupp.single (0, 0) (-120), 0, DFinsupp.single (0, 0) 1000⟩
 
 def callerCap : StoredCapability .account := PayAssignmentReceiver.ownerCapability 8 108
 def providerCap : StoredCapability .account := PayAssignmentReceiver.ownerCapability 9 109

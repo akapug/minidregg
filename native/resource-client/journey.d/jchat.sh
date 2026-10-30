@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JCHAT (PLACE §2.3, §5 item 4, client half): friends talk in a room through
+# JCHAT (docs/PLACE.md §2.3, §5 item 4, client half): friends talk in a room through
 # `mini shell` on this journey's live Store.
 #
 # Five friends are enrolled and provisioned the way OPERATOR.md does it (as in
@@ -111,19 +111,22 @@ finish() {
 mkdir -p -m 700 "$H/sponsor"
 printf '%s\n' '{"type":"all","predicates":[]}' >"$SD/permit-all.json"
 declare -A S
+# The enrollment names are prefixed `jchat-`: they are keys of the demo world's sponsor namespace (one request
+# per name, participant_namespace.rs), and J12 has already enrolled alice and bob there with other keys. The
+# petnames readers use for each other stay plain.
 for f in alice bob carol dave bridge; do
   mkdir -p -m 700 "$H/$f"
   setup "$f" "keygen mini.key"
-  operator "custody copy" install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
-  setup sponsor "enroll plan $f $f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
-  setup sponsor "enroll seal $f"
-  setup sponsor "enroll submit $f"
+  operator "custody copy" install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jchat-$f.key"
+  setup sponsor "enroll plan jchat-$f jchat-$f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
+  setup sponsor "enroll seal jchat-$f"
+  setup sponsor "enroll submit jchat-$f"
   S[$f]=$(jq -r '.subject // empty' "$OUT")
   [ -n "${S[$f]}" ] || { echo "no subject for $f" >&2; finish; }
-  operator "custody remove" rm -f "$H/sponsor/keys/$f.key"
-  operator "provision $f" "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "$f" --holder "${S[$f]}" \
+  operator "custody remove" rm -f "$H/sponsor/keys/jchat-$f.key"
+  operator "provision $f" "$MINI" workspace --action provision --dir "$SPONSOR_WS" --name "jchat-$f" --holder "${S[$f]}" \
       --funding 1000 --account-predicate "$SD/permit-all.json" --factory-ref factory
-  operator "deliver $f" install_private 0600 "$SPONSOR_WS/provisions/$f/birth-context.json" "$H/$f/provision/birth-context.json"
+  operator "deliver $f" install_private 0600 "$SPONSOR_WS/provisions/jchat-$f/birth-context.json" "$H/$f/provision/birth-context.json"
   setup "$f" "init mini.key ${S[$f]}"
 done
 A=${S[alice]} B=${S[bob]} C=${S[carol]} D=${S[dave]} E=${S[bridge]}
@@ -263,7 +266,9 @@ check tamper-others "alice's untouched entry still prints" grep -qE '^#1 h[0-9]+
 check tamper-no-forgery "no altered text is printed" sh -c "! grep -q 'ii alice' '$OUT'"
 
 # ------------------------------------------------ the Discord bridge, both ways
-DD=${JCHAT_DISCORD_DIR:-}
+# The bridge binaries: JCHAT_DISCORD_DIR, else the directory the candidate's `mini` is in (the set's bin,
+# once `fake-discord` ships beside `mini-discord-mirror` there). Without both, the mirror rows are red by name.
+DD=${JCHAT_DISCORD_DIR:-$(dirname "$MINI")}
 if [ -x "$DD/mini-discord-mirror" ] && [ -x "$DD/fake-discord" ]; then
   PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
   mkdir -p -m 700 "$SD/discord" "$SD/spool"

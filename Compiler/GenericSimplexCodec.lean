@@ -1,5 +1,25 @@
-import Kernel.GenericSimplex
-import Compiler.DurableReceiverCodec
+module
+
+public import Kernel.GenericSimplex
+public import Compiler.DurableReceiverCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Compiler.GenericSimplexCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.GenericSimplex
@@ -10,17 +30,24 @@ def kindTag : Kind → Nat
   | .propose => 0 | .vote => 1 | .commit => 2 | .candidate => 3 | .ready => 4
 def kindOfTag : Nat → Kind
   | 0 => .propose | 1 => .vote | 2 => .commit | 3 => .candidate | _ => .ready
+/-- The five kind tags; any other natural is refused (it used to decode as
+`.ready`). -/
+def kindStream : StreamCodec Kind :=
+  StreamCodec.retract StreamCodec.nat kindTag kindOfTag (by intro kind; cases kind <;> rfl)
+
 def messageStream : StreamCodec Message :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat argumentStream)))
-    (fun m => (m.sender, m.view, kindTag m.kind, m.value))
-    (fun (s,v,k,a) => ⟨s,v,kindOfTag k,a⟩)
-    (by intro m; cases m with | mk s v k a => cases k <;> rfl)
-/-- Canonical decoding rejects tag aliases and trailing bytes. -/
-def decodeMessage (bytes : Bytes) : Option Message := do
-  let m ← messageStream.toLawful.decode bytes
-  if messageStream.encode m == bytes then some m else none
+      (StreamCodec.product kindStream argumentStream)))
+    (fun m => (m.sender, m.view, m.kind, m.value))
+    (fun (s,v,k,a) => ⟨s,v,k,a⟩)
+    (by intro m; cases m; rfl)
+/-- `messageStream` is canonical: tag aliases and trailing bytes have no
+decoding (`decodeMessage_canonical`). -/
+def decodeMessage (bytes : Bytes) : Option Message := messageStream.toLawful.decode bytes
+theorem decodeMessage_canonical {bytes : Bytes} {m : Message}
+    (decoded : decodeMessage bytes = some m) : messageStream.encode m = bytes :=
+  messageStream.toLawful_canonical bytes m decoded
 structure Event where
   tag : Nat
   payload : Bytes
@@ -36,18 +63,53 @@ def encodeInput : Input → Event
   | .checked b => ⟨2,blockStream.encode b⟩
   | .offer b => ⟨3,b⟩
   | .poll => ⟨4,[]⟩
-def decodeInput (e : Event) : Option Input := do
-  let input ← match e.tag with
-    | 0 => return .delivery (← decodeMessage e.payload)
-    | 1 => return .tick (← StreamCodec.nat.toLawful.decode e.payload)
-    | 2 => return .checked (← blockStream.toLawful.decode e.payload)
-    | 3 => some (.offer e.payload)
-    | 4 => if e.payload.isEmpty then some .poll else none
-    | 5 => do
-        let (t,m) ← (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode e.payload
-        return .deliveryAt t m
-    | _ => none
-  if encodeInput input == e then some input else none
+/-- Each arm decodes its payload canonically and the tag selects the arm, so a
+decoded input is the input of exactly that event (`decodeInput_canonical`). -/
+def decodeInput (e : Event) : Option Input :=
+  match e.tag with
+  | 0 => return .delivery (← decodeMessage e.payload)
+  | 1 => return .tick (← StreamCodec.nat.toLawful.decode e.payload)
+  | 2 => return .checked (← blockStream.toLawful.decode e.payload)
+  | 3 => some (.offer e.payload)
+  | 4 => if e.payload.isEmpty then some .poll else none
+  | 5 => do
+      let (t,m) ← (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode e.payload
+      return .deliveryAt t m
+  | _ => none
+theorem decodeInput_canonical {e : Event} {input : Input}
+    (decoded : decodeInput e = some input) : encodeInput input = e := by
+  obtain ⟨tag, payload⟩ := e
+  rcases tag with _ | _ | _ | _ | _ | _ | tag <;>
+    simp only [decodeInput, bind, Option.bind] at decoded
+  · cases m : decodeMessage payload with
+    | none => simp [m] at decoded
+    | some message =>
+      simp [m, pure] at decoded; subst decoded
+      simp [encodeInput, decodeMessage_canonical m]
+  · cases t : StreamCodec.nat.toLawful.decode payload with
+    | none => simp [t] at decoded
+    | some tick =>
+      simp [t, pure] at decoded; subst decoded
+      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ t]
+  · cases b : blockStream.toLawful.decode payload with
+    | none => simp [b] at decoded
+    | some block =>
+      simp [b, pure] at decoded; subst decoded
+      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ b]
+  · simp at decoded; subst decoded; rfl
+  · by_cases empty : payload.isEmpty
+    · simp [empty] at decoded; subst decoded
+      simp [encodeInput, List.isEmpty_iff.mp empty]
+    · simp [empty] at decoded
+  · cases d : (StreamCodec.product StreamCodec.nat messageStream).toLawful.decode payload with
+    | none => simp [d] at decoded
+    | some pair =>
+      obtain ⟨t, m⟩ := pair
+      simp [d, pure] at decoded; subst decoded
+      simp [encodeInput, StreamCodec.toLawful_canonical _ _ _ d]
+  · cases decoded
+#assert_axioms decodeMessage_canonical
+#assert_axioms decodeInput_canonical
 /-- Five fields since the timeout-backoff epoch. A four-field pre-epoch
 Context does not decode: such journals and contexts refuse to load. -/
 def configStream : StreamCodec Config :=
@@ -135,23 +197,50 @@ def viewStream : StreamCodec View :=
       v.sentReadyCore,v.sentReadyRelay,v.prepared,v.disabled,v.committed,v.received))
     (fun (a,b,c,d,e,f,g,h,i,j,k,l) => ⟨a,b,c,d,e,f,g,h,i,j,k,l⟩) (by intro v; cases v; rfl)
 
+abbrev AuditWire := Nat × Nat × Nat × Option Message × Block
+
+def auditWire : AuditEvent → AuditWire
+  | .send m => (0,0,0,some m,[])
+  | .prepare party view block => (1,party,view,none,block)
+  | .disable party view => (2,party,view,none,[])
+  | .commit party view block => (3,party,view,none,block)
+  | .idle => (4,0,0,none,[])
+
+def auditOfWire : AuditWire → AuditEvent
+  | (tag,party,view,m,block) => match tag with
+    | 0 => .send (m.getD default)
+    | 1 => .prepare party view block
+    | 2 => .disable party view
+    | 3 => .commit party view block
+    | _ => .idle
+
+/-- The wires `auditWire` produces: a known tag, and the fields that tag does
+not carry left at their one spelling (zero, `none`, empty). Every other wire is
+refused (an unknown tag used to decode as `.idle`, and unused fields were
+dropped). A shape check, not a re-encode. -/
+def auditWireOk : AuditWire → Bool
+  | (0, 0, 0, some _, []) => true
+  | (1, _, _, none, _) => true
+  | (2, _, _, none, []) => true
+  | (3, _, _, none, _) => true
+  | (4, 0, 0, none, []) => true
+  | _ => false
+
 def auditEventStream : StreamCodec AuditEvent :=
   StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option messageStream) blockStream))))
-    (fun
-      | .send m => (0,0,0,some m,[])
-      | .prepare party view block => (1,party,view,none,block)
-      | .disable party view => (2,party,view,none,[])
-      | .commit party view block => (3,party,view,none,block)
-      | .idle => (4,0,0,none,[]))
-    (fun (tag,party,view,m,block) => match tag with
-      | 0 => .send (m.getD default)
-      | 1 => .prepare party view block
-      | 2 => .disable party view
-      | 3 => .commit party view block
-      | _ => .idle)
+    (StreamCodec.refine
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option messageStream) blockStream))))
+      (fun wire => auditWireOk wire = true))
+    (fun event => ⟨auditWire event, by cases event <;> rfl⟩)
+    (fun wire => auditOfWire wire.val)
     (by intro e; cases e <;> rfl)
+    (by
+      rintro ⟨⟨tag, party, view, m, block⟩, ok⟩
+      apply Subtype.ext
+      rcases tag with _ | _ | _ | _ | _ | tag <;> rcases party with _ | party <;>
+        rcases view with _ | view <;> rcases m with _ | m <;> rcases block with _ | ⟨first, block⟩ <;>
+        first | rfl | cases ok)
 
 def stateStream : StreamCodec State :=
   StreamCodec.xmap

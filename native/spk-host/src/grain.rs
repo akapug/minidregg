@@ -18,10 +18,11 @@
 //! namespace uid allocation and image publication. It reaches volume privilege
 //! only through the registered fixed-verb one-shot helper.
 
+use crate::io_context::IoContext;
 use crate::broker::{self, Request};
 use crate::dispatch_native::{private_dir, PrivateOperator};
 use crate::lifecycle_selector::{self, LifecycleSelector};
-use crate::materialize::verify_installed_spk;
+use crate::materialize::{verify_installed_spk, ImportProfile};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -31,14 +32,16 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsE
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use crate::canonical::hex64;
 
 #[path = "grain_profile_upgrade.rs"]
 mod profile_upgrade;
 #[path = "grain_management.rs"]
 mod management;
+#[path = "grain_agent_route.rs"]
+mod agent_route;
 
 const MAX_JSON: u64 = 64 * 1024;
-const MAX_SPK: u64 = 256 * 1024 * 1024;
 /// How long `grain start` waits for the resident's START completion before
 /// reporting UNRESOLVED (the resident keeps going either way). Measured on
 /// final (SPK-APPS 2026-10-01): a START is BEGIN, claim, launch, report,
@@ -70,13 +73,6 @@ fn unresolved(reason: impl Into<String>) -> io::Error {
     io::Error::other(format!("UNRESOLVED: {}", reason.into()))
 }
 
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
 fn exists(path: &Path) -> io::Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
@@ -87,30 +83,7 @@ fn exists(path: &Path) -> io::Result<bool> {
 
 /// Owner-private regular file, single link, bounded.
 fn read_private(path: &Path, max: u64) -> io::Result<Vec<u8>> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !path.is_absolute()
-        || !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.permissions().mode() & 0o777 != 0o600
-        || meta.len() == 0
-        || meta.len() > max
-    {
-        return Err(invalid(format!(
-            "private file identity refused: {}",
-            path.display()
-        )));
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    Read::by_ref(&mut file).take(max + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 != meta.len() {
-        return Err(invalid("private file changed while reading"));
-    }
-    Ok(bytes)
+    crate::private_file::read(path, max, "private file identity refused")
 }
 
 fn read_json(path: &Path) -> io::Result<Value> {
@@ -135,24 +108,24 @@ fn derived_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
         ".{}.tmp",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("derived")
     ));
-    let _ = fs::remove_file(&temp);
+    let _ = fs::remove_file(&temp).ctx("remove", &temp);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&temp)?;
+        .open(&temp).ctx("open", &temp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    fs::rename(&temp, path)?;
-    File::open(parent)?.sync_all()
+    fs::rename(&temp, path).ctx("rename", &temp)?;
+    File::open(parent).ctx("open", parent)?.sync_all()
 }
 
 fn private_directory(path: &Path) -> io::Result<()> {
     match DirBuilder::new().mode(0o700).create(path) {
         Ok(()) => {
             if let Some(parent) = path.parent() {
-                File::open(parent)?.sync_all()?;
+                File::open(parent).ctx("open", parent)?.sync_all()?;
             }
         }
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
@@ -161,8 +134,11 @@ fn private_directory(path: &Path) -> io::Result<()> {
     private_dir(path)
 }
 
+#[cfg(test)]
+pub(crate) fn read_bounded_for_test(path: &Path) -> io::Result<String> { file_sha256(path) }
+
 fn file_sha256(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+    let mut file = File::open(path).ctx("open", path)?;
     let mut digest = Sha256::new();
     let mut chunk = [0u8; 64 * 1024];
     loop {
@@ -175,8 +151,30 @@ fn file_sha256(path: &Path) -> io::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+/// Hash/copy a regular input under the operator's bound without an archive-sized
+/// allocation. Check the bytes actually read as well as the opening length.
+fn copy_package_bounded(path: &Path, output: &mut impl Write, maximum: u64) -> io::Result<String> {
+    let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path).ctx("open", &path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > maximum {
+        return Err(invalid("signed SPK input refused"));
+    }
+    let mut digest = Sha256::new();
+    let mut chunk = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let count = file.read(&mut chunk)?;
+        if count == 0 { break; }
+        total = total.checked_add(count as u64).ok_or_else(|| invalid("SPK length overflow"))?;
+        if total > maximum { return Err(invalid("SPK exceeds input bound")); }
+        digest.update(&chunk[..count]); output.write_all(&chunk[..count])?;
+    }
+    if total != meta.len() { return Err(invalid("SPK changed while reading")); }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
-    let meta = fs::symlink_metadata(path)?;
+    let meta = fs::symlink_metadata(path).ctx("inspect", path)?;
     if !path.is_absolute()
         || !meta.is_file()
         || !(crate::os::root_owner(meta.uid()) || meta.uid()==unsafe{libc::geteuid()})
@@ -195,6 +193,12 @@ fn pinned_executable(path: &Path, sha: &str) -> io::Result<()> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostProfile {
+    /// Per-app physical controller capacity, selected only by the operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    agent_route_profile: Option<crate::agent_route_profile::AgentRouteProfile>,
+    /// Operator-selected input budget; never supplied by a grain request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    import_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     genesis_config_sha256: Option<String>,
     #[serde(default)]
@@ -221,6 +225,12 @@ struct HostProfile {
     spk_host_sha256: String,
 }
 
+impl HostProfile {
+    fn selected_import_profile(&self) -> io::Result<ImportProfile> {
+        self.import_profile.as_deref().unwrap_or("standard-v1").parse()
+    }
+}
+
 struct HostIdentity {
     deployment_id: String,
     host_id: String,
@@ -230,8 +240,8 @@ struct Host {
     profile: HostProfile,
     identity: HostIdentity,
     management_key_id: String,
-    /// The Store key: Mini's `storeTag` of the deployment's genesis seed
-    /// identity, read from the pinned Host's profile at every load. Resident
+    /// The Store key: Mini's `storeTag` of the Store identity (the genesis seed
+    /// at the Store's root), read from the pinned Host's profile at every load. Resident
     /// unit, volume, mount, witness and slice names and the state root carry it.
     store: String,
     // Serializes profile selection with grain lifecycle operations.
@@ -246,6 +256,7 @@ impl Host {
             ));
         }
         let profile: HostProfile = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
+        profile.selected_import_profile()?;
         if let Some(seconds) = profile.ws_authority_lease_seconds {
             crate::web_socket::StreamLease::begin(Duration::from_secs(seconds))?;
         }
@@ -472,25 +483,30 @@ fn place(
 /// descriptor through the pinned Host. Qualification is pure (no Store
 /// effect), so an interrupted attempt is set aside and repeated.
 fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBuf)> {
-    let meta = fs::metadata(spk)?;
-    if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_SPK {
-        return Err(invalid("signed SPK input refused"));
-    }
-    let raw_sha256 = file_sha256(spk)?;
+    let profile = host.profile.selected_import_profile()?;
+    let maximum = profile.limits().raw_bytes;
+    let raw_sha256 = copy_package_bounded(spk, &mut io::sink(), maximum)?;
     private_directory(&host.profile.state_root.join("packages"))?;
     let dir = host.package_dir(&raw_sha256);
     private_directory(&dir)?;
     let copy = dir.join("package.spk");
     if !exists(&copy)? {
-        let temp = dir.join(".package.spk.tmp");
-        let _ = fs::remove_file(&temp);
-        fs::copy(spk, &temp)?;
-        fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))?;
-        File::open(&temp)?.sync_all()?;
-        fs::rename(&temp, &copy)?;
-        File::open(&dir)?.sync_all()?;
+        let mut random = [0u8; 8];
+        File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
+        let temp = dir.join(format!(".package-{}.tmp", random.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        let mut staged = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temp).ctx("open", &temp)?;
+        let copied = (|| -> io::Result<()> {
+            if copy_package_bounded(spk, &mut staged, maximum)? != raw_sha256 {
+                return Err(invalid("SPK changed while staging"));
+            }
+            staged.sync_all()?;
+            fs::rename(&temp, &copy).ctx("rename", &temp)?;
+            File::open(&dir).ctx("open", &dir)?.sync_all()
+        })();
+        if copied.is_err() { let _ = fs::remove_file(&temp).ctx("remove", &temp); }
+        copied?;
     }
-    if file_sha256(&copy)? != raw_sha256 {
+    if copy_package_bounded(&copy, &mut io::sink(), maximum)? != raw_sha256 {
         return Err(invalid("staged SPK copy differs from input hash"));
     }
     let attempt = dir.join("qualification");
@@ -498,15 +514,15 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
     if !exists(&result)? {
         if exists(&attempt)? {
             let mut random = [0u8; 8];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
             let aside = dir.join(format!(
                 "qualification-interrupted-{}",
                 random.iter().map(|b| format!("{b:02x}")).collect::<String>()
             ));
-            fs::rename(&attempt, aside)?;
+            fs::rename(&attempt, aside).ctx("rename", &attempt)?;
         }
         let config = dir.join("qualify.json");
-        let bytes = serde_json::to_vec(&json!({
+        let mut qualification_config = json!({
             "protocol":"mini-spk-launch-qualification-v1",
             "sourceSpk":copy,
             "miniHost":host.profile.mini_host,
@@ -514,9 +530,13 @@ fn stage_package(host: &Host, spk: &Path) -> io::Result<(String, PathBuf, PathBu
             "miniConfig":host.profile.mini_config,
             "miniConfigSha256":host.profile.mini_config_sha256,
             "attemptDir":attempt,
-        }))?;
+        });
+        if profile != ImportProfile::Standard {
+            qualification_config["importProfile"] = json!(profile.as_str());
+        }
+        let bytes = serde_json::to_vec(&qualification_config)?;
         if exists(&config)? {
-            fs::remove_file(&config)?;
+            fs::remove_file(&config).ctx("remove", &config)?;
         }
         derived_file(&config, &bytes)?;
         crate::launch_descriptor_native::qualify_launch(&config)?;
@@ -660,6 +680,30 @@ fn persistent_var(host: &Host, placement: &Placement) -> PathBuf {
         .join(broker::volume_name(&host.store, &placement.volume_resource))
 }
 
+/// An INSTALL whose BEGIN the Host refused with nothing appended
+/// (`lifecycle_v3_native::BEGIN_REFUSED_MARKER` in `begin-v3`), and which reached no claim
+/// and no prepared record, is settled. Its journal is renamed to `install-refused-<n>`
+/// (kept whole, as the refusal's evidence) so the next INSTALL begins afresh. Any other
+/// journal is left exactly as it is, and the attempt check below still holds it.
+fn set_aside_refused_install(journal: &Path) -> io::Result<()> {
+    if !exists(&journal.join("begin-v3").join(crate::lifecycle_v3_native::BEGIN_REFUSED_MARKER))? {
+        return Ok(());
+    }
+    for name in ["install-prepared-v2.json", "claim-v3-author", "claim-v3", "lifecycle-claim-v3-active.json"] {
+        if exists(&journal.join(name))? {
+            return Ok(());
+        }
+    }
+    let parent = journal.parent().ok_or_else(|| invalid("INSTALL journal parent absent"))?;
+    for n in 1..=1000u32 {
+        let aside = parent.join(format!("install-refused-{n}"));
+        if !exists(&aside)? {
+            return fs::rename(journal, &aside).ctx("rename", &journal);
+        }
+    }
+    Err(invalid("INSTALL refused-attempt slots exhausted"))
+}
+
 const INSTALL_ATTEMPT_ARTIFACTS: &[&str] = &[
     "launch-descriptor",
     "lifecycle-begin-v3-active.json",
@@ -715,9 +759,10 @@ fn install(
     }
     let custody = write_custody(host, &selector)?;
     let journal = host.app_dir(&selector.app).join("install");
+    set_aside_refused_install(&journal)?;
     private_directory(&journal)?;
     let config_path = journal.join("install.json");
-    let config = json!({
+    let mut config = json!({
         "protocol":"mini-spk-resident-install-v2",
         "journalDir":journal,
         "sourceSpk":staged,
@@ -738,6 +783,11 @@ fn install(
         "completionCustodianSeed":host.profile.completion_custodian_seed,
         "completionSemantics":host.profile.completion_semantics,
     });
+    // Preserve exact legacy standard config bytes when resuming admitted work.
+    let import_profile = host.profile.selected_import_profile()?;
+    if import_profile != ImportProfile::Standard {
+        config["importProfile"] = json!(import_profile.as_str());
+    }
     derived_file(&config_path, &serde_json::to_vec_pretty(&config)?)?;
     let prepared = journal.join("install-prepared-v2.json");
     if !exists(&prepared)? {
@@ -816,7 +866,7 @@ fn decimal_u64(value: Option<&Value>) -> Option<u64> {
 
 fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     let mut runs = Vec::new();
-    for entry in fs::read_dir(app_dir)? {
+    for entry in fs::read_dir(app_dir).ctx("list", app_dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(generation) = name
@@ -896,16 +946,68 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
     Ok(runs)
 }
 
-fn unit_property(unit: &str, property: &str) -> io::Result<String> {
+/// What `systemctl --user show` said about one property of a unit.
+#[derive(Debug, PartialEq, Eq)]
+enum UnitProperty {
+    Known(String),
+    /// systemctl failed or printed nothing. `show` always prints `ActiveState`, even for
+    /// a unit that does not exist (`inactive`), so this is "could not ask" (a busy or
+    /// pressured user manager), never an answer about the unit.
+    Unreadable(String),
+}
+
+fn classify_show(success: bool, stdout: &[u8], stderr: &[u8]) -> UnitProperty {
+    let value = String::from_utf8_lossy(stdout).trim().to_owned();
+    if success && !value.is_empty() {
+        return UnitProperty::Known(value);
+    }
+    let said = String::from_utf8_lossy(stderr).trim().to_owned();
+    UnitProperty::Unreadable(if said.is_empty() { "systemctl printed nothing".into() } else { said })
+}
+
+fn unit_probe(unit: &str, property: &str) -> io::Result<UnitProperty> {
     let output = crate::os::systemctl()
         .args(["--user", "show", unit, &format!("--property={property}"), "--value"])
         .stdin(Stdio::null())
         .output()?;
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    Ok(classify_show(output.status.success(), &output.stdout, &output.stderr))
+}
+
+fn unit_property(unit: &str, property: &str) -> io::Result<String> {
+    match unit_probe(unit, property)? {
+        UnitProperty::Known(value) => Ok(value),
+        UnitProperty::Unreadable(said) => Err(io::Error::other(format!(
+            "cannot read {property} of {unit}: {said}"
+        ))),
+    }
 }
 
 fn unit_active(unit: &str) -> io::Result<String> {
     unit_property(unit, "ActiveState")
+}
+
+/// Consecutive unreadable polls (500 ms apart) the START wait absorbs before it gives
+/// up on the user manager: one minute.
+const MAX_UNREADABLE_POLLS: u32 = 120;
+
+/// One poll of the START wait. A readable state resets the count and is returned; an
+/// unreadable one is absorbed (`None`) until `MAX_UNREADABLE_POLLS` in a row.
+fn judge_poll(unit: &str, probe: UnitProperty, unreadable: &mut u32) -> io::Result<Option<String>> {
+    match probe {
+        UnitProperty::Known(state) => {
+            *unreadable = 0;
+            Ok(Some(state))
+        }
+        UnitProperty::Unreadable(said) => {
+            *unreadable += 1;
+            if *unreadable > MAX_UNREADABLE_POLLS {
+                return Err(io::Error::other(format!(
+                    "cannot read ActiveState of {unit} for {MAX_UNREADABLE_POLLS} polls: {said}"
+                )));
+            }
+            Ok(None)
+        }
+    }
 }
 
 /// The resident unit is rendered by the broker from its own template (the
@@ -945,7 +1047,7 @@ fn routes(app_dir: &Path, app: &str) -> io::Result<Vec<Value>> {
     if !exists(&root)? {
         return Ok(routes);
     }
-    let mut names: Vec<_> = fs::read_dir(&root)?
+    let mut names: Vec<_> = fs::read_dir(&root).ctx("list", &root)?
         .map(|entry| entry.map(|e| e.path()))
         .collect::<io::Result<_>>()?;
     names.sort();
@@ -975,6 +1077,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
     profile_upgrade::require_ready_runtime(&host.profile)?;
     let app_dir = host.app_dir(app);
     private_dir(&app_dir)?;
+    let route_lock = agent_route::lock(&app_dir)?;
     let placement = load_placement(&app_dir.join("placement.json"))?;
     let install_dir = app_dir.join("install");
     let install_config = read_json(&install_dir.join("install.json"))?;
@@ -1026,15 +1129,15 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         let descriptor = dir.join("descriptor-attempt");
         if exists(&descriptor)? {
             let mut random = [0u8; 8];
-            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            File::open("/dev/urandom").ctx("open", "/dev/urandom")?.read_exact(&mut random)?;
             fs::rename(
                 &descriptor,
                 dir.join(format!(
                     "descriptor-attempt-never-begun-{}",
                     random.iter().map(|b| format!("{b:02x}")).collect::<String>()
                 )),
-            )?;
-            File::open(&dir)?.sync_all()?;
+            ).ctx("rename", &descriptor)?;
+            File::open(&dir).ctx("open", &dir)?.sync_all()?;
         }
     }
     let latest = runs
@@ -1071,6 +1174,8 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
     let journal = app_dir.join(format!("g{generation}"));
     private_directory(&journal)?;
     let config_path = journal.join("resident.json");
+    let route_profile = host.profile.agent_route_profile.unwrap_or_default();
+    let agents = agent_route::configs(&app_dir, app, &placement, &journal, route_profile)?;
     let mut resident = json!({
         "protocol":"mini-spk-resident-start-v3",
         "journalDir":journal,
@@ -1113,8 +1218,9 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
         "completionManagementCustody":install_config["completionManagementCustody"],
         "completionSemantics":host.profile.completion_semantics,
         "entrances":entrances,
-        "agents":[],
+        "agents":agents,
     });
+    resident["agentRouteProfile"] = json!(route_profile);
     resident["brokerSocket"] = json!(broker::socket_path(&host.profile.grains_root, host.profile.broker_socket.as_deref())?);
     if let Some(seconds) = host.profile.ws_authority_lease_seconds {
         resident["wsAuthorityLeaseSeconds"] = json!(seconds);
@@ -1122,6 +1228,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
 
     derived_file(&config_path, &serde_json::to_vec_pretty(&resident)?)?;
     crate::resident_service::validate_config(&config_path)?;
+    drop(route_lock);
     if prepare_only { return Ok(json!({"protocol":"mini-spk-prepared-resident-v1","residentConfig":config_path,"unit":unit})); }
     install_unit(host, app, generation)?;
     let started = Instant::now();
@@ -1130,6 +1237,7 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
             return Err(error);
         }
     }
+    let mut unreadable = 0u32;
     let completed = loop {
         // Re-read each turn: the lane is fixed only once the resident retains
         // its admitted marker (a recovered create retries under v4).
@@ -1140,10 +1248,18 @@ fn start_inner(host: &Host, app: &str, prepare_only: bool) -> io::Result<Value> 
                 .and_then(Value::as_str)
                 .is_some_and(|dir| Path::new(dir).join("http.sock").exists())
         });
-        if exists(&completed)? && sockets_ready {
+        let agents_ready = agents.iter().all(|agent| agent.get("socket").and_then(Value::as_str)
+            .is_some_and(|socket| Path::new(socket).exists()));
+        if exists(&completed)? && sockets_ready && agents_ready {
             break completed;
         }
-        let state = unit_active(&unit)?;
+        // The 2026-10-27 HakyllCMS row failed here at 125 s with an empty state while its
+        // resident was alive until the world was torn down (a START takes 140-630 s): an
+        // unreadable state is not a stopped unit.
+        let Some(state) = judge_poll(&unit, unit_probe(&unit, "ActiveState")?, &mut unreadable)? else {
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        };
         if !matches!(state.as_str(), "active" | "activating") {
             return Err(io::Error::other(format!(
                 "resident unit {unit} is {state} before START completion; see journalctl -u {unit}"
@@ -1352,7 +1468,7 @@ fn export(host: &Host, app: &str, out: &Path) -> io::Result<Value> {
             "volumeMib":placement.volume_mib,
             "stopGeneration":latest.generation.to_string(),
         }),
-        &fs::read(&receipt)?,
+        &fs::read(&receipt).ctx("read", &receipt)?,
         &host.profile.completion_custodian_seed,
     )
 }
@@ -1377,12 +1493,14 @@ pub fn usage() -> &'static str {
     "spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk \
      [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX] [--management-selector PATH] | \
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
+     grain agent-route PROFILE APP AGENT_ROUTE_REQUEST.json | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \
      grain init-store GRAINS_ROOT MINI_HOST MINI_CONFIG [--broker-socket PATH] | grain backup PROFILE | \
      grain rebind-profile OLD_PROFILE ADMISSION | grain session-intents PROFILE APP | \
      grain register-route --socket PATH --request PATH | \
-     grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION"
+     grain current-profile BASELINE | grain runtime-status PROFILE | grain adopt-runtime PROFILE ADMISSION | \
+     grain reclaim-agent-socket SOCKET CONTROLLER_UID"
 }
 
 struct InstallOptions {
@@ -1461,6 +1579,13 @@ fn init_store(root: &Path, host: &Path, config: &Path, socket: Option<&Path>) ->
 }
 
 pub fn run(args: &[String]) -> io::Result<Value> {
+    if let [verb, socket, uid] = args {
+        if verb == "reclaim-agent-socket" {
+            if !lifecycle_selector::decimal(uid) { return Err(invalid("controller UID must be canonical decimal")); }
+            let uid = uid.parse::<u32>().map_err(|_| invalid("controller UID out of range"))?;
+            return crate::agent_api_server::reclaim_socket(Path::new(socket), uid);
+        }
+    }
     if let [verb,store,app,generation]=args {
         if verb=="unit-name" { return Ok(json!({"unit":broker::resident_unit(store,app,generation)?})); }
     }
@@ -1538,6 +1663,7 @@ pub fn run(args: &[String]) -> io::Result<Value> {
                 ("route", [app, request]) => {
                     crate::grain_route::route(&host_view(&host), app, Path::new(request))
                 }
+                ("agent-route", [app, request]) => agent_route::register(&host, app, Path::new(request)),
                 ("start", [app]) => start(&host, app),
                 ("prepare-resident", [app]) => start_inner(&host,app,true),
                 ("stop", [app]) => stop(&host, app),
@@ -1574,6 +1700,46 @@ mod tests {
                 app_capability:"9502".into(),app_observe_capability:"9503".into(),package_capability:"9504".into(),package_observe_capability:"9505".into()},
             raw_sha256:"a".repeat(64),image_dir:None,app_uid:64010,app_gid:64010,
             volume_resource:"8502".into(),volume_mib:512,class:"S".into() }
+    }
+
+    #[test]
+    fn systemctl_that_prints_nothing_or_fails_is_unreadable_never_a_state() {
+        assert_eq!(classify_show(true, b"active\n", b""), UnitProperty::Known("active".into()));
+        assert_eq!(classify_show(true, b"failed\n", b""), UnitProperty::Known("failed".into()));
+        assert_eq!(classify_show(true, b"", b""), UnitProperty::Unreadable("systemctl printed nothing".into()));
+        assert_eq!(classify_show(true, b"  \n", b""), UnitProperty::Unreadable("systemctl printed nothing".into()));
+        assert_eq!(
+            classify_show(false, b"", b"Failed to connect to bus\n"),
+            UnitProperty::Unreadable("Failed to connect to bus".into())
+        );
+        // A nonzero exit never yields a state, whatever it printed.
+        assert!(matches!(classify_show(false, b"active", b""), UnitProperty::Unreadable(_)));
+    }
+
+    #[test]
+    fn start_wait_absorbs_a_pressured_manager_and_gives_up_only_after_a_minute() {
+        let gone = || UnitProperty::Unreadable("Failed to connect to bus".into());
+        let mut misses = 0;
+        for _ in 0..MAX_UNREADABLE_POLLS {
+            assert_eq!(judge_poll("u", gone(), &mut misses).unwrap(), None);
+        }
+        // One readable poll resets the run.
+        assert_eq!(
+            judge_poll("u", UnitProperty::Known("activating".into()), &mut misses).unwrap(),
+            Some("activating".into())
+        );
+        assert_eq!(misses, 0);
+        for _ in 0..MAX_UNREADABLE_POLLS {
+            assert_eq!(judge_poll("u", gone(), &mut misses).unwrap(), None);
+        }
+        let error = judge_poll("u", gone(), &mut misses).unwrap_err().to_string();
+        assert!(error.contains("cannot read ActiveState of u") && error.contains("Failed to connect to bus"));
+        // A real terminal state is returned at once, not absorbed.
+        let mut fresh = 0;
+        assert_eq!(
+            judge_poll("u", UnitProperty::Known("failed".into()), &mut fresh).unwrap(),
+            Some("failed".into())
+        );
     }
 
     #[test]

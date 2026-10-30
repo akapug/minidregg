@@ -10,21 +10,24 @@ repo, frm, to, out = sys.argv[1:5]
 def git(*a): return subprocess.check_output(["git", "-C", repo, *a], text=True)
 changed = git("diff", "--name-only", f"{frm}..{to}").split()
 native = os.path.join(repo, "native")
-crates = sorted(d for d in os.listdir(native) if os.path.isfile(os.path.join(native, d, "Cargo.toml")))
+crates = sorted(d for d in os.listdir(native) if os.path.isfile(os.path.join(native, d, "Cargo.toml")) or d == "mini-sdk-ts")
 deps = {}
 for c in crates:
-    toml = open(os.path.join(native, c, "Cargo.toml")).read()
     deps[c] = set()
+    if c == "mini-sdk-ts":
+        continue
+    toml = open(os.path.join(native, c, "Cargo.toml")).read()
     for p in re.findall(r'path\s*=\s*"([^"]+)"', toml):
         tgt = os.path.normpath(os.path.join(native, c, p))
         if os.path.dirname(tgt) == native and os.path.basename(tgt) in crates:
             deps[c].add(os.path.basename(tgt))
+deps["mini-sdk-ts"] = {"mini-sdk"}  # package.json crate: its pretest builds mini-sdk to wasm
 def rusty(f):
     # what a cargo build or test of the crate reads: Rust sources, manifests, and files under
     # src/ tests/ benches/ examples/ (fixtures, include_bytes!); a script beside the crate is not
     parts = f.split("/")
     # golden/ and fixtures/ are read by tests through CARGO_MANIFEST_DIR (mini-sdk golden vectors)
-    return (f.endswith(".rs") or parts[-1] in ("Cargo.toml", "Cargo.lock", "build.rs")
+    return (f.endswith((".rs", ".ts")) or parts[-1] in ("Cargo.toml", "Cargo.lock", "build.rs", "package.json", "package-lock.json")
             or (len(parts) > 3 and parts[2] in ("src", "tests", "benches", "examples", "golden", "fixtures", "testdata")))
 def balanced(text, i):
     depth = 0
@@ -35,8 +38,8 @@ def balanced(text, i):
     return len(text)
 def embedded(crate):
     """Repo-relative files (a trailing / names a directory) a crate's sources include_str!/include_bytes!,
-    including files outside native/ (deploy/shell/templates/..., Kernel/*.lean) and in-crate files outside
-    src/ (journey.d/*.golden.txt). A change to one is a change to the crate's tests; a selector that looks
+    including files outside native/ (Kernel/*.lean) and in-crate files outside src/ (journey.d/*.golden.txt,
+    templates/...). A change to one is a change to the crate's tests; a selector that looks
     only under native/<crate>/src would never run the rows that read it."""
     out, cdir = set(), os.path.join(native, crate)
     for dirpath, dirnames, filenames in os.walk(cdir):
@@ -83,11 +86,11 @@ for ln in lines:
     if not ln.endswith("\\"):
         logical.append(buf); buf = ""
 if buf: logical.append(buf)
-crate_idx = {"t": 3, "exact": 2, "known_red": 3, "sudo_exact": 2}
+crate_idx = {"t": 3, "exact": 2, "known_red": 3, "sudo_exact": 2, "node_tests": 3}
 outl, rows = [], []
 for l in logical:
     toks = l.split()
-    if toks and toks[0] in crate_idx and not l.lstrip().startswith(("t()", "exact()", "known_red()", "sudo_exact()")) and l == l.lstrip():
+    if toks and toks[0] in crate_idx and not l.lstrip().startswith(("t()", "exact()", "known_red()", "sudo_exact()", "node_tests()")) and l == l.lstrip():
         crate = toks[crate_idx[toks[0]]]
         if crate in sel:
             outl.append(l); rows.append(f"{toks[1]}({crate})")

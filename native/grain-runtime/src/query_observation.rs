@@ -52,15 +52,7 @@ fn stale_query_with(
     source: &[u8],
     inspect: impl FnOnce(&[u8]) -> Result<Value>,
 ) -> Result<bool> {
-    stale_query_via_with(config, config.host_socket.as_deref(), attempt, source, inspect)
-}
-fn stale_query_via_with(
-    config: &Config,
-    expected_socket: Option<&Path>,
-    attempt: &Path,
-    source: &[u8],
-    inspect: impl FnOnce(&[u8]) -> Result<Value>,
-) -> Result<bool> {
+    let expected_socket = config.host_socket.as_deref();
     let marker_path = attempt.join("query-refusal.json");
     match fs::symlink_metadata(&marker_path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -116,8 +108,9 @@ fn stale_query_via_with(
         }
     }
     let frame = bounded_regular_file(&attempt.join("query-refusal.frame"), 12_102_761)?;
-    if frame.len() < 2 || frame[0] != 255 {
-        return Err("query refusal is not an op-255 frame".into());
+    // A query refusal is decided before any append: the Host answers it under NO_RECORD (c5e268ebd).
+    if frame.len() < 2 || frame[0] != mini_sdk::host_operations::RESPONSE_NO_RECORD {
+        return Err("query refusal is not a NO_RECORD frame".into());
     }
     let refusal = inspect(&frame[1..])?;
     Ok(refusal["type"] == "refused" && refusal["reason"] == "stale-root")
@@ -125,27 +118,18 @@ fn stale_query_via_with(
 
 impl Runtime {
     pub(super) fn query_observation_as(&mut self, authority: &Authority) -> Result<Value> {
-        self.query_observation_via(authority, None)
-    }
-    pub(super) fn query_observation_via(&mut self, authority: &Authority,
-        transport: Option<&quiescence_transport::AuthorizedTransport>) -> Result<Value> {
-        fresh_read(|| self.query_observation_once(authority, false, transport))
+        fresh_read(|| self.query_observation_once(authority, false))
     }
     pub(super) fn query_policy_observation(&mut self) -> Result<Value> {
         let authority = self.parent();
-        fresh_read(|| self.query_observation_once(&authority, true, None))
+        fresh_read(|| self.query_observation_once(&authority, true))
     }
     fn query_observation_once(
         &mut self,
         authority: &Authority,
         policy: bool,
-        transport: Option<&quiescence_transport::AuthorizedTransport>,
     ) -> std::result::Result<Value, ReadError> {
-        if let Some(via) = transport {
-            via.assert_bound(&self.config, &self.config_path, &self.journal.binding)?;
-        }
-        let query_socket = transport.map(|via| via.socket().to_owned())
-            .or_else(|| self.config.host_socket.clone());
+        let query_socket = self.config.host_socket.clone();
         let id = self.next_id()?;
         let prefix = if policy { "policy-query" } else { "query" };
         let view_kind = if policy { "policy" } else { "resource" };
@@ -178,7 +162,7 @@ impl Runtime {
             args.extend(["--socket", socket.to_str().ok_or("socket path UTF-8")?]);
         }
         if let Err(error) = self.command_output(&cfg.mini, &args) {
-            let stale = stale_query_via_with(cfg, query_socket.as_deref(), &attempt, &source, |body| {
+            let stale = stale_query_with(cfg, &attempt, &source, |body| {
                 let binary = attempt.join("query-refusal-inspect.bin");
                 let decoded = attempt.join("query-refusal-inspect.json");
                 write_new(&binary, body)?;
@@ -253,7 +237,7 @@ mod tests {
         fs::write(attempt.join("config.json"), b"config").unwrap();
         fs::write(attempt.join("intent.json"), b"source").unwrap();
         fs::write(attempt.join("signed-observation.bin"), b"signed").unwrap();
-        fs::write(attempt.join("query-refusal.frame"), b"\xffencoded").unwrap();
+        fs::write(attempt.join("query-refusal.frame"), [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"encoded"].concat()).unwrap();
         fs::write(attempt.join("attempt.json"),serde_json::to_vec(&json!({"format":"minidregg-resource-client-attempt-v1",
             "operation":"query","host":config.host,"config":attempt.join("config.json"),"socket":config.host_socket})).unwrap()).unwrap();
         let mut marker = json!({"type":"minidregg-query-refusal-v1","stage":"query","operation":5});
@@ -306,7 +290,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn admitted_query_transport_keeps_refusal_bound_to_actual_socket() {
+    fn query_refusal_is_bound_to_the_pinned_socket() {
         let (root, cfg, attempt) = fixture();
         let management = root.join("management.sock");
         let manifest_path = attempt.join("attempt.json");
@@ -318,7 +302,6 @@ mod tests {
         marker["attemptManifestSha256"] = json!(sha256_file(&manifest_path).unwrap());
         fs::write(marker_path, serde_json::to_vec(&marker).unwrap()).unwrap();
         assert!(stale_query_with(&cfg,&attempt,b"source", |_| panic!("wrong socket must refuse before decoding")).is_err());
-        assert!(stale_query_via_with(&cfg,Some(&management),&attempt,b"source", |_| Ok(json!({"type":"refused","reason":"stale-root"}))).unwrap());
         assert_eq!(cfg.host_socket,Some(root.join("host.sock")));
         fs::remove_dir_all(root).unwrap();
     }
@@ -442,7 +425,7 @@ printf '%s' '{"type":"refused","reason":"stale-root"}' > "$5"
         }
         assert_eq!(
             fs::read(first.join("query-refusal.frame")).unwrap(),
-            b"\xffencoded"
+            [&[mini_sdk::host_operations::RESPONSE_NO_RECORD][..], b"encoded"].concat()
         );
         assert_eq!(fs::read(first.join("intent.json")).unwrap(), source);
         assert!(!first.join("view.json").exists());
@@ -454,6 +437,55 @@ printf '%s' '{"type":"refused","reason":"stale-root"}' > "$5"
             .join("policy-query-0000000000000003/attempt/view.json")
             .exists());
         assert!(runtime.journal.pending.is_none() && runtime.journal.provider_pending.is_none());
+        drop(runtime);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A failed prompt's note clears exactly once its typed outcome record
+    /// exists: before the record the post-record reconcile leaves it (and
+    /// logs why); after it, the note is derived once; a second pass is a
+    /// no-op.
+    #[test]
+    fn failed_prompt_note_clears_once_its_record_exists() {
+        let (root, cfg, _) = fixture();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        let mini = r#"#!/bin/sh
+set -eu
+[ "$1" = query ] || exit 90
+dir=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dir) dir=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir "$dir"
+printf '%s' '{"cell":{"root":"r","grain":{"task":"10","generation":"1","status":"1","remaining":"8","reserved":"0"}}}' > "$dir/view.json"
+printf '%s' '{"authorityRoot":"authority","worldRoot":"w","height":"10"}' > "$dir/challenge.json"
+"#;
+        fs::write(&cfg.mini, mini).unwrap();
+        fs::set_permissions(&cfg.mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut runtime = Runtime::open(cfg, root.join("controller-config.json")).unwrap();
+        let note = "Hermes prompt 9: hard disconnect";
+        runtime.journal.connection = Connection::Detached;
+        runtime.journal.unresolved_external.push(note.into());
+        runtime.reconcile_after_prompt_record();
+        assert_eq!(runtime.journal.unresolved_external, vec![note.to_owned()], "no record: the note stays");
+        let derived = |r: &Runtime| r.journal.reconciliation_log.iter()
+            .filter(|e| e["action"] == "derive-no-unaccounted-external-effects").count();
+        assert_eq!(derived(&runtime), 0);
+        prompt_outcome::write(&root, &prompt_outcome::Record {
+            kind: prompt_outcome::KIND.into(), prompt_operation_id: 9, resident_prompt_id: None,
+            prompt_sha256: None, session_id: None,
+            outcome: prompt_outcome::Outcome::Undecided {
+                retry: prompt_outcome::Retry {
+                    admin: vec!["reconcile parent audited".into(), "reconcile effects".into()], operation: None },
+                detail: note.into() } }).unwrap();
+        runtime.reconcile_after_prompt_record();
+        assert!(runtime.journal.unresolved_external.is_empty(), "the record proves the note");
+        assert_eq!(derived(&runtime), 1);
+        runtime.reconcile_after_prompt_record();
+        assert_eq!(derived(&runtime), 1, "derived exactly once");
         drop(runtime);
         fs::remove_dir_all(root).unwrap();
     }

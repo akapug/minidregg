@@ -4,8 +4,27 @@ only selectors, one HTTP request, and a new operation ID. Mini derives the
 current parent/purse, the certified event27 grant, exact reserve context and
 signing headers from one verifier-opened image. A plan is not a permit.
 -/
-import Kernel.ApplicationDispatchAgentPaidAuthoring
-import Kernel.ApplicationAgentLifetimeDispatchReceiver
+module
+
+public import Kernel.ApplicationDispatchAgentPaidAuthoring
+public import Kernel.ApplicationAgentLifetimeDispatchReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring
 
@@ -375,10 +394,16 @@ def preparePaidVerified (config : Config) {target : Durable}
         (some fixed.fixed.purseObserve)] }
   let payer ← NativeHost.prepareLoaded config verified.opened
     (.invoke (DeclaredResourceController.commandCodec.encode command))
-  let some selection := ApplicationDispatchAdmission.selectCommand unsigned
-    | throw "lifetime paid app selector missing"
+  -- The source plan is still unsigned: selectCommand reads an assembled
+  -- signed command and therefore cannot select from this empty placeholder.
+  -- Use the same current-image coordinates as prepareForIssue above.
+  let selection : ApplicationDispatchCommand.Selection :=
+    ⟨sessionCell.payload.root, fixed.fixed.base.base.sessionObserveCapability⟩
   let appCommand := ApplicationDispatchCommand.command unsigned.dispatch selection
     unsigned.parent
+  if app.invocation.finalizedDraft !=
+      .invoke (DeclaredResourceController.commandCodec.encode appCommand) then
+    throw "lifetime paid app command differs from source plan"
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config verified.opened.durable⟩
     verified.opened.ground appCommand

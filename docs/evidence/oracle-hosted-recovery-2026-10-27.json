@@ -1,0 +1,100 @@
+{
+  "protocol": "mini-oracle-hosted-recovery-evidence-v1",
+  "date": "2026-10-27",
+  "status": "Both runs stopped and preserved. Fresh v7 admitted an agent session but refused lifetime-grant planning. The one qualified v5 terminal recovery failed at the existing native Host frame-read deadline during historical ticket lookup; no result or acknowledgment.",
+  "store": "d4090a0c4c356d31",
+  "request_id": "839a6731941b62b1179b4de9c076f0df",
+  "operation_id": 13,
+  "attempts": [
+    {
+      "run": "dregg-build:/build/lanes/oracle-foreground-recovery-r1",
+      "result": "Pre-upgrade binary custody refusal (Cargo artifact had two hardlinks); no native recovery invocation.",
+      "preservation_sha256": "7857517813a1bceb98ecedeb02ed6b04ddc9ec1e0d66cadd1ff11988e76c7fa6"
+    },
+    {
+      "run": "dregg-build:/build/lanes/oracle-foreground-recovery-r2",
+      "result": "One native recovery; original reserve lookup confirmed through the dedicated controller. Parent comparison refused because the client checked a nonexistent projection field. Store unchanged.",
+      "summary_sha256": "3e2f5abf64d9bb144d5813c48007084599e2f576b33691a3695b4d46013d4e21"
+    },
+    {
+      "run": "dregg-build:/build/lanes/oracle-foreground-recovery-r3",
+      "result": "One native recovery with corrected signed-parent comparison. Factory policy refused tool20011 at prepare, before birth submission. Tool attach/reserve/zero-charge settlement/disconnect were admitted as events41\u201344. Outer recovery still retained uncertainty and parent reserve1.",
+      "summary_sha256": "4a4aebc39b0945f8060fe75327ea076bd0d01d76fbe2036ee2d72d2beb94d89a"
+    },
+    {
+      "run": "dregg-build:/build/lanes/oracle-refusal-settlement-r1",
+      "result": "One terminal-only recovery with qualified cancellation-corrected runtimecc6b7962. Historical bootstrap-ticket lookup closed at the inner Host frame-read deadline; native operator restarted its Host. Original parent reserve remains confirmed and foreground13 uncertain. No result/ACK/new birth/grant/START. Execution1,cleanup0; namespace preserved.",
+      "summary_sha256": "8da7352c4299c86eca6fa83d509c1d55fc029a787aa2e2183267550a448e7f02"
+    }
+  ],
+  "current_state": {
+    "all_controller_units_stopped": true,
+    "connection": "fenced",
+    "next_operation_id": 54,
+    "parent_reserved": 1,
+    "tool_hold": null,
+    "birth_pending": null,
+    "born_resources": [],
+    "foreground_result": null,
+    "acknowledged": false,
+    "birth_attempt39_call_or_submit_marker": false,
+    "evidence": "Private operator export remains on build host; no keys or raw private export included here.",
+    "expanded_export_sha256": "8d521bb9d756abc40df183e15de63c46f59f18bab0ec6de081ed654a845c2cbe",
+    "runtime_sha256": "cc6b7962293925e4694c132814b45ec31b09b31687b70515bf714ed46200d562",
+    "stopped_status_sha256": "f9253e79c3a84b11964034119bdaa469a88aa7f2721514a5057a1c8da82b35ae"
+  },
+  "qualified_changes": {
+    "exporter": {
+      "source": "deploy/spk-host/controller-world.py",
+      "limits": "4096 files,1024 directories; unchanged32MiB total,8MiB/file,depth16 and custody checks",
+      "checks": "Linux3 boundary tests + installer companion pin passed; actual644-file stopped export succeeded. Earlier empty export preserved."
+    },
+    "fresh_factory": {
+      "source": "scripts/grain-birth/native-share-member.sh",
+      "behavior": "Preserves owner7 and worker8 exactly; explicit fresh allocation adds only tool subjects, requiring read or kernel grain-backed birth mode. Other roles receive no added permission.",
+      "source_sha256": "2cca47bd42984e05c2cf121b31831fcc00e4fa3b8526d3c9cd63baab6eeed048",
+      "composition": "dregg-build:/build/lanes/oracle-factory-policy/evidence-final:2 tests passed, actual full frozen339 source transformations and malformed allocation controls. Bootstrap was stubbed; no Store created.",
+      "evaluator": "hbox:/othersys/lanes/oracle-factory-policy:42 production Pred.eval guards passed on actual generated laws (original7/8; allocated20011 read/governed birth and bare refusal; unrelated9/20010/20012/20013 refusals).",
+      "qualification_sha256": "c1e9b7d25aee51916602dd137a9c7fb5610c9815be4970b588087fd7dde8cbda"
+    },
+    "fresh_browser": "Optional native web-session B with private loopback Caddy and exact Host/Origin;6 fixture tests passed, including real TLS\u2192Unix forwarding and bounded process cleanup. Actual native browser journey pending.",
+    "fresh_tenant_probe": "Optional same-grain A owner-query/agent-invoke request-ID collision and later agent replay;3 report/control tests passed. Actual pooled receiving evidence pending; does not claim same-principal coverage."
+  },
+  "next": "Preserve both failures. Qualify the special lifetime-grant source/receiver and independent consent in a coherent new Mini cohort, then review a new fresh-world journey using existing data source bytes and ordinary bounded custody publication. Controller migration is deferred. No automatic retry of retained v5 terminal recovery; any future attempt must account for its inner read deadline and exact preserved state.",
+  "package_v7_sha256": "e860a781dc8b897eadd002f28e388b799de92de0f019f1b357d140a9264a3888",
+  "scope": "No specialist panel scores in this infrastructure lane; no successful lifetime Oracle call claimed yet.",
+  "fresh_v7": {
+    "run": "dregg-build:/build/lanes/oracle-v7-acceptance/run-v7",
+    "store": "be0d1db693ca88bd",
+    "plan_sha256": "3044c30f63405a14ba28cfcea5a395f216211711a69a6b77f3efca14298cd9b2",
+    "source_snapshot_sha256": "c3d58fa00f540a2f83b58811d5aace3feacf07ca0612918cdffab34e93bc3147",
+    "session": {
+      "request_id": "085c2434e8b67ea08deab78de5844f30",
+      "operation_id": 7,
+      "birth_operation_id": 24,
+      "accepted_count": 43,
+      "resources": [
+        29420,
+        29421
+      ]
+    },
+    "failure": {
+      "phase": "grant-plan",
+      "opcode": 74,
+      "message": "agent lifetime grant birth pending refused",
+      "retained_frame": "agent-lifetime/native-issue-grant/grant-issue/plan.frame",
+      "grant_submitted": false
+    },
+    "execution_exit": 1,
+    "cleanup_exit": 0,
+    "namespace_preserved": true,
+    "application_started": false,
+    "engine_started": false,
+    "browser_exercised": false,
+    "engine_leases_released": true,
+    "stopped_export_sha256": "a8f8fa47aab9e93922f4acfd04bcb4a61e67b5365dead037a95f37a20575c3a9",
+    "stopped_status_sha256": "405459b860036dfbe52d9b5b80f33f89bf11580247bcb5fa9fc3420d87fd21a4",
+    "summary_sha256": "2c5839f2602738e02d3cbf7ee8150be4c15f4b4f4b4c9dc58381e7cce56133d3",
+    "source_diagnosis": "Lifetime source emits three grants for one birth, while ordinary preparePending requires exactly two. Special lifetime-grant source/receiver repair is in progress; no factory policy change or retry."
+  }
+}

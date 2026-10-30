@@ -4,9 +4,28 @@ ordinary DRC command supplies current mutation authority; this carrier binds
 the physical work requested of a later host to that signed command. It does
 not grant a completion slot or permission to launch a process.
 -/
-import Kernel.ApplicationGrain
-import Kernel.DurableDataIntent
-import Compiler.ResourceBirthCodec
+module
+
+public import Kernel.ApplicationGrain
+public import Kernel.DurableDataIntent
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleBegin
 
@@ -32,7 +51,7 @@ def Kind.ofCode : Nat → Kind
   | 0 => .install | 1 => .start | 2 => .stop | _ => .upgrade
 
 def kindStream : StreamCodec Kind :=
-  StreamCodec.xmap StreamCodec.nat Kind.code Kind.ofCode
+  StreamCodec.retract StreamCodec.nat Kind.code Kind.ofCode
     (by intro kind; cases kind <;> rfl)
 
 def Kind.operation : Kind → ApplicationGrain.Operation
@@ -140,17 +159,7 @@ def sourceStream : StreamCodec Source :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/LIFECYCLE-BEGIN/v2".toUTF8.toList
 
-private def rawSourceCodec : LawfulCodec Source where
-  encode source := frame ++ sourceStream.encode source
-  decode bytes := if bytes.take frame.length = frame then
-    sourceStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro source
-    have decoded := sourceStream.toLawful.decode_encode source
-    change sourceStream.toLawful.decode (sourceStream.encode source) = some source at decoded
-    simp [decoded]
-
-def sourceCodec : LawfulCodec Source := strictCodec rawSourceCodec
+def sourceCodec : LawfulCodec Source := (StreamCodec.framed frame sourceStream).toLawful
 
 def Source.canonicalBytes (source : Source) : List UInt8 :=
   sourceCodec.encode source
@@ -162,7 +171,7 @@ theorem source_decode_encode (source : Source) :
 theorem source_decoded_canonical {bytes : List UInt8} {source : Source}
     (decoded : sourceCodec.decode bytes = some source) :
     source.canonicalBytes = bytes :=
-  strictCodec_canonical rawSourceCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- The operation key stays stable when a different proposed image or package
 is presented under the same app generation and caller operation ID. -/

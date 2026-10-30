@@ -7,10 +7,32 @@ Authored WIP; source opcode 61 and replay/ordered receiver joins are pending.
 The predicted prefix is the opened image extended by the first record
 (`Loaded.extend`), never a genesis replay of the whole history.
 -/
-import Kernel.JointControlBootstrap
-import Kernel.ResourceBirthReceiver
-import Compiler.Sp800185Cshake256
-import Theory.AssertAxioms
+module
+
+public import Kernel.JointControlBootstrap
+public import Kernel.ResourceBirthReceiver
+public import Compiler.Sp800185Cshake256
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointControlBootstrapBundle
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -38,9 +60,11 @@ def decodeSource (bytes : List UInt8) : Option Source := do
   let source ← sourceStream.toLawful.decode (bytes.drop frame.length)
   if sourceBytes source != bytes then none else some source
 
-/-- Additional operation accounting preserves all ten birth lanes. Source
-bytes and two extra current-law validations receive explicit deterministic
-charges. This quote is a source operation rule, not a CPU refinement proof. -/
+/-- Additional operation accounting preserves the birth's lanes but storage.
+Source bytes and two extra current-law validations receive explicit
+deterministic charges; the storage lane is the World's storage of the bundle's
+own turn (`birthIntent`). This quote is a source operation rule, not a CPU
+refinement proof. -/
 def overhead (source : Source) : Charge
   | .turnBytes => (sourceBytes source).length
   | .proofWork => 2
@@ -54,10 +78,14 @@ def birthIntent {config : Config} {opened : Opened config}
       opened.pins opened.durable (logicalHeight config opened.durable)) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ordinary := ResourceBirthReceiver.intent accepted
+  let event : StableEvent := ⟨61,config.deployment.domain,
+    (Sp800185Cshake256.hash frame (sourceBytes source)).digest,sourceBytes source⟩
   { ordinary with
-    exactCharge := ordinary.exactCharge + overhead source
-    event := ⟨61,config.deployment.domain,
-      (Sp800185Cshake256.hash frame (sourceBytes source)).digest,sourceBytes source⟩ }
+    exactCharge := fun lane =>
+      if lane = .storageBytes then
+        DeployedCharge.storageCharge opened.durable.snapshot ordinary.writes event
+      else ordinary.exactCharge lane + overhead source lane
+    event := event }
 
 /-- Bootstrap is a creator-owned source resource: the ordinary current creator
 signature is also the configured current owner permission. General separately
@@ -91,6 +119,13 @@ structure Initialization (config : Config) (predicted : Opened config) where
   intent : DataIntent ResourceBirthCodec.rootBytes
   intentExact : intent = accepted.dataIntent shape
   bootstrap : JointControlBootstrap.Admission config predicted intent
+theorem Initialization.currentPermission {config : Config} {predicted : Opened config}
+    (initialization : Initialization config predicted) :
+    config.jointControl = some initialization.bootstrap.pin ∧
+      initialization.bootstrap.current.intent =
+        initialization.accepted.dataIntent initialization.shape :=
+  ⟨initialization.bootstrap.pinned,
+    initialization.bootstrap.intentExact.trans initialization.intentExact⟩
 
 /-- A bare source prefix is admitted only together with a CURRENT lawful,
 funded, exact initializer, retained verbatim in the first source record. -/

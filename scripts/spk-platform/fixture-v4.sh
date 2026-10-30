@@ -97,7 +97,7 @@ stop_all() {
   done
   rm -f "$FOS/broker.pid" "$GRAINS/broker.sock"
 }
-export BIN SPK GRAINS_ROOT=$GRAINS BROKER_SOCKET=$GRAINS/broker.sock
+export BIN SPK GRAINS_ROOT=$GRAINS BROKER_SOCKET=$GRAINS/runtime-$(basename "$GRAINS")/broker.sock
 
 if [ "$MODE" = restart ]; then
   [ -s "$RUN/fixture.json" ] || fail "$RUN holds no recorded chronology"

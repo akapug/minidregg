@@ -1,0 +1,34 @@
+{
+  "protocol": "mini-spk-integrated-allocation-v1",
+  "status": "reserved-coordinates-only",
+  "app": "9101",
+  "packageManifest": "9102",
+  "snapshotManifest": "9103",
+  "humans": [],
+  "agents": [{
+    "route": "oracle-agent",
+    "sessionKind": "api",
+    "session": "29420",
+    "descriptor": "29421",
+    "ticket": "29520",
+    "persistentGrant": "29530",
+    "controller": {"subject":"20010","keyId":"30010","account":"28010","factoryObserveCapability":"20610","task":"27920"},
+    "tool": {"subject":"20011","keyId":"31011","account":"28011","factoryObserveCapability":"20611","task":"27930"},
+    "dispatch": {"subject":"20012","keyId":"32012","account":"28012","factoryObserveCapability":"20612","task":"27940"},
+    "provider": {"subject":"20013","keyId":"33013","account":"28013","factoryObserveCapability":"20613","task":"27950"},
+    "plannedCaps": {
+      "controllerSpend":"20410","controllerControl":"20510",
+      "parentOwner":"20201","parentControl":"20202",
+      "parentToolWitness":"20203","parentDispatchWitness":"20204","parentProviderWitness":"20205",
+      "toolSpend":"20411","toolControl":"20511","toolOwner":"20211","toolTaskControl":"20212",
+      "dispatchSpend":"20412","dispatchControl":"20512","dispatchOwner":"20221","dispatchTaskControl":"20222",
+      "providerSpend":"20413","providerControl":"20513","providerOwner":"20231","providerTaskControl":"20232",
+      "sessionOwner":"20241","sessionControl":"20242","descriptorOwner":"20243","descriptorControl":"20244",
+      "ticketOwner":"20271","ticketControl":"20272","ticketObserve":"20273","appObserve":"20274",
+      "manifestObserve":"20275","snapshotObserve":"20276","bootstrapTicketObserve":"20277",
+      "controllerAppObserve":"20278","controllerManifestObserve":"20279",
+      "agentTicketToolObserve":"20280",
+      "grantOwner":"20281","grantControl":"20282","grantObserve":"20283"
+    }
+  }]
+}

@@ -1,7 +1,6 @@
 //! Resident-supervisor human dispatch. This function runs only in the process
 //! that owns the actual app fd3 and its RpcDriver; a separate command must not
 //! reopen fd3 or construct a new app-side WebSession from a historical reply.
-#![allow(dead_code)] // Lifecycle-v2/SPK binding and resident service not enabled yet.
 
 use crate::dispatch_author::FixedAuthoring;
 use crate::dispatch_inspection::HttpProjection;
@@ -28,9 +27,9 @@ fn invalid(reason: &'static str) -> io::Error {
 }
 
 /// A single fresh human permit may reach fd3 once. Native op34 is committed
-/// before physical delivery, so any failure thereafter retains the global
-/// submit marker and/or DeliveryRequested tombstone for operator audit. The
-/// caller must not retry this HTTP request after an uncertain result.
+/// before physical delivery, so any failure thereafter retains this call's
+/// submit marker and/or DeliveryRequested tombstone for operator audit. This
+/// call is never resent; a new HTTP request is a new signed call.
 pub(crate) struct ResidentHuman<'a> {
     pub operator: &'a PrivateOperator,
     pub custody: &'a FixedAuthoring,
@@ -58,6 +57,31 @@ enum Physical {
 
 /// A WebSocket open the entrance validated: the client's stream (handed to
 /// the fd3 worker on admission) and the handshake's accept value.
+/// Per-hop wall clock of one delivery, printed once when the delivery ends (answer or refusal):
+/// `spk-host: dispatch-timing METHOD hops=name:ms,...`. Latency is published, never a gate; the
+/// line is what names the hop a slow request spent its time in.
+struct HopTrace {
+    method: String,
+    last: std::time::Instant,
+    hops: Vec<(&'static str, u128)>,
+}
+impl HopTrace {
+    fn new(method: &str) -> Self {
+        Self { method: method.to_owned(), last: std::time::Instant::now(), hops: Vec::new() }
+    }
+    fn mark(&mut self, name: &'static str) {
+        let now = std::time::Instant::now();
+        self.hops.push((name, now.duration_since(self.last).as_millis()));
+        self.last = now;
+    }
+}
+impl Drop for HopTrace {
+    fn drop(&mut self) {
+        let hops: Vec<String> = self.hops.iter().map(|(name, ms)| format!("{name}:{ms}")).collect();
+        eprintln!("spk-host: dispatch-timing {} hops={}", self.method, hops.join(","));
+    }
+}
+
 pub(crate) struct UpgradeRequest {
     pub client: UnixStream,
     pub accept: String,
@@ -76,6 +100,7 @@ impl ResidentHuman<'_> {
         attempt_parent: &Path,
         upgrade: Option<UpgradeRequest>,
     ) -> io::Result<Vec<u8>> {
+        let mut trace = HopTrace::new(http.method);
         let export_capture = crate::export_receipt::requested(policy, http, export_capture)?;
         let kind = match http.route {
             crate::dispatch_inspection::Route::Browser => EntranceKind::Browser,
@@ -92,8 +117,7 @@ impl ResidentHuman<'_> {
         let base_path = format!("https://{}", policy.expected_host);
         // Everything the WebSession projection takes from the request itself
         // is checked here, before an operation number, Store record or
-        // generation-wide marker can exist. A refusal leaves no evidence and
-        // fences nobody.
+        // submit marker can exist. A refusal leaves no evidence.
         crate::dispatch_web_input::preflight_web_input(
             http,
             self.display_name,
@@ -101,27 +125,31 @@ impl ResidentHuman<'_> {
             &base_path,
             upgrade.is_some(),
         )?;
+        trace.mark("preflight");
         // The running claim/descriptor gate belongs to the resident supervisor;
         // this immediate check is the physical unit fence before a new Mini call.
         self.journal
             .read()?
             .ok_or_else(|| invalid("app journal absent"))?
             .verify_running_instance()?;
-        // A retained native submission or physical attempt cannot be replaced
-        // with a new request. Report exact-recovery-only before authoring another
-        // ingress, so all members see the fence without creating extra evidence.
-        for name in ["native-dispatch-active.json", "dispatch-active.json"] {
-            match std::fs::symlink_metadata(attempt_parent.join(name)) {
-                Ok(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Interrupted,
-                        "SPK dispatch uncertain; exact recovery required",
-                    ))
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
+        // The physical fd3 slot is one per generation: while hostd holds a
+        // DeliveryRequested operation no other command may reach the app.
+        match std::fs::symlink_metadata(attempt_parent.join("dispatch-active.json")) {
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "SPK physical delivery uncertain; exact recovery required",
+                ))
             }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
+        // The native fence is per signed call (dispatch_fence): an undecided
+        // earlier call is looked up, never resent, and fences nobody else
+        // until the journal's bound of undecided calls is reached.
+        trace.mark("journal-fence");
+        crate::dispatch_fence::admit_new_call(self.operator, attempt_parent)?;
+        trace.mark("admit-new-call");
         // A WebSocket open takes its place in the grain's class cap before
         // any Mini write: the open past the cap is refused by name and
         // leaves no dispatch record.
@@ -143,6 +171,7 @@ impl ResidentHuman<'_> {
         // The caller cannot choose or replay an operation ID. Even an
         // authoring refusal consumes this fsynced number across restarts.
         let operation_id = self.journal.allocate_dispatch_operation()?;
+        trace.mark("allocate-operation");
         let attempt_dir = attempt_parent.join(format!("dispatch-op-{operation_id}"));
         // Anchor BEFORE native authoring/admission; late success never renews it.
         let lease = upgrade
@@ -158,9 +187,15 @@ impl ResidentHuman<'_> {
             self.route_binding,
             self.continuity_namespace,
         )
-        .inspect_err(|_| {
+        .inspect_err(|error| {
             // A failed current-authority check (including unavailable authority)
             // ends streams for this exact pinned custody, never another principal.
+            // A lost tip race says nothing about authority and ends nothing.
+            if crate::dispatch_fence::DispatchOutcome::of(error)
+                .is_some_and(|outcome| outcome.status == crate::dispatch_fence::Status::Contention)
+            {
+                return;
+            }
             self.rpc.invalidate_custody(
                 &self.custody.app,
                 &self.custody.subject,
@@ -168,22 +203,14 @@ impl ResidentHuman<'_> {
                 &self.custody.ticket_resource,
                 self.route_binding,
             );
-        })
-        .map_err(|error| {
-            if attempt_parent.join("native-dispatch-active.json").exists() {
-                io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "SPK native outcome uncertain; exact recovery required",
-                )
-            } else {
-                error
-            }
         })?;
         // From DeliveryRequested on, the journal holds this exact operation.
         // Every later outcome either finishes it Delivered, releases the
         // shared slot with a worker fence (the operation stays terminally
         // Uncertain), or, without a fence, keeps every marker for audit.
+        trace.mark("author-and-submit");
         let recorded = committed.record_delivery_requested(self.journal)?;
+        trace.mark("record-delivery");
         let uncertain = |error: io::Error| io::Error::new(io::ErrorKind::Interrupted, error);
         let prequeue = match self.rpc.prepare_cancellable(recorded.identity.clone()) {
             Ok(prequeue) => prequeue,
@@ -258,6 +285,7 @@ impl ResidentHuman<'_> {
                 }
             })
         })();
+        trace.mark("prepare-and-project");
         let physical = match projected {
             Ok(physical) => physical,
             Err(error) => {
@@ -278,6 +306,7 @@ impl ResidentHuman<'_> {
                     APP_CALL_TIME,
                     Arc::new(AtomicBool::new(false)),
                 );
+                trace.mark("app-call");
                 #[cfg(feature = "integration-qualification")]
                 crate::dispatch_native::qualification::delivery_event(
                     &attempt_dir,

@@ -5,7 +5,26 @@ also carries the independently signed ticket observation and the
 historical share-issue ingress used to select an admitted issue event. None of
 these bytes are authority until the receiving admission checks one image.
 -/
-import Kernel.ApplicationDispatchCommand
+module
+
+public import Kernel.ApplicationDispatchCommand
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAdmissionIngress
 
@@ -78,17 +97,7 @@ def ingressStream : StreamCodec Ingress :=
 private def frame : List UInt8 :=
   "DREGG/APPLICATION/DISPATCH-ADMISSION-INGRESS/v1".toUTF8.toList
 
-private def rawCodec : LawfulCodec Ingress where
-  encode ingress := frame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take frame.length = frame then
-    ingressStream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def codec : LawfulCodec Ingress := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Ingress := (StreamCodec.framed frame ingressStream).toLawful
 
 def Ingress.canonicalBytes (ingress : Ingress) : List UInt8 :=
   codec.encode ingress
@@ -99,7 +108,7 @@ theorem decode_encode (ingress : Ingress) :
 theorem decoded_canonical {bytes : List UInt8} {ingress : Ingress}
     (decoded : codec.decode bytes = some ingress) :
     ingress.canonicalBytes = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec decoded
+  StreamCodec.toLawful_canonical _ _ _ decoded
 
 /-- The operation key is shared with the base dispatch carrier. A different
 ticket or issue selector under that key is a transaction conflict, not a

@@ -33,8 +33,27 @@ resource birth (`room`; its law is the author law installed at birth) or a
 fleet topic (`topic stream`; its cell id is derived from `stream`, and only the
 fleet receiver appends).  Neither family can append to the other's head.
 -/
-import Compiler.StoreCodec
-import Compiler.TypedAuthorizationRequestCodec
+module
+
+public import Compiler.StoreCodec
+public import Compiler.TypedAuthorizationRequestCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.StreamCell
 
@@ -210,6 +229,12 @@ def headNamespaceStream : StreamCodec headLayout.Namespace where
   encode _ := []
   decodePrefix bytes := some (.head, bytes)
   decodePrefix_encode := by intro space suffix; cases space; rfl
+  encode_decodePrefix := by
+    intro bytes space suffix decoded
+    cases space
+    simp only [Option.some.injEq, Prod.mk.injEq, true_and] at decoded
+    subst decoded
+    rfl
 
 def headWire : Wire headLayout where
   name := "minidregg/stream-head/v2"
@@ -298,6 +323,12 @@ def entryNamespaceStream : StreamCodec entryLayout.Namespace where
   encode _ := []
   decodePrefix bytes := some (.entry, bytes)
   decodePrefix_encode := by intro space suffix; cases space; rfl
+  encode_decodePrefix := by
+    intro bytes space suffix decoded
+    cases space
+    simp only [Option.some.injEq, Prod.mk.injEq, true_and] at decoded
+    subst decoded
+    rfl
 
 def entryWire : Wire entryLayout where
   name := "minidregg/stream-entry/v1"

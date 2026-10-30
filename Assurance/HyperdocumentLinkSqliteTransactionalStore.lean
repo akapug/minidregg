@@ -327,9 +327,10 @@ def transactionalRecoveryWitness : TransactionalRecoveryJoin where
 /-- Premises still required to turn the isolated native conformance tests into
 a physical durability theorem.  No inhabitant is constructed here.
 
-`SQLiteAtomicCommit` includes rollback-journal correctness; `HostLocking`
-includes cross-process lock semantics; `SyncOrdering` includes SQLite's
-`synchronous=EXTRA` requests and directory-entry ordering.  `StableMedia` and
+`SQLiteAtomicCommit` includes write-ahead-log correctness (commit and
+checkpoint); `HostLocking` includes cross-process lock and `-shm` semantics;
+`SyncOrdering` includes SQLite's `synchronous=FULL` WAL syncs and
+directory-entry ordering.  `StableMedia` and
 `PowerLossSurvival` remain distinct because successful calls alone prove
 neither. -/
 structure PhysicalSqliteDurabilityCeiling

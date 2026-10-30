@@ -11,9 +11,28 @@ belongs to the installed policy, current capability, signed ingress and durable
 DeclaredResourceController receiver. In particular, it does not grant an HTTP
 dispatch permit or assert that an external app, package or snapshot is sound.
 -/
-import Kernel.DeclaredFields
-import Kernel.ResourceTransaction
-import Pred.Core
+module
+
+public import Kernel.DeclaredFields
+public import Kernel.ResourceTransaction
+public import Pred.Core
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrain
 open Minidregg.Compiler
@@ -471,18 +490,8 @@ def dispatchStream : StreamCodec DispatchIntent :=
 private def dispatchFrame : List UInt8 :=
   "DREGG/APPLICATION/DISPATCH/v1".toUTF8.toList
 
-private def rawDispatchCodec : LawfulCodec DispatchIntent where
-  encode intent := dispatchFrame ++ dispatchStream.encode intent
-  decode bytes := if bytes.take dispatchFrame.length = dispatchFrame then
-    dispatchStream.toLawful.decode (bytes.drop dispatchFrame.length) else none
-  decode_encode := by
-    intro intent
-    have decoded := dispatchStream.toLawful.decode_encode intent
-    change dispatchStream.toLawful.decode (dispatchStream.encode intent) = some intent at decoded
-    simp [decoded]
-
 def dispatchCodec : LawfulCodec DispatchIntent :=
-  ResourceBirthCodec.strictCodec rawDispatchCodec
+  (StreamCodec.framed dispatchFrame dispatchStream).toLawful
 
 def DispatchIntent.canonicalBytes (intent : DispatchIntent) : List UInt8 :=
   dispatchCodec.encode intent

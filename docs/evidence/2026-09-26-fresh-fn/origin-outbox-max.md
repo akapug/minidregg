@@ -1,6 +1,6 @@
 # Selected-profile prepared R outbox capacity
 
-`scripts/probe-fn-origin-outbox-max.lean` ran in an independent warm Mini
+`scripts.probe-fn-origin-outbox-max [deleted 1e68f88d]` ran in an independent warm Mini
 snapshot against `Kernel/FnOriginOutbox.lean`. It constructed one prepared R
 record with a synthetic carrier of exactly 1,516,384 bytes, the selected
 `FnEvidenceCodec.maxCarrierBytes`, and checked the actual

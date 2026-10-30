@@ -12,16 +12,22 @@
 # OUT/subrows.tsv (ID<TAB>STATUS<TAB>WALL_S<TAB>DETAIL) to report one table row per step; the
 # last stderr line is the row's detail. Rows generate their own test keys inside RUN; no secret
 # ever reaches the box. OWNER hints: OUT/owner (a lane name) when the row can tell.
-JOURNEY_ROWS=(journey objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure growth jserve perf)
+JOURNEY_ROWS=(journey demo objective rooms activity seats bounty call send domain upgrade hostupgrade objectrecord welcomecontinuity sshe2e m3 m4 hermes m6grain m7 m8 fleetsign jpay exchange chargedfailure jbend births jserve perf jprivate rate)
+# growth (1000 records through journey.sh, 30-90 min, judged on UPDATES) belongs to the nightly, not to a landing:
+# it runs only when PIPELINE_NIGHTLY=1 (docs/PIPELINE-HBOX.md "Nightly"). The bar is judged per landing by births.
+# kernel (journey.sh JOURNEY_SET=kernel without G: the steps no public surface needs) is nightly too.
+if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then JOURNEY_ROWS+=(growth kernel); fi
 
 # J0-J8 + the rotation rows (JROT, JROTL, and JRLANE, JAUDIT and any *SEAT* step when the tip's journey.sh
 # has them), one fresh Store, through native/resource-client/journey.sh.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (J0 restores; J1's enrolment is a step on the restored world, not its genesis)
 row_journey() {
   local js=$SRC/native/resource-client/journey.sh steps extra
   [ -f "$js" ] || return 99
   extra=$(sed -n 's/^STEPS=(\(.*\))$/\1/p' "$js" | tr ' ' '\n' | grep -E '^(JRLANE|JGATE|JAUDIT|.*SEAT.*)$' | paste -sd' ')
   steps="J0 J1 J2 J3 J4 J5 J6 J7 J8 JROT JROTL${extra:+ $extra}"
-  JOURNEY_STEPS="$steps" JOURNEY_GROWTH_LEVELS=10 bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
+  # every red step reports its own failure, not its dependency's shadow (journey.sh --keep-going)
+  JOURNEY_KEEP_GOING=${JOURNEY_KEEP_GOING:-1} JOURNEY_STEPS="$steps" JOURNEY_GROWTH_LEVELS=10 bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
   local rc=$?
   [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
   cp "$RUN/j/journey-result.json" "$OUT/"
@@ -36,12 +42,61 @@ row_journey() {
   return $rc
 }
 
+# journey_set_row SET OWNED...: one journey of journey.sh's partition (JOURNEY_SET; `journey.sh --list-set`)
+# on one fresh Store, minus the steps another row already runs (OWNED; the spine J0-J8 always runs: every
+# step depends on part of it). One sub-row per step that is not the spine (the `journey` row reports those).
+journey_set_row() {
+  local set=$1 js=$SRC/native/resource-client/journey.sh steps id spine="J0 J1 J2 J3 J4 J5 J6 J7 J8"; shift
+  [ -f "$js" ] || return 99
+  bash "$js" --list-set "$set" >"$OUT/set.txt" 2>"$OUT/set.err" || return 99   # a tree before the split
+  steps=""
+  while read -r id; do
+    case " $* " in *" $id "*) continue ;; esac
+    steps="$steps $id"
+  done <"$OUT/set.txt"
+  # the journey's own wall budget ends 400 s inside the runner's row timeout, so a slow run is a named red
+  # J14 and J17 name the grain runtime GRAIN_RUNTIME; the runner exports the set's as GRAIN
+  JOURNEY_KEEP_GOING=${JOURNEY_KEEP_GOING:-1} JOURNEY_STEPS="${steps# }" JOURNEY_GROWTH_LEVELS=10 JOURNEY_BUDGET_S=$(( ${PIPELINE_ROW_TIMEOUT_S:-5400} - 400 )) \
+    GRAIN_RUNTIME=${GRAIN_RUNTIME:-${GRAIN:-$BIN/grain-runtime}} bash "$js" "$MANIFEST" "$RUN/j" >"$OUT/journey.out" 2>"$OUT/journey.err"
+  local rc=$?
+  [ -s "$RUN/j/journey-result.json" ] || { tail -1 "$OUT/journey.err" >&2; return 1; }
+  cp "$RUN/j/journey-result.json" "$OUT/"
+  jq -r --arg spine " $spine " '.steps[] | select($spine | contains(" " + .id + " ") | not) |
+    [.id, .status, (.wallSeconds|tostring), (.detail // "" | gsub("[\t\n]"; " "))] | @tsv' \
+    "$RUN/j/journey-result.json" >"$OUT/subrows.tsv"
+  jq -r '.steps[] | select(.status != "PASS") | .id' "$RUN/j/journey-result.json" | while read -r id; do
+    [ -d "$RUN/j/steps/$id" ] && cp -r "$RUN/j/steps/$id" "$OUT/step-$id" 2>/dev/null
+  done
+  echo "$set journey: $(jq -r '[.steps[] | select(.status == "PASS")] | length' "$RUN/j/journey-result.json")/$(jq -r '.steps | length' "$RUN/j/journey-result.json") PASS, frontier $(jq -r .frontier "$RUN/j/journey-result.json")" >&2
+  return $rc
+}
+# The demo journey: the steps the public demo's surfaces need that no other row runs (M3-M8 have their
+# rows, JPAY1-4/6 the jpay row, JSERVE its row; the rotation and audit steps run in `journey`).
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (J0)
+row_demo() {
+  journey_set_row demo M3 M4 M5 M6 M7 M8 JPAY1 JPAY2 JPAY3 JPAY4 JPAY6 JSERVE JROT JROTL JRLANE JGATE JAUDIT
+}
+# The kernel journey (nightly): kernel semantics no public surface exercises directly; G is row_growth's.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (J0)
+row_kernel() { journey_set_row kernel G; }
+
 # The native Objective acceptance (Accepted receipt + every refusal) on its own two scratch worlds.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (both scratch worlds: the policy and knobs are constant, so one variant each)
 row_objective() {
-  local d=$SRC/native/resource-client/objective-native-acceptance.py
+  local d=$SRC/native/resource-client/objective-native-acceptance.py lean=$SRC
   [ -f "$d" ] || return 99
-  [ "$LEANENV" = 1 ] || { echo "no lean env for this tip (its mutations run lake env lean)" >&2; return 98; }
-  (cd "$SRC" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
+  if [ "$LEANENV" != 1 ]; then
+    # --source-tree unbinds leanenv even when the box holds the tip's own oleans
+    # ($ARTIFACT_ROOT/.leanenv/TIP, the very tree the standing pipeline runs rows from):
+    # take them by the tip's name before declaring the row unconfigured.
+    lean=${ARTIFACT_ROOT:-/srv/artifacts}/.leanenv/${SET##*/}
+    if [ ! -f "$lean/.pipeline-leanenv-complete" ] || [ ! -f "$lean/native/resource-client/objective-native-acceptance.py" ]; then
+      echo "missing input: the tip's lean env ($lean with .pipeline-leanenv-complete; the mutations run lake env lean)" >&2
+      return 98
+    fi
+    d=$lean/native/resource-client/objective-native-acceptance.py
+  fi
+  (cd "$lean" && python3 "$d" all --bin "$BIN" --root "$RUN/o") >"$OUT/objective.out" 2>"$OUT/objective.err"
   local rc=$?
   cp "$RUN/o/results/summary.json" "$OUT/" 2>/dev/null
   tail -1 "$OUT/objective.out" >&2
@@ -49,6 +104,7 @@ row_objective() {
 }
 
 # Private rooms end to end on a real Host (J0..J5 + JPRIV1 against the expected row table).
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (journey.sh J0)
 row_rooms() {
   local d=$SRC/native/resource-client/rooms-e2e.sh
   [ -f "$d" ] || return 99
@@ -63,6 +119,7 @@ row_rooms() {
 }
 
 # The activity acceptance (activity-native's driver) once it is in the tree.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World; extra subjects fixture-made)
 row_activity() {
   local d
   d=$(ls "$SRC"/native/resource-client/*activity*accept* "$SRC"/native/resource-client/*activity*e2e* 2>/dev/null | head -1)
@@ -80,6 +137,7 @@ row_activity() {
 }
 
 # Seats: a stand-alone seats driver when one exists (seat steps of journey.sh run in row_journey).
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_seats() {
   local d
   d=$(ls "$SRC"/native/resource-client/*seat*journey* "$SRC"/native/resource-client/*seat*accept* \
@@ -99,6 +157,7 @@ row_seats() {
 # vault-permit-all, gate-open); JOURNEY_PLANT_CALL=NAME[,NAME] runs the row with that fault put in the
 # world: the row must go RED (the driver exits 1 with "PLANT-RESULT red <groups>"), a planted fault that
 # stays green is the driver exiting 3 ("PLANT-RESULT blind"), also red. Unset in normal runs.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_call() {
   local d=$SRC/native/resource-client/objective-call-native-journey.py
   [ -f "$d" ] || return 99
@@ -117,6 +176,7 @@ row_call() {
 # after the delivery is a no-op, stop-waiting keeps the message and retires the slot, only the sender controls).
 # Plants (vault-open, dir-empty, roomy-postage, relay-deposit, cancel-late, cancel-early, stop-cancels,
 # sender-controls) via JOURNEY_PLANT_SEND, as row_call.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_send() {
   local d=$SRC/native/resource-client/objective-send-native-journey.py
   [ -f "$d" ] || return 99
@@ -133,6 +193,7 @@ row_send() {
 # law refuses a write each object's own law admits; registration refusals; a stale plan re-judged on a member's
 # new state; the bank reserve = sum of balances). Plants via JOURNEY_PLANT_DOMAIN (member-permit; domain-blind
 # needs a Host built from a tree patched by scripts/plants/domain-blind.py), as row_call.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_domain() {
   local d=$SRC/native/resource-client/objective-domain-native-journey.py
   [ -f "$d" ] || return 99
@@ -149,6 +210,7 @@ row_domain() {
 # migration, the drain (an old activity's write judged by the old law and, migrated, by the new), abortDrained
 # after the deadline, MIGRATE, REBIRTH of a chosen activity on the new package. Plants via JOURNEY_PLANT_UPGRADE
 # (drain-blind needs a Host built from a tree patched by scripts/plants/drain-blind.py).
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_upgrade() {
   local d=$SRC/native/resource-client/objective-upgrade-native-journey.py
   [ -f "$d" ] || return 99
@@ -163,6 +225,7 @@ row_upgrade() {
 
 # HOST-UPGRADE exercises the running tip, independent of APP ADOPT/MIGRATE.
 # The previous main reopen is 98 until a READY same-epoch main set is available.
+# world: genesis: the subject is the Host upgrade, so the world is born by the PREVIOUS candidate's binaries
 row_hostupgrade() (
   local d=$SRC/native/resource-client/journey.d/jhostupgrade.sh
   local artifacts=${ARTIFACT_ROOT:-/srv/artifacts} previous=
@@ -264,6 +327,7 @@ PY_PREVIOUS
 
 # The bounty on the seat kernel (world/bounty/BountyEscrow.obend): escrow, claim, submit, approve / reject /
 # silence / cancel, the first claimer, and the planted double-pay, reward+1 and raid the kernel refuses.
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_bounty() {
   local d=$SRC/native/resource-client/objective-bounty-native-acceptance.py
   [ -f "$d" ] || return 99
@@ -279,6 +343,7 @@ row_bounty() {
 # route's own acceptance (row `activity`) installs every object under a permit-all law; this row is the law
 # half, on a fresh scratch world. ABSENT on a tip whose `mini` has no `activity` command (the route is
 # not in that tip), never red. OUT/subrows.tsv: one line per journey row (OR1..OR7).
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_objectrecord() {
   local d=$SRC/native/resource-client/objectrecord-native-journey.py
   [ -f "$d" ] || return 99
@@ -297,6 +362,7 @@ row_objectrecord() {
 # Key-only welcome continuity: a participant joins from the sponsor's welcome, the receipt is authenticated
 # by read-only lookup and the local Lean verifier, refused welcomes (forged, wrong possession, wrong command,
 # lost custody) leave no workspace. One sub-row per step of the driver (rows.tsv).
+# world: genesis: the subject is enrolment by welcome (the receiving path from the sponsor's genesis)
 row_welcomecontinuity() {
   local d=$SRC/native/resource-client/welcome-continuity-journey.sh
   [ -f "$d" ] || return 99
@@ -314,6 +380,7 @@ row_welcomecontinuity() {
 # unprivileged sshd on loopback, the forced `mini socket-proxy`, a real Host; a planted host key, an unknown
 # host key and an unauthorised key are refused by name. Builds the SDK test binary on first use into a
 # shared target dir (CARGO_TARGET_DIR), so the first tip on a box is slow and the rest are warm.
+# world: genesis, OWED a template: the subject is the ssh route, but its world comes from the operator's `run.sh init`, which the fixture's template does not cover yet
 row_sshe2e() {
   local d=$SRC/native/mini-sdk/tests/ssh-e2e.sh
   [ -f "$d" ] || return 99
@@ -356,12 +423,31 @@ product_native() {
   for name in HOST MINI STORE VERIFIER; do product_input "$name" executable || return $?; done
 }
 # bwrap present is not bwrap usable: a kernel that restricts unprivileged user namespaces (Ubuntu 24.04+:
-# kernel.apparmor_restrict_unprivileged_userns=1 with no bwrap AppArmor profile, measured on hbox 2026-10-14)
-# makes every sandboxed worker exit 1 at once, and the hermes driver then reported "Hermes ACP stream closed"
-# after a 15-min wait: a missing box input rendering as a product red. Probe it and name it (98).
+# kernel.apparmor_restrict_unprivileged_userns=1, measured on hbox 2026-10-14) makes every sandboxed worker
+# exit 1 at once, and the hermes driver then reported "Hermes ACP stream closed" after a 15-min wait: a
+# missing box input rendering as a product red. The set's own deploy/grain-host/resolve-bwrap is the one
+# resolver its drivers use (hermes-journey.sh, jpay6.sh, grain-journey.sh for m6grain's spk-host profile):
+# the AppArmor-profiled /usr/local/libexec/mini-grain-bwrap when present and usable, else /usr/bin/bwrap;
+# MINI_BWRAP selects one. The probe runs it and exports its answer, so the row and its driver resolve the
+# same binary; nothing usable is 98, named. A set without the resolver pins its bwrap in its drivers:
+# product_userns [LEGACY_BWRAP...] probes those (default /usr/bin/bwrap; jpay6.sh before the resolver also
+# fell back to the profiled copy), and only for such a set.
 product_userns() {
-  bwrap --die-with-parent --unshare-user --ro-bind / / true 2>"$OUT/userns-probe.err" && return 0
-  echo "missing input: unprivileged user namespaces for bwrap ($(tail -1 "$OUT/userns-probe.err"); kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo ?))" >&2
+  local resolver=$SRC/deploy/grain-host/resolve-bwrap
+  if [ -f "$resolver" ]; then
+    MINI_BWRAP=$(sh "$resolver" 2>"$OUT/userns-probe.err") && { export MINI_BWRAP; echo "$MINI_BWRAP" >"$OUT/bwrap"; return 0; }
+    unset MINI_BWRAP
+    tail -1 "$OUT/userns-probe.err" >&2
+    return 98
+  fi
+  local b
+  [ $# -gt 0 ] || set -- /usr/bin/bwrap
+  : >"$OUT/userns-probe.err"
+  for b in "$@"; do
+    [ -x "$b" ] || continue
+    "$b" --die-with-parent --unshare-user --ro-bind / / true 2>>"$OUT/userns-probe.err" && return 0
+  done
+  echo "missing input: unprivileged user namespaces for bwrap ($*: $(tail -1 "$OUT/userns-probe.err"); kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo ?))" >&2
   return 98
 }
 product_systemd() {
@@ -389,6 +475,7 @@ product_keep() { # public evidence only; never copy custody keys or a whole worl
   local file
   for file in "$@"; do [ ! -e "$file" ] || cp -r "$file" "$OUT/"; done
 }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top
 row_m3() {
   local d=$SRC/native/resource-client/provisioning-acceptance.sh rc
   [ -f "$d" ] || return 99
@@ -400,6 +487,7 @@ row_m3() {
   awk -F'\t' '$1=="reopen-create" && $3==0 {ok=1} END {exit !ok}' "$OUT/timings.tsv" || { echo "missing expected evidence: m3 reopen-create" >&2; return 1; }
   echo "provisioning and cold reopen completed" >&2
 }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (shell-journey.sh)
 row_m4() {
   local d=$SRC/native/resource-client/shell-journey.sh rc
   [ -f "$d" ] || return 99
@@ -407,6 +495,10 @@ row_m4() {
   product_input SHELL_BIN executable || return $?
   product_tools ssh ssh-keygen ss || return $?
   command -v sshd >/dev/null 2>&1 || [ -x /usr/sbin/sshd ] || { echo "missing input: sshd" >&2; return 98; }
+  [ -x "$SRC/deploy/shell/mini-shell-ssh" ] && [ -x "$SRC/deploy/shell/render-shell-key" ] ||
+    { echo "missing input: $SRC/deploy/shell/mini-shell-ssh and render-shell-key (shell-journey.sh: 'deploy/shell scripts missing')" >&2; return 98; }
+  ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ':22422$' &&
+    { echo "missing input: a free 127.0.0.1:22422 for the journey's private sshd (shell-journey.sh: 'port 22422 is in use')" >&2; return 98; }
   product_exec m4 bash "$d" "$HOST" "$MINI" "$SHELL_BIN" "$STORE" "$VERIFIER" "$RUN/s"; rc=$?
   product_keep "$RUN/s/log"
   if [ "$rc" != 0 ]; then
@@ -419,14 +511,21 @@ row_m4() {
   [ "$(grep -Ec '^J[0-8] PASS$' "$OUT/log/verdicts.txt")" = 9 ] || { echo "missing expected evidence: m4 nine PASS verdicts" >&2; return 1; }
   echo "shell J0-J8 over ssh completed" >&2
 }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (subjects 8/9 fixture-made)
 row_hermes() {
-  local d=$SRC/native/grain-runtime/hermes-journey.sh rc
+  local d=$SRC/native/grain-runtime/hermes-journey.sh rc task=${HERMES_JOURNEY_TASK:-8751} state
   [ -f "$d" ] || return 99
   product_native || return $?
   product_input GRAIN executable || return $?
   product_systemd || return $?
-  product_tools rustc bwrap || return $?
+  product_tools rustc || return $?
   product_userns || return $?
+  [ "$(uname -s)" = Linux ] || { echo "missing input: Linux user systemd (hermes-journey.sh: 'Linux user systemd is required')" >&2; return 98; }
+  [ -n "${LAUNCH_GATE:-}" ] && [ -x "$LAUNCH_GATE" ] ||
+    { echo "missing input: LAUNCH_GATE, the candidate's bin/launch-gate (hermes-journey.sh: 'LAUNCH_GATE names the launch gate (a candidate bin/launch-gate, or cargo build -p launch-gate)')" >&2; return 98; }
+  state=$(systemctl --user show -p LoadState --value "mini-grain-controller@$task.service" 2>/dev/null || :)
+  [ "$state" = not-found ] ||
+    { echo "missing input: unit mini-grain-controller@$task.service unloaded (hermes-journey.sh: 'unit mini-grain-controller@$task is already loaded ($state)'; stop and reset-failed it)" >&2; return 98; }
   product_exec hermes bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$GRAIN" "$RUN/h"; rc=$?
   product_keep "$RUN/h/evidence"
   [ "$rc" = 0 ] || return "$rc"
@@ -442,9 +541,28 @@ row_hermes() {
 # bin/ is both the base and the SPK binaries (spk-host, mini-spk-broker, mini-spk-volume-helper). Root-owned
 # files are made only by the journey's installer and removed by the journey's EXIT trap (which runs on failure
 # too); when that trap never reported (the journey was killed), the row runs the journey's own `cleanup` mode.
-# Inputs a box may lack (uid 1001 with linger, sudo -n, uidmap, a subuid range, bwrap, the pinned SPK) are 98.
+# The journey runs AS the operator: MINI_OPERATOR_UID / MINI_OPERATOR_NAME (default 1001 / ember, the burst
+# boxes, where the runner IS the operator and nothing below changes). A runner that is not the operator (hbox: the
+# pipeline is uid 1000, the operator mini-operator uid 1001) runs it through a scoped sudoers rule naming only
+# two-world-journey.sh (RUNNER ALL=(OPERATOR) NOPASSWD: <tree>/scripts/spk-platform/two-world-journey.sh, env_keep
+# MINI_OPERATOR_UID MINI_OPERATOR_NAME), the operator holding root only for that tree's install-user-world. Its run
+# root is then the operator's own /run/user/UID/m6g-ID (the runner's RUN is 0700); the row mirrors the evidence it
+# reads back into RUN/g with the runner's sudo and removes the operator's root after.
+# Inputs a box may lack (the operator account with linger, its sudo rules, sudo -n, uidmap, a subuid range for the
+# operator, bwrap, the pinned SPK) are 98.
+# The row's three root steps (mirror the operator's run root, remove it, check root cleanup left nothing) go
+# through ONE tree script, scripts/spk-platform/m6grain-root.sh, so one targeted sudoers rule
+# (RUNNER ALL=(root) NOPASSWD: <tree>/scripts/spk-platform/m6grain-root.sh) covers them and the row probes
+# exactly that rule; no broad rule (`sudo -n true`, `rm`, `sh -c`) is ever required.
+M6_ROOT_HELPER=
+m6grain_mirror() { # OPERATOR_RUN RUN_G: the files the row reads, streamed by the helper as root, extracted by the runner
+  mkdir -p "$2" || return 1
+  sudo -n "$M6_ROOT_HELPER" mirror "$1" | tar -xf - -C "$2"
+}
+# world: genesis, OWED a template: a grain world keyed by storeTag (composed-inputs.sh refuses an existing /var/lib/mini-spk-worlds/$store), so a restored copy collides with its origin until restore renames the tag
 row_m6grain() {
-  local d=$SRC/scripts/spk-platform/two-world-journey.sh rc w s spk
+  local d=$SRC/scripts/spk-platform/two-world-journey.sh rc w s spk g cmd
+  local op_uid=${MINI_OPERATOR_UID:-1001} op_name=${MINI_OPERATOR_NAME:-ember}
   [ -f "$d" ] || return 99
   echo prod-spk >"$OUT/owner"
   product_native || return $?
@@ -452,13 +570,26 @@ row_m6grain() {
   local CONSENT_BIN=$BIN/minidregg-client-consent
   for w in SPK_HOST_BIN SPK_BROKER_BIN SPK_VOLUME_HELPER_BIN CONSENT_BIN; do product_input "$w" executable || return $?; done
   product_systemd || return $?
-  product_tools jq curl loginctl sudo install od findmnt bwrap || return $?
-  [ "$(id -u)" = 1001 ] || { echo "missing input: operator uid 1001 (two-world-journey.sh runs as uid 1001; this runner is uid $(id -u))" >&2; return 98; }
-  [ "$(loginctl show-user 1001 -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for uid 1001" >&2; return 98; }
-  sudo -n true 2>/dev/null || { echo "missing input: sudo -n (ROOT SETUP by deploy/spk-host/install-user-world)" >&2; return 98; }
+  product_tools jq curl loginctl sudo install od findmnt tar getent || return $?
+  [ "$(getent passwd "$op_uid" | cut -d: -f1)" = "$op_name" ] || { echo "missing input: operator account $op_name with uid $op_uid (MINI_OPERATOR_UID/MINI_OPERATOR_NAME)" >&2; return 98; }
+  [ "$(loginctl show-user "$op_uid" -p Linger --value 2>/dev/null)" = yes ] || { echo "missing input: linger for operator uid $op_uid" >&2; return 98; }
+  M6_ROOT_HELPER=$(realpath "$SRC/scripts/spk-platform/m6grain-root.sh")
+  [ -x "$M6_ROOT_HELPER" ] || { echo "missing input: $M6_ROOT_HELPER (executable)" >&2; return 98; }
+  sudo -n -l "$M6_ROOT_HELPER" >/dev/null 2>&1 || { echo "missing input: sudoers rule $(id -un) ALL=(root) NOPASSWD: $M6_ROOT_HELPER" >&2; return 98; }
+  export MINI_OPERATOR_UID=$op_uid MINI_OPERATOR_NAME=$op_name
+  if [ "$(id -u)" = "$op_uid" ]; then
+    g=$RUN/g cmd=(bash "$d")
+  else
+    d=$(realpath "$d")
+    sudo -n -l -u "$op_name" "$d" >/dev/null 2>&1 || { echo "missing input: sudoers rule $(id -un) ALL=($op_name) NOPASSWD: $d" >&2; return 98; }
+    w=$(dirname "$(dirname "$(dirname "$d")")")/deploy/spk-host/install-user-world
+    sudo -n -l -U "$op_name" "$w" >/dev/null 2>&1 || { echo "missing input: sudoers rule $op_name ALL=(root) NOPASSWD: $w" >&2; return 98; }
+    g=/run/user/$op_uid/m6g-$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+    cmd=(env -C / sudo -n -u "$op_name" -- "$d")  # the runner's cwd (RUN) is 0700
+  fi
   product_userns || return $?
   for w in /usr/bin/newuidmap /usr/bin/newgidmap; do [ -x "$w" ] || { echo "missing input: $w (uidmap)" >&2; return 98; }; done
-  awk -F: '$1=="ember" && $3>=32 {ok=1} END {exit !ok}' /etc/subuid 2>/dev/null || { echo "missing input: /etc/subuid range (>=32) for ember" >&2; return 98; }
+  awk -F: -v user="$op_name" '$1==user && $3>=32 {ok=1} END {exit !ok}' /etc/subuid 2>/dev/null || { echo "missing input: /etc/subuid range (>=32) for $op_name" >&2; return 98; }
   # The pinned signed sntfy package: MINI_TEST_SPK, else the repo's pinned fetcher (sha256 and size checked).
   TEST_SPK=${MINI_TEST_SPK:-}
   if [ -z "$TEST_SPK" ]; then
@@ -468,18 +599,25 @@ row_m6grain() {
     fi
   fi
   product_input TEST_SPK file || return $?
-  product_exec m6grain bash "$d" full "$BIN" "$BIN" "$RUN/g" "$TEST_SPK"; rc=$?
+  product_exec m6grain "${cmd[@]}" full "$BIN" "$BIN" "$g" "$TEST_SPK"; rc=$?
+  [ "$g" = "$RUN/g" ] || m6grain_mirror "$g" "$RUN/g" 2>"$OUT/mirror.err" || rc=1
   if [ -f "$RUN/g/root-setup.log" ] && ! grep -q '^cleanup original=' "$RUN/g/result.log" 2>/dev/null; then
-    bash "$d" cleanup "$BIN" "$BIN" "$RUN/g" >"$OUT/row-cleanup.out" 2>&1 || rc=1
+    "${cmd[@]}" cleanup "$BIN" "$BIN" "$g" >"$OUT/row-cleanup.out" 2>&1 || rc=1
+    [ "$g" = "$RUN/g" ] || m6grain_mirror "$g" "$RUN/g" 2>>"$OUT/mirror.err" || rc=1
+  fi
+  if [ "$g" != "$RUN/g" ]; then
+    case $g in /run/user/"$op_uid"/m6g-[0-9a-f]*) sudo -n "$M6_ROOT_HELPER" remove "$g" || rc=1 ;; *) rc=1 ;; esac
   fi
   for w in a b; do [ ! -d "$RUN/g/$w/evidence" ] || cp -r "$RUN/g/$w/evidence" "$OUT/evidence-$w"; done
   product_keep "$RUN/g/result.log" "$RUN/g/root-setup.log" "$RUN/g/root-cleanup.log" "$RUN/g/cross-world-plant" \
     "$RUN/g/binary-sha256.txt" "$RUN/g/volume-helper.log" "$RUN/g/cleanup-services.log" "$RUN/g/"broker-*.log
-  # Root custody after the run, whatever its verdict: nothing of either scratch world survives.
+  # Root custody after the run, whatever its verdict: nothing of either scratch world survives. Checked as root:
+  # /etc/sudoers.d (0750) and the operator's /run/user/UID (0700) cannot be stat'ed by the runner, so a plain -e
+  # there is false whether or not the file survived.
   for s in $(awk '/^ROOT SETUP BEGIN store=/ {sub(/^store=/,"",$4); print $4}' "$RUN/g/root-setup.log" 2>/dev/null); do
     for w in "/etc/mini-spk-volumes/$s.json" "/etc/sudoers.d/mini-spk-$s" "/var/lib/mini-spk-worlds/$s" \
-        "/run/user/1001/systemd/user/mini-spk-broker@$s.service"; do
-      [ ! -e "$w" ] || { echo "m6grain root cleanup left $w" >&2; return 1; }
+        "/run/user/$op_uid/systemd/user/mini-spk-broker@$s.service"; do
+      ! sudo -n "$M6_ROOT_HELPER" survives "$w" || { echo "m6grain root cleanup left $w" >&2; return 1; }
     done
   done
   if [ "$rc" != 0 ]; then
@@ -511,7 +649,9 @@ product_fleet() {
   jq -e --arg t "$type" '.type == $t and .result == "pass"' "$OUT/evidence/summary.json" >/dev/null || { echo "invalid expected evidence: $name summary" >&2; return 1; }
   echo "$name completed with verified summary" >&2
 }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (fleet-journey.sh)
 row_m8() { product_fleet m8 fleet-journey.sh minidregg-fleet-journey-v1; }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (fleet-sign-journey.sh)
 row_fleetsign() { product_fleet fleetsign fleet-sign-journey.sh minidregg-fleet-sign-journey-v1; }
 
 product_journey() { # NAME TARGET DEPENDENCIES; only target is a product sub-row
@@ -531,19 +671,104 @@ product_journey() { # NAME TARGET DEPENDENCIES; only target is a product sub-row
   jq -e --arg id "$target" '[.steps[] | select(.id==$id)] | length==1 and .[0].status=="PASS"' "$OUT/journey-result.json" >/dev/null || { echo "missing expected evidence: $target PASS" >&2; return 1; }
   echo "$target completed: $(jq -r --arg id "$target" '.steps[] | select(.id==$id) | .detail' "$OUT/journey-result.json")" >&2
 }
+# world: genesis, OWED a template: a grain world keyed by storeTag, as m6grain
 row_m7() {
   [ -f "$SRC/native/resource-client/journey.d/m7.sh" ] || return 99
   product_input CANDIDATE file || return $?
   product_input M7_REFERENCE file || return $?
   product_journey m7 M7 J0 || return $?
   product_evidence "$OUT/steps/M7/m7-result.json" || return 1
-  jq -e '.type=="minidregg-m7-result-v1" and (.checks|length)==5' "$OUT/steps/M7/m7-result.json" >/dev/null
+  # the checks m7.sh runs, by name: a count admits a renamed or swapped check (it read 5 while m7.sh ran 6)
+  jq -e '.type=="minidregg-m7-result-v1" and (.checks|sort)==(["sha256sums","journey-runs-candidate-binaries",
+    "no-tmp-inputs","reproduces-all-outputs","tamper-init-and-serve-refuse","run.sh-init-start-sponsor-stop"]|sort)' \
+    "$OUT/steps/M7/m7-result.json" >/dev/null || { echo "invalid expected evidence: m7-result.json checks $(jq -c .checks "$OUT/steps/M7/m7-result.json")" >&2; return 1; }
 }
+# THE BAR (cv 01a0f9c0-521b) on BIRTHS: a fresh native Store (genesis, the two package publications, four
+# fixed objects), then PERF_BIRTHS_N Objective objects born (each a native resource, `mini workspace --action
+# create`, and its `create` turn), then the Host stopped by its PID file and restarted on the same Store, timed
+# to the first answered read. scripts/perf/workload.py --births-only; N=64 by default, 1000 when
+# PIPELINE_NIGHTLY=1. PASS iff every birth completed (N resource writes and N create turns, every turn judged
+# as expected), the p99 of each write op (births/resource, births/create) <= 5 s, and the reopen <= 60 s.
+# FAIL names the op and the bound it crossed. The BAR is judged only on a quiet box (Ember 10-14: never a
+# performance verdict on a box slammed by dev work): scripts/perf/box.py quiet before AND after the run,
+# excluding this journey run's own sibling rows. Busy at either end -> UNCONFIGURED (98) by name, "bar not
+# judged: loadavg N (quiet: no other unit >= Q cores)", and the detail still records p50/p99 and the counts.
+# The real bar run is the nightly on a dedicated burst box (scripts/pipeline/nightly-burst.sh).
+# Plant: JOURNEY_PLANT_BIRTHS=bar-1ms judges the same run against a 0.001 s write bar (must FAIL by name).
+# world: genesis: the genesis and the first births ARE the measurement
+row_births() {
+  local d=$SRC/scripts/perf/workload.py bar_ms=5000 reopen_ms=60000 rc n la0 la1 f
+  [ -f "$d" ] && grep -q -- '--births-only' "$d" || return 99
+  case "${JOURNEY_PLANT_BIRTHS:-}" in
+    '') ;;
+    bar-1ms) bar_ms=1 ;;
+    *) echo "unknown JOURNEY_PLANT_BIRTHS ${JOURNEY_PLANT_BIRTHS} (known: bar-1ms)" >&2; return 2 ;;
+  esac
+  if [ "${PIPELINE_NIGHTLY:-0}" = 1 ]; then n=${PERF_BIRTHS_N:-1000}; else n=${PERF_BIRTHS_N:-64}; fi
+  la0=$(cut -d' ' -f1 /proc/loadavg)
+  local q0 q1 qt=${PIPELINE_QUIET_CORES:-0.5}
+  python3 "$SRC/scripts/perf/box.py" quiet "$OUT/quiet-start.json" 3 "$qt" >"$OUT/quiet-start.out"; q0=$?
+  (cd "$SRC" && python3 "$d" --bin "$BIN" --root "$RUN/b" --births "$n" --births-only) >"$OUT/births.out" 2>"$OUT/births.err"
+  rc=$?
+  la1=$(cut -d' ' -f1 /proc/loadavg)
+  python3 "$SRC/scripts/perf/box.py" quiet "$OUT/quiet-end.json" 3 "$qt" >"$OUT/quiet-end.out"; q1=$?
+  for f in results.tsv table.txt summary.json results.json; do cp "$RUN/b/$f" "$OUT/" 2>/dev/null; done
+  if [ ! -s "$OUT/summary.json" ] || [ ! -s "$OUT/results.tsv" ]; then
+    echo "births FAIL: workload exited $rc with no summary (N=$n; load $la0->$la1): $(tail -1 "$OUT/births.err")" >&2; return 1
+  fi
+  python3 - "$OUT/results.tsv" "$OUT/summary.json" "$n" "$bar_ms" "$reopen_ms" "$la0" "$la1" "$rc" "$OUT/subrows.tsv" <<'PY'
+import json, sys
+res_f, sum_f, n, bar, reopen_bar, la0, la1, rc, sub_f = sys.argv[1:]
+n, bar, reopen_bar = int(n), int(bar), int(reopen_bar)
+ops, wall = {}, {}
+for l in open(res_f).read().splitlines()[1:]:
+    p = l.split('\t')
+    if len(p) != 7: continue
+    if p[1] == 'TOTAL': wall[p[0]] = p[6]
+    else: ops[(p[0], p[1])] = {'n': int(p[2]), 'p50': int(p[3]), 'p99': int(p[4]), 'max': int(p[5])}
+s = json.load(open(sum_f))
+def fmt(k):
+    o = ops.get(k)
+    return f'{k[0]}/{k[1]} n={o["n"]} p50 {o["p50"]} p99 {o["p99"]} max {o["max"]} ms' if o else f'{k[0]}/{k[1]} none'
+fails = []
+if rc != '0': fails.append(f'workload exit {rc}')
+if s.get('phasesFailed'): fails.append('phases failed: ' + ','.join(s['phasesFailed']))
+if not s.get('allTurnsOk'): fails.append('a turn judged red')
+subs = []
+for k, key, b in ((('births', 'create'), 'p99', bar), (('births', 'resource'), 'p99', bar),
+                  (('reopen', 'to-first-read'), 'max', reopen_bar)):
+    o, why = ops.get(k), None
+    if o is None: why = f'{k[0]}/{k[1]} not measured'
+    elif k[0] == 'births' and o['n'] != n: why = f'{k[0]}/{k[1]} completed {o["n"]} of {n}'
+    elif o[key] > b: why = f'{k[0]}/{k[1]} {key} {o[key]} ms > {b} ms bar'
+    if why: fails.append(why)
+    subs.append(f'{k[1] if k[0] == "births" else "reopen"}\t{"FAIL" if why else "PASS"}\t{wall.get(k[0], "")}\t{fmt(k)}; bar {key} <= {b} ms\n')
+open(sub_f, 'w').write(''.join(subs))
+cert = ops.get(('checkpoint', 'certify'))
+r = ops.get(('reopen', 'to-first-read'))
+detail = (f'N={n} create p50 {ops.get(("births", "create"), {}).get("p50", "?")} p99 {ops.get(("births", "create"), {}).get("p99", "?")} '
+          f'max {ops.get(("births", "create"), {}).get("max", "?")} ms; resource p99 {ops.get(("births", "resource"), {}).get("p99", "?")} ms; '
+          f'reopen {r["max"] if r else "?"} ms; cells {s.get("objectCount")} records {s.get("records")} store {s.get("storeBytes")} B'
+          f'{"; cadence certifies " + str(cert["n"]) if cert else ""}; wall {s.get("totalSeconds")} s; load {la0}->{la1}; '
+          f'bar write p99 <= {bar} ms, reopen <= {reopen_bar} ms')
+print(('births FAIL: ' + '; '.join(fails) + ' | ' if fails else 'births PASS: ') + detail, file=sys.stderr)
+sys.exit(1 if fails else 0)
+PY
+  rc=$?
+  if [ "$q0" != 0 ] || [ "$q1" != 0 ] && [ -z "${JOURNEY_PLANT_BIRTHS:-}" ]; then
+    echo "births UNCONFIGURED: bar not judged: loadavg $la0->$la1 (quiet: no other unit >= $qt cores; $(tail -1 "$OUT/quiet-start.out" "$OUT/quiet-end.out" 2>/dev/null | grep -m1 'box not quiet' || echo busy)) | verdict it would have had: rc $rc; $(tail -1 "$OUT/births.err" 2>/dev/null | cut -c1-300)" >&2
+    sed -i 's/\tPASS\t/\tUNJUDGED\t/; s/\tFAIL\t/\tUNJUDGED\t/' "$OUT/subrows.tsv" 2>/dev/null
+    return 98
+  fi
+  return $rc
+}
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (J0; G's records are the row's own heights)
 row_growth() {
   product_journey growth G 'J0 J1 J2 J3 J4' || return $?
   product_evidence "$OUT/steps/G/levels.tsv" || return 1
   awk -F'\t' '$1==1000 && $2<=5 && $6<=60 {ok=1} END {exit !ok}' "$OUT/steps/G/levels.tsv" || { echo "growth bar failed: 1000 records write <=5 s cold reopen <=60 s" >&2; return 1; }
 }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (journey.sh J0)
 row_jserve() {
   [ -f "$SRC/native/resource-client/journey.d/jserve.sh" ] || return 99
   product_journey jserve JSERVE 'J0 J1 J2 J3 J4' || return $?
@@ -558,6 +783,7 @@ row_jserve() {
 # quiet box: a busy one is UNCONFIGURED (98) with the busy job named (scripts/perf/box.py quiet), never
 # a red or green verdict taken under someone else's load. Plant: JOURNEY_PLANT_PERF=budget-1s
 # judges the same run against a 1 s bound, so the row must go red naming the bound.
+# world: genesis: perf-genesis measures the fresh genesis
 row_perf() {
   local d=$SRC/scripts/perf/workload.sh budget=180 rc
   [ -f "$d" ] || return 99
@@ -566,9 +792,12 @@ row_perf() {
     budget-1s) budget=1 ;;
     *) echo "unknown JOURNEY_PLANT_PERF ${JOURNEY_PLANT_PERF} (known: budget-1s)" >&2; return 2 ;;
   esac
-  PERF_BUDGET_S=$budget bash "$d" "$BIN" "$RUN/p" "${PERF_ROW_N:-20}" "${PERF_ROW_M:-16}" "${PERF_ROW_K:-8}" \
+  local la0 la1; la0=$(cut -d' ' -f1 /proc/loadavg)
+  # always measured (instructions, p50/p99 in the detail); the wall bound is judged only when quiet
+  PERF_UNDER_LOAD=1 PERF_BUDGET_S=$budget bash "$d" "$BIN" "$RUN/p" "${PERF_ROW_N:-20}" "${PERF_ROW_M:-16}" "${PERF_ROW_K:-8}" \
     >"$OUT/perf.out" 2>"$OUT/perf.err"
   rc=$?
+  la1=$(cut -d' ' -f1 /proc/loadavg)
   [ "$rc" = 3 ] && { tail -1 "$OUT/perf.err" >&2; return 98; }
   local f
   for f in results.tsv table.txt summary.json settings.json quiet.json workload.log; do cp "$RUN/p/$f" "$OUT/" 2>/dev/null; done
@@ -580,8 +809,54 @@ row_perf() {
         "$(awk -F'\t' -v p="$ph" '$1 == p && $2 != "TOTAL" {printf "%s%s n=%s p50=%sms max=%sms", (s++?"; ":""), $2, $3, $4, $6}' "$OUT/results.tsv")"
     done >"$OUT/subrows.tsv"
   fi
+  if [ -z "${JOURNEY_PLANT_PERF:-}" ] && jq -e '.underLoad == true' "$OUT/summary.json" >/dev/null 2>&1; then
+    echo "perf UNCONFIGURED: bar not judged: loadavg $la0->$la1 ($(grep -m1 'box not quiet' "$RUN/p/quiet.out" 2>/dev/null || echo 'box not quiet')) | verdict it would have had: rc $rc; $(tail -1 "$OUT/perf.err" | cut -c1-300)" >&2
+    return 98
+  fi
   tail -1 "$OUT/perf.err" >&2
   return $rc
+}
+
+# The research-labelled in-process four-party MPC door (private-backend R1; owner ruling 2026-10-27): one
+# computation through `mini private-compute`, asserting the output, the research banner with the label
+# verbatim, the curious-holder transcript (present, and naming no input value), the refusals, and that a
+# report without the label is refused. A DOOR, not the spine: NOT in required-rows, no Store, no Host, no
+# socket; it needs `mini-private-compute` in the set's bin (cargo build --release --features demo --bin
+# mini-private-compute, native/private-backend), and a set without it is UNCONFIGURED (98), named.
+# Plant: JPRIVATE_PLANT=leak | drop-label (native/resource-client/journey.d/jprivate.sh).
+# world: genesis: no world at all; a local computation
+row_jprivate() {
+  local d=$SRC/native/resource-client/journey.d/jprivate.sh rc
+  [ -f "$d" ] || return 99
+  [ -x "$BIN/mini" ] || { echo "jprivate: $BIN/mini is not executable" >&2; return 98; }
+  [ -x "$BIN/mini-private-compute" ] || { echo "jprivate UNCONFIGURED: $BIN/mini-private-compute is not in the artifact set (cargo build --release --features demo --bin mini-private-compute in native/private-backend)" >&2; return 98; }
+  bash "$d" "$BIN" "$RUN/jp" >"$OUT/jprivate.out" 2>"$OUT/jprivate.err"; rc=$?
+  awk -F'\t' '$1=="PASS"||$1=="FAIL" {print "jprivate-" $2 "\t" $1 "\t0\t" $3}' "$OUT/jprivate.out" >"$OUT/subrows.tsv"
+  tail -1 "$OUT/jprivate.err" >&2
+  return $rc
+}
+
+# The per-subject request rate (Kernel/SubjectRate.lean; docs/PD-HOST-RATE-DESIGN.md): a genesis
+# with requestRate {limit 3, window 20 s, the sponsor exempt} through the one template, one
+# `mini serve`; subject 8's first three signed reads (op 5) admitted, the fourth in the window
+# refused `rate-limited` naming the retry seconds under NO_RECORD; subject 9 admitted at that
+# moment; the exempt sponsor never refused past the limit; after the window subject 8 admitted
+# again. One sub-row per check (rate-rows.tsv); the driver names its own red row.
+# world: genesis: requestRate is operator config pinned at this row's own genesis (scenario-genesis.sh), a knob the template world does not carry
+row_rate() {
+  local d=$SRC/native/resource-client/rate-journey.sh rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec rate bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$RUN/r"; rc=$?
+  product_keep "$RUN/r/rate-rows.tsv" "$RUN/r/input-sha256.txt"
+  [ ! -s "$OUT/rate-rows.tsv" ] ||
+    awk -F'\t' 'NR>1 {printf "%s\t%s\t0\t%s\n", $1, $2, $3}' "$OUT/rate-rows.tsv" >"$OUT/subrows.tsv"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/rate-rows.tsv" || return 1
+  # every check of the row table, and exactly the nine it defines
+  awk -F'\t' 'NR>1 {n++; if ($2 != "PASS") bad=1} END {exit !(n==9 && !bad)}' "$OUT/rate-rows.tsv" ||
+    { echo "invalid expected evidence: rate-rows.tsv $(cut -f1,2 "$OUT/rate-rows.tsv" | tr '\n' ';')" >&2; return 1; }
+  tail -1 "$OUT/rate.err" >&2
 }
 
 product_pay_step() {
@@ -593,9 +868,9 @@ product_pay_step() {
   if [ "$id" = 1 ] || [ "$id" = 4 ]; then product_input PAY_WATCHER_BIN executable || return $?; fi
   if [ "$id" = 6 ]; then
     product_systemd || return $?
-    product_tools sudo bwrap || return $?
+    product_tools sudo || return $?
     sudo -n true 2>/dev/null || { echo "no sudo: sudo -n probe failed" >&2; return 98; }
-    product_userns || return $?
+    product_userns /usr/bin/bwrap /usr/local/libexec/mini-grain-bwrap || return $?
     local name
     for name in GRAIN TEST_PROVIDER LAUNCH_GATE; do product_input "$name" executable || return $?; done
   fi
@@ -618,6 +893,7 @@ product_pay_step() {
   fi
   tail -1 "$OUT/JPAY$id.err" >&2
 }
+# world: genesis, OWED a template: JPAY2/E2/4/6 write their own genesis (observer, friends 8/9/31, the tariff); a template once those are the fixture's knobs
 row_jpay() {
   local id t rc status detail overall=0
   : >"$OUT/subrows.tsv"
@@ -636,6 +912,18 @@ row_jpay() {
   echo "JPAY1-4 and JPAY6: $(cut -f1,2 "$OUT/subrows.tsv" | tr '\n' ';')" >&2
   return "$overall"
 }
+# The fn consumer worker's row (fn-r route): poll a fresh local fn node, admit
+# the selected release at the recipient, replay it through the unit's own
+# ExecStart (deploy/fn/mini-fn-receive@.service). No live fn is contacted.
+# exchange: two Stores with distinct domains (NEWPARTICIPANT_DOMAIN), one of them a selected-release recipient;
+# the second is not the fixture's default world. Left on its own constructor.
+# unit_verify_warns TEXT: does systemd-analyze verify's output carry a warning? Only lines in its
+# message shape (a unit or path, an optional :LINE, then ": "), and the warning words as whole words
+# bounded by spaces or punctuation, never inside a hyphenated or slashed path component.
+unit_verify_warns() {
+  printf '%s\n' "$1" | grep -Eiq '^[^:[:space:]]+(:[0-9]+)?: (.*[[:space:]])?(invalid|ignoring|unknown|failed|bad)([[:space:],.;:]|$)'
+}
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (two domains: two variants)
 row_exchange() {
   local d=$SRC/native/resource-client/selected-exchange-journey.sh rc name
   [ -f "$d" ] || return 99
@@ -646,7 +934,27 @@ row_exchange() {
   product_input MINI_FN_LAUNCHER executable || return $?
   product_input MINI_FN_CORE file || return $?
   product_native || return $?
-  product_tools openssl od ss || return $?
+  product_tools openssl od ss systemd-analyze || return $?
+  # Static check of the fn consumer unit as systemd parses it: a template is
+  # verified through one instance, and any parse warning (an unquoted
+  # Environment= value is split and "ignored") fails the row.
+  local unitdir verify
+  unitdir=$(mktemp -d) || return 1
+  cp "$SRC/deploy/fn/mini-fn-receive@.service" "$unitdir/mini-fn-receive@probe.service"
+  cp "$SRC/deploy/fn/mini-fn-receive@.timer" "$unitdir/mini-fn-receive@probe.timer"
+  verify=$(cd "$unitdir" && systemd-analyze verify "$unitdir/mini-fn-receive@probe.service" "$unitdir/mini-fn-receive@probe.timer" 2>&1); rc=$?
+  rm -rf "$unitdir"
+  printf '%s\n' "$verify" >"$OUT/unit-verify.log"
+  # The verdict reads systemd-analyze's own message shape (UNIT[:LINE]: MESSAGE) and its words as
+  # words, so a path in a message (x86_64-unknown-linux-gnu) never reads as a warning. Self-check
+  # first: one harmless line must pass and one real warning must fail, or the row refuses itself.
+  if unit_verify_warns 'mini-fn-receive@probe.service: Using /opt/x86_64-unknown-linux-gnu/lib/libfoo-bad-1.so (bad-free path)' \
+     || ! unit_verify_warns "mini-fn-receive@probe.service:7: Unknown key name 'Foo' in section 'Service', ignoring."; then
+    echo "row_exchange: the systemd-analyze verdict pattern fails its own self-check" >&2; return 1
+  fi
+  if [ "$rc" != 0 ] || unit_verify_warns "$verify"; then
+    echo "fn consumer unit failed systemd-analyze verify: $verify" >&2; return 1
+  fi
   product_exec exchange bash "$d" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$MINI_FN_LAUNCHER" "$MINI_FN_CORE" "$RUN/x"; rc=$?
   product_keep "$RUN/x/public-summary.json" "$RUN/x/timings.tsv" "$RUN/x/input-sha256.txt"
   if [ -f "$RUN/x/negative/control-attempt/request-0000.outcome.json" ]; then
@@ -664,8 +972,9 @@ row_exchange() {
       .type=="refused" and .phase=="61646d697373696f6e"))' "$OUT/public-summary.json" >/dev/null || {
     echo "exchange summary failed local fn/admission/disclosure checks" >&2; return 1;
   }
-  echo "exchange PASS: local fn stopped; exact selected packet admitted and signed readback verified" >&2
+  echo "exchange PASS: local fn stopped; exact selected packet admitted, replayed by the fn consumer unit, signed readback verified" >&2
 }
+# world: template: the fixture's per-candidate world restored, the row's own heights on top (activity_world.World)
 row_chargedfailure() {
   local d=$SRC/native/resource-client/objective-charged-failure-journey.py rc
   [ -f "$d" ] || return 99
@@ -673,6 +982,20 @@ row_chargedfailure() {
   product_exec chargedfailure python3 "$d" --bin "$BIN" --root "$RUN/c"; rc=$?
   product_keep "$RUN/c/results.json" "$RUN/c/timings.tsv" "$RUN/c/transcript"
   [ ! -s "$RUN/c/groups.tsv" ] || cp "$RUN/c/groups.tsv" "$OUT/subrows.tsv"
+  [ "$rc" = 0 ] || return "$rc"
+  product_evidence "$OUT/results.json" "$OUT/subrows.tsv" || return 1
+  jq -e '.allPass==true and (.rows|length)>0' "$OUT/results.json" >/dev/null
+}
+# `bend` through the shell: a member authors world/activity/Tally.obend, publishes it, runs it on an object of
+# theirs, and reads the Host's decided outcome back through the public view; a malformed source is refused by
+# the Host's front end, by name, with nothing submitted (native/resource-client/bend-journey.py).
+row_jbend() {
+  local d=$SRC/native/resource-client/bend-journey.py rc
+  [ -f "$d" ] || return 99
+  product_native || return $?
+  product_exec jbend python3 "$d" --bin "$BIN" --root "$RUN/b"; rc=$?
+  product_keep "$RUN/b/results.json" "$RUN/b/transcript"
+  [ ! -s "$RUN/b/groups.tsv" ] || cp "$RUN/b/groups.tsv" "$OUT/subrows.tsv"
   [ "$rc" = 0 ] || return "$rc"
   product_evidence "$OUT/results.json" "$OUT/subrows.tsv" || return 1
   jq -e '.allPass==true and (.rows|length)>0' "$OUT/results.json" >/dev/null

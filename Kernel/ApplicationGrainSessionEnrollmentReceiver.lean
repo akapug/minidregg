@@ -1,5 +1,9 @@
 /- One event28 CAS and receipt-only recovery, after the verifier's original event22 ticket join. -/
-import Kernel.NativeHost
+module
+
+public import Kernel.NativeHost
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentReceiver
 
@@ -32,7 +36,7 @@ def lookupVerified {config : Config} {target : Durable}
     | none
   let some record := verified.opened.durable.image.accepted[index]?
     | some (.error "enrollment original record unavailable")
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | some (.error "enrollment original receipt unavailable")
   let event := ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress
   if record.event == event && receipt.transactionId == tx &&
@@ -55,13 +59,13 @@ structure Confirmed (config : Config) where
 def Confirmed.verified {config : Config} (confirmed : Confirmed config) :
     NativeHostReplay.Verified config
       (NativeHostReplay.exactCandidate confirmed.old
-        confirmed.readback.derived confirmed.readback.ready) :=
+        confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) :=
   NativeHostReplay.extendExact confirmed.reader confirmed.old confirmed.readback
 
 def Confirmed.receipt {config : Config} (confirmed : Confirmed config) : Receipt :=
   let old := confirmed.old
   let candidate := NativeHostReplay.exactCandidate old
-    confirmed.readback.derived confirmed.readback.ready
+    confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     old.opened.durable.height + 1,
@@ -72,6 +76,14 @@ theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed conf
       DurableCheckpointCodec.recordFrame.encode
         (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
   NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback
+
+/-- The exact readback installs the intent admitted at `old.opened`, and the
+post-CAS image is the `config`-validated successor of `old` extended by it. -/
+theorem Confirmed.validated_successor {config : Config} (confirmed : Confirmed config) :
+    confirmed.readback.derived.intent = confirmed.admitted.intent ∧
+      validateLoaded config (NativeHostReplay.exactCandidate confirmed.old
+        confirmed.readback.derived confirmed.readback.ready confirmed.readback.tag) = .ok confirmed.readback.after :=
+  ⟨confirmed.derivedExact, confirmed.readback.validated⟩
 
 inductive Result (config : Config) where
   | confirmed (confirmed : Confirmed config)

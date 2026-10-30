@@ -1,6 +1,6 @@
 # Selected Mini fn consumer envelope probe
 
-The pure Lean probe `scripts/probe-fn-consumer-max-envelope.lean` (SHA-256
+The pure Lean probe `scripts.probe-fn-consumer-max-envelope [deleted 1e68f88d]` (SHA-256
 `ef45fb708c4cac1bb70eaa60501dcb0cf410ded3ff9f14145240766c84b3c8c7`)
 passed against the coherent B `Host.Main` build in
 `/tmp/minidregg-overnight-20260926-final`. It constructed a canonical

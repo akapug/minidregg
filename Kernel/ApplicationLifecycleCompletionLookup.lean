@@ -2,7 +2,11 @@
 Receipt-only lookup of a previously admitted checked completion. An exact
 historical receipt cannot run a physical host effect or create a new event.
 -/
-import Kernel.ApplicationLifecycleCompletionReceiver
+module
+
+public import Kernel.NativeHostReplay
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleCompletionLookup
 

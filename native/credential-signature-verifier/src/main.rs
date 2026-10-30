@@ -1,5 +1,4 @@
-use ed25519_dalek::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
-use sha2::{Digest, Sha512};
+use mini_kernels::{verify_ed25519, verify_sshsig as verify_sshsig_bytes};
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
@@ -26,70 +25,17 @@ fn read_fixed<const N: usize>(path: &Path, role: &str) -> Result<[u8; N], String
 }
 
 fn verify(key_path: &Path, frame_path: &Path, signature_path: &Path) -> Result<&'static [u8], String> {
-    let key_bytes = read_fixed::<PUBLIC_KEY_LENGTH>(key_path, "public key")?;
-    let signature_bytes = read_fixed::<SIGNATURE_LENGTH>(signature_path, "signature")?;
-    let key = VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|_| "public key point decoding failed".to_owned())?;
+    let key_bytes = read_fixed::<32>(key_path, "public key")?;
+    let signature_bytes = read_fixed::<64>(signature_path, "signature")?;
     let frame = fs::read(frame_path).map_err(|error| format!("cannot read frame: {error}"))?;
-    let signature = Signature::from_bytes(&signature_bytes);
 
     // The frame is opaque. Domain separation, key selection, request binding,
     // revocation, and authority are the Lean caller's responsibility.
-    Ok(if key.verify_strict(&frame, &signature).is_ok() {
+    Ok(if verify_ed25519(&key_bytes, &frame, &signature_bytes)? {
         b"verified\n"
     } else {
         b"invalid\n"
     })
-}
-
-/// FIPS 204 ML-DSA-65: the public key (1952 bytes), the context string (chosen by Lean), the
-/// frame and the 3309-byte signature. This is the ML-DSA half of a hybrid key ONLY: the Ed25519
-/// half is `verify`, and the conjunction is decided by the Lean caller
-/// (`CredentialSignatureIO.combineHalves`), so no verb here answers for both.
-fn verify_mldsa(
-    key_path: &Path,
-    context_path: &Path,
-    frame_path: &Path,
-    signature_path: &Path,
-) -> Result<&'static [u8], String> {
-    use fips204::ml_dsa_65;
-    use fips204::traits::{SerDes, Verifier};
-    let key_bytes = read_fixed::<{ ml_dsa_65::PK_LEN }>(key_path, "ML-DSA-65 public key")?;
-    let signature = read_fixed::<{ ml_dsa_65::SIG_LEN }>(signature_path, "ML-DSA-65 signature")?;
-    let key = ml_dsa_65::PublicKey::try_from_bytes(key_bytes)
-        .map_err(|error| format!("ML-DSA-65 public key does not decode: {error}"))?;
-    let context = fs::read(context_path).map_err(|error| format!("cannot read context: {error}"))?;
-    if context.len() > 255 {
-        return Err("ML-DSA context must be at most 255 bytes".to_owned());
-    }
-    let frame = fs::read(frame_path).map_err(|error| format!("cannot read frame: {error}"))?;
-    Ok(if key.verify(&frame, &signature, &context) {
-        b"verified\n"
-    } else {
-        b"invalid\n"
-    })
-}
-
-/// An SSH `string`: a big-endian u32 length, then the bytes.
-fn ssh_string(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), String> {
-    let length = u32::try_from(bytes.len()).map_err(|_| "SSH string exceeds 2^32 bytes".to_owned())?;
-    out.extend_from_slice(&length.to_be_bytes());
-    out.extend_from_slice(bytes);
-    Ok(())
-}
-
-/// OpenSSH PROTOCOL.sshsig: the bytes an SSHSIG signature is over,
-/// `"SSHSIG" || string namespace || string "" || string "sha512" || string SHA-512(message)`.
-/// This is the only hash computed here; Lean fixes every other byte
-/// (`Kernel.PayEnrolMemo.sshsigSignedData`).
-fn sshsig_signed_data(namespace: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
-    let digest = Sha512::digest(message);
-    let mut signed = b"SSHSIG".to_vec();
-    ssh_string(&mut signed, namespace)?;
-    ssh_string(&mut signed, b"")?;
-    ssh_string(&mut signed, b"sha512")?;
-    ssh_string(&mut signed, &digest)?;
-    Ok(signed)
 }
 
 fn verify_sshsig(
@@ -98,26 +44,19 @@ fn verify_sshsig(
     message_path: &Path,
     signature_path: &Path,
 ) -> Result<&'static [u8], String> {
-    let key_bytes = read_fixed::<PUBLIC_KEY_LENGTH>(key_path, "public key")?;
-    let signature_bytes = read_fixed::<SIGNATURE_LENGTH>(signature_path, "signature")?;
-    let key = VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|_| "public key point decoding failed".to_owned())?;
+    let key_bytes = read_fixed::<32>(key_path, "public key")?;
+    let signature_bytes = read_fixed::<64>(signature_path, "signature")?;
     let namespace =
         fs::read(namespace_path).map_err(|error| format!("cannot read namespace: {error}"))?;
-    if namespace.is_empty() {
-        return Err("SSHSIG namespace must not be empty".to_owned());
-    }
     let message = fs::read(message_path).map_err(|error| format!("cannot read message: {error}"))?;
-    let signed = sshsig_signed_data(&namespace, &message)?;
-    let signature = Signature::from_bytes(&signature_bytes);
-    Ok(if key.verify_strict(&signed, &signature).is_ok() {
+    Ok(if verify_sshsig_bytes(&key_bytes, &namespace, &message, &signature_bytes)? {
         b"verified\n"
     } else {
         b"invalid\n"
     })
 }
 
-const USAGE: &str = "usage: minidregg-credential-signature-verifier verify <public-key-file> <frame-file> <signature-file>\n       minidregg-credential-signature-verifier verify-mldsa <public-key-file> <context-file> <frame-file> <signature-file>\n       minidregg-credential-signature-verifier verify-sshsig <public-key-file> <namespace-file> <message-file> <signature-file>\n       minidregg-credential-signature-verifier serve";
+const USAGE: &str = "usage: minidregg-credential-signature-verifier verify <public-key-file> <frame-file> <signature-file>\n       minidregg-credential-signature-verifier verify-sshsig <public-key-file> <namespace-file> <message-file> <signature-file>\n       minidregg-credential-signature-verifier serve";
 
 /// One one-shot invocation: its exit code, stdout and stderr. `main` writes
 /// them; `serve` frames them. Both run exactly this function.
@@ -125,9 +64,6 @@ fn invoke(arguments: &[OsString]) -> (u8, Vec<u8>, Vec<u8>) {
     let result = match arguments {
         [command, public_key, frame, signature] if command == OsStr::new("verify") => {
             verify(Path::new(public_key), Path::new(frame), Path::new(signature))
-        }
-        [command, public_key, context, frame, signature] if command == OsStr::new("verify-mldsa") => {
-            verify_mldsa(Path::new(public_key), Path::new(context), Path::new(frame), Path::new(signature))
         }
         [command, public_key, namespace, message, signature]
             if command == OsStr::new("verify-sshsig") =>

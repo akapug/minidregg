@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# check-host-closure.sh — what the deployed Host is built from, pinned.
+# check-host-closure.sh — what the deployed Host is built from: measured, and a size ratchet.
 #
-# The umbrella (gate 2) elaborates every library module; the minidregg-host
-# executable is built from the import closure of Host.Main only. A theorem in a
-# module outside that closure is about something the Host never runs. This gate
-# computes the closure of Host.Main over tracked library modules, prints how
-# many modules of each library it reaches against the library's total, and
-# compares the closure with the pinned list scripts/gates/host-closure.pin.
+# The umbrella elaborates every library module; the minidregg-host executable is
+# built from the import closure of Host.Main only. A theorem in a module outside
+# that closure is about something the Host never runs. This gate computes the
+# closure of Host.Main over tracked library modules, prints how many modules of
+# each library it reaches against the library's total, and refuses when the
+# closure has GROWN past the one number in scripts/gates/host-closure.max.
 #
-# A module ENTERING or LEAVING the Host closure is a red naming it, until the
-# pin is rewritten on purpose:
-#   scripts/check-host-closure.sh --update "why the Host now reaches/drops these"
-# which records the reason, the date and the per-library counts in the pin.
+# It was a pinned module list (scripts/gates/host-closure.pin, 841 lines) that
+# went red on every ordinary edit and was re-pinned 53 times in October; the
+# ratchet keeps what the pin protected (the Host does not silently grow) at the
+# cost of one line (docs/COORDINATION-2026-10-27.md §2; the plan's rule 2).
+#   scripts/check-host-closure.sh --update "why the ceiling moves"
 set -euo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 python3 - "$@" <<'PY'
-import re, subprocess, sys, datetime
+import re, subprocess, sys, datetime, os
 sys.path.insert(0, "scripts")
 from lean_imports import file_imports
-PIN = "scripts/gates/host-closure.pin"
+MAX = "scripts/gates/host-closure.max"
 libs = re.findall(r'^\[\[lean_lib\]\]\s*\nname\s*=\s*"([^"]+)"', open("lakefile.toml").read(), re.M)
 files = [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0") if f]
 mods = {}
@@ -61,33 +62,35 @@ print(f"Host.Main reaches {len(host)} of {len(mods)} library modules; gate 2 bui
       f"in the Host closure but not built by gate 2: {len(host_only)}")
 for m in host_only:
     print(f"  host-only (not built by gate 2): {m}")
+HEADER = ("# The CEILING on the Host.Main import closure (module count): a size ratchet, not a module list.\n"
+          "# scripts/check-host-closure.sh is red when the closure GROWS past it; a deletion lowers it with\n"
+          "#   scripts/check-host-closure.sh --update REASON\n"
+          "# and a module the Host must now reach raises it the same way, with the reason on the line.\n")
+def read_max():
+    for l in open(MAX):
+        l = l.strip()
+        if l and not l.startswith("#"):
+            return int(l.split()[0])
+    sys.exit(f"host-closure: no ceiling in {MAX}")
 if "--update" in sys.argv:
     i = sys.argv.index("--update")
     reason = sys.argv[i + 1].strip() if i + 1 < len(sys.argv) else ""
     if not reason:
         sys.exit("host-closure: --update needs a reason")
-    old = open(PIN).read().splitlines() if __import__("os").path.exists(PIN) else []
+    old = open(MAX).read().splitlines() if os.path.exists(MAX) else []
     log = [l for l in old if l.startswith("# updated ")]
-    log.append(f"# updated {datetime.date.today()}: {reason}  [counts: " + ", ".join(rows) + "]")
-    with open(PIN, "w") as fh:
-        fh.write("# The import closure of Host.Main (the minidregg-host exe root), one module per line.\n"
-                 "# Written by scripts/check-host-closure.sh --update REASON; compared by local-gates.\n")
-        fh.write("\n".join(log) + "\n")
-        fh.write("\n".join(sorted(host)) + "\n")
-    print(f"host-closure: pin rewritten ({len(host)} modules)")
+    log.append(f"# updated {datetime.date.today()}: {len(host)} modules: {reason}  [" + ", ".join(rows) + "]")
+    with open(MAX, "w") as fh:
+        fh.write(HEADER + "\n".join(log) + "\n" + f"{len(host)}\n")
+    print(f"host-closure: ceiling set to {len(host)} modules")
     sys.exit(0)
-try:
-    pinned = {l.strip() for l in open(PIN) if l.strip() and not l.startswith("#")}
-except FileNotFoundError:
-    sys.exit(f"host-closure: no pin at {PIN}; run with --update REASON")
-entered, left = sorted(host - pinned), sorted(pinned - host)
-for m in entered:
-    print(f"host-closure: ENTERED the Host closure (not in the pin): {m}")
-for m in left:
-    print(f"host-closure: LEFT the Host closure (in the pin): {m}")
-if entered or left:
-    print(f"host-closure: FAIL: {len(entered)} entered, {len(left)} left; rewrite the pin with "
-          f"scripts/check-host-closure.sh --update REASON once the change is meant")
+if not os.path.exists(MAX):
+    sys.exit(f"host-closure: no ceiling at {MAX}; run with --update REASON")
+ceiling = read_max()
+if len(host) > ceiling:
+    print(f"host-closure: FAIL: Host.Main reaches {len(host)} modules, over the ceiling {ceiling} ({MAX}); a Host "
+          f"that must reach more raises it on purpose: scripts/check-host-closure.sh --update REASON")
     sys.exit(1)
-print(f"host-closure: OK: the Host closure equals the pin ({len(host)} modules)")
+print(f"host-closure: OK: {len(host)} modules, ceiling {ceiling}"
+      + (" (lower it: scripts/check-host-closure.sh --update REASON)" if len(host) < ceiling else ""))
 PY

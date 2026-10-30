@@ -5,9 +5,30 @@ record. Today's management, mutation, package and app observations are checked
 on one current image. This module emits no CAS or physical launch permit;
 Replay must additionally prove the original step belonged to admitted history.
 -/
-import Kernel.ApplicationLifecycleClaimV2Ingress
-import Kernel.ApplicationLifecycleBeginV2Admission
-import Kernel.ApplicationLifecycleClaimCore
+module
+
+public import Kernel.ApplicationLifecycleClaimV2Ingress
+public import Kernel.ApplicationLifecycleBeginV2Admission
+public import Kernel.ApplicationLifecycleClaimCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleClaimV2Core
 
@@ -49,6 +70,29 @@ theorem Conditional.original_record_exact {config : Config} {store : StoreIdenti
     conditional.original.record =
       DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent := by
   exact conditional.originalMatch.selected.symm.trans conditional.originalMatch.exact
+
+/-- The original record is the one verified under `head` at height
+`ingress.base.source.originalIndex + 1` and decodes to exactly the record of the
+re-admitted `ingress.originalBegin`; the ingress's original BEGIN is its claim's
+source BEGIN, the claim's current world root is `ground`'s, and the package cell the
+current claim observed holds `ingress.originalBegin`'s installed descriptor under
+`config`. -/
+theorem Conditional.original_under_head {config : Config} {store : StoreIdentity}
+    {head : Head store} {ground : Ground config.deployment}
+    {ingress : Ingress} (conditional : Conditional config head ground ingress) :
+    (∃ bytes chain root,
+      DurableHistory.Included head.frontier head.height (ingress.base.source.originalIndex + 1) bytes chain root ∧
+        DurableCheckpointCodec.recordFrame.decode bytes =
+          some (DurableReceiver.IntentRecord.ofIntent conditional.originalAccepted.intent)) ∧
+      ingress.originalExact = true ∧
+      ingress.base.source.currentWorldRoot = ground.worldRoot ∧
+      ApplicationLifecycleBeginV2Admission.installedExact config.deployment ingress.originalBegin
+        conditional.current.packageRead.selected.observed.before = true :=
+  ⟨⟨conditional.original.read.verified.record, conditional.original.read.verified.chain,
+      conditional.original.read.verified.root, conditional.original.read.verified.included,
+      conditional.original.read.decoded.trans (congrArg some (conditional.original.recordExact.trans
+        (NativeHistorySelection.Matched.candidateRecord conditional.originalMatch)))⟩,
+    conditional.sourceExact, conditional.current.boundary, conditional.currentInstalled⟩
 
 /-- Every key the current part of a v2 claim reads. -/
 def keys (ingress : Ingress) : DurableView.Keys :=

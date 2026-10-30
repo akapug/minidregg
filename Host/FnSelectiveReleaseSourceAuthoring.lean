@@ -5,9 +5,13 @@ only exact canonical header bytes leave for custody signing. Assembly is not
 admission. The source receiver checks the native signature, `.delegateObject`
 capability, installed law, selected content and root before durable settlement.
 -/
-import Kernel.FnSelectiveReleaseSourceAuthority
-import Kernel.FnSelectiveReleaseArticle
-import Kernel.NativeHostContext
+module
+
+public import Kernel.FnSelectiveReleaseSourceAuthority
+public import Kernel.FnSelectiveReleaseArticle
+public import Kernel.NativeHostContext
+
+@[expose] public section
 
 namespace Minidregg.Host.FnSelectiveReleaseSourceAuthoring
 
@@ -49,8 +53,6 @@ def assemble (specBytes headerBytes signatureBytes : List UInt8) :
     | throw "selected source spec is noncanonical"
   let some header := CredentialSignedEnvelopeController.headerCodec.decode headerBytes
     | throw "selected source signing header is noncanonical"
-  if CredentialSignedEnvelopeController.headerCodec.encode header != headerBytes then
-    throw "selected source signing header is noncanonical"
   if signatureBytes.length != 64 then
     throw "selected source signature must be 64 bytes"
   let envelopeBytes := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode

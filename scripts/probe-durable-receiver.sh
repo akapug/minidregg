@@ -10,5 +10,11 @@ export LEAN_NUM_THREADS=2
 lake build Compiler.DurableReceiverIO
 cargo test --release --manifest-path native/hyperdocument-link-sqlite-store/Cargo.toml \
   --target-dir native/hyperdocument-link-sqlite-store/target --all-targets
+# The crash phases are a test-only binary (feature `fixtures`), never a verb of
+# the production helper.
+cargo build --release --manifest-path native/hyperdocument-link-sqlite-store/Cargo.toml \
+  --target-dir native/hyperdocument-link-sqlite-store/target --features fixtures \
+  --bin minidregg-link-sqlite-store-fixtures
 lake env lean --run scripts/durable-receiver.lean \
-  "$repo/native/hyperdocument-link-sqlite-store/target/release/minidregg-link-sqlite-store"
+  "$repo/native/hyperdocument-link-sqlite-store/target/release/minidregg-link-sqlite-store" \
+  "$repo/native/hyperdocument-link-sqlite-store/target/release/minidregg-link-sqlite-store-fixtures"

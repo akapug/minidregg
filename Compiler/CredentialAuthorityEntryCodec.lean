@@ -8,10 +8,30 @@ not through a noncomputable choice of enumeration. Naturals use the shared
 compact prefix codec. Whole-page canonical decoding is enforced by the page
 materializer, including rejection of aliases accepted by primitive codecs.
 -/
-import Compiler.TypedAuthorizationRequestCodec
-import Compiler.CredentialSigningKeyCodec
-import Theory.CredentialAuthorityState
-import Mathlib.Data.Finset.Sort
+module
+
+public import Compiler.TypedAuthorizationRequestCodec
+public import Compiler.FiniteDependentMapCodec
+public import Compiler.CredentialSigningKeyCodec
+public import Theory.CredentialAuthorityState
+public import Mathlib.Data.Finset.Sort
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CredentialAuthorityEntryCodec
 
@@ -23,25 +43,39 @@ open Minidregg.Theory.CredentialAuthorityFamily
 
 set_option autoImplicit false
 
-/-- Sorting is a computable canonical enumeration of the finite set. -/
+/-- Sorting is a computable canonical enumeration of the finite set; an
+unsorted or duplicated label list is refused. -/
 def natSetStream : StreamCodec (Finset Nat) :=
-  StreamCodec.xmap (StreamCodec.list StreamCodec.nat)
-    (fun values => values.sort (· ≤ ·)) List.toFinset
-    (by intro values; exact Finset.sort_toFinset _ _)
+  FiniteDependentMapCodec.finsetStream StreamCodec.nat
 
-/-- Transport a sorted finite set along a concrete, total retraction.
-Invalid natural labels may decode provisionally; exact whole-page re-encoding
-rejects them before they become materialized authority. -/
+/-- Transport a sorted finite set along a concrete, total retraction. A label
+that is not the label of its own value (`label (ofLabel n) ≠ n`) is refused by
+the stream decoder; it used to decode provisionally and rely on the whole-page
+re-encoding. -/
 def labeledSetStream {alpha : Type} [DecidableEq alpha]
     (label : alpha → Nat) (ofLabel : Nat → alpha)
     (roundtrip : ∀ value, ofLabel (label value) = value) :
     StreamCodec (Finset alpha) :=
-  StreamCodec.xmap natSetStream (Finset.image label) (Finset.image ofLabel)
+  StreamCodec.xmap
+    (StreamCodec.refine natSetStream (fun labels => ∀ n ∈ labels, label (ofLabel n) = n))
+    (fun values => ⟨values.image label, by
+      intro n member
+      obtain ⟨value, _, rfl⟩ := Finset.mem_image.mp member
+      rw [roundtrip]⟩)
+    (fun labels => labels.val.image ofLabel)
     (by
       intro values
+      change (values.image label).image ofLabel = values
       rw [Finset.image_image]
       simpa only [Function.comp_def, roundtrip] using
         (Finset.image_id : Finset.image _root_.id values = values))
+    (by
+      intro labels
+      apply Subtype.ext
+      change (labels.val.image ofLabel).image label = labels.val
+      rw [Finset.image_image]
+      conv => rhs; rw [← Finset.image_id (s := labels.val)]
+      exact Finset.image_congr (fun n member => labels.property n (Finset.mem_coe.mp member)))
 
 def capabilityIdStream : StreamCodec CapabilityId :=
   StreamCodec.xmap StreamCodec.nat CapabilityId.value CapabilityId.mk
@@ -132,6 +166,25 @@ def holderStream : StreamCodec Holder where
     cases holder with
     | bearer => rfl
     | subject subject => simp [subjectIdStream.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes holder suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    by_cases zero : tag = 0
+    · subst zero
+      simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+      obtain ⟨rfl, rfl⟩ := decoded
+      rfl
+    by_cases one : tag = 1
+    · subst one
+      cases ok : subjectIdStream.decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨subject, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [subjectIdStream.encode_decodePrefix _ _ _ ok]
+    · simp [zero, one] at decoded
 
 /-- Scope targets carry a tag byte: `0` an explicit sorted target set, `1`
 the room cell of an `under` scope. Any other leading byte refuses. -/
@@ -152,11 +205,33 @@ def targetSetStream (kind : ResourceKind) : StreamCodec (TargetSet kind) where
     cases targets with
     | explicit targets => simp [(resourceSetStream kind).decodePrefix_encode]
     | under room => simp [StreamCodec.nat.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes targets suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    by_cases zero : tag = 0
+    · subst zero
+      cases ok : (resourceSetStream kind).decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨set, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [(resourceSetStream kind).encode_decodePrefix _ _ _ ok]
+    by_cases one : tag = 1
+    · subst one
+      cases ok : StreamCodec.nat.decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨room, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [StreamCodec.nat.encode_decodePrefix _ _ _ ok]
+    · simp [zero, one] at decoded
 
 /-- A field's natural label: `slot n ↦ 4n`, `balance a ↦ 4a+1`, `atomsOf m ↦ 4m+3`
 (J-PRIV-1), and the three content/program fields at `2`, `6`, `10`.  Any other
-label decodes provisionally to `slot 0` and is refused by the whole-page
-re-encoding. -/
+label is refused by `labeledSetStream` (it is not the label of its own value). -/
 def fieldLabel : CellField → Nat
   | .slot n => 4 * n
   | .balance asset => 4 * asset + 1
@@ -307,6 +382,25 @@ def lineageOriginStream (kind : ResourceKind) : StreamCodec (LineageOrigin kind)
     cases origin with
     | strict => rfl
     | delegated request => simp [(requestStreamFor kind).decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes origin suffix decoded
+    rcases bytes with _ | ⟨tag, bytes⟩
+    · cases decoded
+    by_cases zero : tag = 0
+    · subst zero
+      simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+      obtain ⟨rfl, rfl⟩ := decoded
+      rfl
+    by_cases one : tag = 1
+    · subst one
+      cases ok : (requestStreamFor kind).decodePrefix bytes with
+      | none => simp [ok] at decoded
+      | some pair =>
+        obtain ⟨request, rest⟩ := pair
+        simp only [ok, bind, Option.bind, Option.some.injEq, Prod.mk.injEq] at decoded
+        obtain ⟨rfl, rfl⟩ := decoded
+        simp [(requestStreamFor kind).encode_decodePrefix _ _ _ ok]
+    · simp [zero, one] at decoded
 
 def parentLinkStream (kind : ResourceKind) : StreamCodec (ParentLink kind) :=
   StreamCodec.xmap

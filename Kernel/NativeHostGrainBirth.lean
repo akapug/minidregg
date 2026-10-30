@@ -3,9 +3,13 @@ Source-owned signing plan for the grain-backed birth. The public host first
 authorizes the exact observation footprint; this helper then finalizes only
 authority-allocated auxiliary cells and derives every current signing header.
 -/
-import Kernel.NativeHostContext
-import Kernel.GrainResourceBirthAdmission
-import Compiler.GrainResourceBirthHostCodec
+module
+
+public import Kernel.NativeHostContext
+public import Kernel.GrainResourceBirthAdmission
+public import Compiler.GrainResourceBirthHostCodec
+
+@[expose] public section
 
 namespace Minidregg.Kernel.NativeHostGrainBirth
 
@@ -45,7 +49,8 @@ def prepareLoaded (config : Config) (opened : Opened config)
     Except String (List UInt8 × List SigningSlot) := do
   let source ← need "noncanonical grain-backed birth source"
     (sourceCodec.decode sourceBytes)
-  let tariff ← config.grainBirthTariffValue
+  let tariff ← need "grain-backed birth tariff: the image's platform record pins none"
+    (GrainResourceBirthAdmission.grainTariffAt config.deployment opened.durable)
   let profile := config.profile
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let height := logicalHeight config opened.durable

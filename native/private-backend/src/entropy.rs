@@ -13,6 +13,11 @@
 use crate::{custody::hash, reconstruction::Field};
 use std::{fs::File, io::Read, io::Result};
 
+/// The one reader of the operating-system random source: fill `buf` exactly.
+pub(crate) fn os_fill(buf: &mut [u8]) -> Result<()> {
+    File::open("/dev/urandom")?.read_exact(buf)
+}
+
 const STREAM: &[u8] = b"DREGG.PRIVATE.ENTROPY.STREAM.V1";
 const FORK: &[u8] = b"DREGG.PRIVATE.ENTROPY.FORK.V1";
 
@@ -20,11 +25,16 @@ pub struct Entropy {
     key: [u8; 32],
     counter: u64,
 }
+impl Drop for Entropy {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.key);
+    }
+}
 impl Entropy {
     /// A fresh key from the operating system.
     pub fn os() -> Result<Self> {
         let mut key = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut key)?;
+        crate::entropy::os_fill(&mut key)?;
         Ok(Self::from_seed(key))
     }
     /// A reproducible stream. The seed must itself be secret randomness when the
@@ -38,6 +48,22 @@ impl Entropy {
         b.extend(self.key);
         crate::codec::bytes(label, &mut b);
         Self::from_seed(hash(&b))
+    }
+    /// A keyed derivation `SHA-256(domain || seed || context || tag || index)`:
+    /// the stateless per-index randomness a dealer draws from its retained seed.
+    pub(crate) fn derive(
+        domain: &[u8],
+        seed: [u8; 32],
+        context: [u8; 32],
+        tag: u8,
+        index: usize,
+    ) -> [u8; 32] {
+        let mut b = domain.to_vec();
+        b.extend(seed);
+        b.extend(context);
+        b.push(tag);
+        b.extend((index as u64).to_le_bytes());
+        hash(&b)
     }
     pub fn bytes32(&mut self) -> [u8; 32] {
         let mut b = STREAM.to_vec();
@@ -55,7 +81,7 @@ impl Entropy {
 /// Process-wide root for tests. `MINI_PRIVATE_TEST_ENTROPY=<64 hex>` replays a
 /// run; otherwise the key comes from the OS and is printed once so a failing run
 /// can be reproduced. Neither path derives anything from a party's input value.
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) fn test_root() -> Entropy {
     use std::sync::OnceLock;
     static ROOT: OnceLock<[u8; 32]> = OnceLock::new();
@@ -91,5 +117,17 @@ mod tests {
         assert_ne!(a.bytes32(), x, "a stream never repeats a block");
         let (mut s, mut t) = (Entropy::os().unwrap(), Entropy::os().unwrap());
         assert_ne!(s.bytes32(), t.bytes32());
+    }
+    #[test]
+    fn os_fill_fills_exactly_the_requested_length() {
+        let (mut a, mut b) = ([0u8; 32], [0u8; 32]);
+        os_fill(&mut a).unwrap();
+        os_fill(&mut b).unwrap();
+        assert_ne!(a, [0; 32]);
+        assert_ne!(a, b);
+        let mut long = vec![0u8; 4096];
+        os_fill(&mut long).unwrap();
+        assert!(long[4064..].iter().any(|x| *x != 0) || long[..32].iter().any(|x| *x != 0));
+        os_fill(&mut []).unwrap();
     }
 }

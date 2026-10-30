@@ -3,7 +3,6 @@
 //! This is a physical codec, not dispatch admission. The private entrance must
 //! obtain a fresh Mini committed permit before calling the RPC driver or this
 //! serializer. An uncertain RPC result is never converted into a retry.
-#![allow(dead_code)] // Staged behind Mini's committed dispatch permit route.
 
 use minidregg_spk_rpc::{CookieExpiry, ETag, WebResponse, WebResult};
 use std::io;
@@ -315,10 +314,31 @@ pub(crate) fn serialize_for_origin(
     if body.len() > MAX_BODY {
         return Err(invalid("WebSession response body exceeds bound"));
     }
+    let mut app_status_seen = false;
     for extra in &response.headers {
         // Security context and HTTP framing belong to the host, never the app.
-        if extra.name != "x-oc-mtime" {
-            return Err(invalid("WebSession response header refused"));
+        match extra.name.as_str() {
+            "x-oc-mtime" => {},
+            // An OPTIONS answer's DAV compliance classes, rendered by spk-rpc from the app's
+            // typed `Options` (never an app-supplied header string).
+            "dav" => {
+                if extra.value.is_empty() || !extra.value.split(", ").all(|class| !class.is_empty()
+                    && class.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.:/<>".contains(&b))) {
+                    return Err(invalid("WebSession DAV classes refused"));
+                }
+            },
+            "x-sandstorm-app-http-status" => {
+                // This preserves the app's original status when the pinned
+                // Sandstorm union has no matching variant. It is metadata;
+                // the union above still determines the HTTP transport status.
+                if app_status_seen || extra.value.len() != 3
+                    || !extra.value.bytes().all(|byte| byte.is_ascii_digit())
+                    || !extra.value.parse::<u16>().is_ok_and(|code| (200..=599).contains(&code)) {
+                    return Err(invalid("WebSession original app status refused"));
+                }
+                app_status_seen = true;
+            },
+            _ => return Err(invalid("WebSession response header refused")),
         }
         add(&mut headers, &extra.name, &extra.value)?;
     }
@@ -424,6 +444,27 @@ mod tests {
             http_only: true,
             expiry: CookieExpiry::None,
         });
+        assert!(serialize(&reply, false).is_err());
+    }
+
+    #[test]
+    fn original_app_status_is_bounded_metadata_not_transport_authority() {
+        let mut reply = WebResponse {
+            result: WebResult::ServerError { html: String::new(), non_html: Some(("application/json".into(), b"{\"error\":\"busy\"}".to_vec())) },
+            headers: vec![Header { name: "x-sandstorm-app-http-status".into(), value: "503".into() }],
+            set_cookies: vec![],
+        };
+        let bytes = serialize(&reply, false).unwrap();
+        assert!(bytes.starts_with(b"HTTP/1.1 500 "));
+        assert!(String::from_utf8_lossy(&bytes).contains("x-sandstorm-app-http-status: 503\r\n"));
+        assert!(bytes.ends_with(b"{\"error\":\"busy\"}"));
+        for value in ["", "099", "600", "0503", "+503", "503\r\nInjected: yes"] {
+            reply.headers[0].value = value.into();
+            assert!(serialize(&reply, false).is_err(), "{value:?}");
+        }
+        reply.headers[0].value = "200".into();
+        assert!(serialize(&reply, false).unwrap().starts_with(b"HTTP/1.1 500 "));
+        reply.headers.push(Header { name: "x-sandstorm-app-http-status".into(), value: "200".into() });
         assert!(serialize(&reply, false).is_err());
     }
 

@@ -7,6 +7,7 @@
 # install in a separate integrated Store.
 set -eu
 umask 077
+. "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/native/resource-client/journey.d/lib/evidence.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 SOURCE_MATCHED_HOST NEW_EVIDENCE_DIRECTORY" >&2
@@ -37,7 +38,7 @@ command -v jq >/dev/null
 command -v xxd >/dev/null
 # This fixture selects the exact bounded Lean author output from the signed
 # GitWeb descriptor; matching caller-provided root strings alone is not enough.
-IDENTITY_ROOTS_SHA=$(shasum -a 256 "$IDENTITY_ROOTS" | cut -d ' ' -f 1)
+IDENTITY_ROOTS_SHA=$(sha256 "$IDENTITY_ROOTS" | cut -d ' ' -f 1)
 [ "$IDENTITY_ROOTS_SHA" = \
   0d848da24169771e02fcb32b88465cbe9dec87649432e76a87309cf6f89f272f ] || {
     echo "unexpected source-authored GitWeb roots file" >&2; exit 2;
@@ -49,10 +50,10 @@ jq -e --arg package "$PACKAGE_ROOT" --arg interface "$INTERFACE_ROOT" \
    .schemaRoot == $schema' "$IDENTITY_ROOTS" >/dev/null
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-shasum -a 256 "$0" "$BASE_SCRIPT" "$HOST" "$MINI" "$STORE_BINARY" \
+sha256 "$0" "$BASE_SCRIPT" "$HOST" "$MINI" "$STORE_BINARY" \
   "$SIGNATURE_BINARY" "$FEE_INSPECTOR" "$IDENTITY_ROOTS" \
   >"$EVIDENCE/input-sha256.txt"
-shasum -a 256 -c "$EVIDENCE/input-sha256.txt" \
+sha256 -c "$EVIDENCE/input-sha256.txt" \
   >"$EVIDENCE/input-precheck.txt"
 
 if [ -n "$PREPARED_BASE" ]; then
@@ -60,7 +61,7 @@ if [ -n "$PREPARED_BASE" ]; then
   [ -s "$BASE/input-recheck.txt" ] || {
     echo "prepared app/session base lacks completed input recheck" >&2; exit 2;
   }
-  shasum -a 256 "$BASE/input-recheck.txt" >>"$EVIDENCE/input-sha256.txt"
+  sha256 "$BASE/input-recheck.txt" >>"$EVIDENCE/input-sha256.txt"
 else
   BASE="$EVIDENCE/base"
   MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
@@ -118,7 +119,7 @@ while [ "$index" -lt "$COUNT" ]; do
   esac
   public=$(od -An -tx1 -v "$public_path" | tr -d ' \n')
   header=$(printf '%s\n' "$slot" | jq -er '.header')
-  header_sha=$(printf '%s' "$header" | xxd -r -p | shasum -a 256 | cut -d' ' -f1)
+  header_sha=$(printf '%s' "$header" | xxd -r -p | sha256 | cut -d' ' -f1)
   printf '%s\n' "$slot" | jq -c --arg public "$public" \
     --arg headerSha "$header_sha" --arg keyPath "$key_path" \
     '{role,index,keyId:.signing.keyId,keyEpoch:.signing.keyEpoch,
@@ -126,7 +127,7 @@ while [ "$index" -lt "$COUNT" ]; do
     >>"$EVIDENCE/signers.ndjson"
   index=$((index + 1))
 done
-REQUEST_SHA=$(shasum -a 256 "$EVIDENCE/request.bin" | cut -d' ' -f1)
+REQUEST_SHA=$(sha256 "$EVIDENCE/request.bin" | cut -d' ' -f1)
 SPEC=$(jq -er '.canonicalSpec' "$EVIDENCE/request-inspected.json")
 jq -s --arg request "$REQUEST_SHA" --arg spec "$SPEC" \
   '{type:"minidregg-application-share-issue-approval-v1",
@@ -202,15 +203,6 @@ jq -e --slurpfile funded "$EVIDENCE/request-inspected.json" \
   '.canonicalSpec == $funded[0].canonicalSpec and
    .canonicalRequest != $funded[0].canonicalRequest' \
   "$EVIDENCE/shortage-request-inspected.json" >/dev/null
-# The Store's durable image (seed + every log record), read under the Store's own
-# anchor identity, as the Host's transport opens it (`Config.anchorIdentity`,
-# printed by `describe` as storeAnchorIdentity; never re-derived here). The legacy single-blob `read-to` image no longer
-# exists: the Store keeps a durable log, so `read-to` refuses ("published byte
-# record is missing").
-durable_image() {
-  _image_id=$("$HOST" "$CONFIG" describe | jq -er .storeAnchorIdentity)
-  "$STORE_BINARY" --anchor-identity "$_image_id" durable-read "$1" 1 1 "$2"
-}
 durable_image "$STORE" "$EVIDENCE/before-shortage-image.bin"
 if "$HOST" "$CONFIG" application-share-issue-plan \
     "$EVIDENCE/shortage-request.bin" "$EVIDENCE/shortage-plan.bin" \
@@ -298,5 +290,5 @@ durable_image "$STORE" "$EVIDENCE/after-lookup-image.bin"
 cmp "$EVIDENCE/before-lookup-image.bin" "$EVIDENCE/after-lookup-image.bin"
 stop_service
 
-shasum -a 256 -c "$EVIDENCE/input-sha256.txt" >"$EVIDENCE/input-recheck.txt"
+sha256 -c "$EVIDENCE/input-sha256.txt" >"$EVIDENCE/input-recheck.txt"
 echo "application share issue native acceptance PASS"

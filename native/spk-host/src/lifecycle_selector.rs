@@ -2,7 +2,7 @@
 //!
 //! The Host pins one lifecycle management identity (`lifecycleManagement`:
 //! subject and key) and no application. Every lifecycle authoring call
-//! (ops 44/50/52/66/68/70) is framed as `(selector JSON, request)`. The
+//! (ops 66/68/70) is framed as `(selector JSON, request)`. The
 //! selector confers nothing: Mini's receiver checks the application's current
 //! law, which names its package and snapshot manifests and the management
 //! subject, and admits the named capabilities against current authority.
@@ -18,11 +18,9 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 
+/// Lean's `canonicalDecimal?` (`Host/Main.lean`): a selector field is a natural below 2^256.
 pub(crate) fn decimal(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 78
-        && (value == "0" || !value.starts_with('0'))
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    crate::canonical::decimal_within(value, crate::canonical::NAT256_DIGITS)
 }
 
 /// Exactly the Lean `LifecycleSelector` fields, as canonical decimal strings.

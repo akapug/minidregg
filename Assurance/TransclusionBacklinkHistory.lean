@@ -476,6 +476,49 @@ def applyEffect
       ref :=
   ⟨observation, accepted, referenceArgumentExact⟩
 
+/-- **What an applied transclusion guarantees about its indices**: the accepted
+effect's exact `request` commits `ref`'s reference root; `ref`'s source names the
+retained committed history entry (receipt root under `SCommit`), at which the
+finality, PCS-opening, commitment-binding and random-oracle premises hold for
+`ref`'s opening; and the effect is `effectFamily`'s `declaration` from its
+canonical `pre`, with the request quoting `pre`'s root, the family patch for
+`outcome` valid from `pre`'s logical store, and the request's policy epoch and
+committed policy accepted by `portal` at `authState`. -/
+theorem AppliedEffect.sound
+    {ref : TransclusionRef n F DisclosureAtom}
+    (applied : AppliedEffect (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (family := family)
+      (headerCells := headerCells) (C := C) (SCommit := SCommit)
+      (CellLayout := CellLayout) (M := M) (Nullifier := Nullifier)
+      (effectFamily := effectFamily) (portal := portal)
+      (authState := authState) (kind := kind) (request := request)
+      (pre := pre) (declaration := declaration) (outcome := outcome)
+      FinalityEvidence PCSOpeningSound CommitmentBindingCR RandomOracleModel
+      ref) :
+    request.argsDigest = ref.referenceRoot ∧
+      ref.source.historyEntryRoot = applied.observation.entry.receiptRoot SCommit ∧
+      applied.observation.entry.context.outcome = .committed ∧
+      FinalityEvidence applied.observation.entry.context ∧
+      PCSOpeningSound applied.observation.entry.claim ref.opening ∧
+      CommitmentBindingCR applied.observation.entry.claim ∧
+      RandomOracleModel applied.observation.entry.claim ∧
+      pre = effectFamily.pre ∧
+      (⟨kind, request⟩ : PackedEffectRequest) = effectFamily.request declaration ∧
+      request.preStateRoot = pre.root ∧
+      Store.Patch.ValidFrom pre.logical (effectFamily.patch declaration outcome) ∧
+      request.policyEpoch = authState.policyEpoch request.policyId ∧
+      portal.verifyCommittedPolicy
+        (authState.policyAddress request.policyId request.policyRevision)
+        request applied.accepted.authorization.policyWitness = true :=
+  ⟨applied.referenceArgumentExact, applied.observation.historyEntryExact,
+    applied.observation.committed,
+    applied.observation.finalized, applied.observation.pcsOpeningSound,
+    applied.observation.commitmentBinding, applied.observation.fiatShamirROM,
+    applied.accepted.preStateBound, applied.accepted.requestBound,
+    applied.accepted.validated.preRoot_bound, applied.accepted.validated.valid,
+    applied.accepted.authorization.policyEpochExact,
+    applied.accepted.authorization.policyVerified⟩
+
 end Effect
 
 /-! ## Forward events and exact chain welds -/
@@ -542,6 +585,14 @@ local notation "Event" =>
     (clauseEvidence := clauseEvidence) (family := family)
     (headerCells := headerCells) (C := C) FinalityEvidence PCSOpeningSound
     CommitmentBindingCR RandomOracleModel encoding linkRelationId
+/-- The event occurs in a committed entry of the link relation, and its exact opening
+of that entry's word encodes the destination reference. -/
+theorem sound (event : Event) :
+    event.entry.context.outcome = .committed ∧
+      event.entry.context.semanticRelationId = linkRelationId ∧
+      event.eventOpening.Exact event.entry.word ∧
+      event.eventOpening.cells = encoding.cells event.target :=
+  ⟨event.committed, event.relationExact, event.openingExact, event.targetEncodingExact⟩
 
 /-- Exact source identity derived from the retained verified entry. -/
 def source (event : Event) : SourceIdentity where

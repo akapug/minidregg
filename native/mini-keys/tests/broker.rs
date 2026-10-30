@@ -138,13 +138,14 @@ impl Fixture {
         });
         let table = json!({"type":"mini-provider-table-v2","providers":[
             {"name":"openrouter","endpoint":format!("{}/v1/chat/completions",provider.0),"kind":"openai-compatible","models":["m1"],"credential":"user"},
-            {"name":"poolrow","endpoint":format!("{}/v1/chat/completions",provider.0),"kind":"openai-compatible","models":["m1"],"credential":"pool","caps":{"perCall":"256","perDay":"2"}},
+            {"name":"poolrow","endpoint":format!("{}/v1/chat/completions",provider.0),"kind":"openai-compatible","models":["m1"],"credential":"pool","caps":{"perCall":"256","perDay":"2","ceilingMicroUsd":"40000000","callMicroUsd":"5000"}},
             {"name":"homelab","endpoint":format!("{}/v1/chat/completions",provider.0),"kind":"openai-compatible","models":["m1"],"credential":"homelab"}]});
         write_mode(&dir.join("etc/providers.json"), table.to_string().as_bytes(), 0o644);
         let mirror = dir.join("keys/discord-mirror.json");
         write_mode(&mirror, json!({"type":"mini-discord-mirror-secrets-v1","webhookUrl":format!("{}/webhook/1/tok",discord.0),
             "channelUrl":format!("{}/channels/9/messages",discord.0),"botToken":BOT_TOKEN}).to_string().as_bytes(), 0o600);
         let member = ed25519_dalek::SigningKey::from_bytes(&[41; 32]);
+        // The Host's reply shape today: no publicKey, no height (the Lean ask adds both).
         let view = Arc::new(Mutex::new(json!({"type":"subject-key-status-v1","subject":"20","keyEpoch":"3","isCurrent":true,"currentRevoked":false})));
         fake_store(&dir.join("run/public.sock"), view.clone());
         Fixture {
@@ -165,8 +166,9 @@ impl Fixture {
     fn config_json(&self, peers: Value, single: bool) -> Value {
         let mut v = json!({"type":"mini-keys-broker-v1","socket":self.socket,"audit":self.audit,"spool":self.dir.join("state/spool"),
             "peers":peers,
-            "credentials":{"host":self.dir.join("etc/host"),"hostConfig":self.dir.join("etc/pinned-config.json"),
-                "publicSocket":self.dir.join("run/public.sock"),"providers":self.dir.join("etc/providers.json"),
+            "credentials":{"host":self.dir.join("etc/host"),"hostSha256":server::native::sha256_hex(b"host image bytes"),
+                "hostConfig":self.dir.join("etc/pinned-config.json"),
+                "publicSocket":self.dir.join("run/public.sock"),"publicSocketUid":peer::euid(),"providers":self.dir.join("etc/providers.json"),
                 "root":self.root,"key":self.key},
             "discord":{"mirror":self.mirror}});
         if single {
@@ -350,7 +352,7 @@ fn a_ticket_forwards_one_exact_body_with_the_bearer_the_caller_never_sees() {
     let ticket = t["ticket"].as_str().unwrap().to_owned();
     // Another body under this ticket: refused, and the ticket is spent.
     assert_eq!(forward(&b, &ticket, b"{\"other\":1}").unwrap_err().code, "ticket-body-mismatch");
-    assert_eq!(forward(&b, &ticket, body).unwrap_err().code, "ticket-unknown");
+    assert_eq!(forward(&b, &ticket, body).unwrap_err().code, "ticket-spent");
     let t = authorize(body, 50).unwrap();
     let r = forward(&b, t["ticket"].as_str().unwrap(), body).unwrap();
     assert_eq!(r["complete"], true);
@@ -374,6 +376,127 @@ fn a_ticket_forwards_one_exact_body_with_the_bearer_the_caller_never_sees() {
         "bodySha256":body_sha(body),"owner":f.owner(),"model":"m1","height":5}), Duration::from_secs(10)).unwrap_err();
     assert_eq!(revoked.code, "provider-refused:owner-not-current");
     assert!(!f.audit_text().contains(SECRET));
+}
+
+/// B-F1: the controller states maxTokens 64 and model m1 at authorize; the
+/// body it forwards asks for more. The grant, read against the body, refuses.
+#[test]
+fn the_forwarded_body_is_held_to_the_grant_whatever_the_controller_claimed() {
+    let f = Fixture::new("claims");
+    let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
+    f.member_action(&b, json!({"action":"set","provider":"openrouter","secret":SECRET}));
+    f.member_action(&b, json!({"action":"grant","provider":"openrouter","runner":"9","perCall":"256","perDay":"9","notAfter":"100","model":"m1"}));
+    let claimed = |body: &[u8]| {
+        b.call(&json!({"op":"provider-authorize","kind":"user","provider":"openrouter","runner":"9","maxTokens":64,
+            "bodySha256":body_sha(body),"owner":f.owner(),"model":"m1","height":5}), Duration::from_secs(10)).unwrap()["ticket"].as_str().unwrap().to_owned()
+    };
+    for body in [&br#"{"model":"m1","max_tokens":100000,"messages":[]}"#[..], br#"{"model":"expensive","max_tokens":8}"#,
+        br#"{"model":"m1","max_tokens":8,"n":50}"#, br#"{"model":"m1","max_tokens":100000,"max_tokens":8}"#] {
+        let t = claimed(body);
+        assert_eq!(forward(&b, &t, body).unwrap_err().code, "provider-refused:body-exceeds-grant", "{}", String::from_utf8_lossy(body));
+    }
+    assert!(f.provider.1.lock().unwrap().is_empty(), "nothing reached the provider");
+}
+
+/// B-F2: a lost authorize reply and a lost forward reply are both recovered by
+/// an exact retry, across a broker restart, with one count and one provider call.
+#[test]
+fn an_exact_retry_recovers_a_lost_reply_without_a_second_count_or_call() {
+    let f = Fixture::new("retry");
+    let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
+    b.call(&json!({"op":"pool","action":"set","provider":"poolrow","secret":POOL_SECRET}), Duration::from_secs(10)).unwrap();
+    let body = br#"{"model":"m1","max_tokens":64,"messages":[]}"#;
+    let authorize = |b: &Broker| b.call(&json!({"op":"provider-authorize","kind":"pool","provider":"poolrow","runner":"9","maxTokens":64,"bodySha256":body_sha(body)}), Duration::from_secs(10));
+    let first = authorize(&b).unwrap();
+    let again = authorize(&b).unwrap();
+    assert_eq!(first["ticket"], again["ticket"], "the same live ticket, counted once");
+    let ticket = first["ticket"].as_str().unwrap().to_owned();
+    let answer = forward(&b, &ticket, body).unwrap();
+    // The broker restarts; the reply was lost; the controller presents the ticket again.
+    let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
+    let replay = forward(&b, &ticket, body).unwrap();
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(replay["body"], answer["body"]);
+    assert_eq!(f.provider.1.lock().unwrap().len(), 1, "one provider call");
+    // perDay 2: only one call was counted, so one more fits; then the cap.
+    let other = br#"{"model":"m1","max_tokens":8,"messages":[]}"#;
+    let t = b.call(&json!({"op":"provider-authorize","kind":"pool","provider":"poolrow","runner":"9","maxTokens":8,"bodySha256":body_sha(other)}), Duration::from_secs(10)).unwrap();
+    assert_ne!(t["ticket"], first["ticket"]);
+    let third = br#"{"model":"m1","max_tokens":9,"messages":[]}"#;
+    assert_eq!(b.call(&json!({"op":"provider-authorize","kind":"pool","provider":"poolrow","runner":"9","maxTokens":9,"bodySha256":body_sha(third)}), Duration::from_secs(10)).unwrap_err().code, "provider-refused:per-day-cap");
+    let ls = b.call(&json!({"op":"pool","action":"ls"}), Duration::from_secs(10)).unwrap();
+    assert_eq!(ls["result"]["credentials"][0]["spentMicroUsd"], 10000, "two calls charged at the row's worst case");
+}
+
+/// B-F4: an operation-144 answer from any account but the pinned one is refused.
+#[test]
+fn an_owner_status_from_an_unpinned_account_or_about_another_key_is_refused() {
+    let f = Fixture::new("pin144");
+    let mut cfg = f.config_json(f.all_roles(), true);
+    cfg["credentials"]["publicSocketUid"] = json!(peer::euid().wrapping_add(1));
+    let b = f.start(cfg).unwrap();
+    let r = f.member_action(&b, json!({"action":"ls"}));
+    assert_eq!(r["type"], server::member::REFUSED);
+    assert!(r["error"].as_str().unwrap().contains("not the pinned public-socket uid"), "{r}");
+    let f = Fixture::new("key144");
+    let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
+    f.view.lock().unwrap()["publicKey"] = json!("cd".repeat(32));
+    assert_eq!(f.member_action(&b, json!({"action":"ls"}))["error"], "owner-not-current");
+    f.view.lock().unwrap()["publicKey"] = json!(wire::hex(f.member.verifying_key().as_bytes()));
+    assert_eq!(f.member_action(&b, json!({"action":"ls"}))["type"], server::member::RESULT);
+}
+
+/// B-F3: a session account gets four connections and a small first frame;
+/// the Host image is pinned by digest, and a swapped image refuses.
+#[test]
+fn a_member_account_cannot_take_the_slots_or_force_a_large_frame_and_the_host_is_pinned() {
+    let f = Fixture::new("slots");
+    let b = f.start(f.config_json(json!([{"role":"member","gids":[peer::egid()]}]), true)).unwrap();
+    let end = Instant::now() + Duration::from_secs(5);
+    let held: Vec<_> = (0..4).map(|_| b.connect(end).unwrap()).collect();
+    std::thread::sleep(Duration::from_millis(100));
+    let mut fifth = b.connect(end).unwrap();
+    assert_eq!(wire::recv(&mut fifth, 4096, end).unwrap()["refused"], "busy");
+    drop(held);
+    std::thread::sleep(Duration::from_millis(100));
+    let mut s = b.connect(end).unwrap();
+    wire::write_frame(&mut s, &vec![b' '; 64 * 1024], end).unwrap_or(());
+    let r = wire::recv(&mut s, 4096, end).unwrap();
+    assert_eq!(r["refused"], "bad-request");
+    assert!(r["detail"].as_str().unwrap().contains("exceeds bound"), "{r}");
+    drop(s);
+    // The image changes under the broker: the next member action refuses by name.
+    write_mode(&f.dir.join("etc/host"), b"another host image", 0o755);
+    let r = f.member_action(&b, json!({"action":"ls"}));
+    assert!(r["error"].as_str().unwrap_or("").contains("not the pinned candidate image"), "{r}");
+    // And a broker whose pin is not the image does not start.
+    let mut cfg = f.config_json(f.all_roles(), true);
+    cfg["credentials"]["hostSha256"] = json!("0".repeat(64));
+    assert!(f.start(cfg).unwrap_err().contains("not the pinned candidate image"));
+}
+
+/// B-F7: an operation the audit log cannot record does not run.
+#[test]
+fn an_operation_that_cannot_be_audited_is_refused_and_has_no_effect() {
+    let f = Fixture::new("audit");
+    let b = f.start(f.config_json(f.all_roles(), true)).unwrap();
+    // Every later write by this process (the broker's audit appends among them) fails EFBIG.
+    unsafe {
+        libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+        let size = std::fs::metadata(&f.audit).unwrap().len() as libc::rlim_t;
+        let limit = libc::rlimit { rlim_cur: size, rlim_max: libc::RLIM_INFINITY };
+        assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+    }
+    let r = b.call(&json!({"op":"pool","action":"set","provider":"poolrow","secret":POOL_SECRET}), Duration::from_secs(10)).unwrap_err();
+    assert_eq!(r.code, "audit-unavailable", "{r}");
+    assert!(!f.root.join("_pool/poolrow.key").exists(), "nothing was sealed");
+}
+
+#[test]
+fn single_account_is_a_test_shape_a_root_owned_config_cannot_select() {
+    let f = Fixture::new("single");
+    let err = Config::parse(f.config_json(f.all_roles(), true).to_string().as_bytes(), 0).unwrap_err();
+    assert!(err.contains("test shape"), "{err}");
 }
 
 #[test]

@@ -76,7 +76,26 @@ literally computes; on boolean-encoded bits the two coincide: `merkleMuxExec_enc
   COMPOSED note-spend statement (nullifier + amount range + membership over one shared
   witness) is the remaining rung, by list append on this file's systems.
 -/
-import Compiler.AirHash
+module
+
+public import Compiler.AirHash
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler
 

@@ -121,11 +121,7 @@ fn parse_ids(value: &Value, roles: &[Role]) -> Result<BTreeMap<String, String>> 
             .get(&role.label)
             .and_then(Value::as_str)
             .ok_or("namespace record lacks role ID")?;
-        if id
-            .parse::<u64>()
-            .ok()
-            .is_none_or(|number| number < (1u64 << 63))
-            || id.starts_with('0')
+        if mini_sdk::decimal::parse::<u64>(id).is_none_or(|number| number < (1u64 << 63))
         {
             return Err("namespace record has invalid candidate ID".into());
         }
@@ -158,11 +154,7 @@ fn used_ids(root: &Path, deployment: &str) -> Result<BTreeSet<String>> {
             .ok_or("namespace record lacks ids")?;
         for value in prior_ids.values() {
             let id = value.as_str().ok_or("namespace record has non-string ID")?;
-            if id
-                .parse::<u64>()
-                .ok()
-                .is_none_or(|number| number < (1u64 << 63))
-                || id.starts_with('0')
+            if mini_sdk::decimal::parse::<u64>(id).is_none_or(|number| number < (1u64 << 63))
             {
                 return Err("namespace record has invalid candidate ID".into());
             }
@@ -239,9 +231,7 @@ pub(crate) fn reserve(
     }
     private_root(root)?;
     let _guard = lock(root)?;
-    let key = serde_json::to_vec(&json!([deployment, participant, request]))
-        .map_err(|error| error.to_string())?;
-    let request_digest = hex(&Sha256::digest(&key));
+    let request_digest = request_digest_of(deployment, participant, request)?;
     let path = root.join(format!("request-{request_digest}.json"));
     let fingerprint_digest = hex(&Sha256::digest(fingerprint));
     let role_spec = role_json(roles);
@@ -251,12 +241,42 @@ pub(crate) fn reserve(
         if saved.get("deployment") != Some(&json!(deployment))
             || saved.get("participant") != Some(&json!(participant))
             || saved.get("request") != Some(&json!(request))
-            || saved.get("fingerprintSha256") != Some(&json!(fingerprint_digest))
             || saved.get("roles") != Some(&role_spec)
         {
             return Err(
                 "namespace request key is already bound to different source or roles".into(),
             );
+        }
+        if saved.get("fingerprintSha256") != Some(&json!(fingerprint_digest)) {
+            // The same request key under a new source (a fresh nonce). Bound to an attempt, the
+            // reservation is that attempt's: the caller resumes it there, nothing new is reserved.
+            // Unbound, no attempt ever held it (the plan that reserved it never validated), so the
+            // reservation moves to the new source with the SAME ids: no second identity is minted
+            // and the abandoned plan strands nothing.
+            let binding = root.join(format!("binding-{request_digest}.json"));
+            if binding.exists() {
+                let bound = record(&binding)?;
+                let attempt = bound.get("attemptPath").and_then(Value::as_str).unwrap_or("?");
+                return Err(format!(
+                    "namespace request {request} is already bound to attempt {attempt}; resume that attempt, nothing new is reserved"
+                ));
+            }
+            let mut rekeyed = saved.clone();
+            rekeyed["fingerprintSha256"] = json!(fingerprint_digest);
+            let mut bytes = serde_json::to_vec_pretty(&rekeyed).map_err(|error| error.to_string())?;
+            bytes.push(b'\n');
+            let staged = root.join(format!("request-{request_digest}.json.rekey"));
+            if staged.exists() {
+                fs::remove_file(&staged).map_err(|error| error.to_string())?;
+            }
+            create_private(&staged, &bytes).map_err(|error| format!("cannot stage namespace record: {error}"))?;
+            fs::rename(&staged, &path).map_err(|error| format!("cannot rekey namespace record: {error}"))?;
+            sync_directory_ancestors(root)?;
+            return Ok(Reservation {
+                request_digest,
+                ids: parse_ids(&rekeyed, roles)?,
+                record_path: path,
+            });
         }
         return Ok(Reservation {
             request_digest,
@@ -283,6 +303,33 @@ pub(crate) fn reserve(
         ids,
         record_path: path,
     })
+}
+
+/// The digest that keys a request record: the deployment, participant and request name.
+fn request_digest_of(deployment: &str, participant: &str, request: &str) -> Result<String> {
+    let key = serde_json::to_vec(&json!([deployment, participant, request])).map_err(|error| error.to_string())?;
+    Ok(hex(&Sha256::digest(&key)))
+}
+
+/// The exact attempt a request key is bound to, when a reservation for it exists and is bound:
+/// the directory a caller resumes instead of planning again. `None` when the namespace, the
+/// record or the binding is absent.
+pub(crate) fn bound_attempt(
+    root: &Path,
+    deployment: &str,
+    participant: &str,
+    request: &str,
+) -> Result<Option<PathBuf>> {
+    if !root.exists() {
+        return Ok(None);
+    }
+    let digest = request_digest_of(deployment, participant, request)?;
+    let binding = root.join(format!("binding-{digest}.json"));
+    if !root.join(format!("request-{digest}.json")).exists() || !binding.exists() {
+        return Ok(None);
+    }
+    let bound = record(&binding)?;
+    Ok(bound.get("attemptPath").and_then(Value::as_str).map(PathBuf::from))
 }
 
 /// Whether this reservation is already bound to an exact custody attempt.
@@ -543,7 +590,9 @@ mod tests {
         assert_eq!(first, again);
         assert_eq!(first.ids.len(), 3);
         assert_eq!(first.ids.values().collect::<BTreeSet<_>>().len(), 3);
-        assert!(reserve(
+        // Unbound (no attempt ever validated under it), a changed source takes the reservation over
+        // with the same ids; bound, it is refused and the attempt named (the test below).
+        let moved = reserve(
             &root,
             "deployment-1",
             "alice",
@@ -551,7 +600,8 @@ mod tests {
             b"source-v2",
             &roles()
         )
-        .is_err());
+        .unwrap();
+        assert_eq!(moved.ids, first.ids);
         let mut changed_roles = roles();
         changed_roles[1].kind = IdKind::Resource;
         assert!(reserve(
@@ -559,7 +609,7 @@ mod tests {
             "deployment-1",
             "alice",
             "create-project",
-            b"source-v1",
+            b"source-v2",
             &changed_roles
         )
         .is_err());
@@ -577,6 +627,48 @@ mod tests {
             .map(|e| e.unwrap())
             .map(|e| (e.file_name().to_string_lossy().into_owned(), fs::read(e.path()).unwrap_or_default()))
             .collect()
+    }
+
+    #[test]
+    fn an_unbound_reservation_moves_to_a_new_source_with_the_same_ids() {
+        let root = root();
+        let first = reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-1", &roles()).unwrap();
+        assert!(bound_attempt(&root, "deployment-1", "alice", "enrol-public").unwrap().is_none());
+        // The plan that reserved it never validated (no binding): a fresh request (new nonce)
+        // for the same name takes the reservation over, minting nothing.
+        let again = reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-2", &roles()).unwrap();
+        assert_eq!(again.ids, first.ids);
+        assert_eq!(again.request_digest, first.request_digest);
+        let saved = record(&again.record_path).unwrap();
+        assert_eq!(saved["fingerprintSha256"], json!(hex(&Sha256::digest(b"request-nonce-2"))));
+        // The old source is no longer the record's; the new one is exact.
+        assert!(reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-1", &roles()).is_ok());
+        assert!(!root.join(format!("request-{}.json.rekey", first.request_digest)).exists());
+        // Other roles under the same key still refuse.
+        let other = [Role { label: "subject".into(), kind: IdKind::Subject }];
+        assert!(reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-2", &other).is_err());
+    }
+
+    #[test]
+    fn a_bound_reservation_refuses_a_new_source_and_names_its_attempt() {
+        let root = root();
+        let first = reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-1", &roles()).unwrap();
+        let attempt = root.parent().unwrap().join(format!("attempt-{}", first.request_digest));
+        fs::create_dir_all(&attempt).unwrap();
+        bind_attempt(&first, &attempt, &"ab".repeat(32)).unwrap();
+        let bound = bound_attempt(&root, "deployment-1", "alice", "enrol-public").unwrap().unwrap();
+        assert_eq!(bound, fs::canonicalize(attempt.parent().unwrap()).unwrap().join(attempt.file_name().unwrap()));
+        let error = reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-2", &roles()).unwrap_err();
+        assert!(error.contains("already bound to attempt") && error.contains(&bound.to_string_lossy().to_string()), "{error}");
+        // The exact source still resumes, and the record is unchanged.
+        let same = reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-1", &roles()).unwrap();
+        assert_eq!(same.ids, first.ids);
+        // Released (the attempt definitely unadmitted), the new source takes over with the same ids.
+        release_attempt(&first, &attempt).unwrap().unwrap();
+        let moved = reserve(&root, "deployment-1", "alice", "enrol-public", b"request-nonce-2", &roles()).unwrap();
+        assert_eq!(moved.ids, first.ids);
+        assert!(bound_attempt(&root, "deployment-1", "alice", "enrol-public").unwrap().is_none());
+        let _ = fs::remove_dir_all(&attempt);
     }
 
     #[test]

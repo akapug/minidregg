@@ -5,8 +5,29 @@ policy context; it does not admit signatures or submit a durable intent.
 Only the later completion receiver may use this context after authenticating
 historical BEGIN/claim, current physical state and the configured custodian.
 -/
-import Kernel.ApplicationLifecycleRetryCompletionV4Report
-import Kernel.DeclaredResourceController
+module
+
+public import Kernel.ApplicationLifecycleRetryCompletionV4Report
+public import Kernel.DeclaredResourceController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationLifecycleRetryCompletionV4Policy
 
@@ -248,6 +269,27 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   legs : (incidence : DeclaredResourceController.Incidence command) →
     DeclaredResourceController.incidenceObserveOnly command incidence = false →
     CheckedLeg prepared tuple physical incidence (signed.envelope command incidence)
+theorem Accepted.sound {F : Type} [Field F] [DecidableEq F]
+    {deployment : CanonicalCellRegistry.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F}
+    {ambient : DeclaredResourceController.Ambient}
+    {ground : Ground deployment}
+    {command : DeclaredResourceController.Command}
+    {prepared : DeclaredResourceController.PreparedInvocation
+      deployment profile ambient ground command}
+    {signed : DeclaredResourceController.SignedCommand}
+    {domain semantics : Digest} {publicKey : List UInt8}
+    {begin : ApplicationLifecycleRetryBeginV4Ingress.Ingress}
+    {physical : Checked domain semantics publicKey begin}
+    (accepted : Accepted prepared signed physical) :
+    DeclaredResourceController.commandCodec.encode command = signed.commandBytes ∧
+    ∀ (incidence : DeclaredResourceController.Incidence command)
+      (live : DeclaredResourceController.incidenceObserveOnly command incidence = false),
+      (accepted.legs incidence live).receipt.envelopeBytes = signed.envelope command incidence ∧
+      authorizeLeg prepared accepted.tuple incidence physical (accepted.legs incidence live).receipt =
+        .ok (accepted.legs incidence live).authorization :=
+  ⟨accepted.ingressExact, fun incidence live =>
+    ⟨(accepted.legs incidence live).envelopeExact, (accepted.legs incidence live).admitted⟩⟩
 
 def admit {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}

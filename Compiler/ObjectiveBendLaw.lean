@@ -20,8 +20,15 @@ The fragment, exactly (G1B-ENFORCED-LAW-DESIGN; anything else refuses
 `not` applies to the atom (or parenthesised expression) after it. Edition 1 reads TOP-LEVEL
 fields only: `new.a.b` refuses by name. `old.` is readable only through `monotone` and
 `writeOnce` (all the kernel's predicate can say about the old state). -/
-import Theory.AssertCompiled
-import Pred.Core
+module
+
+public import Theory.AssertCompiled
+public import Pred.Core
+meta import Theory.AssertCompiled
+meta import Pred.Core
+
+@[expose] public section
+
 namespace Minidregg.Compiler.ObjectiveBendLaw
 open Minidregg.Pred (Pred Slot)
 set_option autoImplicit false

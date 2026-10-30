@@ -43,31 +43,21 @@ def manifestStream : StreamCodec Manifest :=
 
 def frame : Bytes := "DREGG.PORTABLE.CUSTODY/v1".toUTF8.toList
 
+/-- The frame is CHECKED (same octets: the length-prefixed `frame`); any other
+frame is refused by the stream decoder. -/
 def framedManifest : StreamCodec Manifest :=
-  StreamCodec.xmap (StreamCodec.product bytesStream manifestStream)
-    (fun manifest => (frame, manifest)) Prod.snd (by intro manifest; rfl)
+  StreamCodec.framed (bytesStream.encode frame) manifestStream
 
 def encode (manifest : Manifest) : Bytes := framedManifest.encode manifest
 
-def decode (bytes : Bytes) : Option Manifest := do
-  let manifest ← framedManifest.toLawful.decode bytes
-  if encode manifest = bytes then some manifest else none
+def decode (bytes : Bytes) : Option Manifest := framedManifest.toLawful.decode bytes
 
-@[simp] theorem decode_encode (manifest : Manifest) : decode (encode manifest) = some manifest := by
-  have roundtrip := framedManifest.toLawful.decode_encode manifest
-  change framedManifest.toLawful.decode (encode manifest) = some manifest at roundtrip
-  simp [decode, roundtrip]
+@[simp] theorem decode_encode (manifest : Manifest) : decode (encode manifest) = some manifest :=
+  framedManifest.toLawful.decode_encode manifest
 
 theorem decode_canonical {bytes : Bytes} {manifest : Manifest}
-    (accepted : decode bytes = some manifest) : encode manifest = bytes := by
-  unfold decode at accepted
-  cases decoded : framedManifest.toLawful.decode bytes with
-  | none => simp [decoded] at accepted
-  | some result =>
-    simp only [decoded, bind, Option.bind] at accepted
-    split at accepted
-    · cases accepted; assumption
-    · cases accepted
+    (accepted : decode bytes = some manifest) : encode manifest = bytes :=
+  framedManifest.toLawful_canonical bytes manifest accepted
 
 def prefixOf (identity : Identity) (image : Minidregg.Kernel.DurableReceiver.Image) : Prefix :=
   ⟨identity, seedStream.encode image.seed, image.accepted.map intentStream.encode⟩

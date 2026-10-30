@@ -1,0 +1,520 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "mediawiki",
+  "interfaceVersion": 1,
+  "appId": "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",
+  "packageId": "505d2458a4ce1b02e6ac01f7db4f88b8",
+  "appVersion": "1.46.2",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "identity.read": {
+      "description": "Initialize and read routed Sandstorm member identity before requesting CSRF token.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "properties": {
+              "userinfo": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 255
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "userinfo"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api.php"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "query": {
+          "format": "json",
+          "action": "query",
+          "meta": "userinfo"
+        }
+      },
+      "internal": true
+    },
+    "token.read": {
+      "description": "Read session-bound edit token; agents should use page create/update, which bind this response internally.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object",
+            "properties": {
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "csrftoken": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "csrftoken"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "tokens"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api.php"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "query": {
+          "format": "json",
+          "action": "query",
+          "meta": "tokens",
+          "type": "csrf"
+        }
+      },
+      "internal": true
+    },
+    "page.read": {
+      "description": "Read current wikitext and revision by grain-scoped title. Missing/invalid page produces an API error and fails output schema.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "parse": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "pageid": {
+                "type": "integer"
+              },
+              "revid": {
+                "type": "integer"
+              },
+              "wikitext": {
+                "type": "object",
+                "properties": {
+                  "*": {
+                    "type": "string",
+                    "maxLength": 1048576
+                  }
+                },
+                "required": [
+                  "*"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "title",
+              "pageid",
+              "revid",
+              "wikitext"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "parse"
+        ],
+        "additionalProperties": true
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api.php"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "query": {
+          "format": "json",
+          "action": "parse",
+          "page": {
+            "arg": "title"
+          },
+          "prop": "wikitext|revid"
+        }
+      }
+    },
+    "page.create": {
+      "description": "Create a new page only.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "title",
+          "text",
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "edit": {
+            "type": "object",
+            "properties": {
+              "result": {
+                "const": "Success"
+              },
+              "pageid": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "newrevid": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "result",
+              "pageid",
+              "title"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "edit"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api.php"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "form": {
+          "action": "edit",
+          "format": "json",
+          "title": {
+            "arg": "title"
+          },
+          "text": {
+            "arg": "text"
+          },
+          "summary": {
+            "arg": "summary"
+          },
+          "token": {
+            "result": [
+              "csrf",
+              "query",
+              "tokens",
+              "csrftoken"
+            ]
+          },
+          "createonly": "1"
+        }
+      },
+      "prepare": [
+        {
+          "id": "identity",
+          "op": "identity.read",
+          "args": {}
+        },
+        {
+          "id": "csrf",
+          "op": "token.read",
+          "args": {}
+        }
+      ]
+    },
+    "page.update": {
+      "description": "Replace existing page only when its revision still matches baseRevision; edit conflict must not be retried silently.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "baseRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "title",
+          "text",
+          "summary",
+          "baseRevision"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "edit": {
+            "type": "object",
+            "properties": {
+              "result": {
+                "const": "Success"
+              },
+              "pageid": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "newrevid": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "result",
+              "pageid",
+              "title"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "edit"
+        ],
+        "additionalProperties": true
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api.php"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "form": {
+          "action": "edit",
+          "format": "json",
+          "title": {
+            "arg": "title"
+          },
+          "text": {
+            "arg": "text"
+          },
+          "summary": {
+            "arg": "summary"
+          },
+          "token": {
+            "result": [
+              "csrf",
+              "query",
+              "tokens",
+              "csrftoken"
+            ]
+          },
+          "baserevid": {
+            "arg": "baseRevision"
+          },
+          "nocreate": "1"
+        }
+      },
+      "prepare": [
+        {
+          "id": "identity",
+          "op": "identity.read",
+          "args": {}
+        },
+        {
+          "id": "csrf",
+          "op": "token.read",
+          "args": {}
+        }
+      ]
+    }
+  },
+  "qualification": [
+    {
+      "id": "create",
+      "op": "page.create",
+      "args": {
+        "title": {
+          "context": "runId"
+        },
+        "text": "typed wiki initial",
+        "summary": "typed qualification"
+      }
+    },
+    {
+      "id": "read",
+      "op": "page.read",
+      "args": {
+        "title": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "parse",
+            "wikitext",
+            "*"
+          ],
+          "equals": "typed wiki initial"
+        }
+      ]
+    },
+    {
+      "id": "update",
+      "op": "page.update",
+      "args": {
+        "title": {
+          "context": "runId"
+        },
+        "text": "typed wiki revised",
+        "summary": "revision qualified",
+        "baseRevision": {
+          "result": [
+            "read",
+            "parse",
+            "revid"
+          ]
+        }
+      }
+    },
+    {
+      "id": "readback",
+      "op": "page.read",
+      "args": {
+        "title": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [
+            "parse",
+            "wikitext",
+            "*"
+          ],
+          "equals": "typed wiki revised"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route",
+    "appCookies": "retain"
+  },
+  "sources": [
+    "https://github.com/zenhack/mediawiki-sandstorm",
+    "scripts/spk-platform/market-writes/b8.sh:52",
+    "https://github.com/wikimedia/mediawiki/blob/1.37.4/includes/api/ApiEditPage.php",
+    "https://github.com/wikimedia/mediawiki/blob/1.37.4/includes/api/ApiParse.php"
+  ]
+}

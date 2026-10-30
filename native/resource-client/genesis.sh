@@ -27,7 +27,23 @@
 # EXTRA_GENESIS_ENROLLMENTS, if set, is an absolute path to a JSON array of at
 # most 8 further genesis enrollments (a hosted operator's agent-grain subjects;
 # the only AgentGrain birth route is the historical birth intent, admitted only
-# against the genesis image). None may reuse the sponsor's subject or account.
+# against the genesis image). None may reuse the sponsor's or the clock's subject
+# or account. An entry is either the genesis enrollment record itself (it has
+# `key`) or the compact form this template completes, so a caller never spells
+# the record: {subject, keyId, publicKey, accountId, spendCapabilityId,
+# controlCapabilityId, factoryObserveCapabilityId, initialBalance} (decimal
+# strings or JSON integers; publicKey 64 lowercase hex), with keyEpoch,
+# activeFrom and activeUntil defaulting to the sponsor's, nextKeyDigest to null
+# and accountPredicate to all[]. A compact entry may name `nextPublicKey` (64 hex)
+# instead of a digest: this template commits it with the Host's own
+# `author signing-key-next-digest` over the operator config it just wrote. GENESIS_EXTRA_ENROLLMENTS_MAX raises the bound
+# of 8 for a test scenario (scenario-genesis.sh); a deployment never sets it.
+#
+# The params may carry `factoryPredicate` (a predicate object; absent = all[]).
+# `operatorPolicy` optionally supplies the whitelisted deployment settings below
+# before profile/genesis identity is computed. Values also specified through
+# grainPlatform or top-level settings must agree. Native profile parsing validates
+# their full types; this template derives the platform record from that same config.
 #
 # The params may name compiled-in evaluators the operator disables
 # ("disabledEvaluators": ["nock"], registry names; K-EVAL E2/E3). They go into the
@@ -36,7 +52,7 @@
 # refused evaluatorDisabled at birth and at run. Absent = none disabled.
 #
 # GENESIS_PAY_OBSERVER, if set, is an absolute path to a JSON object
-# {"subject","capability","controlCapability","enrolCapability"} (canonical
+# {"subject","capability","enrolCapability"} (canonical
 # decimal strings) naming the PAY observer (deploy/pay/README.md): genesis then
 # installs the pay law and the observer's, the pay controller's and the
 # self-enrollment capabilities. Its subject must be one of the genesis
@@ -56,8 +72,9 @@ check_params() {
     and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCellId, .issuer,
           .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
           .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability, .tailBound] | all(int))
-    and .tailBound > 0
+          .factoryControllerCapability, .tailBound, .issuanceCap, .payControlCapability,
+          .clockControlCapability] | all(int))
+    and .tailBound > 0 and .lifetime > 0
     and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
           .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
           .initialBalance] | all(int))
@@ -69,10 +86,86 @@ check_params() {
           or (.nextKeyDigest | type == "string" and test("^(0|[1-9][0-9]*)$"))))
     and (.meterAllowance | type == "object" and length == 10 and (map_values(int) | all))
     and ((.disabledEvaluators // []) | type == "array" and all(type == "string" and length > 0))
+    and ((.factoryPredicate // {}) | type == "object")
+    and ((.operatorPolicy // {}) | type == "object" and
+      (keys - ["completionCustodianKey", "lifecycleManagement", "grainBirthTariff",
+        "providerServices", "disabledEvaluators", "agentLifetimeDispatchTargets"] | length == 0))
   ' "$1" >/dev/null || { echo "genesis: params file fails the minidregg-candidate-genesis-params-v1 schema" >&2; exit 2; }
+  check_grain_platform "$1"
+  jq -e '
+    (.operatorPolicy // {}) as $policy |
+    ((.grainPlatform // {}) +
+      (if has("providerServices") then {providerServices} else {} end) +
+      (if has("disabledEvaluators") then {disabledEvaluators} else {} end)) as $existing |
+    all($policy | keys[]; . as $key |
+      ($existing | has($key) | not) or $existing[$key] == $policy[$key])
+  ' "$1" >/dev/null || { echo "genesis: conflicting operatorPolicy settings" >&2; exit 2; }
+}
+# The grain platform's operator policy (deploy/market/INSTALL.md §0), pinned at genesis so the world
+# can host SPK grains at all: `grainPlatform {lifecycleManagement {managementSubject, managementKeyId},
+# grainBirthTariff {base, perBirth}, completionCustodianKey}`. Optional as a whole; when present every
+# field must be, and the refusal names the one that is not. `lifecycleManagement` is a Host setting
+# (`run.sh platform` changes it on a stopped Store; the sponsor's key is the natural first choice,
+# since `run.sh init` generates it); the completion custodian key is a 32-byte public key, `null` in
+# the operator's file until `run.sh init` generates the pair and fills it.
+check_grain_platform() {
+  jq -e 'has("grainPlatform") | not' "$1" >/dev/null && return 0
+  for field in lifecycleManagement grainBirthTariff completionCustodianKey; do
+    jq -e --arg f "$field" '.grainPlatform | type == "object" and has($f)' "$1" >/dev/null ||
+      { echo "genesis: grainPlatformIncomplete: .grainPlatform.$field is absent (INSTALL.md §0 genesis)" >&2; exit 2; }
+  done
+  jq -e 'def int: type == "number" and . >= 0 and . == floor and . < 9007199254740992;
+    .grainPlatform | (keys - ["lifecycleManagement", "grainBirthTariff", "completionCustodianKey"] | length == 0)
+    and (.lifecycleManagement | type == "object" and (keys | sort) == ["managementKeyId", "managementSubject"]
+         and ([.managementSubject, .managementKeyId] | all(int)))
+    and (.grainBirthTariff | type == "object" and (keys | sort) == ["base", "perBirth"]
+         and ([.base, .perBirth] | all(int)) and .base > 0)' "$1" >/dev/null ||
+    { echo 'genesis: grainPlatformInvalid: lifecycleManagement {managementSubject, managementKeyId} and grainBirthTariff {base > 0, perBirth} must be JSON integers' >&2; exit 2; }
+  jq -e '.grainPlatform.completionCustodianKey | . == null or (type == "string" and test("^[0-9a-f]{64}$"))' "$1" >/dev/null ||
+    { echo 'genesis: completionCustodianKeyInvalid: null (to be generated at init) or 64 lowercase hex digits' >&2; exit 2; }
+}
+# The Host's per-route provider tariffs (deploy/hermes/README.md "Charges"):
+# `providerServices [{providerResourceId, tariff {version, model, routes}}]`,
+# copied verbatim into operator.json. A serving Store refuses a changed config,
+# so a provider purse's tariff exists only if genesis pins it. Optional; when
+# present it is one to eight entries with positive, distinct resource IDs and a
+# tariff object each (the Host's checkedServices parses the tariff itself), and
+# the refusal names what is wrong.
+check_provider_services() {
+  jq -e 'has("providerServices") | not' "$1" >/dev/null && return 0
+  jq -e '.providerServices | type == "array" and length >= 1 and length <= 8' "$1" >/dev/null ||
+    { echo 'genesis: providerServicesInvalid: .providerServices must be an array of one to eight entries' >&2; exit 2; }
+  jq -e 'def int: type == "number" and . > 0 and . == floor and . < 9007199254740992;
+    .providerServices | all(type == "object" and (keys | sort) == ["providerResourceId", "tariff"]
+      and (.providerResourceId | int)
+      and (.tariff | type == "object" and (.version | type == "string") and (.model | type == "string" and length > 0)
+           and (.routes | type == "object" and length > 0)))
+    and (map(.providerResourceId) | length == (unique | length))' "$1" >/dev/null ||
+    { echo 'genesis: providerServicesInvalid: each entry is {providerResourceId: positive distinct integer, tariff: {version, model, routes}}' >&2; exit 2; }
+}
+# The operator's per-subject request rate (Kernel/SubjectRate.lean; Host RequestRateSettings):
+# `requestRate {limit, windowMs, exempt?}` copied verbatim into operator.json. Operator-local
+# admission policy, not runtime semantics; absent, the Host applies SubjectRate.hostDefault. When
+# present, limit and windowMs are positive JSON integers and exempt (optional) an array of subject
+# integers; the refusal names what is wrong.
+check_request_rate() {
+  jq -e 'has("requestRate") | not' "$1" >/dev/null && return 0
+  jq -e 'def int: type == "number" and . >= 0 and . == floor and . < 9007199254740992;
+    .requestRate | type == "object" and (keys - ["exempt", "limit", "windowMs"] | length == 0)
+    and has("limit") and has("windowMs")
+    and (.limit | int and . > 0) and (.windowMs | int and . > 0)
+    and ((.exempt // []) | type == "array" and all(int))' "$1" >/dev/null ||
+    { echo 'genesis: requestRateInvalid: .requestRate must be {limit: positive integer, windowMs: positive integer, exempt?: [subject integers]}' >&2; exit 2; }
 }
 if [ "$#" -eq 2 ] && [ "$1" = --check ]; then
   check_params "$2"
+  check_provider_services "$2"
+  check_request_rate "$2"
+  exit 0
+fi
+# The platform block alone (params.sh require-platform), usable before the clock is filled.
+if [ "$#" -eq 2 ] && [ "$1" = --check-platform ]; then
+  check_grain_platform "$2"
   exit 0
 fi
 if [ "$#" -ne 7 ]; then
@@ -95,6 +188,12 @@ for target in operator.json profile.json genesis.json sponsor-birth-context.json
 done
 
 check_params "$params"
+# At genesis the completion custodian key is pinned, never null: run.sh init fills it first.
+if jq -e 'has("grainPlatform") and .grainPlatform.completionCustodianKey == null' "$params" >/dev/null; then
+  echo 'genesis: completionCustodianKeyUnfilled: run.sh init generates keys/completion.seed and fills .grainPlatform.completionCustodianKey before the genesis template runs' >&2; exit 2
+fi
+check_provider_services "$params"
+check_request_rate "$params"
 
 jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg verifier "$verifier" '
   $p[0] as $p |
@@ -106,13 +205,19 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
    asset: $p.asset, genesisHeight: $p.genesisHeight, expectedSeed: 0,
    storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}
   + (if $p.disabledEvaluators then {disabledEvaluators: $p.disabledEvaluators} else {} end)
-  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)' >"$dir/operator.json"
+  + (if $p.objectiveInvocation then {objectiveInvocation: $p.objectiveInvocation} else {} end)
+  + (if $p.grainPlatform then {completionCustodianKey: $p.grainPlatform.completionCustodianKey,
+        lifecycleManagement: $p.grainPlatform.lifecycleManagement,
+        grainBirthTariff: $p.grainPlatform.grainBirthTariff} else {} end)
+  + (if $p.providerServices then {providerServices: $p.providerServices} else {} end)
+  + (if $p.requestRate then {requestRate: $p.requestRate} else {} end)
+  + ($p.operatorPolicy // {})' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$dir/profile.json") || { echo 'genesis: Host profile has no semantics digest' >&2; exit 1; }
 
-jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public" \
+jq -n --slurpfile p "$params" --slurpfile operator "$dir/operator.json" --arg semantics "$semantics" --arg public "$public" \
   --arg clockPublic "$clock_public" '
   $p[0] as $p | def s: tostring;
   {domain: ($p.domain|s), factoryId: ($p.factoryId|s), resourceBookId: ($p.resourceBookId|s),
@@ -122,7 +227,7 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    tariffPerInitialPayloadByte: ($p.tariffPerInitialPayloadByte|s),
    collector: ($p.collector|s), asset: ($p.asset|s), expectedSemantics: $semantics,
    issuerEpoch: ($p.issuerEpoch|s), genesisHeight: ($p.genesisHeight|s),
-   factoryPredicate: {type: "all", predicates: []},
+   factoryPredicate: ($p.factoryPredicate // {type: "all", predicates: []}),
    enrollments: [{key: {keyId: ($p.sponsor.keyId|s), keyEpoch: ($p.sponsor.keyEpoch|s),
                         algorithm: "1", subject: ($p.sponsor.subject|s), publicKey: $public,
                         activeFrom: ($p.sponsor.activeFrom|s),
@@ -146,8 +251,14 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
                   accountPredicate: {type: "all", predicates: []}}],
    factoryControllerSubject: ($p.sponsor.subject|s),
    factoryControllerCapability: ($p.factoryControllerCapability|s),
+   payControlCapability: ($p.payControlCapability|s),
+   clockControlCapability: ($p.clockControlCapability|s),
+   platform: {ownerBudget: ($operator[0].ownerBudget|s), lifetime: ($operator[0].lifetime|s),
+     grainBirthTariff: (if $operator[0].grainBirthTariff then ($operator[0].grainBirthTariff | map_values(s)) else null end),
+     completionCustodianKey: ($operator[0].completionCustodianKey // null)},
    meterAllowance: ($p.meterAllowance | map_values(s)),
    tailBound: ($p.tailBound|s),
+   issuanceCap: ($p.issuanceCap|s),
    clockGenesisNow: ($p.clock.genesisNow|s),
    clockMaxStepSeconds: ($p.clock.maxStepSeconds|s),
    clockTickers: [{subject: ($p.clock.subject|s), capability: ($p.clock.tickCapabilityId|s)}]}' \
@@ -155,15 +266,51 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
 
 if [ -n "${EXTRA_GENESIS_ENROLLMENTS:-}" ]; then
   case "$EXTRA_GENESIS_ENROLLMENTS" in /*) ;; *) echo 'genesis: EXTRA_GENESIS_ENROLLMENTS must be absolute' >&2; exit 2;; esac
-  jq -e --slurpfile p "$params" '
+  max=${GENESIS_EXTRA_ENROLLMENTS_MAX:-8}
+  case "$max" in ''|0*|*[!0-9]*) echo 'genesis: GENESIS_EXTRA_ENROLLMENTS_MAX must be a positive integer' >&2; exit 2;; esac
+  # The compact form completed into the genesis enrollment record (an entry with `key` is kept).
+  jq --slurpfile p "$params" '
+    $p[0].sponsor as $s | def s: tostring;
+    if type != "array" then error("not an array") else . end |
+    map(if has("key") then . else
+      {key: {keyId: (.keyId|s), keyEpoch: ((.keyEpoch // $s.keyEpoch)|s), algorithm: "1",
+             subject: (.subject|s), publicKey: .publicKey,
+             activeFrom: ((.activeFrom // $s.activeFrom)|s), activeUntil: ((.activeUntil // $s.activeUntil)|s),
+             nextKeyDigest: (.nextKeyDigest // null)},
+       accountId: (.accountId|s), spendCapabilityId: (.spendCapabilityId|s),
+       controlCapabilityId: (.controlCapabilityId|s),
+       factoryObserveCapabilityId: (.factoryObserveCapabilityId|s),
+       initialBalance: (.initialBalance|s),
+       accountPredicate: (.accountPredicate // {type: "all", predicates: []})} end)' \
+    "$EXTRA_GENESIS_ENROLLMENTS" >"$dir/genesis-enrollments.json" ||
+    { echo 'genesis: extra genesis enrollments are invalid' >&2; exit 2; }
+  # A compact entry's next public key, committed as the Host commits one.
+  index=0
+  for next in $(jq -r '.[] | if has("key") then "-" else (.nextPublicKey // "-") end' "$EXTRA_GENESIS_ENROLLMENTS"); do
+    if [ "$next" != - ]; then
+      case "$next" in *[!0-9a-f]*) echo 'genesis: extra enrollment nextPublicKey must be 64 lowercase hex' >&2; exit 2;; esac
+      [ "${#next}" -eq 64 ] || { echo 'genesis: extra enrollment nextPublicKey must be 32 bytes' >&2; exit 2; }
+      printf '{"publicKey":"%s"}\n' "$next" >"$dir/genesis-next-$index.json"
+      "$host" "$dir/operator.json" author signing-key-next-digest "$dir/genesis-next-$index.json" "$dir/genesis-next-$index.digest"
+      digest=$(tr -d ' \n' <"$dir/genesis-next-$index.digest")
+      jq --argjson i "$index" --arg d "$digest" '.[$i].key.nextKeyDigest = $d' "$dir/genesis-enrollments.json" \
+        >"$dir/genesis-enrollments.next.json" && mv "$dir/genesis-enrollments.next.json" "$dir/genesis-enrollments.json"
+    fi
+    index=$((index + 1))
+  done
+  jq -e --slurpfile p "$params" --argjson max "$max" '
+    def dec: type == "string" and test("^(0|[1-9][0-9]*)$");
     ($p[0].sponsor.subject|tostring) as $subject | ($p[0].sponsor.accountId|tostring) as $account |
-    type == "array" and length > 0 and length <= 8 and
+    type == "array" and length > 0 and length <= $max and
+    all(.[]; ([.key.keyId, .key.keyEpoch, .key.subject, .key.activeFrom, .key.activeUntil, .accountId,
+               .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId, .initialBalance] | all(dec))
+      and (.key.publicKey | type == "string" and test("^[0-9a-f]{64}$"))) and
     ($p[0].clock.subject|tostring) as $clock | ($p[0].clock.accountId|tostring) as $clockAccount |
     all(.[]; .key.subject != $subject and .accountId != $account and
       .key.subject != $clock and .accountId != $clockAccount)' \
-    "$EXTRA_GENESIS_ENROLLMENTS" >/dev/null ||
+    "$dir/genesis-enrollments.json" >/dev/null ||
     { echo 'genesis: extra genesis enrollments are invalid' >&2; exit 2; }
-  jq --slurpfile extra "$EXTRA_GENESIS_ENROLLMENTS" '.enrollments += $extra[0]' \
+  jq --slurpfile extra "$dir/genesis-enrollments.json" '.enrollments += $extra[0]' \
     "$dir/genesis.json" >"$dir/genesis-extended.json"
   mv "$dir/genesis-extended.json" "$dir/genesis.json"
 fi
@@ -172,8 +319,8 @@ if [ -n "${GENESIS_PAY_OBSERVER:-}" ]; then
   case "$GENESIS_PAY_OBSERVER" in /*) ;; *) echo 'genesis: GENESIS_PAY_OBSERVER must be absolute' >&2; exit 2;; esac
   jq -e --slurpfile g "$dir/genesis.json" '
     def dec: type == "string" and test("^(0|[1-9][0-9]*)$");
-    type == "object" and (keys == ["capability", "controlCapability", "enrolCapability", "subject"])
-    and ([.subject, .capability, .controlCapability, .enrolCapability] | all(dec))
+    type == "object" and (keys == ["capability", "enrolCapability", "subject"])
+    and ([.subject, .capability, .enrolCapability] | all(dec))
     and (.subject as $s | $g[0].enrollments | any(.key.subject == $s))' \
     "$GENESIS_PAY_OBSERVER" >/dev/null ||
     { echo 'genesis: the pay observer is invalid or not enrolled' >&2; exit 2; }

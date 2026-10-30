@@ -267,6 +267,14 @@ fn closed_boundary(status: &Status) -> Result<()> {
                 "resident_completion"
                     | "resident_delivery"
                     | "resident_pending_prompt"
+                    // A maintenance prompt (the program revision changed) or
+                    // the started request this prompt serves is the pending
+                    // prompt itself; each clears only when this completion is
+                    // received (resident_requests::reconcile). Queued requests
+                    // are unstarted inbox entries with no effect yet.
+                    | "resident_maintenance_pending"
+                    | "resident_started_request"
+                    | "resident_queued_requests"
                     | "hermes_pending_prompt"
                     | "hermes_retention_issue"
             )
@@ -499,7 +507,7 @@ impl Runtime {
             }
             if self.journal.resident_completion.is_some() {
                 self.journal.resident_completion = None;
-                self.publish_completion_journal(turn.operation()?)?;
+                { turn.operation()?; self.publish_completion_journal() }?;
             }
             return Ok(receipt);
         }
@@ -528,7 +536,7 @@ impl Runtime {
         publish_resident(&receiving)?;
         retain(&received_path, &receipt)?;
         self.journal.resident_completion = None;
-        self.publish_completion_journal(turn.operation()?)?;
+        { turn.operation()?; self.publish_completion_journal() }?;
         Ok(receipt)
     }
 
@@ -542,19 +550,162 @@ impl Runtime {
             return Err("completion session is outside its old/new source vectors".into());
         }
         self.journal.hermes_session = Some(turn.session_after.clone());
-        self.publish_completion_journal(turn.operation()?)
+        { turn.operation()?; self.publish_completion_journal() }
     }
 
-    fn publish_completion_journal(&self, operation: u64) -> Result<()> {
-        config_migration::ensure_process_current(&self.config.state_dir)?;
-        session_failure::ensure_publication_known(&self.config.state_dir)?;
+    fn publish_completion_journal(&self) -> Result<()> {
         let bytes = serde_json::to_vec_pretty(&self.journal).map_err(|e| e.to_string())?;
-        config_migration::publish_bytes(
-            &self.config.state_dir.join("journal.json"),
-            &bytes,
-            &format!("resident-completion-{operation}-{}", sha256_bytes(&bytes)?),
-        )
+        journal_io::write(&self.config.state_dir.join("journal.json"), &bytes)
+            .map_err(|e| format!("completion journal publication: {e}"))
     }
+}
+
+/// Read-only proof that the resident received this exact successful turn.
+/// Enrollment preserves the session and source archives; it does not rerun
+/// completion or equate an idle queue with a completed model turn.
+pub(crate) fn consumed_turn(
+    config: &Config,
+    journal: &Journal,
+    guard: &ResidentGuard,
+) -> Result<Value> {
+    let origin = journal
+        .resident_prompt_origin
+        .as_ref()
+        .ok_or("completed origin absent")?;
+    let source = config.state_dir.join(format!(
+        "resident-completion-{:016}.source.json",
+        origin.prompt_operation_id
+    ));
+    let turn: CompletedTurn = read(&source)?;
+    turn.validate()?;
+    let session = journal
+        .hermes_session
+        .as_ref()
+        .ok_or("completed session absent")?;
+    if turn.origin != serde_json::to_value(origin).map_err(|e| e.to_string())?
+        || hash(session)? != hash(&turn.session_after)?
+        || turn.provider_replays_sha256 != hash(&journal.provider_replays)?
+    {
+        return Err(
+            "completed turn differs from retained origin, session or provider history".into(),
+        );
+    }
+    let outcome = prompt_outcome::read_bound(
+        &config.state_dir,
+        origin.prompt_operation_id,
+        &origin.resident_prompt_id,
+        &origin.prompt_sha256,
+    )?;
+    let last = journal
+        .provider_replays
+        .last()
+        .ok_or("completed delivery has no provider replay")?;
+    let typed_response_matches = match &outcome.outcome {
+        prompt_outcome::Outcome::Admitted {
+            stop_reason,
+            provider_response_sha256,
+            provider_metered_charge,
+            ..
+        } => {
+            stop_reason == "end_turn"
+                && provider_response_sha256.as_ref() == Some(&last.response_sha256)
+                && provider_metered_charge == &last.metered_charge
+        }
+        _ => false,
+    };
+    if outcome.session_id != origin.session_id || !typed_response_matches || last.status != 200 {
+        return Err("typed completed outcome differs from its settled provider response".into());
+    }
+    turn.fingerprint_matches()?;
+    let receiving_path = turn.path(&config.state_dir, "receiving")?;
+    let receiving: Receiving = read(&receiving_path)?;
+    receiving.validate(&turn, guard.path()?)?;
+    if guard.bytes()? != receiving.resident_after.as_bytes() {
+        return Err("completed turn has not been received in the exact resident state".into());
+    }
+    let received_path = turn.path(&config.state_dir, "received")?;
+    let received: Value = read(&received_path)?;
+    let evidence: EvidenceRef = serde_json::from_value(received["quiescenceEvidence"].clone())
+        .map_err(|e| e.to_string())?;
+    validate_quiescence_archive(&config.state_dir, &turn, &receiving, &evidence)?;
+    if received != completion_receipt(&turn, &receiving, &evidence)? {
+        return Err("completed turn receipt differs from its source transition".into());
+    }
+    for replay in &journal.provider_replays {
+        if replay.prompt_operation_id != origin.prompt_operation_id {
+            return Err("completed provider replay belongs to another prompt".into());
+        }
+        retained_exact(
+            &replay.request_path,
+            replay.request_bytes,
+            &replay.request_sha256,
+            4_194_304,
+        )?;
+        retained_exact(
+            &replay.response_path,
+            replay.response_bytes,
+            &replay.response_sha256,
+            8_388_608,
+        )?;
+        if let (Some(path), Some(digest)) = (&replay.meter_report_path, &replay.meter_report_sha256)
+        {
+            if sha256_bytes(&bounded_regular_file(path, 131_072)?)? != *digest {
+                return Err("completed provider metering receipt changed".into());
+            }
+        } else {
+            return Err("completed provider metering receipt absent".into());
+        }
+    }
+    if let Some(settled) = &journal.provider_settlement {
+        let replay = journal
+            .provider_replays
+            .last()
+            .ok_or("settlement has no completed provider replay")?;
+        let pending = crate::Pending {
+            operation_id: settled.operation_id,
+            operation: settled.operation.clone(),
+            attempt: settled.attempt.clone(),
+            uncertain: false,
+            publication: None,
+        };
+        if replay.request_path
+            != config.state_dir.join(format!(
+                "provider-{:016}.controller-request",
+                settled.provider_attempt_id
+            ))
+            || replay.metered_charge.as_ref() != Some(&settled.charge)
+            || provider_settlement_record_from(
+                config,
+                settled.provider_attempt_id,
+                &pending,
+                &settled.outcome_path,
+            )? != *settled
+        {
+            return Err("historical provider settlement differs from the completed prompt".into());
+        }
+    } else if !journal.provider_replays.is_empty() {
+        return Err("completed provider history lacks its final settlement".into());
+    }
+    let delivery = resident_delivery::consumed_delivery(
+        config,
+        journal,
+        &turn.origin,
+        &turn.binding_sha256,
+        turn.acp_result["miniSourceFinalText"]
+            .as_str()
+            .ok_or("completed final absent")?,
+        guard,
+    )?;
+    let evidence_ref = |path: &Path| -> Result<Value> {
+        Ok(json!({"path":path,"sha256":sha256_bytes(&bounded_regular_file(path,LIMIT)?)?}))
+    };
+    Ok(
+        json!({"type":"mini-consumed-completed-turn-v1","source":evidence_ref(&source)?,
+        "receiving":evidence_ref(&receiving_path)?,"received":evidence_ref(&received_path)?,
+        "quiescenceEvidence":evidence,"sessionSha256":hash(session)?,
+        "providerReplaysSha256":turn.provider_replays_sha256,"providerSettlement":journal.provider_settlement,
+        "delivery":delivery}),
+    )
 }
 
 pub(crate) fn require_source_receipt(config: &Config, frame: &Value) -> Result<()> {
@@ -598,11 +749,8 @@ fn publish_resident(receiving: &Receiving) -> Result<()> {
     if current == receiving.resident_after.as_bytes() {
         return Ok(());
     }
-    config_migration::publish_bytes(
-        &path,
-        receiving.resident_after.as_bytes(),
-        &receiving.turn_sha256[..16],
-    )
+    journal_io::write(&path, receiving.resident_after.as_bytes())
+        .map_err(|e| format!("completion resident publication: {e}"))
 }
 
 /// Called with the resident flock held before rejecting pending, before a new
@@ -643,7 +791,6 @@ pub(crate) fn drain(config: &Config, state: &Path, lock: &File) -> Result<()> {
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("resident lock changed while completion was receiving".into());
     }
-    config_migration::ensure_resident_current(config)?;
     result
 }
 
@@ -726,7 +873,7 @@ pub(crate) fn fixture_write_receipt(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     fn fixture(tag: &str) -> (PathBuf, CompletedTurn, Value) {
         let (root, rt) = crate::tests::restart_resolution_fixture(tag);
@@ -760,6 +907,64 @@ mod tests {
             "returnPending":false,"returned":null});
         (root, turn, resident)
     }
+    pub(crate) fn consumed_fixture(tag:&str,refused:bool)->(PathBuf,Runtime,PathBuf) {
+        let (root,mut rt)=crate::room_task::tests::fixture(tag);
+        rt.config.provider_task=Some(serde_json::from_value(json!({"task":"7104","subject":"10","capability":"101","queryCapability":"102",
+            "custodyKey":root.join("provider.key"),"parentCapability":"78","parentObserveCapability":"79","reserve":"5",
+            "maxInputTokens":8,"maxOutputTokens":8,"model":"fixture","providers":root.join("providers.json"),
+            "credentialBroker":root.join("keys.json"),"gatewayBind":"127.0.0.1:0","maxRequestBytes":1024,"maxResponseBytes":1024,"timeoutSeconds":30})).unwrap());
+        rt.journal=Journal::fresh(json!({"config":rt.config,"configPath":rt.config_path}));
+        rt.journal.next_operation_id=50;
+        rt.journal.resident_prompt_origin=Some(resident_origin::ResidentPromptOrigin{resident_prompt_id:"a".repeat(64),prompt_sha256:"b".repeat(64),prompt_operation_id:42,session_id:Some("session".into())});
+        let workspace=root.join("session");fs::create_dir(&workspace).unwrap();let home=workspace.join(".hermes");fs::create_dir(&home).unwrap();fs::set_permissions(&home,fs::Permissions::from_mode(0o700)).unwrap();write_new(&home.join("state.db"),b"fixture session bytes").unwrap();
+        rt.journal.hermes_session=Some(HermesSession{id:"session".into(),workspace,load_verified:true,state_fingerprint:Some("old".into()),retention_issue:None,pending_prompt:true});
+        let state=rt.config.state_dir.join("resident");fs::create_dir(&state).unwrap();fs::set_permissions(&state,fs::Permissions::from_mode(0o700)).unwrap();write_new(&state.join("resident.lock"),b"").unwrap();
+        let resident=json!({"completed":0,"pending":{"residentPromptId":"a".repeat(64),"promptSha256":"b".repeat(64),"inputSha256":"d".repeat(64),"attachmentId":2,"requestId":3},"lastInput":null,"lastCompletion":null,"returnPending":false,"returned":null});
+        atomic_json(&state.join("resident.json"),&resident).unwrap();
+        let request=rt.config.state_dir.join("provider-0000000000000043.controller-request");let response=rt.config.state_dir.join("provider-response");let meter=rt.config.state_dir.join("provider-meter");
+        write_new(&request,b"request").unwrap();write_new(&response,b"response").unwrap();write_new(&meter,b"meter").unwrap();
+        rt.journal.provider_replays.push(ProviderReplay{prompt_operation_id:42,parent_generation:"1".into(),request_path:request,request_bytes:7,request_sha256:sha256_bytes(b"request").unwrap(),response_path:response,response_bytes:8,response_sha256:sha256_bytes(b"response").unwrap(),status:200,content_type:"text/event-stream".into(),response_headers_path:None,response_headers_bytes:None,response_headers_sha256:None,meter_report_path:Some(meter),meter_report_sha256:Some(sha256_bytes(b"meter").unwrap()),metered_charge:Some("1".into())});
+        let attempt=rt.config.state_dir.join("attempt-0000000000000044");fs::create_dir(&attempt).unwrap();
+        let source=json!({"intentNonce":"44","grain":{"task":"7104","subject":"10","context":{"operationId":"44"},"operation":{"type":"settle","charge":"1"}}});
+        atomic_json(&rt.config.state_dir.join("source-0000000000000044.json"),&source).unwrap();write_new(&attempt.join("call.bin"),b"call").unwrap();write_new(&attempt.join("outcome.bin"),b"outcome").unwrap();
+        atomic_json(&attempt.join("outcome.json"),&json!({"type":"confirmed","confirmation":"installed","transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"})).unwrap();
+        let pending=crate::Pending{operation_id:44,operation:"provider settle".into(),attempt:attempt.clone(),uncertain:false,publication:None};
+        rt.journal.provider_settlement=Some(provider_settlement_record_from(&rt.config,43,&pending,&attempt.join("outcome.json")).unwrap());
+        let acp=json!({"stopReason":"end_turn","miniSourceFinalText":"the answer"});rt.stage_resident_completion(&acp).unwrap();
+        let turn=rt.journal.resident_completion.as_ref().unwrap().turn.clone();
+        let receiving=transition(&turn,&state,&fs::read(state.join("resident.json")).unwrap()).unwrap();
+        let status=receiving_status(&turn,&state);let evidence=archive_quiescence(&rt.config.state_dir,&turn,&receiving,receiving.resident_before.as_bytes(),&status).unwrap();
+        retain(&turn.path(&rt.config.state_dir,"receiving").unwrap(),&receiving).unwrap();
+        rt.publish_completed_session(&turn).unwrap();publish_resident(&receiving).unwrap();
+        retain(&turn.path(&rt.config.state_dir,"received").unwrap(),&completion_receipt(&turn,&receiving,&evidence).unwrap()).unwrap();rt.journal.resident_completion=None;
+        prompt_outcome::write(&rt.config.state_dir,&prompt_outcome::Record{kind:prompt_outcome::KIND.into(),prompt_operation_id:42,resident_prompt_id:Some("a".repeat(64)),prompt_sha256:Some("b".repeat(64)),session_id:Some("session".into()),outcome:prompt_outcome::Outcome::Admitted{stop_reason:"end_turn".into(),settled_charge:"1".into(),provider_response_sha256:Some(sha256_bytes(b"response").unwrap()),provider_metered_charge:Some("1".into())}}).unwrap();
+        resident_delivery::fixture_consume_final(&mut rt,&state,refused).unwrap();
+        (root,rt,state)
+    }
+
+    #[test]
+    fn consumed_success_requires_native_receiving_delivery_and_session_proofs() {
+        for refused in [false,true] {
+            let (root,mut rt,state)=consumed_fixture(if refused {"consumed-refused-delivery"} else {"consumed-delivered"},refused);
+            let guard=ResidentGuard::acquire(&rt.config,Some(&state)).unwrap();
+            let proof=consumed_turn(&rt.config,&rt.journal,&guard).unwrap();
+            assert_eq!(proof["delivery"]["terminal"]["resolution"],if refused {"refused"} else {"performed"});
+            let old=rt.journal.hermes_session.clone();rt.journal.hermes_session.as_mut().unwrap().id="foreign".into();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());rt.journal.hermes_session=old;
+            let typed_path=prompt_outcome::path(&rt.config.state_dir,42);let typed=fs::read(&typed_path).unwrap();
+            let mut altered:Value=serde_json::from_slice(&typed).unwrap();altered["sessionId"]=json!("foreign");atomic_json(&typed_path,&altered).unwrap();
+            assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err(),"typed outcome session must match independently");fs::write(&typed_path,typed).unwrap();
+            let old=rt.journal.provider_settlement.clone();rt.journal.provider_settlement.as_mut().unwrap().charge="2".into();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());rt.journal.provider_settlement=old;
+            let old=rt.journal.room_resolutions.clone();rt.journal.room_resolutions.clear();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());rt.journal.room_resolutions=old;
+            let request_receipt=fs::read_dir(&state).unwrap().map(|e|e.unwrap().path()).find(|p|p.file_name().unwrap().to_string_lossy().starts_with("request-")).unwrap();
+            let original=fs::read(&request_receipt).unwrap();let mut request:Value=serde_json::from_slice(&original).unwrap();request["evidence"]["origin"]["promptOperationId"]=json!(41);atomic_json(&request_receipt,&request).unwrap();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());fs::write(&request_receipt,original).unwrap();
+            let receipt_name=if refused {"resident-final-refused"} else {"resident-delivered"};let other_name=if refused {"resident-delivered"} else {"resident-final-refused"};
+            let other=rt.config.state_dir.join(format!("{other_name}-0000000000000042.json"));fs::copy(rt.config.state_dir.join(format!("{receipt_name}-0000000000000042.json")),&other).unwrap();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());fs::remove_file(other).unwrap();
+            let frame=rt.config.state_dir.join("resident-completion-0000000000000042.received.json");let bytes=fs::read(&frame).unwrap();let mut value:Value=serde_json::from_slice(&bytes).unwrap();value["completedOrdinal"]=json!(99);atomic_json(&frame,&value).unwrap();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());fs::write(&frame,bytes).unwrap();
+            write_new(&rt.journal.hermes_session.as_ref().unwrap().workspace.join(".hermes/state.db-wal"),b"changed").unwrap();assert!(consumed_turn(&rt.config,&rt.journal,&guard).is_err());
+            drop(guard);drop(rt);fs::remove_dir_all(root).unwrap();
+        }
+    }
+
     #[test]
     fn source_receipt_supports_lost_or_matching_frame_without_counting_twice() {
         let (root, turn, resident) = fixture("completion-frame");
@@ -781,17 +986,13 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn publication_reentry_accepts_exact_staging_and_after_bytes_only() {
+    fn publication_reentry_accepts_exact_after_bytes_only() {
         let (root, turn, resident) = fixture("completion-publication");
         let bytes = serde_json::to_vec_pretty(&resident).unwrap();
         let receiving = transition(&turn, &root, &bytes).unwrap();
         receiving.validate(&turn, &root).unwrap();
         fs::write(root.join("resident.json"), &bytes).unwrap();
-        let temp = root.join(format!(
-            ".resident.json.migration-{}.tmp",
-            &receiving.turn_sha256[..16]
-        ));
-        write_new(&temp, receiving.resident_after.as_bytes()).unwrap(); // crash after staging fsync
+        fs::set_permissions(root.join("resident.json"), fs::Permissions::from_mode(0o600)).unwrap();
         publish_resident(&receiving).unwrap();
         let after = fs::read(root.join("resident.json")).unwrap();
         publish_resident(&receiving).unwrap(); // crash after rename, before received receipt
@@ -907,6 +1108,19 @@ mod tests {
     }
 
     #[test]
+    fn a_maintenance_or_request_prompt_completion_is_received_at_its_closed_boundary() {
+        let (root, turn, _) = fixture("completion-maintenance");
+        let mut status = receiving_status(&turn, &root);
+        status.retained.push("resident_maintenance_pending");
+        closed_boundary(&status).unwrap();
+        status.retained.extend(["resident_started_request", "resident_queued_requests"]);
+        closed_boundary(&status).unwrap();
+        status.retained.push("resident_return_pending");
+        assert!(closed_boundary(&status).is_err(), "a pending budget return is never a closed boundary");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn completion_receipt_refuses_tampered_foreign_or_unclosed_evidence() {
         let (root, turn, resident) = fixture("completion-evidence-refusal");
         let bytes = serde_json::to_vec_pretty(&resident).unwrap();
@@ -923,6 +1137,9 @@ mod tests {
         let mut unclosed = receiving_status(&turn, &root);
         unclosed.observations[0]["state"]["grain"]["reserved"] = json!("1");
         assert!(archive_quiescence(&root, &turn, &receiving, &bytes, &unclosed).is_err());
+        let mut other = receiving_status(&turn, &root);
+        other.retained.push("tool_hold");
+        assert!(closed_boundary(&other).is_err(), "a held allowance is never a closed boundary");
         let mut wrong_config = receiving_status(&turn, &root);
         wrong_config.config_sha256 = Some("f".repeat(64));
         assert!(archive_quiescence(&root, &turn, &receiving, &bytes, &wrong_config).is_err());

@@ -1,0 +1,25 @@
+# /etc/systemd/system/mini-session-run@.service — one connection of mini-session-run.socket.
+# Root, because it starts a member's session as mini-s-NAME (setpriv); everything else is
+# closed. The answer goes back on the connection; diagnostics go to the journal.
+[Unit]
+Description=Mini session runner (one Discord line)
+After=mini-store.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/mini/mini-session-run
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+Slice=mini.slice
+RuntimeMaxSec=150
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+TasksMax=64
+MemoryMax=768M

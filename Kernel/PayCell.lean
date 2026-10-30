@@ -20,7 +20,7 @@ domain (`physicalId`), with thirteen namespaces on `Theory.Store`:
 | `computeUsage` | subject `Nat`   | day/admitted steps        | RAM         |
 | `computeActivation` | `Unit`     | activation/history anchor | append-only |
 
-The last three are PAY §11's self-enrollment state (layout v2).  An
+The last three are docs/PAY.md §11's self-enrollment state (layout v2).  An
 `enrolment` row is written once by an enrollment and rewritten only by a
 renewal of the same key (its lease grows, `PayEnrolDecision`); `sshIndex`
 makes an ssh key belong to at most one Mini key, and the law ties the two
@@ -38,7 +38,7 @@ against the deployment clock. Empty verified observation reports refresh it.
 Both indexed namespaces are append-only, so an index is written once
 (`Store.Op.allocate_enabled_fresh`).  The index an observation names resolves
 to both its address (`bookAt`) and its account (`assignmentAt`); a payment
-nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
+nullifier covering signature ‖ address (docs/PAY.md §10 erratum 1) reads the address
 from `bookAt`.
 
 Wire: the store codec with layout name `DREGG/PAY/CELL/v6` (its frame commits
@@ -56,11 +56,30 @@ not activate compute or assert that historical execution used no allowance.
 Compute requires a separately authenticated fresh-genesis or closed-legacy
 history activation. Its append-only record prevents resetting the free epoch.
 -/
-import Kernel.PayEnrolClaim
-import Kernel.PayEnrolMemoV2
-import Compiler.StoreCodec
-import Kernel.PayTariff
-import Kernel.PayEnrolMemo
+module
+
+public import Kernel.PayEnrolClaim
+public import Kernel.PayEnrolMemoV2
+public import Compiler.StoreCodec
+public import Kernel.PayTariff
+public import Kernel.PayEnrolMemo
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayCell
 
@@ -112,7 +131,7 @@ def chainTipStream : StreamCodec ChainTip :=
     (fun (slot, blockTime) => ⟨slot, blockTime⟩)
     (by intro tip; cases tip; rfl)
 
-/-- A self-enrolled Mini key's record (PAY §11.4), keyed by the 32-byte Mini
+/-- A self-enrolled Mini key's record (docs/PAY.md §11.4), keyed by the 32-byte Mini
 key.  `leaseUntil` is a chain hour (`blockTime / 3600`): the node membership
 the key has paid for runs while `clock hour < leaseUntil`. -/
 structure EnrolRecord where
@@ -417,7 +436,8 @@ instance (store : PayStore) : Decidable (Law store) := by
 
 /-! ## Wire `DREGG/PAY/CELL/v6` -/
 
-def namespaceStream : StreamCodec Namespace where
+/-- The namespace tag's list codec; `namespaceStream` is it on the cursor. -/
+def namespaceListStream : StreamCodec Namespace where
   encode
     | .tariff => [0]
     | .book => [1]
@@ -448,6 +468,9 @@ def namespaceStream : StreamCodec Namespace where
     | 13 :: suffix => some (.computeActivation, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
+
+def namespaceStream : StreamCodec Namespace :=
+  withTagCursor namespaceListStream rfl (by unfold namespaceListStream; one_octet_tag)
 
 def enrolRecordStream : StreamCodec EnrolRecord :=
   StreamCodec.xmap
@@ -514,7 +537,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .computeUsage => computeUsageStream
   | .computeActivation => computeActivationStream
 
-def wireName : String := "DREGG/PAY/CELL/v6"
+def wireName : String := "DREGG/PAY/CELL/v10"
 
 def wire : Wire layout where
   name := wireName
@@ -540,19 +563,19 @@ def wire : Wire layout where
     | .computeUsage => "subject-id/nat"
     | .computeActivation => "unit"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v4"
+    | .tariff => "DREGG/PAY/TARIFF/v8"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
-    | .enrolment => "DREGG/PAY/ENROLMENT/v1"
+    | .enrolment => "DREGG/PAY/ENROLMENT/v5"
     | .sshIndex => "mini-key32/bytes"
-    | .journal => "DREGG/PAY/UNATTRIBUTED/v1"
-    | .claim => "DREGG/PAY/CLAIM/v2"
-    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v2"
-    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v1"
-    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v1"
-    | .chainTip => "DREGG/PAY/CHAIN-TIP/v1"
-    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v1"
-    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v1"
+    | .journal => "DREGG/PAY/UNATTRIBUTED/v5"
+    | .claim => "DREGG/PAY/CLAIM/v6"
+    | .claimConsumption => "DREGG/PAY/CLAIM/CONSUMPTION/v6"
+    | .pendingOwner => "DREGG/PAY/PENDING-OWNER/v5"
+    | .pendingOwnerHistory => "DREGG/PAY/PENDING-OWNER/v5"
+    | .chainTip => "DREGG/PAY/CHAIN-TIP/v5"
+    | .computeUsage => "DREGG/RUN/COMPUTE-USAGE/v5"
+    | .computeActivation => "DREGG/RUN/COMPUTE-ACTIVATION/v5"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 

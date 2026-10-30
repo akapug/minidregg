@@ -1,0 +1,22 @@
+[package]
+name = "minidregg-spk-package-stream"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[dependencies]
+capnp = { version = "=0.27.0", features = ["unaligned"] }
+ed25519-dalek = "=2.2.0"
+libc = "=0.2.189"
+memmap2 = "=0.9.11"
+sandstorm-package = { git = "https://github.com/emberian/dregg.git", rev = "5819115352bdfa43c5cbd329727d4f8d8a1b5be9" }
+sha2 = "=0.10.9"
+tempfile = "=3.27.0"
+xz2 = "=0.1.7"
+
+[build-dependencies]
+capnpc = "=0.27.0"
+
+[dev-dependencies]
+serde_json = "=1.0.151"

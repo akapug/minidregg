@@ -9,7 +9,7 @@ the ordinary B operation. The fn ACK itself appends another Store event, so
 the harness ended the initial wake after the short second page instead of
 waiting for an idle poll.
 
-After the owner and Mini service stopped, `scripts/probe-fn-accepted-skip.lean`
+After the owner and Mini service stopped, `scripts.probe-fn-accepted-skip [deleted 1e68f88d]`
 reopened the completed B Store through `NativeHost.openExisting` and scanned
 accepted Mini events with `FnConsumerProgress.originalSkip`. It recognized
 exactly two skips, 0→16 and 16→21, in a bounded cursor chain. That selector

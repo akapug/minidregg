@@ -5,9 +5,30 @@ The native signature, current custody, immutable origin, one-time consumption
 and quote gate precede the witness; the actual current composed factory law is
 still mandatory. This is a closed two-action receiving surface.
 -/
-import Kernel.PayClaimDecision
-import Kernel.PayEnrolV2Receiver
-import Kernel.PayClaimLaw
+module
+
+public import Kernel.PayClaimDecision
+public import Kernel.PayEnrolV2Receiver
+public import Kernel.PayClaimLaw
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.PayClaimReceiver
 open Minidregg.Compiler
@@ -117,8 +138,8 @@ birth descriptor. Renewal/rotation decision ignores this birth fee. -/
 def pricingAt {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (seed : Digest)
     (authority : CredentialAuthorityDomain.Snapshot) (command : Command) : PayClaimDecision.Pricing :=
-  ⟨deployment.domain, seed, profile.semantics, ambient.tariff, profile.template,
-    PayEnrolReceiver.birthFee deployment profile.semantics profile.template ambient.tariff
+  ⟨deployment.domain, seed, profile.semantics, ambient.tariff, ambient.template,
+    PayEnrolReceiver.birthFee deployment profile.semantics ambient.template ambient.tariff
       authority.cell ambient.height (PayEnrolReceiver.ids deployment.domain (identityKey command)) 0⟩
 
 section Preparation
@@ -165,6 +186,8 @@ structure Prepared (deployment : Deployment) (profile : CanonicalRuntimeProfile.
   pay : PayCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   factory : FactoryCell deployment directory.directory
+  /-- The claim is priced from the image's platform record. -/
+  ambientCurrent : PayEnrolReceiver.AmbientCurrent deployment profile durable ambient
   tariff : Tariff
   tariffExact : tariffOf pay.cell.logical = some tariff
   clock : ClockCellDomain.Loaded deployment durable.snapshot
@@ -193,6 +216,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
     (ResourceBirthController.Concrete.observeCell deployment directory.directory deployment.resourceBookId .resourceBook)
   let factory ← requireSome .factoryUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory deployment.factoryId .declaredObject)
+  let current ← (PayEnrolV2Legs.requireCurrent deployment profile durable ambient).mapError Reject.legs
   if ingress.command.expectedAuthorityRoot ≠ authority.snapshot.cell.root then throw .staleAuthority
   if rootExact : ingress.command.expectedPayRoot = pay.cell.root then
     match tariffExact : tariffOf pay.cell.logical with
@@ -219,7 +243,7 @@ def prepare (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
                 profile.semantics deployment.factoryId dependencies.additional with
             | none => throw .policyUnavailable
             | some lawGuards =>
-              pure ⟨seed, directory, authority, pay, book, factory, tariff, tariffExact, clock,
+              pure ⟨seed, directory, authority, pay, book, factory, current.down, tariff, tariffExact, clock,
                 decision, decided, legs, candidate, dependencies, dependenciesExact, lawGuards, lawGuardsExact⟩
   else throw .stalePay
 
@@ -249,7 +273,7 @@ def step (prepared : Prepared deployment profile ambient durable ingress checked
 /-- The witness is only available for this private, checked source preparation.
 It retains the actual native-checked decision equality, not a caller boolean. -/
 structure SourceWitness (prepared : Prepared deployment profile ambient durable ingress checked) : Type where
-  private mk ::
+  mk ::
   admitted : PayClaimDecision.decide prepared.pay.cell.logical prepared.authority.snapshot
     prepared.clock.clock (pricingAt deployment profile ambient prepared.expectedSeed
       prepared.authority.snapshot ingress.command) ingress checked = .ok prepared.decision
@@ -373,7 +397,9 @@ def charge (accepted : AcceptedClaim deployment profile ambient durable ingress)
   | .incidences => (writes accepted.prepared).length
   | .turnBytes => (ingressBytes ingress).length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge durable.snapshot
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.possessionSignature.length
   | .proofWork => 1
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -384,7 +410,7 @@ def intent (accepted : AcceptedClaim deployment profile ambient durable ingress)
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := nullifiers accepted.prepared
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   postRootsBound := accepted.physical.2.2.2.1
   guardsReadOnly := readGuards_readonly accepted.prepared

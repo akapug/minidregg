@@ -20,7 +20,10 @@ usage: python3 deploy/candidate/test-package.py
 """
 import hashlib
 import json
+import tarfile
+import io
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -29,7 +32,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 PACKAGE = HERE / "package.py"
 ROLE_FILES = {"host": "minidregg-host", "consent": "minidregg-client-consent"}
-ROLE_FILES.update({role: name for role, _, name in (
+ROLE_FILES.update({role: name for role, _, name, *_ in (
     line.split() for line in subprocess.run([sys.executable, str(PACKAGE), "--rust-roles"], check=True,
                                             capture_output=True, text=True).stdout.splitlines())})
 SCRIPTS = ["deploy/candidate/check-tamper.sh", "lean-toolchain", "Cargo.lock", "deploy/candidate/run.sh", "deploy/candidate/lib.sh", "deploy/candidate/params.sh", "native/resource-client/genesis.sh",
@@ -57,7 +60,7 @@ def run(*args):
     return subprocess.run([sys.executable, str(PACKAGE), *args], capture_output=True, text=True)
 
 
-if subprocess.run(["which", "readelf"], capture_output=True).returncode != 0:
+if shutil.which("readelf") is None:
     sys.exit("test-package: readelf (binutils) is required, as for package.py itself")
 
 
@@ -74,11 +77,13 @@ def roles_manifest(binaries, commit, drop=(), bad_pin=None):
 
 
 with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
-    tmp = Path(tmp)
+    tmp = Path(tmp).resolve()  # package.py resolves --out; macOS /var/folders is a symlink to /private/var
     repo = tmp / "repo"
     for rel in SCRIPTS:
         (repo / rel).parent.mkdir(parents=True, exist_ok=True)
         (repo / rel).write_text(f"stub {rel}\n")
+    (repo / "world" / "activity").mkdir(parents=True)
+    (repo / "world" / "activity" / "Tally.obend").write_text("stub world program\n")
     git(repo, "init", "-q")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "stub")
@@ -128,6 +133,9 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
         check("SHA256SUMS lists the consent binary and every bundle file",
               "bin/minidregg-client-consent" in sums
               and all(f"bin/clients/x86_64-unknown-linux-gnu/{n}" in sums for n in names))
+        check("the example programs ship read-only under world/ and SHA256SUMS lists them",
+              (cand / "world" / "activity" / "Tally.obend").read_text() == "stub world program\n"
+              and "world/activity/Tally.obend" in sums)
         check("SHA256SUMS verifies", all(sha(cand / rel) == digest for rel, digest in sums.items()))
         manifest = json.loads((cand / "manifest.json").read_text())
         check("manifest.json names consentHost with its pin",
@@ -141,6 +149,28 @@ with tempfile.TemporaryDirectory(prefix="package-test-") as tmp:
                   git(repo, "rev-parse", "HEAD^{tree}").decode().strip() and
                   v["build"]["cargoLockSha256"]["Cargo.lock"] == sha(repo / "Cargo.lock")
                   for rel, v in manifest["outputs"].items()))
+        # build.sh --source-archive packages in an extracted tree: no repository holds the commit there.
+        def package_from(archive_path, cwd, out):
+            return subprocess.run([sys.executable, str(PACKAGE), "--roles", str(tmp / "cand.roles.json"),
+                                   "--source-archive", str(archive_path), "--out", str(tmp / out),
+                                   "--toolchains", str(toolchains)], cwd=cwd, capture_output=True, text=True)
+        outside = tmp / "no-repo"
+        outside.mkdir()
+        bare = package_from(archive, outside, "no-repo-cand")
+        check("packages outside any repository, tree taken from the archive",
+              bare.returncode == 0 and json.loads((tmp / "no-repo-cand/provenance.json").read_text())["source"]["tree"]
+              == git(repo, "rev-parse", "HEAD^{tree}").decode().strip(), bare.stderr)
+        # Teeth: an archive whose files are not the commit's (same commit id in its header) is refused
+        # where a repository holding the commit can say so.
+        tampered = tmp / "tampered.tar"
+        tampered.write_bytes(archive.read_bytes())
+        with tarfile.open(tampered, "a") as tar:
+            extra = tarfile.TarInfo("planted.txt")
+            extra.size = 7
+            tar.addfile(extra, io.BytesIO(b"planted"))
+        refused = package_from(tampered, repo, "tampered-cand")
+        check("an archive whose files differ from the commit is refused",
+              refused.returncode != 0 and "is not `git archive" in refused.stderr, refused.stderr)
         # Missing builder evidence must refuse, not invent provenance from the current machine.
         no_evidence = run("--roles", str(tmp / "cand.roles.json"), "--source-archive", str(archive),
                           "--out", str(tmp / "no-evidence"))

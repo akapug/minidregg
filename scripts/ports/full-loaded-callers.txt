@@ -2,9 +2,14 @@
 # May only SHRINK. Checked by scripts/ports/check-full-loaded-callers.sh. Deletion of the full shape: cv 01a11476-4ddb.
 # Approved diagnostic addition (kern gate repair): Host/ObjectiveTurnTotalityRunner.lean
 # replays retained prefixes read-only to measure expressibility; replaces no production path.
+# Approved diagnostic addition (ROOT 10-17): Host/WorldSim.lean, the HP-6 seeded sim comparing Host path
+# and follower over whole Worlds; reachable from no shipped executable (not in the closure of Host.Main
+# or Host.ClientConsentSession, checked with scripts/lean_imports.py).
+# Approved diagnostic addition (ROOT 10-17): scripts/consent/own-base-plant.lean, a planted-forgery
+# script; a standalone script, no library module, so in no shipped closure.
 # Includes the fleet head/incoming ops (Kernel/NativeHost.lean, cv 01a114aa-6780).
 Assurance/HyperdocumentLinkFramedRecovery.lean
-Assurance/NativeAcceptedFixture.lean
+Fixtures/NativeAcceptedFixture.lean
 Compiler/CarriedSegmentIO.lean
 Compiler/DurableCheckpointCodec.lean
 Compiler/DurableLogTags.lean
@@ -24,6 +29,8 @@ Host/Kn2StoreBench.lean
 Host/Main.lean
 Host/ObjectiveTurnTotalityRunner.lean
 Host/SourceAgreementReader.lean
+# EXPORTER (turn-log R4a f916e16f / R4b f8bc8bdf): exportLog folds EVERY record of the Store into the Turn log; reading the whole log is its job, not a full-path use of the receiver
+Host/TurnLogFollower.lean
 Kernel/ApplicationAgentLifetimeGrantLookup.lean
 Kernel/ApplicationAgentLifetimeGrantReceiver.lean
 Kernel/CarriedSegment.lean
@@ -63,9 +70,13 @@ scripts/kn2/neutral-birth.lean
 scripts/kn2/neutral-birth-install.lean
 # PROBE (KN2-NEUTRAL-BIRTHS cluster 5): the reserve-method birth probe; boots its Store through the full open
 scripts/kn2/neutral-birth-reserve.lean
+# PROBE (state-at d951d57a): the executed past-checkpoint plant boots a native Store through the full open, flips a kept checkpoint's MAC and requires `at h` to refuse by name
+scripts/kn2/past-checkpoint-tamper.lean
 scripts/kn2/port-b-tamper.lean
 scripts/kn2/receipt-tamper.lean
 scripts/native-accepted-fixture/replay.lean
 scripts/probe-canonical-cell-registry.lean
 scripts/probe-native-host-genesis.lean
 scripts/probe-policy-source-cell.lean
+Host/WorldSim.lean
+scripts/consent/own-base-plant.lean

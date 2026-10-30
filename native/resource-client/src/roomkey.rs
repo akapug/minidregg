@@ -1,4 +1,4 @@
-//! The room-key protocol of a private room (PRIVACY §3.1, row 7 / B4).
+//! The room-key protocol of a private room (docs/PRIVATE-CELL.md; docs/PRIVATE-ROOMS-DESIGN.txt).
 //!
 //! A private room `R` is a room (K-ROOM 3c) whose content the members' clients
 //! seal under a ROOM KEY `k_R^e` before it reaches the socket. The founder's
@@ -108,7 +108,7 @@
 //! as forgotten so `sync` does not unwrap them again. The wrap stays in the
 //! append-only keys cell and this subject's X25519 secret still opens it:
 //! forgetting is a promise this client keeps, not a cryptographic erasure, until
-//! the subject's key itself is rotated (PRIVACY row 13).
+//! the subject's key itself is rotated (`rotate-key`).
 
 use super::private::{
     self, derive_enc_key, enc_public, open, seal, unwrap_room_key, wrap_room_key, Keyring,
@@ -130,9 +130,9 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 /// The keys cell's law, as the template ships it; `@FOUNDER` is the founder.
-const KEYS_LAW: &str = include_str!("../../../deploy/shell/templates/room/private/law.keys.json");
+const KEYS_LAW: &str = include_str!("../templates/room/private/law.keys.json");
 /// The room cell's own law for the private template.
-const ROOM_LAW: &str = include_str!("../../../deploy/shell/templates/room/private/law.room.json");
+const ROOM_LAW: &str = include_str!("../templates/room/private/law.room.json");
 /// The kernel's stream payload limit (`StreamCell.maxPayloadBytes`).
 const MAX_STREAM_PAYLOAD: usize = 4096;
 /// Where the operator lists the subjects whose signing key is a file on the box.
@@ -321,7 +321,7 @@ fn read_epoch_head(root: &Path, room: &str, keys: &str) -> Result<Option<(Value,
     if value["type"] != "minidregg-authenticated-room-head-v1" || value["room"] != room
         || value["keys"] != keys { return Err("retained room lineage belongs to another context".into()); }
     let epoch: u32 = member(&value, "epoch")?.parse().map_err(|_| "invalid retained epoch")?;
-    let identity = crate::decode_hex(member(&value, "identity")?)?.try_into()
+    let identity = mini_sdk::hex::decode(member(&value, "identity")?).map_err(|e| e.0)?.try_into()
         .map_err(|_| "retained epoch identity must have 32 bytes")?;
     Ok(Some((value, EpochHead { epoch, identity })))
 }
@@ -333,7 +333,7 @@ fn retained_transitions(retained: Option<&Value>) -> usize {
 }
 
 fn retained_founder_tip(retained: Option<&Value>) -> Option<[u8; 32]> {
-    crate::decode_hex(retained?["founderTip"].as_str()?).ok()?.try_into().ok()
+    mini_sdk::hex::decode(retained?["founderTip"].as_str()?).ok()?.try_into().ok()
 }
 
 /// A served founder-key chain shorter than one this client already authenticated is a
@@ -431,7 +431,7 @@ fn founder_pin(root: &Path, room: &str, keys: &str) -> Result<[u8; 32]> {
     if value["type"] != FOUNDER_PIN_TYPE || value["room"] != room || value["keys"] != keys {
         return Err("founder pin belongs to another room or keys cell".into());
     }
-    let public: [u8; 32] = crate::decode_hex(member(&value, "founderKeyHex")?)?.try_into()
+    let public: [u8; 32] = mini_sdk::hex::decode(member(&value, "founderKeyHex")?).map_err(|e| e.0)?.try_into()
         .map_err(|_| "pinned founder key must be 32 bytes")?;
     verifying_key(&public)?;
     Ok(public)
@@ -446,7 +446,7 @@ fn member_pins(root: &Path, room: &str, keys: &str) -> Result<(Option<Value>, BT
     }
     let mut pins = BTreeMap::new();
     for (subject, key) in value["members"].as_object().ok_or("member pins lack members")? {
-        let public: [u8; 32] = crate::decode_hex(key.as_str().ok_or("member pin must be hex")?)?
+        let public: [u8; 32] = mini_sdk::hex::decode(key.as_str().ok_or("member pin must be hex")?).map_err(|e| e.0)?
             .try_into().map_err(|_| "member pin must be 32 bytes")?;
         pins.insert(subject_number(subject)?, public);
     }
@@ -611,7 +611,7 @@ fn transitions_in_view(view: &Value) -> Result<Vec<FounderTransition>> {
     let mut out = BTreeMap::new();
     for atom in atoms {
         let id = member(atom, "id")?;
-        let transition = FounderTransition::from_atom(id, &crate::decode_hex(member(atom, "payload")?)?)?;
+        let transition = FounderTransition::from_atom(id, &mini_sdk::hex::decode(member(atom, "payload")?).map_err(|e| e.0)?)?;
         if out.insert(transition.index, transition).is_some() { return Err("transition atom repeats an address".into()); }
     }
     Ok(out.into_values().collect())
@@ -820,7 +820,7 @@ fn releases_in_view(view: &Value) -> Result<BTreeMap<String, ReleaseStatement>> 
     let mut out = BTreeMap::new();
     for atom in atoms {
         let id = member(atom, "id")?;
-        let release = ReleaseStatement::from_atom(id, &crate::decode_hex(member(atom, "payload")?)?)?;
+        let release = ReleaseStatement::from_atom(id, &mini_sdk::hex::decode(member(atom, "payload")?).map_err(|e| e.0)?)?;
         if out.insert(id.to_owned(), release).is_some() { return Err("release atom repeats an address".into()); }
     }
     Ok(out)
@@ -926,11 +926,18 @@ pub(crate) fn wrap_atom_id(epoch: u32, gen: u32, member: u64) -> String {
     (((u128::from(epoch) + 1) << 96) | (u128::from(gen) << 64) | u128::from(member)).to_string()
 }
 
+/// `room-key --op wrap-atom`: the address `wrap_atom_id` gives, from decimal text. Scripts that
+/// assert where a wrap lands ask this rather than restating Kernel/PrivateRoomKeys.lean wrapAtomId.
+pub(crate) fn wrap_atom_text(epoch: &str, gen: &str, member: &str) -> Result<String> {
+    let epoch: u32 = mini_sdk::decimal::parse(epoch).filter(|epoch| *epoch <= MAX_EPOCH)
+        .ok_or_else(|| format!("--epoch must be a canonical decimal at most {MAX_EPOCH}"))?;
+    let gen: u32 = mini_sdk::decimal::parse(gen).ok_or("--gen must be a canonical u32 decimal")?;
+    let member: u64 = mini_sdk::decimal::parse(member).ok_or("--member must be a canonical u64 decimal")?;
+    Ok(wrap_atom_id(epoch, gen, member))
+}
+
 pub(crate) fn parse_wrap_atom_id(id: &str) -> Result<(u32, u32, u64)> {
-    let value: u128 = id.parse().map_err(|_| format!("wrap atom id {id} is not a decimal below 2^128"))?;
-    if value.to_string() != id {
-        return Err(format!("wrap atom id {id} is not canonical"));
-    }
+    let value: u128 = mini_sdk::decimal::parse(id).ok_or_else(|| format!("wrap atom id {id} is not a canonical decimal below 2^128"))?;
     let high = value >> 96;
     if high == 0 {
         return Err(format!("atom id {id} is in the record region, not a wrap"));
@@ -1044,10 +1051,7 @@ impl EncRecord {
 }
 
 fn subject_number(subject: &str) -> Result<u64> {
-    let value: u64 = subject.parse().map_err(|_| format!("subject {subject} is not a 64-bit decimal"))?;
-    if value.to_string() != subject {
-        return Err(format!("subject {subject} is not canonical"));
-    }
+    let value: u64 = mini_sdk::decimal::parse(subject).ok_or_else(|| format!("subject {subject} is not a canonical 64-bit decimal"))?;
     Ok(value)
 }
 
@@ -1194,7 +1198,7 @@ pub(crate) fn wraps_in_view(view: &Value) -> Result<Vec<WrapAtom>> {
                             .get("payload")
                             .and_then(Value::as_str)
                             .ok_or("wrap atom lacks payload")?;
-                        WrapAtom::from_atom(id, &crate::decode_hex(payload)?)
+                        WrapAtom::from_atom(id, &mini_sdk::hex::decode(payload).map_err(|e| e.0)?)
                     })());
                 } else {
                     object.values().for_each(|item| walk(item, schema, out));
@@ -1246,7 +1250,7 @@ pub(crate) fn records_in_view(view: &Value) -> BTreeMap<u64, EncRecord> {
         let parsed = (|| {
             let id = atom.get("id").and_then(Value::as_str).ok_or("record atom lacks id")?;
             let payload = atom.get("payload").and_then(Value::as_str).ok_or("record atom lacks payload")?;
-            EncRecord::from_atom(id, &crate::decode_hex(payload)?, atom)
+            EncRecord::from_atom(id, &mini_sdk::hex::decode(payload).map_err(|e| e.0)?, atom)
         })();
         match parsed {
             Ok(record) => {
@@ -1393,7 +1397,7 @@ fn text_or_hex(bytes: &[u8]) -> Value {
 
 // ---------------------------------------------------------------- hosted subjects (B6)
 
-/// PRIVACY B6. A subject whose signing key is a file on this box (a hosted
+/// A subject whose signing key is a file on this box (a hosted
 /// friend, hosted Hermes, a bot) invited into a private room puts the room key
 /// where root can read it. Refused unless the inviter said `--i-know`.
 pub(crate) fn hosted_private_invite(
@@ -1973,9 +1977,9 @@ impl RetainedReleaseDraft {
 
     fn deliveries(&self) -> Result<Vec<Delivery>> {
         self.manifest["deliveries"].as_array().ok_or("release draft lacks deliveries")?.iter().map(|row| {
-            let wrap = WrapAtom::from_atom(member(row, "wrapAtom")?, &crate::decode_hex(member(row, "wrapPayloadHex")?)?)?;
+            let wrap = WrapAtom::from_atom(member(row, "wrapAtom")?, &mini_sdk::hex::decode(member(row, "wrapPayloadHex")?).map_err(|e| e.0)?)?;
             let release = ReleaseStatement::from_atom(member(row, "releaseAtom")?,
-                &crate::decode_hex(member(row, "releasePayloadHex")?)?)?;
+                &mini_sdk::hex::decode(member(row, "releasePayloadHex")?).map_err(|e| e.0)?)?;
             release.names(&wrap)?;
             Ok(Delivery { wrap, release })
         }).collect()
@@ -1985,7 +1989,7 @@ impl RetainedReleaseDraft {
         let head = &self.manifest["headBefore"];
         if head.is_null() { return Ok(None); }
         Ok(Some(EpochHead { epoch: member(head, "epoch")?.parse().map_err(|_| "invalid draft head epoch")?,
-            identity: crate::decode_hex(member(head, "identity")?)?.try_into()
+            identity: mini_sdk::hex::decode(member(head, "identity")?).map_err(|e| e.0)?.try_into()
                 .map_err(|_| "draft head identity must be 32 bytes")? }))
     }
 }
@@ -1998,7 +2002,7 @@ fn drafts_of_room(root: &Path, room: &str) -> Result<Vec<RetainedReleaseDraft>> 
     for entry in fs::read_dir(&parent).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         if !entry.file_type().map_err(|error| error.to_string())?.is_dir() { continue; }
-        let Ok(operation) = crate::decode_hex(&entry.file_name().to_string_lossy())
+        let Ok(operation) = mini_sdk::hex::decode(&entry.file_name().to_string_lossy()).map_err(|e| e.0)
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).map_err(|_| "not an operation".to_string())) else { continue };
         if let Some(draft) = RetainedReleaseDraft::load(root, &operation)? {
             if draft.room()? == room { out.push(draft); }
@@ -2381,8 +2385,7 @@ fn check_declared_custody(record: &EncRecord, i_know: bool) -> Result<()> {
 /// identity/key epoch, current room entitlement and release permission.
 pub(crate) fn signed_recipient_descriptor(workspace: &Value, room: &str, keys: &str,
     key_epoch: &str) -> Result<Value> {
-    let epoch: u32 = key_epoch.parse().map_err(|_| "recipient key epoch must fit32bits")?;
-    if epoch.to_string() != key_epoch { return Err("recipient key epoch must be canonical decimal".into()); }
+    let epoch: u32 = mini_sdk::decimal::parse(key_epoch).ok_or("recipient key epoch must be a canonical decimal that fits 32 bits")?;
     let subject = member(workspace, "subject")?;
     let signer = crate::read_secret(&member_path(workspace, "key")?)?;
     let encryption = enc_public(&*crate::fsio::read_seed(&member_path(workspace, "key")?)?)?;
@@ -2849,7 +2852,7 @@ pub(crate) fn tail(root: &Path, workspace: &Value, name: &str, start: &str, coun
     if let Some(entries) = view.get_mut("entries").and_then(Value::as_array_mut) {
         for entry in entries {
             let sequence = entry.get("sequence").and_then(Value::as_str).unwrap_or("").to_owned();
-            let note = match entry.get("payload").and_then(Value::as_str).map(crate::decode_hex) {
+            let note = match entry.get("payload").and_then(Value::as_str).map(|payload| mini_sdk::hex::decode(payload).map_err(|e| e.0)) {
                 Some(Ok(bytes)) => open_in_room(keys.as_ref(), &room, &stream, &sequence, &bytes),
                 Some(Err(error)) => json!({"refused": error}),
                 None => json!({"refused": "the view carried no payload for this entry"}),
@@ -3103,6 +3106,13 @@ mod tests {
         assert_eq!(parse_wrap_atom_id(&wrap_atom_id(7, 3, u64::MAX)).unwrap(), (7, 3, u64::MAX));
         assert_eq!(parse_wrap_atom_id(&wrap_atom_id(MAX_EPOCH, u32::MAX, 1)).unwrap(), (MAX_EPOCH, u32::MAX, 1));
         assert_ne!(wrap_atom_id(4, 1, 12), wrap_atom_id(4, 2, 12), "a re-wrap is a new atom");
+        // The verb scripts ask is the same rule, byte for byte, and refuses what the rule cannot address.
+        assert_eq!(wrap_atom_text("1", "2", "12").unwrap(), wrap_atom_id(1, 2, 12));
+        assert_eq!(wrap_atom_text(&MAX_EPOCH.to_string(), &u32::MAX.to_string(), &u64::MAX.to_string()).unwrap(),
+            wrap_atom_id(MAX_EPOCH, u32::MAX, u64::MAX));
+        assert!(wrap_atom_text(&(MAX_EPOCH + 1).to_string(), "0", "1").is_err());
+        assert!(wrap_atom_text("01", "0", "1").is_err());
+        assert!(wrap_atom_text("0", "0", "18446744073709551616").is_err());
         assert!(parse_wrap_atom_id("012").is_err());
         assert!(parse_wrap_atom_id("12").is_err(), "the record region is not a wrap");
         assert!(parse_wrap_atom_id(&release_atom_id(0, 0, 12)).is_err(), "the release region is not a wrap");

@@ -48,31 +48,17 @@ pub(crate) fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("fleet record lacks {key}"))
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
-    let length: u32 = first
-        .len()
-        .try_into()
-        .map_err(|_| "fleet pair exceeds u32")?;
-    let mut bytes = length.to_le_bytes().to_vec();
-    bytes.extend_from_slice(first);
-    bytes.extend_from_slice(second);
-    if first.is_empty() || second.is_empty() || bytes.len() >= transport::HOST_MAX_FRAME {
-        return Err("fleet pair exceeds Host bound or has an empty component".into());
-    }
-    Ok(bytes)
-}
-
 /// The Host's refusal frame is retained byte-exact; its text is shown only as
 /// a diagnostic, never parsed into a decision.
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, body @ ..] => {
+        [byte @ (crate::RESPONSE_HOST_OUTCOME | crate::RESPONSE_NO_RECORD), body @ ..] => {
             // The refusal frame is the Host's own encoded outcome; it is kept
             // as the Host's decision (the shell renders it through the Host),
             // never parsed here.
-            crate::note_host_decision(crate::HostDecision::RefusedFrame {
+            crate::note_host_decision(crate::HostDecision::Frame {
                 command: format!("fleet op{operation}"),
-                byte: 255,
+                byte: *byte,
                 encoded: body.to_vec(),
                 decoded: None,
             });
@@ -286,7 +272,7 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
         })
         .count();
     let stem = format!("lookup-{count:04}");
-    invoke(agent, directory, &stem, 99, ingress)?;
+    invoke(agent, directory, &stem, mini_sdk::host_operations::FLEET_TURN_LOOKUP, ingress)?;
     inspect(
         agent,
         "outcome",
@@ -295,16 +281,26 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
     )
 }
 
-/// The Host's own decoding of this attempt's plan refusal (op 96 answered
-/// 255), or `None` when the plan frame is not a refusal. A `stale-root`
-/// reason means the signed observation it was given is no longer current;
-/// nothing was signed yet, so the attempt is decided and a fresh observation
-/// re-plans it. The reason is read from the decoding, never from the text.
+/// The Host's own decoding of this attempt's plan refusal, or `None` when the
+/// plan frame is not a decided refusal. The session answers a receiver's
+/// refusal of op 96 under NO_RECORD (253: proven no-append, a plan appends
+/// nothing whatever it answers) and an undecided envelope under 255
+/// (`RequestRefusal.returnedMarker`); either way the refusal is read from the
+/// decoding, never from the byte or the text. A `stale-root` reason means the
+/// signed observation it was given is no longer current; nothing was signed
+/// yet, so the attempt is decided and a fresh observation re-plans it. The
+/// retained `plan-refusal.bin`/`.json` are also the operation record's
+/// closure: `recover_operation` reads them, so a payment the Host refused is
+/// recovered `refused`, never a pending `not-submitted` that blocks the
+/// request's next attempt.
 fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
     let frame = crate::agent_reserve::bounded(&directory.join("plan.frame"), LIMIT)?;
-    let [255, body @ ..] = frame.as_slice() else {
+    let [byte, body @ ..] = frame.as_slice() else {
         return Ok(None);
     };
+    if !crate::is_outcome_frame(*byte) {
+        return Ok(None);
+    }
     retain(&directory.join("plan-refusal.bin"), body)?;
     let outcome = inspect(
         agent,
@@ -322,7 +318,7 @@ fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
 /// caller's report.
 fn observation_stale() -> bool {
     match crate::take_host_decision() {
-        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+        Some(crate::HostDecision::Frame { decoded: Some(outcome), .. })
             if outcome.get("reason").and_then(Value::as_str) == Some("stale-root") =>
         {
             true
@@ -389,16 +385,82 @@ fn retained_file(path: &Path) -> Result<bool> {
     }
 }
 
+/// `confirmed`, `refused` (the Host's DECODED refusal only) or `uncertain`. `contention`,
+/// `unavailable`, `absent` and anything undecoded are uncertain: none says the exact call was
+/// not admitted (review Q1/Q3 in `docs/review/2026-10-26-native-crates/resource-client.md` §8),
+/// so none licenses a new payment.
 fn exact_status(outcome: &Value) -> &'static str {
     if confirmed(outcome) && receipt_of(outcome).is_ok() { "confirmed" }
-    else if matches!(outcome.get("type").and_then(Value::as_str), Some("refused" | "contention")) { "refused" }
+    else if outcome.get("type").and_then(Value::as_str) == Some("refused") { "refused" }
     else { "uncertain" }
+}
+
+/// The operation record a money verb uses when the caller names none: a chain
+/// `WS/operations/FAMILY-KEY-N.json`, KEY the digest of the request's stable `context`. The
+/// record is the request's identity, so a rerun after a lost reply or a crash finds it and
+/// recovers the exact retained call instead of paying again (`recover_operation`). A further
+/// operation of the same request is the member's explicit decision (`again`), and is refused
+/// while the previous one is undecided; a previous one that never reached submission
+/// (`not-submitted`) may be followed only once its submitter has stopped, which `again`
+/// asserts. A previous one the Host refused is closed (`recover_operation` reads its plan
+/// refusal): nothing was appended and nothing can follow from it, so the next attempt of the
+/// same request begins a fresh record at once, the refused one kept whole as evidence.
+pub(crate) fn default_operation(root: &Path, family: &str, context: &Value, again: bool) -> Result<PathBuf> {
+    let dir = root.join("operations");
+    crate::fsio::ensure_private_dir(&dir)?;
+    let key = &digest(&serde_json::to_vec(context).map_err(|e| e.to_string())?)[..16];
+    let name = |n: u32| dir.join(format!("{family}-{key}-{n}.json"));
+    let mut n = 1;
+    while retained_file(&name(n + 1))? {
+        n += 1;
+    }
+    if !retained_file(&name(n))? {
+        return Ok(name(n));
+    }
+    let latest = name(n);
+    let recovered = recover_bound_operation(root, &latest, context)?.ok_or("operation record vanished")?;
+    let status = recovered["status"].as_str().unwrap_or("uncertain");
+    let lookup = format!("mini credit --action lookup-operation --dir {} --operation-record {}", root.display(), latest.display());
+    match (status, again) {
+        // A decided refusal closed the previous record: nothing was appended, so nothing
+        // can follow from it and the next attempt of the same request begins afresh.
+        ("refused", _) => Ok(name(n + 1)),
+        ("confirmed" | "not-submitted", true) => Ok(name(n + 1)),
+        ("confirmed", false) => {
+            print_json(&recovered)?;
+            Err(format!("this {family} is already confirmed (record {}); a new one is a new operation: repeat with --again", latest.display()))
+        }
+        ("not-submitted", false) => {
+            print_json(&recovered)?;
+            Err(format!("a previous {family} of this request was recorded but never submitted (record {}); \
+                once that command has stopped, repeat with --again", latest.display()))
+        }
+        _ => {
+            print_json(&recovered)?;
+            Err(format!("undecided: a previous {family} of this request may have been admitted (status {status}); \
+                nothing new is paid: look the exact call up with `{lookup}`"))
+        }
+    }
 }
 
 fn decided_outcome(path: &Path) -> Result<Option<Value>> {
     if !retained_file(path)? { return Ok(None); }
     let value = workspace::bounded_json(path)?;
     Ok((exact_status(&value) != "uncertain").then_some(value))
+}
+
+/// The attempt's decided plan refusal (`plan_refusal`'s retained Host decoding):
+/// `Some` only when that decoding says `refused` — a refusal the Host answered
+/// the plan with, having appended nothing. No retention yet (a crash before the
+/// refusal was recorded), or an undecided envelope, leaves the operation
+/// pending for `recover_operation`.
+fn decided_plan_refusal(attempt: &Path) -> Result<Option<Value>> {
+    let path = attempt.join("plan-refusal.json");
+    if !retained_file(&path)? {
+        return Ok(None);
+    }
+    let outcome = workspace::bounded_json(&path)?;
+    Ok((outcome.get("type").and_then(Value::as_str) == Some("refused")).then_some(outcome))
 }
 
 /// Resume a balance-derived operation before reading a new balance. The
@@ -437,6 +499,15 @@ pub(crate) fn recover_operation(root: &Path, path: &Path) -> Result<Value> {
         _ => return Err("unknown exact operation kind".into()),
     };
     if !present {
+        // Nothing was submitted, yet the operation may still be decided: a plan the
+        // Host refused is a decided no-append answer (`plan_refusal` retains the
+        // Host's own decoding), and it closes the record as `refused` instead of
+        // leaving a pending `not-submitted` that blocks the request's next attempt.
+        // The refusal is read from the decoding's type, never the frame's byte, so
+        // an undecided envelope keeps the record pending exactly as before.
+        if let Some(refusal) = decided_plan_refusal(&attempt)? {
+            return Ok(recovery_value(path, &record, "refused", refusal));
+        }
         return Ok(recovery_value(path, &record, "not-submitted", Value::Null));
     }
     let (outcome, submit_decision) = if kind == "fleet" {
@@ -522,7 +593,7 @@ fn attempt(
     };
     retain(&directory.join("signed-observation.bin"), &signed)?;
     retain_json(&directory.join("account-view.json"), &view)?;
-    let plan = match invoke(agent, &directory, "plan", 96, &pair(&signed, &draft_bytes)?) {
+    let plan = match invoke(agent, &directory, "plan", mini_sdk::host_operations::FLEET_TURN_PLAN, &mini_sdk::local::pair_nonempty(&signed, &draft_bytes)?) {
         Ok(plan) => plan,
         Err(error) => match plan_refusal(agent, &directory)? {
             Some(refusal) if refusal.get("reason").and_then(Value::as_str) == Some("stale-root") => {
@@ -545,11 +616,11 @@ fn attempt(
     };
     let plan_view = inspect(agent, "fleet-turn-plan", &directory.join("plan.bin"), &directory.join("plan.json"))?;
     validate_plan(&draft_view, &plan_view, &plan, base)?;
-    let header = decode_hex(field(&plan_view, "header")?)?;
+    let header = mini_sdk::hex::decode(field(&plan_view, "header")?).map_err(|e| e.0)?;
     let signing = read_secret(&workspace::member_path(&agent.workspace, "key")?)?;
     let signature = signing.sign(&header).to_bytes();
     retain(&directory.join("signature.bin"), &signature)?;
-    let ingress = invoke(agent, &directory, "ingress", 97, &pair(&plan, &signature)?)?;
+    let ingress = invoke(agent, &directory, "ingress", mini_sdk::host_operations::FLEET_TURN_ASSEMBLE, &mini_sdk::local::pair_nonempty(&plan, &signature)?)?;
     let ingress_view = inspect(agent, "fleet-turn-ingress", &directory.join("ingress.bin"), &directory.join("ingress.json"))?;
     if field(&ingress_view, "canonical")? != hex(&ingress)
         || field(&ingress_view, "commandBytes")? != field(&plan_view, "commandBytes")?
@@ -564,7 +635,7 @@ fn attempt(
     if let Some(journal) = journal {
         journal_attempt(journal, &directory)?;
     }
-    let outcome = match invoke(agent, &directory, "submit", 98, &ingress) {
+    let outcome = match invoke(agent, &directory, "submit", mini_sdk::host_operations::FLEET_TURN_SUBMIT, &ingress) {
         Ok(_) => inspect(agent, "outcome", &directory.join("submit.bin"), &directory.join("submit.json"))?,
         Err(error) => {
             eprintln!("fleet submit uncertain ({error}); exact lookup follows");
@@ -591,7 +662,7 @@ fn attempt(
         let detail = outcome
             .get("detail")
             .and_then(Value::as_str)
-            .and_then(|value| decode_hex(value).ok())
+            .and_then(|value| mini_sdk::hex::decode(value).ok())
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
             .unwrap_or_default();
         return Err(format!(
@@ -718,7 +789,7 @@ pub(crate) fn resubmit(agent: &Agent, directory: &Path) -> Result<Value> {
         })
         .count();
     let stem = format!("resubmit-{count:04}");
-    invoke(agent, &canonical, &stem, 98, &ingress)?;
+    invoke(agent, &canonical, &stem, mini_sdk::host_operations::FLEET_TURN_SUBMIT, &ingress)?;
     inspect(
         agent,
         "outcome",
@@ -741,8 +812,8 @@ fn lookup(agent: &Agent, directory: &Path) -> Result<()> {
 /// The Host's answer to op 102 for one transaction id, uninterpreted.
 pub(crate) fn receipt_by_transaction(agent: &Agent, transaction: &str) -> Result<Value> {
     canonical_decimal(transaction, "--transaction")?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 102, transaction.as_bytes())?;
-    let body = reply(&frame, 102)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_RECEIPT, transaction.as_bytes())?;
+    let body = reply(&frame, mini_sdk::host_operations::FLEET_RECEIPT)?;
     serde_json::from_slice(body).map_err(|error| error.to_string())
 }
 
@@ -759,9 +830,9 @@ fn by_transaction(agent: &Agent, transaction: &str) -> Result<()> {
 /// The agent head (op 101) of `reference`, behind this agent's signed observation.
 pub(crate) fn head_of(agent: &Agent, reference: &Value) -> Result<Value> {
     let (_, signed) = observe(agent, reference)?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 101, &signed)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_HEAD, &signed)?;
     let value: Value =
-        serde_json::from_slice(reply(&frame, 101)?).map_err(|error| error.to_string())?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_HEAD)?).map_err(|error| error.to_string())?;
     if field(&value, "payer")? != field(reference, "target")? {
         return Err("agent head answered for another account".into());
     }
@@ -842,9 +913,9 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
     let (_, signed) = observe(agent, reference)?;
     let request = serde_json::to_vec(&json!({"topic":hex(&topic),"cursor":since,"limit":limit}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 100, &pair(&signed, &request)?)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_TOPIC_POLL, &mini_sdk::local::pair_nonempty(&signed, &request)?)?;
     let mut value: Value =
-        serde_json::from_slice(reply(&frame, 100)?).map_err(|error| error.to_string())?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_TOPIC_POLL)?).map_err(|error| error.to_string())?;
     if field(&value, "payer")? != field(reference, "target")? || field(&value, "topic")? != hex(&topic)
     {
         return Err("topic poll answered for another stream".into());
@@ -860,7 +931,7 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
         }
         match event.get("payload").and_then(Value::as_str) {
             Some(payload) => {
-                let bytes = decode_hex(payload)?;
+                let bytes = mini_sdk::hex::decode(payload).map_err(|e| e.0)?;
                 if let Ok(text_value) = String::from_utf8(bytes) {
                     event["payloadText"] = json!(text_value);
                 }
@@ -882,21 +953,10 @@ fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit:
 
 // ---------------------------------------------------------------- for `mini credit`
 
-/// One paid fleet turn from this workspace's account reference `name`:
-/// `amount` of `asset` (the pinned tariff asset when `None`) to account `to`,
-/// publishing `payload` on `topic` of the paying account when given. The
-/// result is the fleet turn result (`minidregg-fleet-turn-result-v1`), printed.
-pub(crate) fn pay_turn(
-    root: &Path,
-    name: &str,
-    to: &str,
-    amount: &str,
-    asset: Option<&str>,
-    publication: Option<(&str, &[u8])>,
-) -> Result<Value> {
-    pay_turn_recorded(root, name, to, amount, asset, publication, None, Value::Null)
-}
-
+/// One paid fleet turn from this workspace's account reference `name`: `amount` of `asset` (the
+/// pinned tariff asset when `None`) to account `to`, publishing `payload` on `topic` when given,
+/// under the operation record `operation` (exact recovery on rerun). Without a record it is one
+/// fleet turn (`turn`); every money verb passes one (`credit::money_record`).
 pub(crate) fn pay_turn_recorded(
     root: &Path, name: &str, to: &str, amount: &str, asset: Option<&str>,
     publication: Option<(&str, &[u8])>, operation: Option<&Path>, context: Value,
@@ -986,9 +1046,9 @@ pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit:
     let (_, signed) = observe(&agent, &reference)?;
     let request = serde_json::to_vec(&json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}))
         .map_err(|error| error.to_string())?;
-    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 180, &pair(&signed, &request)?)?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, mini_sdk::host_operations::FLEET_INCOMING_LEDGER, &mini_sdk::local::pair_nonempty(&signed, &request)?)?;
     let mut value: Value =
-        serde_json::from_slice(reply(&frame, 180)?).map_err(|error| error.to_string())?;
+        serde_json::from_slice(reply(&frame, mini_sdk::host_operations::FLEET_INCOMING_LEDGER)?).map_err(|error| error.to_string())?;
     if field(&value, "account")? != field(&reference, "target")? || field(&value, "topic")? != hex(topic.as_bytes()) {
         return Err("incoming ledger answered for another account or topic".into());
     }
@@ -1001,7 +1061,7 @@ pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit:
             return Err("incoming ledger is not strictly ascending above the cursor".into());
         }
         previous = height;
-        if let Ok(text_value) = String::from_utf8(decode_hex(field(entry, "payload")?)?) {
+        if let Ok(text_value) = String::from_utf8(mini_sdk::hex::decode(field(entry, "payload")?).map_err(|e| e.0)?) {
             entry["payloadText"] = json!(text_value);
         }
     }
@@ -1296,9 +1356,9 @@ mod tests {
 
     #[test]
     fn refusal_frames_never_read_as_success() {
-        assert!(reply(&[255, b'x'], 98).is_err());
-        assert!(reply(&[99, 1], 98).is_err());
-        assert_eq!(reply(&[98, 1, 2], 98).unwrap(), &[1, 2]);
+        assert!(reply(&[255, b'x'], mini_sdk::host_operations::FLEET_TURN_SUBMIT).is_err());
+        assert!(reply(&[99, 1], mini_sdk::host_operations::FLEET_TURN_SUBMIT).is_err());
+        assert_eq!(reply(&[98, 1, 2], mini_sdk::host_operations::FLEET_TURN_SUBMIT).unwrap(), &[1, 2]);
     }
 
     #[test]
@@ -1402,18 +1462,18 @@ mod exact_operation_tests {
     fn exact_operation_lost_reply_recovers_only_retained_call_without_resubmit() {
         let f = Fixture::new();
         let host = f.0.join("host");
-        // The fake transport refuses every operation except lookup/inspect and
-        // verifies the exact original call; no feed or text matching is possible.
-        let script = r##"#!/bin/sh
+        // The fake transport refuses every operation except lookup and the codec loop (inspect)
+        // and verifies the exact original call; no feed or text matching is possible.
+        let _codec = crate::client_consent::codec_test_lock();
+        let script = format!(r##"#!/bin/sh
 case "$2" in
  lookup)
   test "$(cat "$3")" = 'signed-call-for-g7' || exit 70
   printf 'lookup\n' >> "$1.calls"
-  printf '%s' '{"type":"confirmed","confirmation":"replayed","transactionId":"31","eventId":"32","acceptedCount":"1","worldRoot":"33"}' > "$4" ;;
- inspect) test "$3" = outcome || exit 71; cp "$4" "$5" ;;
- *) exit 72 ;;
+  printf '%s' '{{"type":"confirmed","confirmation":"replayed","transactionId":"31","eventId":"32","acceptedCount":"1","worldRoot":"33"}}' > "$4" ;;
+{} *) exit 72 ;;
 esac
-"##;
+"##, crate::client_consent::codec_loop_arm(r#"test "$kind" = outcome && cp "$body" "$out""#));
         crate::create_private(&host, script.as_bytes()).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let (path, record) = f.record("lost-reply", "workspace", json!({"text":"repeated text"}));
@@ -1447,6 +1507,51 @@ esac
         // The same typed decision received from the original submit is decisive.
         retain_json(&attempt.join("outcome.json"), &refused).unwrap();
         assert_eq!(recover_operation(&f.0, &path).unwrap()["status"], "refused");
+    }
+
+    #[test]
+    fn exact_operation_plan_refused_payment_is_closed_and_the_next_attempt_proceeds() {
+        let f = Fixture::new();
+        let context = json!({"action":"pay","room":"18","account":{"target":"20","operationCapability":"21"},
+            "till":"19","amount":"100","window":null});
+        let key = &digest(&serde_json::to_vec(&context).unwrap())[..16];
+        let (path, record) = f.record(&format!("pay-{key}-1.json"), "fleet",
+            json!({"verb":"send","context":context}));
+        let attempt = PathBuf::from(field(&record, "attempt").unwrap());
+        workspace::make_private_dir(&attempt).unwrap();
+        // The plan the Host refused under NO_RECORD, and the decoding
+        // `plan_refusal` retains: the operation is closed, not left pending.
+        crate::create_private(&attempt.join("plan.frame"), &[crate::RESPONSE_NO_RECORD, 1, 2]).unwrap();
+        retain_json(&attempt.join("plan-refusal.json"),
+            &json!({"type":"refused","reason":"bookRefused","phase":"fleet-plan"})).unwrap();
+        let recovered = recover_bound_operation(&f.0, &path, &context).unwrap().unwrap();
+        assert_eq!(recovered["status"], "refused");
+        assert_eq!(recovered["outcome"]["reason"], "bookRefused");
+        assert_eq!(recovered["requiresSubmitterStopped"], false);
+        // A closed refusal does not block the request: the next attempt begins a
+        // fresh record, the refused one kept whole as the refusal's evidence.
+        let next = default_operation(&f.0, "pay", &context, false).unwrap();
+        assert_eq!(next, path.parent().unwrap().join(format!("pay-{key}-2.json")));
+        assert_eq!(recover_bound_operation(&f.0, &path, &context).unwrap().unwrap()["status"], "refused");
+    }
+
+    #[test]
+    fn exact_operation_undecided_plan_envelope_keeps_the_request_pending() {
+        let f = Fixture::new();
+        let context = json!({"action":"pay","room":"18","account":{"target":"20","operationCapability":"21"},
+            "till":"19","amount":"100","window":null});
+        let key = &digest(&serde_json::to_vec(&context).unwrap())[..16];
+        let (path, record) = f.record(&format!("pay-{key}-1.json"), "fleet",
+            json!({"verb":"send","context":context}));
+        let attempt = PathBuf::from(field(&record, "attempt").unwrap());
+        workspace::make_private_dir(&attempt).unwrap();
+        // A 255 envelope that decodes to anything but a refusal decides nothing.
+        crate::create_private(&attempt.join("plan.frame"), &[crate::RESPONSE_HOST_OUTCOME, 1, 2]).unwrap();
+        retain_json(&attempt.join("plan-refusal.json"),
+            &json!({"type":"unavailable","detail":"host session reopening"})).unwrap();
+        assert_eq!(recover_bound_operation(&f.0, &path, &context).unwrap().unwrap()["status"], "not-submitted");
+        let blocked = default_operation(&f.0, "pay", &context, false).unwrap_err();
+        assert!(blocked.contains("never submitted"), "{blocked}");
     }
 
     #[test]

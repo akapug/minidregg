@@ -13,7 +13,7 @@ theorem invalid_layout_refuses {rootBytes : List UInt8 → TypedAuthorization.Di
     (snapshot : DataSnapshot rootBytes) (intent : DataIntent rootBytes)
     (invalid : config.controlLayoutValid = false) :
     config.sourceGate own snapshot intent = .error (.durable .transactionConflict) := by
-  simp [Config.sourceGate,invalid]; rfl
+  simp [Config.sourceGate,invalid]
 
 theorem joint_exception_retains_activity {rootBytes : List UInt8 → TypedAuthorization.Digest}
     (config : Config) (pin : ContentControlFrame.Pin)
@@ -51,7 +51,7 @@ theorem activity_exception_retains_joint {rootBytes : List UInt8 → TypedAuthor
           simp [Config.sourceGate,layout,pinned,jointGate,ordinary] at admitted
           change (Except.error (.durable .transactionConflict) : Except RejectReason Unit) = .ok () at admitted
           cases admitted
-      | ok value => cases value; rfl
+      | ok value => cases value
 
 #assert_axioms invalid_layout_refuses
 #assert_axioms joint_exception_retains_activity

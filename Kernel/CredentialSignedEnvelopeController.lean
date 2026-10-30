@@ -22,10 +22,30 @@ authenticity, and the relation between authenticity and custody/EUF-CMA, remain
 explicit premises below.  The executable digest used to pin the registry is a
 representation function only; no collision-resistance theorem is claimed.
 -/
-import Compiler.Tower256ConcreteBackend
-import Compiler.CredentialSigningKeyCodec
-import Kernel.CanonicalPolicyRegistry
-import Theory.CredentialAuthorityFamily
+module
+
+public import Compiler.Tower256ConcreteBackend
+public import Compiler.CredentialSigningKeyCodec
+public import Kernel.CanonicalPolicyRegistry
+public import Theory.CredentialAuthorityFamily
+public import Theory.AxiomPin
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CredentialSignedEnvelopeController
 
@@ -273,13 +293,7 @@ def prepare {NativeError : Type}
           match envelopeCodec.decode envelopeBytes with
           | none => .error .malformedEnvelope
           | some envelope =>
-              if stateCodec.encode state != stateBytes then
-                .error .malformedState
-              else if registryCodec.encode registry != registryBytes then
-                .error .malformedRegistry
-              else if envelopeCodec.encode envelope != envelopeBytes then
-                .error .malformedEnvelope
-              else if ¬(registry.keys.map (fun key => key.keyId)).Nodup then
+              if ¬(registry.keys.map (fun key => key.keyId)).Nodup then
                 .error .malformedRegistry
               else if state.codecVersion != stateCodecVersion then
                 .error .wrongStateVersion
@@ -411,5 +425,22 @@ theorem SignatureCompletion.issued_of_verified {Error : Type}
   completion.custody.authentic_implies_issued prepared.key prepared.frame
     prepared.envelope.signature
       (completion.native.sound _ _ _ verified)
+
+/-! ## Poles of `SignatureCompletion`
+
+A verifier that never accepts completes against any custody; one that accepts
+everything is refused when nothing authenticates. -/
+
+theorem signatureCompletion_rejectAll :
+    SignatureCompletion (Error := Unit) (fun _ _ _ => .ok false) (fun _ _ _ => False)
+      (fun _ _ _ _ => False) :=
+  ⟨⟨fun _ _ _ h => nomatch h⟩, ⟨fun _ _ _ h => h.elim⟩⟩
+
+theorem signatureCompletion_acceptAll_refused :
+    ¬ SignatureCompletion (Error := Unit) (fun _ _ _ => .ok true) (fun _ _ _ => False)
+      (fun _ _ _ _ => True) :=
+  fun c => c.native.sound [] [] [] rfl
+
+#assert_axioms signatureCompletion_rejectAll signatureCompletion_acceptAll_refused
 
 end Minidregg.Kernel.CredentialSignedEnvelopeController

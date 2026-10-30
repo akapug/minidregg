@@ -1,4 +1,4 @@
-//! The Hermes ROOM RUNNER (PLACE §2.7, §5 row 7): Hermes's controller for one
+//! The Hermes ROOM RUNNER (docs/PLACE.md §2.7, §5 item 7): Hermes's controller for one
 //! room it was summoned into.
 //!
 //! An attach: adopt what the founder handed over (`summon`'s hand-off in the
@@ -548,11 +548,31 @@ pub(crate) fn prepare_resident(tools: &RoomToolsConfig, inbox: &Path, state: &Pa
     let member_changes: Vec<Value> = room["entries"].as_array().into_iter().flatten()
         .filter(|entry| entry["subject"].as_str() != Some(me.as_str())).rev().take(20).cloned().collect();
     let room_status = runner.tools.read("mini_room_status", &json!({}))?;
-    Ok(json!({"type":"mini-hermes-resident-assignment-v1","room":tools.room,"me":me,
+    // The founder's sandbox grant (room fields hermes/tools, hermes/compute);
+    // absent keys keep a room without sandbox tools byte-identical.
+    let tariff = runner.mini(&["credit","--action","tariff","--dir",&runner.ws(),"--room",&tools.room])?;
+    let (sandbox_tools, sandbox_compute) = sandbox_fields(&tariff);
+    let mut assignment = json!({"type":"mini-hermes-resident-assignment-v1","room":tools.room,"me":me,
         "role":manifest["role"],"programName":name,"program":program,"contextProjection":context_projection,
         "docs":manifest["docs"],"every":manifest["every"],"account":tools.account,
         "acceptedHeight":ready["acceptedHeight"],"recentMemberEntries":[],"sourceRequests":entries,"sourceRoom":tail["room"],"requestBinding":binding,
-        "recentMemberChanges":member_changes,"roomStatus":room_status}))
+        "recentMemberChanges":member_changes,"roomStatus":room_status});
+    if sandbox_tools != 0 {
+        assignment["sandboxTools"] = json!(sandbox_tools);
+        assignment["sandboxCompute"] = json!(sandbox_compute);
+    }
+    Ok(assignment)
+}
+
+/// `hermes/tools` (bits 1 files, 2 terminal, 4 Python, 8 the oracle, 16 typed apps) and `hermes/compute`
+/// (sandbox CPU seconds per paid turn) from `credit --action tariff`'s
+/// listing; an unset or undeclared field reads 0.
+pub(crate) fn sandbox_fields(tariff: &str) -> (u64, u64) {
+    let field = |name: &str| tariff.lines()
+        .filter_map(|line| line.trim_start().strip_prefix(name))
+        .find_map(|rest| rest.starts_with(' ').then(|| rest.trim().parse::<u64>().ok()).flatten())
+        .unwrap_or(0);
+    (field("hermes/tools").min(31), field("hermes/compute"))
 }
 
 /// One attach: recover, adopt, return the budget when dismissed, else run the
@@ -666,5 +686,17 @@ mod tests {
             .map(|f| f["function"]["name"].as_str().unwrap().to_owned()).collect();
         assert_eq!(names.len(), 7);
         assert!(names.contains(&"mini_doc_link".to_owned()));
+    }
+}
+
+#[cfg(test)]
+mod sandbox_field_tests {
+    #[test]
+    fn the_sandbox_grant_reads_from_the_tariff_listing() {
+        let listing = "tariff of lab (room 9) at height 40\n  hermes/turn  10\n  hermes/provider 9870003\n  hermes/tools 5\n  hermes/compute 10\n";
+        assert_eq!(super::sandbox_fields(listing), (5, 10));
+        assert_eq!(super::sandbox_fields("  hermes/tools -\n"), (0, 0));
+        assert_eq!(super::sandbox_fields("  hermes/turn 10\n"), (0, 0), "an older room declares neither");
+        assert_eq!(super::sandbox_fields("  hermes/tools 99\n").0, 31);
     }
 }

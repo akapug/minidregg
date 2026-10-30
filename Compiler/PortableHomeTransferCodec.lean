@@ -23,8 +23,10 @@ private def tagStatus : Nat × Bytes → CallStatus
   | (2,outcome) => .reconciled outcome
   | _ => .retained
 
+/-- Retracted, so an unused tag or a payload on a payload-free status (which
+`tagStatus` reads as `.retained` / `.dispatchedUncertain`) is refused, not aliased. -/
 def statusStream : StreamCodec CallStatus :=
-  StreamCodec.xmap (StreamCodec.product StreamCodec.nat bytesStream)
+  StreamCodec.retract (StreamCodec.product StreamCodec.nat bytesStream)
     statusTag tagStatus (by intro status; cases status <;> rfl)
 
 def liabilityStream : StreamCodec Liability :=
@@ -73,7 +75,7 @@ private def tagPhase : Nat → Phase
   | 9 => .activationPending
   | _ => .recoveryRequired
 def phaseStream : StreamCodec Phase :=
-  StreamCodec.xmap StreamCodec.nat phaseTag tagPhase (by intro phase; cases phase <;> rfl)
+  StreamCodec.retract StreamCodec.nat phaseTag tagPhase (by intro phase; cases phase <;> rfl)
 
 def stateStream : StreamCodec State :=
   StreamCodec.xmap (StreamCodec.product bytesStream (StreamCodec.product principalStream (StreamCodec.product principalStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat (StreamCodec.product phaseStream (StreamCodec.product (StreamCodec.option planStream) (StreamCodec.product (StreamCodec.option cutReferenceStream) (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product bytesStream (StreamCodec.product (StreamCodec.list liabilityStream) (StreamCodec.product (StreamCodec.list artifactStream) (StreamCodec.product DurableReceiverCodec.chargeStream (StreamCodec.product (StreamCodec.list StreamCodec.nat) bytesStream))))))))))))))))))
@@ -82,28 +84,32 @@ def stateStream : StreamCodec State :=
 
 def frame : Bytes := "DREGG.PORTABLE.HOME-CONTROL/v1".toUTF8.toList
 def encode (state : State) : Bytes := frame ++ stateStream.encode state
-def decode (bytes : Bytes) : Option State := do
-  let state ← stateStream.toLawful.decode (bytes.drop frame.length)
-  if encode state = bytes then some state else none
 
-@[simp] theorem decode_encode (state : State) : decode (encode state) = some state := by
-  have roundtrip := stateStream.toLawful.decode_encode state
-  change stateStream.toLawful.decode (stateStream.encode state) = some state at roundtrip
-  simp [decode,encode,List.drop_left,roundtrip]
+/-- The frame is CHECKED and `stateStream` is canonical, so the decoder accepts
+exactly the encodings (`decode_canonical`). -/
+def decode (bytes : Bytes) : Option State := (StreamCodec.framed frame stateStream).toLawful.decode bytes
+
+@[simp] theorem decode_encode (state : State) : decode (encode state) = some state :=
+  (StreamCodec.framed frame stateStream).toLawful.decode_encode state
+
+theorem decode_canonical {bytes : Bytes} {state : State}
+    (accepted : decode bytes = some state) : encode state = bytes :=
+  (StreamCodec.framed frame stateStream).toLawful_canonical bytes state accepted
 
 /-- Exact source statement signed by both current-admitted invocations. -/
 def proposalFrame : Bytes := "DREGG.PORTABLE.HOME-TRANSFER-PROPOSAL/v1".toUTF8.toList
 def proposalBytes (plan : Plan) : Bytes := proposalFrame ++ planStream.encode plan
 
-def decodeProposal (bytes : Bytes) : Option Plan := do
-  let plan ← planStream.toLawful.decode (bytes.drop proposalFrame.length)
-  if proposalBytes plan = bytes then some plan else none
+def decodeProposal (bytes : Bytes) : Option Plan :=
+  (StreamCodec.framed proposalFrame planStream).toLawful.decode bytes
 
 @[simp] theorem decodeProposal_encode (plan : Plan) :
-    decodeProposal (proposalBytes plan) = some plan := by
-  have roundtrip := planStream.toLawful.decode_encode plan
-  change planStream.toLawful.decode (planStream.encode plan) = some plan at roundtrip
-  simp [decodeProposal,proposalBytes,roundtrip]
+    decodeProposal (proposalBytes plan) = some plan :=
+  (StreamCodec.framed proposalFrame planStream).toLawful.decode_encode plan
+
+theorem decodeProposal_canonical {bytes : Bytes} {plan : Plan}
+    (accepted : decodeProposal bytes = some plan) : proposalBytes plan = bytes :=
+  (StreamCodec.framed proposalFrame planStream).toLawful_canonical bytes plan accepted
 
 structure Envelope where
   plan : Plan
@@ -118,11 +124,12 @@ def encodeEnvelope (envelope : Envelope) : Bytes :=
   (StreamCodec.list bytesStream).encode
     [proposalBytes envelope.plan,envelope.ownerSigned,envelope.renterSigned]
 
+/-- Both the list and the proposal are canonical, so an accepted envelope is
+the encoding of what it decodes to (`decodeEnvelope_canonical`). -/
 def decodeEnvelope (bytes : Bytes) : Option Envelope := do
   let [proposal,owner,renter] ← (StreamCodec.list bytesStream).toLawful.decode bytes | none
   let plan ← decodeProposal proposal
-  let envelope : Envelope := ⟨plan,owner,renter⟩
-  if encodeEnvelope envelope = bytes then some envelope else none
+  some ⟨plan,owner,renter⟩
 
 @[simp] theorem decodeEnvelope_encode (envelope : Envelope) :
     decodeEnvelope (encodeEnvelope envelope) = some envelope := by
@@ -134,7 +141,31 @@ def decodeEnvelope (bytes : Bytes) : Option Envelope := do
   dsimp [encodeEnvelope] at roundtrip
   simp [decodeEnvelope,roundtrip,encodeEnvelope]
 
+theorem decodeEnvelope_canonical {bytes : Bytes} {envelope : Envelope}
+    (accepted : decodeEnvelope bytes = some envelope) : encodeEnvelope envelope = bytes := by
+  unfold decodeEnvelope at accepted
+  cases listed : (StreamCodec.list bytesStream).toLawful.decode bytes with
+  | none => simp [listed] at accepted
+  | some items =>
+    have listBytes := (StreamCodec.list bytesStream).toLawful_canonical bytes items listed
+    match items, listBytes, listed with
+    | [proposal,owner,renter], listBytes, listed =>
+      cases proposed : decodeProposal proposal with
+      | none => simp [listed, proposed] at accepted
+      | some plan =>
+        simp only [listed, proposed, bind, Option.bind, Option.some.injEq] at accepted
+        subst accepted
+        rw [← decodeProposal_canonical proposed] at listBytes
+        exact listBytes
+    | [], _, listed => simp [listed] at accepted
+    | [_], _, listed => simp [listed] at accepted
+    | [_,_], _, listed => simp [listed] at accepted
+    | _::_::_::_::_, _, listed => simp [listed] at accepted
+
 #assert_axioms decodeProposal_encode
 #assert_axioms decodeEnvelope_encode
 #assert_axioms decode_encode
+#assert_axioms decode_canonical
+#assert_axioms decodeProposal_canonical
+#assert_axioms decodeEnvelope_canonical
 end Minidregg.Compiler.PortableHomeTransferCodec

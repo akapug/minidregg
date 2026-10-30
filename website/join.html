@@ -3,68 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Join · Mini</title>
-<meta name="description" content="How to get an account on Mini's public node, what works there, and what does not.">
+<meta http-equiv="refresh" content="0; url=https://demo.dregg.online/join">
+<link rel="canonical" href="https://demo.dregg.online/join">
 <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
-<header class="site">
-<div class="wrap wide">
-<a class="brand" href="index.html">Mini</a>
-<nav class="primary" aria-label="Site">
-<ul>
-<li><a href="index.html">Overview</a></li>
-<li><a href="language.html">Language</a></li>
-<li><a href="laws.html">Laws</a></li>
-<li><a href="architecture.html">Architecture</a></li>
-<li><a href="status.html">Status</a></li>
-<li><a href="join.html" aria-current="page">Join</a></li>
-<li><a href="https://github.com/emberian/minidregg">Source</a></li>
-</ul>
-</nav>
-</div>
-</header>
 <main id="main">
 <div class="wrap">
 <h1>Join</h1>
-<p class="lede">Accounts on the public node are given by hand. The guide is
-<a href="https://github.com/emberian/minidregg/blob/main/deploy/shell/FRIENDS.md">FRIENDS.md</a>;
-read it first.</p>
-<ol>
-<li>Make an SSH key for Mini.</li>
-<li>Send ember its public half and the session name you want.</li>
-<li>Once enrolled, SSH in to the <code>mini&gt;</code> prompt.</li>
-</ol>
-
-<h2>On the public node</h2>
-<p><strong>Works</strong> (shell journey J0–J8): keys, resources, delegation and revocation,
-JSON laws including locks, retries, history, documents, boards.</p>
-<p><strong>Not yet:</strong> rooms, chat, private rooms, key rotation, proxy mode, the
-librarian, paying to enrol (50 DREGG a week; built and run on fixtures, not deployed).</p>
-<div class="note">
-<p>The devnet is re-genesised when its data model or kernel wire changes: your SSH
-and signing keys stay, and everything you made is erased. Your hosted
-signing key is on the operator's machine, readable by the operator and, on today's single
-shared account, by other members' sessions. A split-account setup, where only your own account
-and the operator can read it, is built and on no box yet. Keep nothing precious behind it.</p>
-</div>
-
-<h2>Contributing</h2>
-<p>Read the <a href="https://github.com/emberian/minidregg/blob/main/README.md">README</a>,
-<a href="https://github.com/emberian/minidregg/blob/main/AGENTS.md">AGENTS.md</a> and the
-<a href="https://github.com/emberian/minidregg/blob/main/docs/DEVELOPING.md">developer
-guide</a>. Nothing in Mini has users, so a format change is a rebuild: an old shape must
-refuse to load, and the commit says what it breaks.</p>
-
+<p>The join page is at <a href="https://demo.dregg.online/join">demo.dregg.online/join</a>.
+If you are not taken there, follow the link. The demo shuts down on 11 November 2026.</p>
+<p><a href="index.html">Back to the overview</a></p>
 </div>
 </main>
-<footer class="site">
-<div class="wrap wide">
-<p>Every claim here maps to a file at main
-(<a href="https://github.com/emberian/minidregg/blob/main/website/SOURCES.md">SOURCES.md</a>).
-The repository overrides this site.</p>
-</div>
-</footer>
 </body>
 </html>

@@ -32,9 +32,15 @@ HOST=${GRAIN_HOST:-$BIN/minidregg-host}
 GRAINS_ROOT=${GRAINS_ROOT:?store-specific grains root required}
 # Explicit native CLI/profile pin; never a native environment-selected endpoint.
 BROKER_SOCKET=${BROKER_SOCKET:?store-specific broker socket required}
+# Every resident `mini` starts (consent, codec) keeps its socket, lock and PID file in the world's
+# own anchor directory, never in the operator's shared $HOME: worlds share no state, and
+# stop-residents.sh stops a world's residents from these PID files alone. Short on purpose:
+# a Unix socket path is bounded.
+MINI_CONSENT_ANCHOR_DIR=${MINI_CONSENT_ANCHOR_DIR:-$RUN/a}
+mkdir -p -m 700 "$MINI_CONSENT_ANCHOR_DIR"
+export MINI_CONSENT_ANCHOR_DIR
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
-BWRAP=${BWRAP:-/usr/bin/bwrap}
 STORE=$RUN/store
 WR=$STORE/base/workroom
 CONFIG=$WR/deployment/pinned-config.json
@@ -76,7 +82,9 @@ state_paths() {
       }
   fi
 }
-state_paths
+# Stopping the recorded Store services needs their PID/socket identities only.
+# A resumed teardown may already have removed the grain profile and volumes.
+[ "$MODE" = stop-services ] || state_paths
 # Resource coordinates: GRAIN_A..GRAIN_I are the two-digit prefixes of
 # instance a..i's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
 # its size class (S, M or L); IMPORT_X (an export directory) with IMPORT_KEY
@@ -119,22 +127,55 @@ confirmed() {
 service_up() {
   name=$1 socket=$2 mode=$3
   pidfile=$RUN/sock/$name.pid
+  service_binary=$MINI controller_uid=
+  if [ "$mode" = serve-public-proxy ] && [ -n "${SPK_PUBLIC_LISTENER_RECEIPT:-}" ]; then
+    # Only the fixed installer registration selects a distinct public listener.
+    # The ordinary clients and the private operator service keep their pins.
+    jq -e --arg socket "$socket" --arg root "$GRAINS_ROOT/controller/public-listener/mini" \
+      --argjson operator "$(id -u)" '
+      .publicListener.socket == $socket and .publicListener.binary == $root and
+      .publicListener.operatorUid == $operator and
+      (.publicListener.controllerUid | type == "number" and . > 0 and floor == .) and
+      (.publicListener.binarySha256 | test("^[0-9a-f]{64}$"))' "$SPK_PUBLIC_LISTENER_RECEIPT" >/dev/null ||
+      fail 'public listener registration differs'
+    service_binary=$(jq -er .publicListener.binary "$SPK_PUBLIC_LISTENER_RECEIPT")
+    controller_uid=$(jq -er .publicListener.controllerUid "$SPK_PUBLIC_LISTENER_RECEIPT")
+    [ -f "$service_binary" ] && [ ! -L "$service_binary" ] &&
+      [ "$(stat -c '%u:%h' "$service_binary")" = 0:1 ] &&
+      [ "$(sha "$service_binary")" = "$(jq -er .publicListener.binarySha256 "$SPK_PUBLIC_LISTENER_RECEIPT")" ] ||
+      fail 'public listener registered binary differs'
+  fi
+  service_pin=$(printf '%s\n' "$mode" "$service_binary" "$(sha "$service_binary")" "$controller_uid" | sha256sum | cut -d ' ' -f 1)
   if [ -S "$socket" ] && [ -s "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
     # Do not accept the old independent public native session as this proxy.
     [ -s "$pidfile.mode" ] && [ "$(cat "$pidfile.mode")" = "$mode" ] ||
       fail "$name service mode differs; retain this fixture and use a fresh one"
+    [ -s "$pidfile.pin" ] && [ "$(cat "$pidfile.pin")" = "$service_pin" ] || fail "$name live service pin differs"
+    service_identity check "$pidfile.identity.json" "$(cat "$pidfile")" "$socket" "$service_binary" ||
+      fail "$name live process/socket identity differs"
     return 0
   fi
   mkdir -p -m 700 "${socket%/*}"
   rm -f "$socket"
+  if [ -f "$pidfile.identity.json" ]; then
+    archived_identity=$pidfile.identity.$(sha "$pidfile.identity.json").json
+    if [ -e "$archived_identity" ]; then
+      cmp "$pidfile.identity.json" "$archived_identity" || fail 'prior service identity archive differs'
+      rm "$pidfile.identity.json"
+    else
+      mv "$pidfile.identity.json" "$archived_identity"
+    fi
+  fi
   case "$mode" in
     serve-operator)
       set -- "$MINI" serve-operator --host "$HOST" --config "$CONFIG" --socket "$socket" ;;
     serve-public-proxy)
-      set -- "$MINI" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG" ;;
+      set -- "$service_binary" serve-public-proxy --socket "$socket" --upstream "$OSOCK" --config "$CONFIG"
+      [ -z "$controller_uid" ] || set -- "$@" --controller-uid "$controller_uid" ;;
     *) fail "unsupported fixture service mode $mode" ;;
   esac
   printf '%s\n' "$mode" >"$pidfile.mode"
+  printf '%s\n' "$service_pin" >"$pidfile.pin"
   setsid "$@" >"$RUN/sock/$name.log" 2>&1 </dev/null &
   echo "$!" >"$pidfile"
   tick=0
@@ -143,6 +184,43 @@ service_up() {
     tick=$((tick + 1)); [ "$tick" -lt 600 ] || fail "$name socket timeout"
     sleep 0.5
   done
+  service_identity capture "$pidfile.identity.json" "$(cat "$pidfile")" "$socket" "$service_binary"
+}
+
+service_identity() {
+  python3 - "$@" <<'PYSERVICE'
+import hashlib,json,os,pathlib,signal,stat,sys
+action,record,pid,socket,binary=sys.argv[1:]
+p=pathlib.Path('/proc')/pid; s=pathlib.Path(socket); record=pathlib.Path(record)
+def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
+if action in ('capture','check','stop'):
+    pidfd=None
+    if action=='stop':
+        try: pidfd=os.pidfd_open(int(pid))
+        except ProcessLookupError: raise SystemExit(0)
+    fields=(p/'stat').read_text().rsplit(')',1)[1].split()
+    sm=s.lstat()
+    assert p.stat().st_uid == os.getuid() and stat.S_ISSOCK(sm.st_mode) and sm.st_uid == os.getuid()
+    value={'pid':int(pid),'startTicks':fields[19], 'executableSha256':digest(p/'exe'),
+           'socket':str(s),'socketDevice':sm.st_dev,'socketInode':sm.st_ino}
+    assert value['executableSha256']==digest(pathlib.Path(binary))
+    if action=='capture': record.write_text(json.dumps(value,sort_keys=True)+'\n')
+    else: assert value==json.loads(record.read_bytes())
+    if pidfd is not None:
+        signal.pidfd_send_signal(pidfd,signal.SIGTERM)
+        os.close(pidfd)
+else:
+    value=json.loads(record.read_bytes())
+    assert value['pid']==int(pid) and value['socket']==str(s)
+    if p.exists():
+        fields=(p/'stat').read_text().rsplit(')',1)[1].split()
+        assert fields[19]!=value['startTicks'] or fields[0]=='Z', 'recorded service remains alive'
+    if s.exists():
+        sm=s.lstat()
+        assert stat.S_ISSOCK(sm.st_mode) and sm.st_uid==os.getuid()
+        assert (sm.st_dev,sm.st_ino)==(value['socketDevice'],value['socketInode']), 'socket replacement refused'
+        s.unlink()
+PYSERVICE
 }
 
 services() {
@@ -158,7 +236,25 @@ stop_services() {
   for name in participant operator; do
     pidfile=$RUN/sock/$name.pid
     [ -s "$pidfile" ] || continue
-    kill "$(cat "$pidfile")" 2>/dev/null || :
+    if [ -f "$pidfile.identity.json" ]; then
+      binary=$MINI
+      if [ "$name" = participant ] && [ -n "${SPK_PUBLIC_LISTENER_RECEIPT:-}" ]; then
+        binary=$(jq -er .publicListener.binary "$SPK_PUBLIC_LISTENER_RECEIPT")
+      fi
+      if kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        service_identity stop "$pidfile.identity.json" "$(cat "$pidfile")" "$RUN/sock/$name/host.sock" "$binary" ||
+          fail "$name stop identity differs"
+      fi
+    else
+      kill "$(cat "$pidfile")" 2>/dev/null || :
+    fi
+    if [ -f "$pidfile.identity.json" ]; then
+      tick=0
+      until service_identity remove-stale "$pidfile.identity.json" "$(cat "$pidfile")" "$RUN/sock/$name/host.sock" "$MINI" 2>/dev/null; do
+        tick=$((tick+1)); [ "$tick" -lt 100 ] || fail "$name stop/owned socket cleanup timeout"
+        sleep .1
+      done
+    fi
     rm -f "$pidfile"
   done
 }
@@ -337,15 +433,25 @@ delegate_observe() (
   confirmed "$D-attempt/outcome.json"
 )
 
-# share LABEL APP SESSION TICKET CAP NONCE KIND: session birth, event22 ticket
-# and event28 enrollment for participant 8, then `spk-host grain route`.
+# share LABEL APP SESSION TICKET CAP NONCE KIND [ROUTE]: session birth, event22
+# ticket and event28 enrollment for participant 8, then `spk-host grain route`.
+# LABEL is the app's letter, or letter+digit for a second browser session on the
+# same grain (its own session, ticket, route and tokens; ROUTE names its route).
 share() (
-  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7
+  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6 kind=$7 route=${8:-owner-$7}
+  expected_host=grain.test
+  if [ "$label" = b ] && [ -n "${GRAIN_EXPECTED_HOST_B:-}" ]; then
+    expected_host=$GRAIN_EXPECTED_HOST_B
+    case "$expected_host" in localhost:*) ;; *) fail "browser-B expected host must be localhost with an explicit port" ;; esac
+    host_port=${expected_host#localhost:}
+    case "$host_port" in ''|0*|*[!0-9]*) fail "browser-B port must be canonical decimal" ;; esac
+    [ "$host_port" -ge 1024 ] && [ "$host_port" -le 65535 ] || fail "browser-B port out of range"
+  fi
   descriptor=$((session + 1)) pkg=$((app + 1))
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   birth_session "$label" "$nonce" "$app" "$session" "$kind" "$cap"
   pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
@@ -403,16 +509,44 @@ share() (
   fi
   delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
     "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
-  jq -n --arg name "owner-$kind" --arg session "$EV/$label-session-author/source.json" \
+  case $route in owner-*) display="Grain owner" handle=owner ;; *) display="Second browser" handle=${route%%-*} ;; esac
+  jq -n --arg host "$expected_host" --arg name "$route" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
-    --arg seed "$WR/tool.key" \
+    --arg seed "$WR/tool.key" --arg display "$display" --arg handle "$handle" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
-    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
-     displayName:"Grain owner",preferredHandle:"owner",sessionSource:$session,
+    {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:$host,
+     displayName:$display,preferredHandle:$handle,sessionSource:$session,
      sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
     >"$EV/$label-route-request.json"
   "$SPK_HOST" grain route "$PROFILE" "$app" "$EV/$label-route-request.json"
+)
+
+# register LABEL APP ROUTE: a route bound after START is served only once the
+# running resident admits it through its own route control
+# (deploy/spk-host/HOT-ROUTE-ENROLLMENT.md); the session generation is the exact
+# one LABEL's enrollment admitted.
+register() (
+  label=$1 app=$2 route=$3
+  plan=$(ls -d "$EV/$label"-enroll-g*/plan-inspected.json | tail -1)
+  gen=$(jq -er .enrollment.appGeneration "$plan") sgen=$(jq -er .enrollment.sessionGeneration "$plan")
+  dir=$STATE/apps/$app/routes/$route
+  R=$EV/$label-register-g$gen
+  [ ! -s "$R/reply.json" ] || exit 0
+  mkdir -p -m 700 "$R"
+  jq -n --arg nonce "$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')" --arg app "$app" --arg gen "$gen" \
+    --arg sgen "$sgen" --arg dir "$dir" --arg custody "$dir/dispatch-custody.json" \
+    --arg custodySha "$(sha "$dir/dispatch-custody.json")" --arg custodianSha "$(sha "$dir/custodian.json")" \
+    --arg handle "${route%%-*}" '
+    {protocol:"mini-spk-route-register-v1",registrationNonceHex:$nonce,expectedApp:$app,
+     expectedAppGeneration:$gen,expectedSessionGeneration:$sgen,directory:$dir,dispatchCustody:$custody,
+     dispatchCustodySha256:$custodySha,custodianSha256:$custodianSha,displayName:"Second browser",
+     preferredHandle:$handle}' >"$R/request.json"
+  chmod 600 "$R/request.json"
+  "$SPK_HOST" grain register-route --socket "$STATE/apps/$app/g$gen/route-control.sock" \
+    --request "$R/request.json" >"$R/reply.json.new"
+  mv "$R/reply.json.new" "$R/reply.json"
+  [ -S "$dir/http.sock" ] || fail "registered route $route has no socket"
 )
 
 # enroll LABEL APP SESSION TICKET CAP NONCE: bind participant 8's session to
@@ -421,9 +555,9 @@ share() (
 enroll() (
   label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6
   pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
-    "$EV/$label-app-author/source.json")
+    "$EV/${label%[0-9]}-app-author/source.json")
   pkgdir=$STATE/apps/$app/install/launch-descriptor/package-v1
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
@@ -464,7 +598,11 @@ enroll() (
       --dir "$EV/$label-close-g$gen-attempt" >"$EV/$label-close-g$gen.stdout"
     confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
   fi
-  count=$(jq -er .receipt.acceptedCount "$EV/$label-ticket-$ticket/issue/receipt-anchor.json")
+  # The share issued the ticket under the label this enrollment carries (a repeat enrolls under
+  # the base label a; the second session shares and enrolls as b2).
+  anchor=$EV/$label-ticket-$ticket/issue/receipt-anchor.json
+  [ -s "$anchor" ] || fail "enroll $label: the ticket's issue receipt anchor is missing: $anchor"
+  count=$(jq -er .receipt.acceptedCount "$anchor") || fail "enroll $label: $anchor has no acceptedCount"
   jq -n --argjson basis "$ROLE_BASIS" --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
     --arg dcap "$((cap + 2))" --arg scap "$cap" --arg mcap "$pkgcap" \
     --arg schema "$schema" --arg version "$version" --arg nonce "$((nonce + 3))" '
@@ -477,7 +615,9 @@ enroll() (
   if [ ! -e "$N/seal.json" ]; then
     rm -rf "$N"
     "$MINI" session-enrollment-plan --host "$HOST" --config "$CONFIG" \
-      --operator-socket "$OSOCK" --request "$N-request.json" --dir "$N" >"$N-plan.stdout"
+      --operator-socket "$OSOCK" --request "$N-request.json" --dir "$N" >"$N-plan.stdout" ||
+      fail "enroll $label: session-enrollment-plan was refused (see its stderr); no plan was written"
+    [ -s "$N/plan.bin" ] || fail "enroll $label: session-enrollment-plan wrote no plan.bin"
     approve "$N/plan-inspected.json" headerHex "$N-approval.json" "$(jq -nc \
       --arg r "$(sha "$N/request.bin")" --arg p "$(sha "$N/plan.bin")" \
       --arg i "$(sha "$N/plan-inspected.json")" '
@@ -497,10 +637,11 @@ enroll() (
 # (curl header arguments, one per line): the API bearer, or the browser
 # session cookie the bootstrap would set (the operator owns the route dir).
 cred() {
+  expected_host=$(jq -er .expectedHost "$2/custodian.json")
   case "$1" in
     api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
     web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
-      -H "Origin: https://grain.test" ;;
+      -H "Origin: https://$expected_host" ;;
     *) echo "unknown route kind $1" >&2; return 1 ;;
   esac
 }
@@ -510,28 +651,30 @@ cred() {
 http_post() (
   label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
   dir=$STATE/apps/$app/routes/owner-$kind
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Host: $expected_host" "$@" -X "$method" \
     -H "Content-Type: $type" --data-binary "$body" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # One authenticated request through the resident's route: the resident asks
 # Mini to author, sign and admit it (op36/37/34), then delivers it over fd3.
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
-  dir=$STATE/apps/$app/routes/owner-$kind
+  dir=$STATE/apps/$app/routes/${5:-owner-$kind}
+  expected_host=$(jq -er .expectedHost "$dir/custodian.json")
   cred "$kind" "$dir" >"$EV/$label.cred"
   set --
   while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
   rm -f "$EV/$label.cred"
   curl -sS --fail-with-body --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" "$@" \
-    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+    -H "Host: $expected_host" "$@" \
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://$expected_host$path"
 )
 
 # floor APP: the M11 floor as the running app sees it. Every process in the
@@ -568,7 +711,7 @@ floor() (
           grep -q '^Seccomp:[[:space:]]*2$' "$status" ||
           { echo "resident no_new_privs/seccomp floor absent" >&2; exit 1; }
         ;;
-      bwrap) ;;
+      bwrap|mini-grain-bwra) ;; # the kernel truncates task names to 15 bytes
       *) grep -q '^Seccomp:[[:space:]]*2$' "$status" &&
            grep -q '^NoNewPrivs:[[:space:]]*1$' "$status" &&
            grep -q '^CapEff:[[:space:]]*0000000000000000$' "$status" &&
@@ -580,12 +723,77 @@ floor() (
   echo "floor-held app-processes=$found unit=$unit"
 )
 
+# edge APP KIND: the public edge in front of the resident's route socket (ruling D9;
+# WEB-SPK-PUBLIC section 4.7): a TLS terminator (Caddy, CADDY) on a loopback port with a
+# throwaway certificate for grain.test, reverse-proxying to the route's http.sock. Through
+# it: the authenticated GET answers 200; the same GET without the credential is refused
+# (not 2xx); a WebSocket open (WS_PATH_X, default /m6grain/ws) reaches 101. Caddy is this
+# phase's child, stopped by its PID file. Not measured here: the Store's op34 count per GET
+# and the edge running under a uid other than the operator's (the peer-gid change, L3).
+edge_check() (
+  app=$1 kind=$2 ws=$3
+  dir=$STATE/apps/$app/routes/owner-$kind
+  [ -n "${CADDY:-}" ] && [ -x "$CADDY" ] || { echo "edge phase needs CADDY (a caddy executable)" >&2; exit 1; }
+  [ -S "$dir/http.sock" ] || { echo "no route socket $dir/http.sock" >&2; exit 1; }
+  e=$RUN/edge-$app
+  rm -rf "$e"; mkdir -m 700 "$e" "$e/data" "$e/config"
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=grain.test \
+    -addext subjectAltName=DNS:grain.test -keyout "$e/key.pem" -out "$e/cert.pem" 2>"$e/openssl.err" \
+    || { echo "openssl could not make the test certificate: $(tail -1 "$e/openssl.err")" >&2; exit 1; }
+  port=$((20000 + $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % 20000))
+  cat >"$e/Caddyfile" <<CADDYFILE
+{
+	admin off
+	auto_https off
+	storage file_system $e/data
+}
+https://grain.test:$port {
+	bind 127.0.0.1
+	tls $e/cert.pem $e/key.pem
+	reverse_proxy unix/$dir/http.sock {
+		header_up Host grain.test
+	}
+}
+CADDYFILE
+  XDG_DATA_HOME=$e/data XDG_CONFIG_HOME=$e/config HOME=$e \
+    "$CADDY" run --config "$e/Caddyfile" --adapter caddyfile >"$e/caddy.log" 2>&1 &
+  echo $! >"$e/caddy.pid"
+  trap 'kill "$(cat "$e/caddy.pid")" 2>/dev/null; wait 2>/dev/null' EXIT
+  url=https://grain.test:$port
+  tls="--resolve grain.test:$port:127.0.0.1 --cacert $e/cert.pem"
+  tries=0
+  until curl -s $tls -o /dev/null --max-time 2 "$url/"; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 50 ] || { echo "edge did not listen on 127.0.0.1:$port: $(tail -1 "$e/caddy.log")" >&2; exit 1; }
+    kill -0 "$(cat "$e/caddy.pid")" 2>/dev/null || { echo "caddy exited: $(tail -1 "$e/caddy.log")" >&2; exit 1; }
+    sleep 0.2
+  done
+  cred "$kind" "$dir" >"$e/cred"
+  set --
+  while IFS= read -r arg; do set -- "$@" "$arg"; done <"$e/cred"
+  rm -f "$e/cred"
+  authed=$(curl -sS $tls --max-time 900 "$@" -o "$EV/edge-$app-authed.body" -w '%{http_code}' "$url$getp")
+  anon=$(curl -sS $tls --max-time 900 -o "$EV/edge-$app-anon.body" -w '%{http_code}' "$url$getp")
+  wsc=$(curl -sS $tls --http1.1 --max-time 10 "$@" -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: bWluaS1lZGdlLXByb2JlLQ==' \
+    -o /dev/null -w '%{http_code}' "$url$ws" 2>/dev/null || :)
+  printf 'authed=%s anon=%s websocket=%s port=%s\n' "$authed" "$anon" "$wsc" "$port" >"$EV/edge-$app.result"
+  [ "$authed" = 200 ] || { echo "edge: authenticated GET $getp answered $authed, not 200" >&2; exit 1; }
+  case $anon in 2??) echo "edge: GET $getp without the credential answered $anon" >&2; exit 1 ;; esac
+  [ "$wsc" = 101 ] || { echo "edge: WebSocket open $ws answered ${wsc:-nothing}, not 101" >&2; exit 1; }
+  echo "edge-held authed=200 anon=$anon websocket=101 via 127.0.0.1:$port"
+)
+
 write_profile() {
   state_paths
   if [ -n "$PROFILE" ]; then
     printf '%s\n' "$PROFILE_RESULT"
     return 0
   fi
+  case "${MINI_AGENT_ROUTE_PROFILE:-standard-v1}" in
+    standard-v1|shared-64-v1) ;;
+    *) fail "unknown operator agent route profile" ;;
+  esac
   [ ! -e "$EV/init-store.json" ] || fail "Store init already attempted; inspect retained evidence"
   if [ -n "${BROKER_SOCKET:-}" ]; then
     [ "$BROKER_SOCKET" = "$GRAINS_ROOT/runtime-${GRAINS_ROOT##*/}/broker.sock" ] || fail "isolated broker must belong to grains root"
@@ -601,20 +809,26 @@ write_profile() {
   PROFILE=$STATE/grain-host.json
   [ ! -e "$PROFILE" ] || fail "profile already exists without this fixture result; preserve it"
   semantics=$(jq -er .semantics "$WR/operator-profile.json")
+  # The physical bwrap spk-host's sandbox runs (MINI_BWRAP selects; see resolve-bwrap), pinned into the profile.
+  BWRAP=$(sh "$HERE/../../deploy/grain-host/resolve-bwrap") || fail "no usable bwrap for the grain sandbox"
   jq -n --arg root "$STATE" --arg grains "$GRAINS_ROOT" --arg host "$HOST" --arg broker "$broker" \
     --arg hostSha "$(sha "$HOST")" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" --arg socket "$OSOCK" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" \
     --arg seed "$WR/tool.key" --arg completion "$STORE/custody/completion.seed" \
     --arg semantics "$semantics" --arg bwrap "$BWRAP" --arg bwrapSha "$(sha "$BWRAP")" \
-    --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" '
+    --arg spkHost "$SPK_HOST" --arg spkHostSha "$(sha "$SPK_HOST")" \
+    --arg importProfile "${MINI_IMPORT_PROFILE:-standard-v1}" \
+    --arg agentRouteProfile "${MINI_AGENT_ROUTE_PROFILE:-standard-v1}" '
     {protocol:"mini-spk-grain-host-v2",stateRoot:$root,grainsRoot:$grains,
      miniHost:$host,miniHostSha256:$hostSha,miniConfig:$config,miniConfigSha256:$configSha,
      miniOperatorSocket:$socket,managementSubject:"8",managementKeyEpoch:"2",
      managementPublicKeyHex:$public,managementSeed:$seed,
      completionCustodianSeed:$completion,completionSemantics:$semantics,
      bwrap:$bwrap,bwrapSha256:$bwrapSha,spkHost:$spkHost,spkHostSha256:$spkHostSha} +
-    {brokerSocket:$broker}' >"$PROFILE"
+    {brokerSocket:$broker} +
+    (if $importProfile == "standard-v1" then {} else {importProfile:$importProfile} end) +
+    (if $agentRouteProfile == "standard-v1" then {} else {agentRouteProfile:$agentRouteProfile} end)' >"$PROFILE"
   chmod 600 "$PROFILE"
   jq -n --arg profile "$PROFILE" --arg state "$STATE" --arg grains "$GRAINS_ROOT" --arg broker "$broker" \
     --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
@@ -644,14 +858,18 @@ run_phase() {
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
   case "$letter" in
     a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;;
-    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;; *) fail "unknown phase $1" ;;
+    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;;
+    # j..p: the featured market set (featured-qualify.sh), resource prefixes 61..67.
+    j) P=61 i=10 ;; k) P=62 i=11 ;; l) P=63 i=12 ;; m) P=64 i=13 ;; n) P=65 i=14 ;;
+    o) P=66 i=15 ;; p) P=67 i=16 ;; *) fail "unknown phase $1" ;;
   esac
-  upper=$(printf '%s' "$letter" | tr a-i A-I)
+  upper=$(printf '%s' "$letter" | tr a-p A-P)
   eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-} spk=\${SPK_$upper:-\$SPK}"
   eval "kind=\${KIND_$upper:-api} getp=\${GET_PATH_$upper:-/v1/health}"
   eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
   eval "postm=\${POST_METHOD_$upper:-POST} pollp=\${POLL_PATH_$upper:-'/m6grain/json?poll=1&since=all'}"
   eval "postb=\${POST_BODY_$upper:-'published by $letter before STOP'}"
+  eval "wsp=\${WS_PATH_$upper:-/m6grain/ws}"
   # The owner's role basis in the share ceiling and the enrollment: role 0
   # (sntfy's only role) unless ROLE_BASIS_X says otherwise, e.g.
   # {"type":"allAccess"} for a package that declares no roles.
@@ -676,14 +894,25 @@ run_phase() {
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
           "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class"
       fi ;;
-    share) step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind" ;;
-    enroll) step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
-      $((base + 2000 + ${n:-1} * 1000)) ;;
+    # A trailing s (share-bs, enroll-bs, register-bs, get-bs) is a second browser session on the
+    # same grain (a trailing digit is a repeat after a restart: enroll-a2, get-a2): session ${P}50, ticket ${P}30, capabilities 3${i}51.. (ticket
+    # 3${i}81..), route guest2-KIND, nonces from base + 6000.
+    share) if [ "$n" = s ]; then
+        step "$phase" share "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 6000)) "$kind" "guest2-$kind"
+      else step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind"; fi ;;
+    enroll) if [ "$n" = s ]; then
+        step "$phase" enroll "${letter}2" "$app" "${P}50" "${P}30" "3${i}51" $((base + 7000))
+      else step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
+        $((base + 2000 + ${n:-1} * 1000)); fi ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
-    get) step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" ;;
+    register) [ "$n" = s ] || fail "register applies to a second session (register-Xs)"
+      step "$phase" register "${letter}2" "$app" "guest2-$kind" ;;
+    get) if [ "$n" = s ]; then step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" "guest2-$kind"
+      else step "$phase" http_get "$phase-body" "$app" "$getp" "$kind"; fi ;;
     post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
     poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
     floor) step "$phase" floor "$app" ;;
+    edge) step "$phase" edge_check "$app" "$kind" "$wsp" ;;
     *) fail "unknown phase $1" ;;
   esac
 }

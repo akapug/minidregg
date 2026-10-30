@@ -2,7 +2,7 @@
 
 The combined certified Linux host SHA-256
 `d413081bb6c6ac1c0699b5fdc22cf3a13fb87930ff49ac147ae994e2c364e7a3`
-uses `Compiler/Sp800185Cshake256Core.lean` SHA-256 `aa4e9294…` and the same
+uses `Theory/Sp800185Cshake256Core.lean` SHA-256 `aa4e9294…` and the same
 five exact-readback module bytes as the pre-UInt64 exact host. The certified
 Mac counterpart has SHA-256
 `a7dd4605ef80d49a3cc9a9e5eeaed5cb8fc4bac4554ce7ea7562475aaa70717f`.

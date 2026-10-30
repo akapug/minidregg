@@ -2,13 +2,13 @@
 # Kernel.DurableCheckpoint — resume a durable image from a materialized state
 
 A checkpoint is the statement "the replay of the first `h` accepted records is
-this state" (DATAMODEL §3.3, §4.4). The host reopens by materializing that
+this state" (docs/DATAMODEL.md §3.3, §4.4). The host reopens by materializing that
 state and replaying only the records after `h`; the genesis replay survives as
 `Image.restore` (and, with signature re-admission, as the operator `audit`).
 
 What a checkpoint cannot certify is that the prefix was correctly admitted.
 That is trust in the host's own past execution, authenticated by the host-held
-MAC in `Compiler.DurableCheckpointCodec` (DATAMODEL §6 Q1): an attacker who can
+MAC in `Compiler.DurableCheckpointCodec` (docs/DATAMODEL.md §6 Q1): an attacker who can
 forge that MAC can already forge the host's receipts, so no new trust is
 introduced. The theorems below say what the checkpoint buys under that trust:
 
@@ -24,7 +24,26 @@ consumed nullifiers and the remaining allowance. Journal and history are not
 state: they are recovered from the retained log prefix, which the MAC chain in
 the codec authenticates.
 -/
-import Kernel.DurableReceiver
+module
+
+public import Kernel.DurableReceiver
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DurableCheckpoint
 
@@ -49,6 +68,7 @@ def IntentRecord.erase (record : IntentRecord) :
   nullifiers := record.nullifiers
   exactCharge := record.exactCharge
   event := { writes := record.writes, readGuards := record.readGuards, event := record.event }
+  credit := record.credit
 
 theorem IntentRecord.erase_bind {rootBytes : List UInt8 → Digest} {record : IntentRecord}
     {intent : DataIntent rootBytes} (bound : record.bind? rootBytes = some intent) :
@@ -96,8 +116,8 @@ theorem tableLookup_rootTable (rootBytes : List UInt8 → Digest)
       · simp only [rootTable, List.map_cons, tableLookup, Seed.lookup, same, ↓reduceIte]
         exact ih
 
-/-- The snapshot at the checkpoint. Journal (newest first) and history
-(chronological) come from the retained prefix exactly as `install` builds them. -/
+/-- The snapshot at the checkpoint. Journal and history (both newest first)
+come from the retained prefix exactly as `install` builds them. -/
 def State.snapshot (rootBytes : List UInt8 → Digest) (state : State)
     (prefixRecords : List IntentRecord) : DataSnapshot rootBytes :=
   let table := rootTable rootBytes state.cells
@@ -110,7 +130,7 @@ def State.snapshot (rootBytes : List UInt8 → Digest) (state : State)
           | none => absentRoot
         consumed := fun nullifier => decide (nullifier ∈ spent)
         available := state.available
-        history := prefixRecords.map fun record => (IntentRecord.erase record).event
+        history := (prefixRecords.map fun record => (IntentRecord.erase record).event).reverse
         journal := (prefixRecords.map fun record =>
           (record.transactionId, IntentRecord.erase record)).reverse }
     canonicalBytes := fun cellId => (Seed.lookup state.cells cellId).getD state.absentBytes
@@ -165,7 +185,7 @@ theorem mem_cellIds_append {rootBytes : List UInt8 → Digest} {image : Image}
     (member : cellId ∈ image.cellIds) : cellId ∈ (image.append intent).cellIds := by
   unfold Image.cellIds at member ⊢
   rw [List.mem_eraseDups] at member ⊢
-  simp only [Image.append, List.flatMap_append, List.mem_append] at member ⊢
+  simp only [Image.accepted_append, List.flatMap_append, List.mem_append] at member ⊢
   rcases member with seeded | written
   · exact Or.inl seeded
   · exact Or.inr (Or.inl written)
@@ -219,7 +239,7 @@ theorem resume_genesis (rootBytes : List UInt8 → Digest) (image : Image) :
       fun admissible => valid admissible.1
     rw [if_neg notAdmissible, if_neg valid]
 
-/-- **Checkpoint soundness** (DATAMODEL §4.4 for the host's record type). If
+/-- **Checkpoint soundness** (docs/DATAMODEL.md §4.4 for the host's record type). If
 the checkpoint's materialized state is the replay of the prefix it claims,
 resuming from it is exactly the replay from genesis. -/
 theorem resume_sound (rootBytes : List UInt8 → Digest) (image : Image) (height : Nat)
@@ -250,7 +270,7 @@ theorem resume_append (rootBytes : List UInt8 → Digest) (image : Image) (heigh
     have stillValid : state.Admissible (image.append intent) :=
       ⟨valid.1, valid.2.1, fun cellId member => mem_cellIds_append (valid.2.2 cellId member)⟩
     rw [if_pos stillValid]
-    simp only [Image.append, List.take_append_of_le_length withinLog,
+    simp only [Image.accepted_append, List.take_append_of_le_length withinLog,
       List.drop_append_of_le_length withinLog, replay_append, resumed, Option.bind_some]
     simp [replay, IntentRecord.bind_ofIntent, accepted]
   next => simp at resumed
@@ -265,17 +285,49 @@ structure Ready (rootBytes : List UInt8 → Digest) (image : Image) (height : Na
   resumed : resume rootBytes (image.append intent) height state = some next
 
 /-- The receiver calls the shared executor at the resumed snapshot. A stale
-prepared append after a failed CAS is never retried: the caller reloads. -/
+prepared append after a failed CAS is never retried: the caller reloads.
+First, before the snapshot is consulted, the intent is held to the static
+bounds (`DataIntent.checkBounds`, `Kernel.Bounds`): an intent past one is
+rejected `overBound` by name. Replay goes through here too, so a log record
+past a bound refuses to load rather than being reinterpreted. -/
 def prepare {rootBytes : List UInt8 → Digest} (image : Image) (height : Nat) (state : State)
     (before : DataSnapshot rootBytes) (withinLog : height ≤ image.accepted.length)
     (resumed : resume rootBytes image height state = some before)
     (intent : DataIntent rootBytes) :
     Sum (Ready rootBytes image height state before intent) (Outcome rootBytes) :=
-  match executed : DurableDataIntent.execute .complete before intent with
-  | .accepted next =>
-      .inl ⟨next, executed,
-        resume_append rootBytes image height state before next intent withinLog resumed executed⟩
-  | outcome => .inr outcome
+  match intent.checkBounds with
+  | .error reason => .inr (.rejected reason)
+  | .ok () =>
+    match executed : DurableDataIntent.execute .complete before intent with
+    | .accepted next =>
+        .inl ⟨next, executed,
+          resume_append rootBytes image height state before next intent withinLog resumed executed⟩
+    | outcome => .inr outcome
+
+/-- An intent past a static bound is rejected by that bound's name, value and
+limit, before the snapshot is consulted. -/
+theorem prepare_overBound {rootBytes : List UInt8 → Digest} (image : Image) (height : Nat)
+    (state : State) (before : DataSnapshot rootBytes) (withinLog : height ≤ image.accepted.length)
+    (resumed : resume rootBytes image height state = some before)
+    {intent : DataIntent rootBytes} {reason : DurableDataIntent.RejectReason}
+    (past : intent.checkBounds = .error reason) :
+    prepare image height state before withinLog resumed intent = .inr (.rejected reason) := by
+  unfold prepare
+  rw [past]
+
+/-- A prepared append is within every static bound. -/
+theorem prepare_inl_withinBounds {rootBytes : List UInt8 → Digest} {image : Image} {height : Nat}
+    {state : State} {before : DataSnapshot rootBytes} {withinLog : height ≤ image.accepted.length}
+    {resumed : resume rootBytes image height state = some before}
+    {intent : DataIntent rootBytes} {ready : Ready rootBytes image height state before intent}
+    (prepared : prepare image height state before withinLog resumed intent = .inl ready) :
+    intent.checkBounds = .ok () := by
+  unfold prepare at prepared
+  split at prepared
+  · cases prepared
+  · assumption
+
+#assert_axioms prepare_overBound prepare_inl_withinBounds
 
 /-- The state a checkpoint at the head of `image` materializes: every
 enumerable identifier with its current bytes, every consumed nullifier, the

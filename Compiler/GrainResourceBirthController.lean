@@ -8,13 +8,32 @@ The tool settles a prior reservation. The parent is an exact, no-op witness
 of its reserved generation. The conserved Book birth fee is independent of
 the tool's permission-unit charge.
 -/
-import Kernel.AgentGrain
-import Kernel.ResourceBirthController
-import Kernel.DeclaredResourceController
-import Compiler.ResourceBirthCodec
-import Compiler.CredentialAuthorityDomainReceiver
-import Compiler.GrainResourceBirthAuthority
-import Compiler.Tower256ConcreteBackend
+module
+
+public import Kernel.AgentGrain
+public import Kernel.ResourceBirthController
+public import Kernel.DeclaredResourceController
+public import Compiler.ResourceBirthCodec
+public import Compiler.CredentialAuthorityDomainReceiver
+public import Compiler.GrainResourceBirthAuthority
+public import Compiler.Tower256ConcreteBackend
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.GrainResourceBirthController
 
@@ -80,7 +99,7 @@ def Source.userDraft (source : Source) :
 
 def Source.grainNonce (source : Source) : Nat :=
   (Sp800185Cshake256.hash
-    "DREGG/GRAIN-RESOURCE-BIRTH/USER-DRAFT-NONCE/v1".toUTF8.toList
+    "DREGG/GRAIN-RESOURCE-BIRTH/USER-DRAFT-NONCE/v5".toUTF8.toList
     ((StreamCodec.product StreamCodec.nat bytesStream).encode
       (source.birth.nonce,
         (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode
@@ -134,7 +153,7 @@ not merely the birth descriptor or a Rust-selected task ID. Both components
 use the existing canonical codecs; the outer length framing prevents an
 ambiguous concatenation. -/
 def Source.canonicalBytes (tariff : Tariff) (source : Source) : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/SOURCE/v1".toUTF8.toList ++
+  "DREGG/GRAIN-RESOURCE-BIRTH/SOURCE/v5".toUTF8.toList ++
     (StreamCodec.product bytesStream bytesStream).encode
       ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
         DeclaredResourceController.commandCodec.encode (source.grainCommand tariff))
@@ -149,9 +168,9 @@ def Source.factoryRequest (tariff : Tariff) (source : Source)
     Request .object :=
   { ResourceBirth.factoryRequest pins encoding oldAuthority factoryPreRoot height source.birth with
     argsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v1".toUTF8.toList ++ source.canonicalBytes tariff)
+      ("DREGG/GRAIN-RESOURCE-BIRTH/ARGS/v5".toUTF8.toList ++ source.canonicalBytes tariff)
     effectsDigest := encoding.hashBytes
-      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++ source.canonicalBytes tariff) }
+      ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v5".toUTF8.toList ++ source.canonicalBytes tariff) }
 
 theorem Source.factoryRequest_subject (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)
@@ -263,6 +282,31 @@ def prepareSourceAuthority {F : Type} [Field F]
     some ⟨shape, combined⟩
   else none
 
+/-- **What a prepared source authority guarantees about its indices**: `source` has the source
+shape at `loaded`'s domain for `semantics` and `tariff` (distinct unborn tool and parent tasks,
+reserved/running statuses, the tool's reservation covers `tariff.charge source.birth`, and the birth's
+authority nullifier differs from the source-derived operation marker); `source.birth` is batch-ready
+at `loaded`'s authority snapshot; that operation marker is unspent in the consumed set of the
+physical snapshot `durable` holds, read in `deployment`'s domain; and every initial policy decodes
+to a record satisfying `InitialFacts` for `deployment`'s domain and `profile`. -/
+theorem PreparedSourceAuthority.sound {F : Type} [Field F]
+    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
+    {semantics : Digest} {tariff : Tariff} {source : Source}
+    (prepared : PreparedSourceAuthority profile deployment loaded semantics tariff source) :
+    SourceShape loaded.snapshot.domain semantics tariff source ∧
+      CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot source.birth ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+        (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
+          (source.grainCommand tariff)) = false ∧
+      ∀ initial ∈ source.birth.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record := by
+  obtain ⟨_, ready, fresh, initials⟩ := prepared.combined.sound
+  exact ⟨prepared.shape, ready, (congrFun loaded.spentExact _).symm.trans fresh, initials⟩
+
 def PreparedSourceAuthority.auxiliaryCreates {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
@@ -303,6 +347,34 @@ def prepareSourceBirth {F : Type} [Field F] [DecidableEq F]
         (source.grainCommand tariff)) height sourced
     .ok ⟨shape, prepared⟩
   else .error .authorityBatch
+
+/-- **What a prepared source birth guarantees about its indices**: `source` has the source shape at
+`deployment`'s domain for `semantics` and `tariff`; `pins` name `deployment`'s factory and domain and
+carry `profile`'s semantics; the birth's authority nullifier and the source-derived operation marker
+are both unspent in the consumed set of `durable`'s physical snapshot, read in `deployment`'s domain;
+and every initial policy decodes to a record satisfying `InitialFacts` for `deployment`'s domain and
+`profile`. -/
+theorem PreparedSourceBirth.sound {F : Type} [Field F]
+    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
+    {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
+    {durable : ResourceBirthController.Concrete.Durable}
+    {semantics : Digest} {tariff : Tariff} {source : Source}
+    (prepared : PreparedSourceBirth profile deployment pins durable semantics tariff source) :
+    SourceShape deployment.domain semantics tariff source ∧
+      ResourceBirthController.Concrete.PinsBound deployment pins ∧
+      ResourceBirthController.Concrete.ProfileBound profile pins ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+        source.birth.authorityNullifier = false ∧
+      CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+        (DeclaredResourceController.operationMarker deployment.domain semantics
+          (source.grainCommand tariff)) = false ∧
+      ∀ initial ∈ source.birth.initialPolicies, ∃ record,
+        PolicyRecordCodec.decode initial.canonicalBytes = some record ∧
+          PolicySourceCell.InitialFacts deployment.domain profile initial record := by
+  obtain ⟨_, ready, fresh, initials⟩ := prepared.prepared.authorityCombined.sound
+  have spent := prepared.prepared.pre.authority.spentExact
+  exact ⟨prepared.shape, prepared.prepared.pre.pinsBound, prepared.prepared.pre.profileBound,
+    (congrFun spent _).symm.trans ready.2.2.2.1, (congrFun spent _).symm.trans fresh, initials⟩
 
 /-- The birth's authority patch validated at the loaded cell's own root. -/
 def PreparedSourceBirth.authorityValidated {F : Type} [Field F]

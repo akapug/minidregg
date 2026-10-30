@@ -2,10 +2,15 @@
 This token checks actual closed typing, executes SAME source term with one root+
 field budget, materializes complete data, and binds exact source Plan against
 ACTUAL loaded directory and command. It creates no accepted receipt or authority. -/
-import Theory.ObjectiveBendTyping
-import Theory.ObjectiveBendDemandCapacity
-import Compiler.ObjectiveBendPlanAdapter
-import Theory.AssertAxioms
+module
+
+public import Theory.ObjectiveBendTyping
+public import Theory.ObjectiveBendDemandCapacity
+public import Compiler.ObjectiveBendPlanAdapter
+public import Theory.AssertAxioms
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendPreparedOutput
 open Minidregg.Theory
 open Minidregg.Theory.ObjectiveBendTyping
@@ -34,6 +39,15 @@ structure Prepared (deployment : CanonicalCellRegistry.Deployment)
   bound : BoundPlan deployment loaded command proposal
   lowerExact : ObjectiveBendPlanAdapter.lower deployment loaded command execution.extraction =
     some ⟨proposal,bound⟩
+theorem Prepared.sound {deployment : CanonicalCellRegistry.Deployment}
+    {loaded : Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry}
+    {command : Command} {source : AnnotatedTerm} {limits : Limits} {budget : Budget}
+    {capacity : ObjectiveBendDemandCapacity.Profile}
+    (prepared : Prepared deployment loaded command source limits budget capacity) :
+    executeWith (ObjectiveBendDemandCapacity.allows capacity) limits budget source.term = .ok prepared.execution ∧
+      ObjectiveBendPlanAdapter.lower deployment loaded command prepared.execution.extraction =
+        some ⟨prepared.proposal,prepared.bound⟩ :=
+  ⟨prepared.runExact, prepared.lowerExact⟩
 
 /-- Current source/input/codec/profile/funding/family gates consume this evidence
 separately. Native binding refusal never becomes a source success fallback. -/

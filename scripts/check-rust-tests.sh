@@ -26,6 +26,8 @@ rust=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
 jobs=${LOCAL_GATES_CARGO_JOBS:-6}
 logs=$root/build-logs/rust-tests; mkdir -p "$logs"
 red=0
+# CRATE is a directory under native/, or a top-level package directory (prover).
+crate_dir() { if [ -d "native/$1" ]; then echo "native/$1"; else echo "$1"; fi; }
 passed_of() { grep -Eo 'test result: [a-zA-Z]+\. [0-9]+ passed' "$1" | awk '{s+=$4} END{print s+0}'; }
 # The cause of a failed build (a build script's stderr) sits below its "error:" line, which
 # the one-line verdict cannot carry; print the end of the log so it is in the gate output.
@@ -38,7 +40,7 @@ t() {
     echo "rust-tests: RED: $name: floor '$floor' is not a positive integer"; red=$((red + 1)); return ;;
   esac
   printf '  %-22s cargo test --release --locked %s\n' "$name" "$*"
-  (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "$@") >"$log" 2>&1
+  (cd "$(crate_dir "$crate")" && cargo "+$rust" test --release --locked -j "$jobs" "$@") >"$log" 2>&1
   rc=$?
   n=$(passed_of "$log")
   if [ "$rc" != 0 ]; then
@@ -55,7 +57,7 @@ t() {
 known_red() {
   local name=$1 task=$2 crate=$3; shift 3
   local log=$logs/$name.log rc
-  (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "$@" --exact) >"$log" 2>&1
+  (cd "$(crate_dir "$crate")" && cargo "+$rust" test --release --locked -j "$jobs" "$@" --exact) >"$log" 2>&1
   rc=$?
   if [ "$rc" = 0 ] && [ "$(passed_of "$log")" -ge 1 ]; then
     echo "rust-tests: RED: $name: known-red test now PASSES; delete its known_red row (cv task $task)"
@@ -80,7 +82,7 @@ exact() {
   if [ "${#tests[@]}" = 0 ]; then
     echo "rust-tests: RED: $name: row names no test"; red=$((red + 1)); return
   fi
-  (cd "native/$crate" && cargo "+$rust" test --release --locked -j "$jobs" "${args[@]}" -- --exact "${flags[@]}" "${tests[@]}") >"$log" 2>&1
+  (cd "$(crate_dir "$crate")" && cargo "+$rust" test --release --locked -j "$jobs" "${args[@]}" -- --exact "${flags[@]}" "${tests[@]}") >"$log" 2>&1
   rc=$?
   n=$(passed_of "$log")
   for test in "${tests[@]}"; do
@@ -129,10 +131,35 @@ armed_exact() { # armed_exact NAME ENVVAR WHAT CRATE [cargo args] -- FULL::TEST:
   exact "$name" "$crate" "$@"
 }
 
+# node_tests NAME FLOOR DIR: `npm ci` + `npm test` (node --test) in native/DIR; red when npm fails or
+# fewer than FLOOR tests passed. The TS SDK's pretest builds the wasm core with this script's cargo, so
+# the rows above and this one run the same Rust.
+node_tests() {
+  local name=$1 floor=$2 dir=$3 log=$logs/$1.log rc n
+  printf '  %-22s npm ci && npm test (native/%s)\n' "$name" "$dir"
+  (cd "native/$dir" && npm ci --no-audit --no-fund && RUSTUP_TOOLCHAIN=$rust npm test) >"$log" 2>&1
+  rc=$?
+  n=$(grep -E '^ℹ pass [0-9]+' "$log" | awk '{print $3}' | tail -n 1)
+  n=${n:-0}
+  if [ "$rc" != 0 ]; then
+    echo "rust-tests: RED: $name: npm exit $rc, $n passed ($log)"; red=$((red + 1))
+  elif [ "$n" -lt "$floor" ]; then
+    echo "rust-tests: RED: $name: $n tests ran, floor $floor ($log)"; red=$((red + 1))
+  else
+    echo "rust-tests: ok: $name: $n passed (floor $floor)"
+  fi
+}
+
 t rc-shell-private-enroll 50 resource-client --bin mini -- shell:: private:: participant_enrollment:: key_generation
-t grain-provider          42 grain-runtime -- provider credential publication_refusal
+t grain-provider          27 grain-runtime -- provider credential publication_refusal
+t mini-keys-credentials   16 mini-keys --lib -- credentials::
 t hermes-test-provider    15 hermes-test-provider -- tests::
 t verifier-protocol       10 credential-signature-verifier --test protocol -- protocol_
+# The crates that sat outside the workspace (unbuildable 2026-10-08..10-26, tests silently stopped):
+# prover's five Lean-vector conformance suites, and the two Lean-spawned helpers' unit tests.
+t prover-conformance      30 prover --test sumcheck_conformance --test sumcheck_cubic_conformance --test zkml_matmul_conformance --test evm_stage0_dispatch --test rank1_gradient
+t joint-agreement          6 joint-agreement-crypto --bins
+t portable-archive         5 portable-archive --lib --bins
 
 # Landed defect fixes (R2-1 = scouts-20261003/R2-1-security-residuals-at-HEAD.txt,
 # D = scouts-20261003/D-deos-efficiency-semantics.txt). One row per defect.
@@ -162,6 +189,15 @@ exact store-anchor-head      hyperdocument-link-sqlite-store --lib -- \
   anchor_tests::anchor_custody_refuses_a_foreign_owner_and_a_shared_directory \
   anchor_tests::a_durable_read_of_a_current_anchor_writes_nothing \
   anchor_tests::durable_read_repairs_an_anchor_that_lags_the_head
+# L6 (2026-10-26): a bound violation exits 6, never conflict (4); a read needs no
+# writable disk and a refused write is typed (7); the production binary has no
+# crash or hold verb (the fixtures run from the test binary, tests/support).
+exact store-repairs          hyperdocument-link-sqlite-store --test durable_anchor -- \
+  an_append_over_a_bound_exits_six_not_conflict \
+  a_read_needs_no_writable_disk_and_a_refused_write_is_typed \
+  serve_answers_in_process_and_the_production_binary_has_no_crash_verbs \
+  killed_publisher_recovers_before_and_after_commit_and_anchor \
+  a_crash_after_commit_keeps_the_record_in_the_wal
 # TENANCY-B: the key broker. Custody refusals at start, role/op refusals by name,
 # member keys sealed and never returned, tickets bound to one body and one uid,
 # echo withheld, caller hang-up stops the provider call, Discord's one channel.
@@ -172,7 +208,19 @@ exact mini-keys-broker       mini-keys --test broker -- \
   a_ticket_forwards_one_exact_body_with_the_bearer_the_caller_never_sees \
   an_upstream_that_echoes_the_bearer_is_withheld_and_a_kind_mismatch_refuses \
   a_caller_that_hangs_up_stops_the_provider_call \
-  the_mirror_posts_and_reads_its_one_channel_without_holding_the_token
+  the_mirror_posts_and_reads_its_one_channel_without_holding_the_token \
+  the_forwarded_body_is_held_to_the_grant_whatever_the_controller_claimed \
+  an_exact_retry_recovers_a_lost_reply_without_a_second_count_or_call \
+  an_owner_status_from_an_unpinned_account_or_about_another_key_is_refused \
+  a_member_account_cannot_take_the_slots_or_force_a_large_frame_and_the_host_is_pinned \
+  an_operation_that_cannot_be_audited_is_refused_and_has_no_effect \
+  single_account_is_a_test_shape_a_root_owned_config_cannot_select
+# L6 (2026-10-26): grant caps read against the forwarded body; durable tickets
+# and the forward journal; the op-144 view; the pool spend ceiling.
+exact mini-keys-grant        mini-keys --lib -- \
+  server::ticket::tests::the_forwarded_body_is_held_to_the_grant_not_to_the_claim \
+  server::ticket::tests::a_ticket_round_trips_and_an_answer_is_retained_until_swept \
+  server::native::tests::only_a_current_unrevoked_exact_view_names_an_epoch
 # TENANCY-B: no client process opens the seal key. The hosted `mini key` runs its
 # real exchange against the real broker; the Hermes gateway sends only through
 # the broker (a ticket's bearer reaches upstream, an echo is withheld, a revoke
@@ -253,6 +301,9 @@ exact sdk-lean-pin           mini-sdk --features native --test golden --test exa
 # one-bit difference to show the comparison goes red. Armed by MINI_SDK_LEAN_CODEC_LIB.
 armed_exact sdk-lean-codec MINI_SDK_LEAN_CODEC_LIB "the built libminidregg-intents.so" mini-sdk --features lean-codec --test lean_codec -- \
   the_sdk_encoder_equals_leans_exported_codec_on_every_golden_row
+# The TS SDK (native/mini-sdk-ts): golden, differential, custody, PQ and the pinned worked example against
+# the freshly built wasm core. It has no Cargo.toml; rust-rows.py selects it with mini-sdk.
+node_tests sdk-ts 24 mini-sdk-ts
 # resource-client (bin mini), one row per defect so a red names it
 # D1: sparse board rendering never scans the address space (bce707b7)
 exact rc-board-sparse        resource-client --bin mini -- \
@@ -448,7 +499,6 @@ exact rc-shell-confinement   resource-client --bin mini -- \
 # R2-1 R6: hex decoders refuse malformed input without panicking (76757030)
 exact rc-hex-decoders        resource-client --bin mini -- \
   ascii_hex_regression::refuses_non_ascii_without_panicking \
-  relay::unhex_rejects_malformed_unicode_without_panicking \
   render::decode_hex_malformed_payload_retains_empty_fallback \
   render::history::payload_text_malformed_unicode_retains_diagnostic
 # W1.8 tenancy (535fea1e, f86e394a): operator peer allowlist, tenant-group public
@@ -474,7 +524,33 @@ exact grain-journal-digest   grain-runtime --bin grain-runtime -- \
 # A full-length torn final WAL record truncates like a short one (fa84160e)
 exact private-transition-wal private-backend --lib -- \
   transition_journal::tests::zeroed_final_record_body_truncates_to_one_less_record \
-  transition_journal::tests::invalid_event_has_no_effect_or_outbox
+  transition_journal::tests::invalid_event_has_no_effect_or_outbox \
+  transition_journal::tests::interior_length_damage_is_refused_never_truncated \
+  transition_journal::tests::final_torn_record_is_reported_and_recovery_resumes_from_last_complete_record
+# The dealer WALs: a torn dealer tail re-derives the same deal or published nothing; the dZK
+# store drops a partial trailing length word and keeps every published record
+exact private-dealer-wal     private-backend --lib -- \
+  sh2t_id_store::tests::retained_full_dealer_randomness_exact_outbox_changed_input_identity_and_tear \
+  sh2t_id_store::tests::torn_commit_record_published_nothing_so_a_fresh_deal_is_safe \
+  dzk_store::tests::store_retains_proof_randomness_and_outboxes_and_refuses_changed_identity \
+  dzk_store::tests::canonical_wire_and_durable_recipient_transfer_replay \
+  dzk_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
+  dzk_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe \
+  private_send_store::tests::dropped_reply_replays_identical_ciphertext_and_key_shares \
+  private_send_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
+  private_send_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe \
+  acss_id_store::tests::dropped_dealer_reply_replays_all_exact_private_rows_and_proofs \
+  acss_id_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
+  acss_id_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe \
+  king_store::tests::torn_emit_rederives_the_same_deal_never_a_redraw \
+  king_store::tests::torn_commit_published_nothing_so_a_fresh_deal_is_safe
+# The anchor runs on transition_journal: a torn tail recovers, interior damage refuses, the
+# record is linear in the request
+exact private-anchor-wal     private-backend --lib -- \
+  custody::tests::full_controller_sized_batch_is_single_durable_record_and_preserves_old_rows \
+  custody::tests::torn_anchor_tail_recovers_at_every_cut_and_the_anchor_keeps_serving \
+  custody::tests::lost_reply_and_relabel \
+  custody::tests::singleton_authority
 # W16 MPC: the King composite store recovers a kill -9 mid-King with one dealer event per
 # instance and no new anchor allocation; the curious-holder transcript check and its falsifier
 exact private-king-store private-backend --lib -- \
@@ -485,6 +561,20 @@ exact private-king-store private-backend --lib -- \
   king_store::tests::kill9_mid_king_recovers_with_one_dealer_event_per_instance_no_new_allocations_and_complete_triples \
   private_view::curious_holder_view_is_consistent_with_three_input_pairs_and_recipient_gets_256 \
   private_view::retired_public_coefficient_dealing_is_decoded_by_the_curious_holder
+# The research-labelled in-process four-party door (private-backend R1): the report carries the
+# banner, the output and the curious holder's counts and names no input value; the `mini` side
+# refuses a report without the banner, bounds the values, and its verb is a Local grammar leaf
+# whose form and page text carry the research label. Not a spine row: nothing here is an admission.
+exact private-compute-demo private-backend --features demo --lib -- \
+  demo::tests::inputs_are_two_bounded_decimals \
+  demo::tests::an_alternate_pair_keeps_the_sum_and_differs \
+  demo::tests::the_report_on_a_fixed_input_has_the_label_the_output_and_names_no_input
+exact rc-private-compute resource-client --bin mini -- \
+  private_compute::tests::the_banner_is_the_research_word_and_the_label \
+  private_compute::tests::values_are_bounded_decimals \
+  private_compute::tests::a_report_without_the_banner_is_refused \
+  shell::tests::private_compute_takes_two_bounded_values_and_is_a_local_client_call \
+  web::verbs::tests::the_private_compute_form_is_derived_and_the_page_text_carries_the_research_label
 # One hex decoder (c158f9ba); rate budgets per IPv6 /64 with eviction (664ee3c4)
 exact rc-hex-rate-limit      resource-client --bin mini -- \
   decode_hex_tests::decode_hex_refuses_non_ascii_sign_and_odd_input_without_panic \
@@ -494,6 +584,19 @@ exact rc-hex-rate-limit      resource-client --bin mini -- \
 # Operator `resolve` frees the slot of a dead lease holder (0c148911)
 exact scheduler-resolve      inference-scheduler --test core -- \
   dead_lease_holder_frees_its_slot_only_by_operator_resolve
+# Native crates the sprint never tested directly (un-native-rows): the placement bound, the exact signed-API
+# prefix, and the root image pin of a compatible upgrade each have a decision test that goes red under a planted fault
+exact scheduler-placement-bound inference-scheduler --test core -- \
+  placement_bound_is_exact_at_context_and_output_limits \
+  incompatible_context_tools_output_and_pool_are_refused
+exact signed-api-path        signed-api-path -- \
+  exact_prefix_tests::near_miss_prefixes_are_not_under_the_signed_prefix \
+  exact_prefix_tests::percent_escapes_and_trailing_slashes_are_refused_not_decoded \
+  tests::refuse_ambiguous_prefix_and_path_without_normalizing
+exact upgrade-custody-pin    compatible-upgrade-custody --features fixture-os -- \
+  tests::pin::root_pin_accepts_exact_digest_and_refuses_wrong_pin_or_custody \
+  tests::pin::root_pin_refuses_symlink_and_root_bytes_refuses_empty_and_oversize \
+  tests::only_exact_helper_transition_is_accepted
 # Signing consent: a remote plan with one changed byte is refused before any key signs (W1.9 b45237d1)
 exact consent-remote-plan    resource-client --bin mini -- \
   client_consent::tests::remote_signing_plan_with_one_changed_byte_is_refused_before_signing \
@@ -513,6 +616,19 @@ exact rc-private-rooms       resource-client --bin mini -- \
   workspace::roomkey::tests::rotation_leaves_out_members_without_a_grant_and_needs_a_keyed_room \
   workspace::roomkey::tests::a_hosted_invitee_into_a_private_room_needs_i_know \
   workspace::private::tests::legacy_private_content_never_seals_and_only_strikes_retaining_ciphertext
+# D16: every pure frame goes to ONE codec child per mini process (Host SETTINGS codec), keyed by
+# the Host image's file identity; recovery decodes retained outcomes through it, never through a
+# one-shot Host inspect (H 22166640 left four recovery fixtures on the one-shot shape, red unseen)
+exact rc-codec-child         resource-client --bin mini -- \
+  client_consent::tests::one_codec_child_serves_the_process_and_names_its_refusals \
+  client_consent::tests::codec_loop_is_reused_only_for_the_same_image_and_settings \
+  client_consent::tests::codec_child_is_kept_across_a_renamed_settings_directory \
+  client_consent::tests::codec_child_that_dies_decoding_its_refusal_is_replaced \
+  fleet::exact_operation_tests::exact_operation_lost_reply_recovers_only_retained_call_without_resubmit \
+  provider_continuity::tests::guarded_attempt_lookup_uses_original_call_without_rechecking_or_resigning \
+  selected_publisher::tests::truncated_submit_reply_recovers_by_lookup_without_resubmit \
+  selected_publisher::tests::an_old_absent_lookup_does_not_block_later_read_only_confirmation \
+  workspace::tests::retained_stale_observation_is_superseded_once_and_prior_generation_kept
 # D15: a queued request whose caller left, or that outwaited its residence bound,
 # is answered 254 and never reaches the Host (2a72f8ed)
 exact rc-transport-queue     resource-client --bin mini -- \

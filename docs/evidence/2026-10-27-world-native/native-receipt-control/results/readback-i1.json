@@ -1,0 +1,61 @@
+{
+ "height": "14",
+ "notesRoot": "3061383278542927513989499639077423081685631130099339676145213175412986980321",
+ "atoms": 2,
+ "returns": [
+  {
+   "invocation": "i1",
+   "returnAtom": "33594506972532492405621144974421188292837021309289501811866143340647172650635",
+   "stored": true,
+   "bytesExact": true,
+   "value": {
+    "tag": "record",
+    "fields": [
+     {
+      "value": {
+       "tag": "record",
+       "fields": [
+        {
+         "value": {
+          "value": "15376500067633520723",
+          "tag": "natural"
+         },
+         "name": "resource"
+        },
+        {
+         "value": {
+          "value": "f58e2b24f73830cc8de7f9baa5fa1123ee5540066ca1c4979de7923880f2b4a1ff",
+          "tag": "label"
+         },
+         "name": "root"
+        }
+       ]
+      },
+      "name": "document"
+     },
+     {
+      "value": {
+       "value": "7",
+       "tag": "natural"
+      },
+      "name": "subject"
+     },
+     {
+      "value": {
+       "value": "1444490968239458669",
+       "tag": "natural"
+      },
+      "name": "nonce"
+     },
+     {
+      "value": {
+       "value": "7",
+       "tag": "natural"
+      },
+      "name": "byte"
+     }
+    ]
+   }
+  }
+ ]
+}

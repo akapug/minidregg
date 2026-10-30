@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JMKT (SEALED-MARKET; PRIVACY §3.4, MUD §2.7/§2.8): a sealed-bid market through `mini shell`, on
+# JMKT (SEALED-MARKET; docs/MUD.md §2.8): a sealed-bid market through `mini shell`, on
 # this journey's live Store. Supersedes KHQ (journey.d/jhasheq.sh, the single-value K-HASHEQ probe).
 #
 # alice opens market `fish` (supply 8) with a close height and a reveal end; bob bids twice and carol
@@ -174,7 +174,8 @@ for f in alice bob carol; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
     install_private 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
-  ok setup sponsor "enroll plan $f $f.key"
+  # the record commits to the newcomer's next key, which co-signs (FIX-IDENTITY): both hex, from their keygen
+  ok setup sponsor "enroll plan $f $f.key $(xxd -p -c 256 "$H/$f/keys/mini.key.next.pub") $(xxd -p -c 256 "$H/$f/keys/mini.key.next.cosign")"
   ok setup sponsor "enroll seal $f"
   ok setup sponsor "enroll submit $f"
   SUBJ[$f]=$(jq -r '.subject // empty' "$OUT")

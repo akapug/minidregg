@@ -1,0 +1,110 @@
+{
+  "artifact_directory": "/othersys/lanes/oracle-rootfs-v5-20261027",
+  "build_host": "hbox",
+  "date": "2026-10-27",
+  "elf_check": {
+    "bridge_sha256": "1d34b4f27ea050393f50829ef17af35dc312060a6fb0952c00a2dac0e401f28e",
+    "failures": 0,
+    "files": 1010
+  },
+  "inputs": {
+    "assemble.py": {
+      "bytes": 5566,
+      "sha256": "900e8e031e83dfff9f97792e7aa06839b2c1e997ed128eddd763ad8335c496f4"
+    },
+    "check-elf.py": {
+      "bytes": 2501,
+      "sha256": "eaa3fecd6a136724eb4a949ab47c16e30fb044c2351a76d79e47b8556484b64f"
+    },
+    "check-runtime.py": {
+      "bytes": 1650,
+      "sha256": "d57d0fe7c15d18d24e4ba87b8cea208340dc5ca971ee40220e29774ea0a666fe"
+    },
+    "check-visual.py": {
+      "bytes": 2698,
+      "sha256": "6870d276100f1fd32aaa98526924041bf76f7549e7dc6c5e9e99b88738169625"
+    },
+    "evidence/elf-closure.json": {
+      "bytes": 480960,
+      "sha256": "a60c93fd427b82f26aba3bed3397a4113294a2ecddc14705596cd5f6da958b1f"
+    },
+    "evidence/importcheck.json": {
+      "bytes": 346,
+      "sha256": "50a1bc4220a5e04de8f3a7a410c45c8d2da7a9e5dbed23886d1d80944a822b2a"
+    },
+    "evidence/importcheck.stderr": {
+      "bytes": 231,
+      "sha256": "86339da15db8a0e7aef67753c2b7357ded43a3cd3523e8779e0ead8dccef1ba0"
+    },
+    "evidence/pillow-11.3.0-pypi.json": {
+      "bytes": 609422,
+      "sha256": "7f08b42942af9316e24d63351befa3b69ace1a8ce129300267380b7f1f4acc97"
+    },
+    "evidence/visualcheck-r2.json": {
+      "bytes": 474,
+      "sha256": "f13cf4d5ad9063b7a69b74aebeeca115a86f993bcaffe0c80645162ea5371057"
+    },
+    "evidence/visualcheck-r2.stderr": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "inputs/inputs.lock.json": {
+      "bytes": 12502,
+      "sha256": "50ae6804cbc5c1758c27f9ee93e033ed4198e167eda741a0347c9a6bafce9d5c"
+    },
+    "inputs/requirements.lock": {
+      "bytes": 1322,
+      "sha256": "a1eecd9162f0f2923c5b4fab016ab5f70f0dc34226598b15c0f66dbafef96705"
+    },
+    "rootfs.inventory.json": {
+      "bytes": 2223625,
+      "sha256": "0d97d99485b4bd33d154e8a29c13f025a6c621b41b369dde41fac0f7f086ee6b"
+    },
+    "rootfs.tar.xz": {
+      "bytes": 81858668,
+      "sha256": "9341c4d75b640bbaaae9c88ccdea5a05371fd0a705d124dc05b973b4e9b6ebb2"
+    }
+  },
+  "inventory_entries": 10551,
+  "largest_member_bytes": 25409073,
+  "logical_bytes": 386918264,
+  "regular_files": 9042,
+  "runtime": {
+    "dependencies": {
+      "mpmath": "1.3.0",
+      "nltk": "3.9.4",
+      "numpy": "2.4.6",
+      "regex": "2026.5.9",
+      "scikit-learn": "1.8.0",
+      "scipy": "1.17.1",
+      "sympy": "1.14.0",
+      "zstandard": "0.25.0"
+    },
+    "glibc": "2.39",
+    "platform": "linux-x86_64",
+    "python": "3.12.3",
+    "scope": "Runtime imports only; no Oracle queries or specialist qualification.",
+    "sqlite": "3.45.1"
+  },
+  "schema": 1,
+  "scope": "New Linux rootfs dependency execution and loader closure only. No Oracle operations, signed SPK or Mini admission claim.",
+  "visual_checks": {
+    "jpeg_input_bytes": 678,
+    "numpy": "2.4.6",
+    "operations": [
+      "PNG lossless decode",
+      "JPEG decode",
+      "RGB/RGBA conversion",
+      "NumPy pixels",
+      "Lanczos resize",
+      "Gaussian blur",
+      "alpha composite",
+      "PNG encode"
+    ],
+    "pillow": "11.3.0",
+    "png_input_bytes": 198,
+    "png_output_bytes": 3884,
+    "png_output_sha256": "e1acb5de23e0204251ac095153a965d50452fb06f299d2e26267a6ded6ebf972",
+    "scope": "Image dependency behavior only; no OCR, font inventory, Oracle route or specialist qualification."
+  }
+}

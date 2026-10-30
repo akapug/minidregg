@@ -1,5 +1,6 @@
 //! Physical checkpoint fencing at the resident's serialized receiving boundary.
 //! This attenuates transport only; resume never mints participant authority.
+use crate::io_context::IoContext;
 use crate::hostd::Journal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,10 +17,7 @@ fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
 fn digest(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    crate::canonical::hex64(&value)
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -47,25 +45,7 @@ pub(crate) struct Intent {
 }
 
 fn retained(path: &Path) -> io::Result<Vec<u8>> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file()
-        || meta.nlink() != 1
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.mode() & 0o777 != 0o600
-        || meta.len() > 8192
-    {
-        return Err(invalid("checkpoint custody differs"));
-    }
-    let mut bytes = Vec::new();
-    file.take(8193).read_to_end(&mut bytes)?;
-    if bytes.len() > 8192 {
-        return Err(invalid("checkpoint record grew"));
-    }
-    Ok(bytes)
+    crate::private_file::read_maybe_empty(path, 8192, "checkpoint custody differs")
 }
 fn publish(path: &Path, bytes: &[u8]) -> io::Result<()> {
     match retained(path) {
@@ -92,7 +72,7 @@ pub(crate) fn checkpoint_lock(app_dir: &Path) -> io::Result<File> {
         .truncate(false)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(app_dir.join(".checkpoint.lock"))?;
+        .open(app_dir.join(".checkpoint.lock")).ctx("open", &(app_dir.join(".checkpoint.lock")))?;
     let meta = lock.metadata()?;
     if !meta.is_file()
         || meta.nlink() != 1
@@ -141,8 +121,8 @@ impl CheckpointControl {
             .ok_or_else(|| invalid("checkpoint app directory absent"))?
             .join("checkpoint-pause.json");
         let socket = binding.journal_dir.join("checkpoint-control.sock");
-        let listener = UnixListener::bind(&socket)?;
-        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+        let listener = UnixListener::bind(&socket).ctx("bind", &socket)?;
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).ctx("set permissions", &socket)?;
         Ok(Self {
             listener,
             socket,
@@ -247,7 +227,7 @@ impl CheckpointControl {
             // Exact acknowledgement is durable before releasing admission. A
             // crash in this gap keeps the app fenced until this exact retry.
             publish(&path, &bytes)?;
-            fs::remove_file(&self.pause_path)?;
+            fs::remove_file(&self.pause_path).ctx("remove", &self.pause_path)?;
             File::open(
                 self.pause_path
                     .parent()
@@ -303,7 +283,7 @@ impl CheckpointControl {
 }
 impl Drop for CheckpointControl {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.socket);
+        let _ = fs::remove_file(&self.socket).ctx("remove", &self.socket);
     }
 }
 #[cfg(test)]

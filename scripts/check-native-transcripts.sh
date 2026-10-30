@@ -2,10 +2,10 @@
 # check-native-transcripts.sh -- every recorded verifier transcript is still the verifier's.
 #
 # A `CredentialSignatureIO.Transcript` answers for the native Ed25519 verifier
-# inside a Lean fixture that evaluates a real admission (Assurance.NativeAcceptedFixture
+# inside a Lean fixture that evaluates a real admission (Fixtures.NativeAcceptedFixture
 # names the first native Objective acceptance through one). This gate is what that
 # substitution rests on:
-#   * scripts/NativeTranscripts.lean lists EVERY transcript in the research umbrella
+#   * scripts/NativeTranscripts.lean lists EVERY transcript in the research umbrella and the Fixtures library
 #     (and refuses a Transcript.mk hidden in any other definition);
 #   * each triple is re-submitted to the pinned verifier built from this tree
 #     (native/credential-signature-verifier, `verify KEY FRAME SIGNATURE`): the
@@ -17,7 +17,7 @@
 #     signature's last byte changed, presented as if the transcript recorded it as
 #     `verified` -- and the checker must FAIL on exactly that triple. A checker that
 #     cannot go red on a forged answer is not a gate.
-# Requires AxiomCensusResearch built (lake-build); builds the verifier with cargo
+# Requires AxiomCensusResearch and Fixtures built (lake-build); builds the verifier with cargo
 # into $CARGO_TARGET_DIR (default <repo>/target-gates, shared with the journey gate).
 set -uo pipefail
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)

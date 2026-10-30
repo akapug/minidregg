@@ -92,7 +92,7 @@ impl AsyncDispatch {
                 .and_then(|v| v.to_str())
                 .and_then(|v| v.strip_suffix(".class"))
             {
-                if crate::decode_hex(stem)?.len() != 16 {
+                if mini_sdk::hex::decode(stem).map_err(|e| e.0)?.len() != 16 {
                     return Err("invalid custody reservation ID".into());
                 }
                 let class = read_private(&path, 1)?;
@@ -273,7 +273,7 @@ fn run_next(
             else {
                 continue;
             };
-            let id: [u8; 16] = crate::decode_hex(stem)?
+            let id: [u8; 16] = mini_sdk::hex::decode(stem).map_err(|e| e.0)?
                 .try_into()
                 .map_err(|_| "invalid custody request ID")?;
             if read_private(&s.journal.path(&id, "class"), 1)? != [class as u8]
@@ -316,15 +316,20 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::time::{Duration, Instant};
     fn scratch() -> PathBuf {
+        // Short on purpose: this scratch binds a Unix socket, and macOS caps a
+        // socket path at 104 bytes (`SUN_LEN`), which a long `$TMPDIR` already
+        // spends most of.
         let p = std::env::temp_dir().join(format!(
-            "mini-async-{}",
-            crate::hex(&crate::fsio::random::<16>().unwrap())
+            "mini-ad-{}",
+            crate::hex(&crate::fsio::random::<8>().unwrap())
         ));
         crate::fsio::ensure_private_dir_all(&p).unwrap();
         p
     }
     fn body() -> Vec<u8> {
-        [vec![1, 2, 0, 0, 0], b"{}".to_vec(), vec![12]].concat()
+        // envelope v2: config "{}", a Host image pin (the public envelope check leaves the pin to
+        // the socket), operation 12
+        [vec![2, 2, 0, 0, 0], b"{}".to_vec(), vec![0; 32], vec![12]].concat()
     }
     fn ready(g: &AsyncDispatch, class: usize, id: [u8; 16], access: &[u8; 32]) -> Vec<u8> {
         let until = Instant::now() + Duration::from_secs(3);

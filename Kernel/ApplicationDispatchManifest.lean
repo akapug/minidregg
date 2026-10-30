@@ -5,8 +5,27 @@ descriptor is installed. The native receiver must read the governed current
 package-manifest content cell, decode these bytes there, and bind its exact
 cell root before using `matches`; birth/version numbers alone do not do so.
 -/
-import Kernel.ApplicationDispatchCodec
-import Kernel.ApplicationPermissionSchema
+module
+
+public import Kernel.ApplicationDispatchCodec
+public import Kernel.ApplicationPermissionSchema
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchManifest
 
@@ -47,19 +66,8 @@ def interfaceStream : StreamCodec Interface :=
 private def interfaceFrame : List UInt8 :=
   "DREGG/APPLICATION/INTERFACE/v2".toUTF8.toList
 
-private def rawInterfaceCodec : LawfulCodec Interface where
-  encode interface := interfaceFrame ++ interfaceStream.encode interface
-  decode bytes := if bytes.take interfaceFrame.length = interfaceFrame then
-    interfaceStream.toLawful.decode (bytes.drop interfaceFrame.length) else none
-  decode_encode := by
-    intro interface
-    have decoded := interfaceStream.toLawful.decode_encode interface
-    change interfaceStream.toLawful.decode (interfaceStream.encode interface) =
-      some interface at decoded
-    simp [decoded]
-
 def interfaceCodec : LawfulCodec Interface :=
-  ResourceBirthCodec.strictCodec rawInterfaceCodec
+  (StreamCodec.framed interfaceFrame interfaceStream).toLawful
 
 def Interface.root (interface : Interface) : Digest :=
   (Sp800185Cshake256.hash "DREGG/APPLICATION/INTERFACE-ROOT/v2".toUTF8.toList
@@ -89,19 +97,8 @@ def manifestStream : StreamCodec Manifest :=
 private def manifestFrame : List UInt8 :=
   "DREGG/APPLICATION/MANIFEST/v2".toUTF8.toList
 
-private def rawManifestCodec : LawfulCodec Manifest where
-  encode manifest := manifestFrame ++ manifestStream.encode manifest
-  decode bytes := if bytes.take manifestFrame.length = manifestFrame then
-    manifestStream.toLawful.decode (bytes.drop manifestFrame.length) else none
-  decode_encode := by
-    intro manifest
-    have decoded := manifestStream.toLawful.decode_encode manifest
-    change manifestStream.toLawful.decode (manifestStream.encode manifest) = some manifest
-      at decoded
-    simp [decoded]
-
 def manifestCodec : LawfulCodec Manifest :=
-  ResourceBirthCodec.strictCodec rawManifestCodec
+  (StreamCodec.framed manifestFrame manifestStream).toLawful
 
 theorem manifest_decode_encode (manifest : Manifest) :
     manifestCodec.decode (manifestCodec.encode manifest) = some manifest :=
@@ -122,7 +119,7 @@ its current physical root; a caller-supplied store is not authority. -/
 def manifestAtom (domain : Digest) (app : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode (domain, app)
   ⟨⟨(Sp800185Cshake256.hash
-    "DREGG/APPLICATION/MANIFEST-ATOM/v1".toUTF8.toList preimage).digest.value⟩⟩
+    "DREGG/APPLICATION/MANIFEST-ATOM/v2".toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (manifestResource app : Nat) (version : Int)
     (page : ContentResource.ContentStore) : Option Manifest := do

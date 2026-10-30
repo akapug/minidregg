@@ -5,8 +5,30 @@ share provenance, but never turns the checked candidate into a pending event,
 CAS, delivery permit, app RPC, or billing record. The reserved signed probe
 shape is explicitly refused by the live op34 delivery receiver.
 -/
-import Compiler.ApplicationReceivingDomain
-import Kernel.ApplicationDispatchProjection
+module
+
+public import Compiler.ApplicationReceivingDomain
+public import Kernel.ApplicationDispatchProjection
+public import Kernel.ApplicationStreamContinuityFresh
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationStreamContinuity
 
@@ -169,6 +191,13 @@ structure Attestation (config : Config) where
   signedChallenge : ingress.dispatch.dispatch.request = probeRequest challenge
   bindingExact : bindingFor admitted = challenge.binding
   minimumExact : minimumCurrent challenge (tipFor old) = true
+theorem Attestation.sound {config : Config} (a : Attestation config) :
+    (a.challenge.domain = config.deployment.domain ∧
+      a.challenge.semantics = config.profile.semantics) ∧
+    a.ingress.dispatch.dispatch.request = probeRequest a.challenge ∧
+    bindingFor a.admitted = a.challenge.binding ∧
+    minimumCurrent a.challenge (tipFor a.old) = true :=
+  ⟨a.namespaceExact, a.signedChallenge, a.bindingExact, a.minimumExact⟩
 
 /-- Renewal retains the same verified image; it does not extend history. -/
 def Attestation.verified {config : Config} (a : Attestation config) :
@@ -197,23 +226,40 @@ private def Attestation.canonicalBytes {config : Config} (a : Attestation config
 /-- Exactly the current verified log entry and its MAC must still be the
 physical tip. Only read/key are used; no append, checkpoint, initialization,
 app RPC or billing operation occurs. This is point-in-time, not a lock against
-later revocation. The physical lease must keep its bounded fallback. -/
+later revocation. The physical lease must keep its bounded fallback.
+
+The opening read is the tag the image carries (`Loaded.headTag`, which the open,
+a physical-suffix extension and the append path all set: `Appended.headTagExact`)
+or, for an image that carries none, the head entry read back here. Either is
+authenticated by `Head.verify` at the image's height, chain and frontier
+(`Held.authentic`). The decision is `ApplicationStreamContinuityFresh.verdict`
+and the handoff runs exactly when its `gate` is `none`
+(`ApplicationStreamContinuityFresh.handoff_runs_iff`). `birthHeight` is the
+grain's floor (0 when the caller's admission already places the session in this
+image). -/
 def withOpenedFreshTip {config : Config} {α : Type}
-    (opened : Opened config) (handoff : IO α) : IO (Except String α) := do
+    (opened : Opened config) (handoff : IO α) (birthHeight : Nat := 0) :
+    IO (Except String α) := do
   let durable := opened.durable
-  let some record := durable.image.accepted.getLast?
-    | return .error "authority handoff requires nonempty history"
-  -- The exact head entry: its record and the tag this opening read (or wrote)
-  -- with its MAC verified.
-  let some tag := durable.headTag
-    | return .error "authority handoff requires an opening read from the Store"
-  let entry : DurableReceiverIO.Entry :=
-    ⟨DurableCheckpointCodec.recordFrame.encode record, tag⟩
-  let .ok current ← DurableReceiverIO.tipIs config.transport
-      durable.height entry
-    | return .error "authority physical tip unavailable"
-  if current then return .ok (← handoff)
-  else return .error "authority physical tip changed before handoff"
+  let record := durable.image.accepted.getLast?.map DurableCheckpointCodec.recordFrame.encode
+  let readTag ← match durable.headTag, record with
+    | none, some _ =>
+        match ← durable.headTagOrRead config.transport with
+        | .ok tag => pure (some tag)
+        | .error _ => pure none
+    | _, _ => pure none
+  let some store ← DurableReceiverIO.headStore config.transport durable
+    | return .error "authority handoff requires an opening read from the Store: no Store key"
+  let physical ← match ← config.transport.read durable.height false with
+    | .ok (some stored) =>
+        pure (some (⟨stored.head, stored.entries⟩ : ApplicationStreamContinuityFresh.Physical))
+    | _ => pure none
+  let held : ApplicationStreamContinuityFresh.Held :=
+    ⟨durable.height, record, durable.headTag, readTag, store, durable.chain, durable.frontier⟩
+  match ApplicationStreamContinuityFresh.gate
+      (ApplicationStreamContinuityFresh.verdict birthHeight held physical) with
+  | none => return .ok (← handoff)
+  | some refusal => return .error refusal
 
 def withVerifiedFreshTip {config : Config} {target : Durable} {α : Type}
     (old : NativeHostReplay.Verified config target) (handoff : IO α) :

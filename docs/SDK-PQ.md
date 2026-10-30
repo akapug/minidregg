@@ -8,7 +8,7 @@ read from source at `main` (every file and line below was read, not inferred).
 
 `native/mini-sdk/src/signer.rs` is the signer abstraction. Everything that signs takes a
 `&dyn Signer` (`sign.rs`: `sign_intent`, `sign_observation_headers`, `sign_transaction`;
-`flow::Client.key`; `consent::Consent` takes the public key as bytes). TS mirrors it
+`flow::Flow.signer`; `consent::Consent` takes the public key as bytes). TS mirrors it
 (`Profile.signer(generation, scheme)`, `verify(scheme, ...)`, `signTransaction(signer, ...)`).
 
 | scheme | algorithm code | public key | signature |
@@ -71,7 +71,7 @@ envelope. `FleetTurn.admitNative` (`Kernel/FleetTurn.lean:563`), `ParticipantKey
 4. **Every key-shape gate.** Each restates `algorithm = ed25519Algorithm ∧ publicKey.length = 32`.
    Replace all of them by one predicate `CredentialSignatureAdmission.wellFormedKey` (`(1,32) ∨ (2,1984)`):
    * `Kernel/ParticipantKeyEnrollment.lean:311-312` (the `Accepted` shape) and `:336-337` (admission);
-   * `Kernel/SubjectKeyRotation.lean:156-157` and `:175-176`;
+   * `Kernel/Receivers/SubjectKeyRotation.lean:156-157` and `:175-176`;
    * `Kernel/NativeObservationController.lean:449-450` (`intentKey`, the key an observation must be
      signed by);
    * `Kernel/NativeCurrentSigningKey.lean:26` and `:37` (`select`);

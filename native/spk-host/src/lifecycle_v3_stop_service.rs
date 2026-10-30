@@ -4,6 +4,7 @@
 //! a crash, retained artifacts may resume an already-fsynced Fenced journal
 //! or audit Stopped, but can never mint another fresh callback or fence Running.
 
+use crate::io_context::IoContext;
 use crate::completion_custodian::preflight_custodian;
 use crate::dispatch_author::private_signing_key;
 use crate::dispatch_author::SignerPin;
@@ -26,7 +27,7 @@ use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use crate::canonical::hex64;
 
 const MAX_CONFIG: u64 = 65_536;
 const MAX_FRAME: u64 = 12_102_760;
@@ -35,7 +36,7 @@ const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
 const REPORT_BOUND: usize = 12_102_759;
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-LAUNCH-COMPLETION-OPERATOR-PLAN/v1";
 const INGRESS_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v2";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v5";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v8";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -61,8 +62,8 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
         .create(true)
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&path)?;
-    let named = fs::symlink_metadata(&path)?;
+        .open(&path).ctx("open", &path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     let opened = lock.metadata()?;
     if !opened.is_file()
         || named.dev() != opened.dev()
@@ -84,7 +85,7 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
             Err(error)
         };
     }
-    let named = fs::symlink_metadata(&path)?;
+    let named = fs::symlink_metadata(&path).ctx("inspect", &path)?;
     if named.dev() != opened.dev() || named.ino() != opened.ino() {
         return Err(invalid("STOP supervisor lock path changed"));
     }
@@ -92,43 +93,8 @@ fn acquire_run_lock(journal_dir: &Path) -> io::Result<File> {
 }
 
 fn read_private(path: &Path, maximum: u64) -> io::Result<Vec<u8>> {
-    private_dir(
-        path.parent()
-            .ok_or_else(|| invalid("STOP file parent absent"))?,
-    )?;
-    let named = fs::symlink_metadata(path)?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let before = file.metadata()?;
-    if !path.is_absolute()
-        || !before.is_file()
-        || named.dev() != before.dev()
-        || named.ino() != before.ino()
-        || before.uid() != unsafe { libc::geteuid() }
-        || before.nlink() != 1
-        || before.permissions().mode() & 0o777 != 0o600
-        || before.len() == 0
-        || before.len() > maximum
-    {
-        return Err(invalid("STOP retained file identity refused"));
-    }
-    let mut bytes = Vec::with_capacity(before.len() as usize);
-    file.by_ref().take(maximum + 1).read_to_end(&mut bytes)?;
-    let after = file.metadata()?;
-    if bytes.len() as u64 != before.len()
-        || after.dev() != before.dev()
-        || after.ino() != before.ino()
-        || after.len() != before.len()
-        || after.mtime() != before.mtime()
-        || after.mtime_nsec() != before.mtime_nsec()
-        || after.ctime() != before.ctime()
-        || after.ctime_nsec() != before.ctime_nsec()
-    {
-        return Err(invalid("STOP retained file changed during read"));
-    }
-    Ok(bytes)
+    private_dir(path.parent().ok_or_else(|| invalid("STOP file parent absent"))?)?;
+    crate::private_file::read(path, maximum, "STOP retained file identity refused")
 }
 
 fn ensure_artifact(directory: &Path, name: &str, expected: &[u8], bound: u64) -> io::Result<()> {
@@ -189,13 +155,6 @@ struct ResidentPins {
     begin_operation_ledger: PathBuf,
     claim_nonce_ledger: PathBuf,
     descriptor_attempt_dir: PathBuf,
-}
-
-fn hex64(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn load_config(path: &Path) -> io::Result<(StopConfig, ResidentPins)> {
@@ -321,7 +280,7 @@ fn inspect_original(
     let committed = read_private(&claim_dir.join("committed-v3.bin"), MAX_FRAME)?;
     let original_frame = read_private(&claim_dir.join("op26-frame.bin"), MAX_FRAME)?;
     let committed_tag = b"DREGG/APPLICATION/LIFECYCLE-CLAIM-COMMITTED/v3";
-    if framed_payload(&original_frame, 26, committed_tag)? != committed {
+    if framed_payload("lifecycle claim submit", &original_frame, crate::host_operations::APPLICATION_LIFECYCLE_CLAIM_SUBMIT, committed_tag)? != committed {
         return Err(invalid("STOP original fresh callback differs"));
     }
     let requested: Value = serde_json::from_slice(&read_private(
@@ -363,28 +322,12 @@ fn inspect_original(
             .ok_or_else(|| invalid("STOP probe parent absent"))?,
     )?;
     DirBuilder::new().mode(0o700).create(probe_dir)?;
-    let plan_path = write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
-    let committed_path = write_new(probe_dir, "committed-v3.bin", &committed)?;
+    write_new(probe_dir, "stop-plan-v2.bin", &plan)?;
+    write_new(probe_dir, "committed-v3.bin", &committed)?;
     let output_path = probe_dir.join("current.json");
-    let _ = operator.pinned_config()?;
-    let status = Command::new(&operator.host)
-        .arg(&operator.config)
-        .arg("inspect-stop-claim")
-        .arg(&plan_path)
-        .arg(&committed_path)
-        .arg(&output_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?;
-    if !status.success() {
-        return Err(invalid("pinned STOP current source inspection refused"));
-    }
-    let _ = operator.pinned_config()?;
-    let inspection = fs::read(&output_path)?;
-    if inspection.is_empty() || inspection.len() as u64 > MAX_INSPECTION {
-        return Err(invalid("STOP current source inspection bound refused"));
-    }
+    let inspection = crate::lifecycle_v3_stop_claim_native::inspect_current(
+        operator, &plan, &committed, &output_path,
+    )?;
     let target = StopTarget::from_verified_inspection(
         &plan,
         &committed,
@@ -415,13 +358,13 @@ fn inspect_original(
 
 fn fresh_probe(journal_dir: &Path, label: &str) -> io::Result<PathBuf> {
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     Ok(journal_dir.join(format!("{label}-{}", hex(&random))))
 }
 
 fn nonce() -> io::Result<String> {
     let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut bytes)?;
     let number = u128::from_le_bytes(bytes);
     if number == 0 {
         return Err(invalid("STOP report nonce zero"));
@@ -747,14 +690,14 @@ fn report_needs_fresh(directory: &Path) -> io::Result<bool> {
     if !absent(&directory.join("report-source.json"))? {
         return Ok(false);
     }
-    if fs::read_dir(directory)?.next().is_some() {
+    if fs::read_dir(&directory).ctx("list", &directory)?.next().is_some() {
         return Err(invalid(
             "STOP report directory has artifacts but no first source",
         ));
     }
     // An empty directory is the crash point immediately after mkdir; there
     // are no nonce or signed bytes to preserve yet.
-    fs::remove_dir(directory)?;
+    fs::remove_dir(&directory).ctx("remove", &directory)?;
     Ok(true)
 }
 
@@ -829,9 +772,9 @@ fn assemble_completion(
         "lifecycle-stop-completion-v2-active.json",
         &active,
     )?;
-    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
-    let plan = framed_payload(&reply, 70, PLAN_TAG)?;
+    let plan = framed_payload("launch completion plan", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_PLAN, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
     let view: Value = serde_json::from_slice(&operator.tool(
         "inspect",
@@ -891,9 +834,9 @@ fn assemble_completion(
     pair.extend_from_slice(plan);
     pair.extend_from_slice(&encoded);
     write_new(attempt_dir, "op71-requested.bin", &pair)?;
-    let reply = operator.invoke(71, &pair)?;
+    let reply = operator.invoke(crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, &pair)?;
     write_new(attempt_dir, "op71-frame.bin", &reply)?;
-    let ingress = framed_payload(&reply, 71, INGRESS_TAG)?.to_vec();
+    let ingress = framed_payload("launch completion assemble", &reply, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)?.to_vec();
     write_new(attempt_dir, "completion-v2.bin", &ingress)?;
     Ok(ingress)
 }
@@ -937,7 +880,7 @@ fn completion_ingress_retained(
     }
     let ingress = read_private(&dir.join("completion-v2.bin"), MAX_FRAME)?;
     let frame = read_private(&dir.join("op71-frame.bin"), MAX_FRAME)?;
-    if framed_payload(&frame, 71, INGRESS_TAG)? != ingress {
+    if framed_payload("launch completion assemble", &frame, crate::host_operations::APPLICATION_LAUNCH_COMPLETION_ASSEMBLE, INGRESS_TAG)? != ingress {
         return Err(invalid("STOP retained completion assembly differs"));
     }
     Ok(ingress)
@@ -961,8 +904,8 @@ fn completion_dir(base: &Path) -> io::Result<(PathBuf, bool)> {
             current = next;
             continue;
         }
-        if fs::read_dir(&current)?.next().is_none() {
-            fs::remove_dir(&current)?;
+        if fs::read_dir(&current).ctx("list", &current)?.next().is_none() {
+            fs::remove_dir(&current).ctx("remove", &current)?;
             return Ok((current, false));
         }
         // Even a complete detached assembly may have become stale if an
@@ -1032,7 +975,7 @@ fn retained_completion_anchor(
     {
         return Ok(None);
     }
-    let payload = framed_payload(&bytes, 38, OUTCOME_TAG)?;
+    let payload = framed_payload("lifecycle completion submit", &bytes, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
     let probe = fresh_probe(dir, "frame-recovery")?;
     DirBuilder::new().mode(0o700).create(&probe)?;
     let input = write_new(&probe, "outcome.bin", payload)?;
@@ -1067,9 +1010,9 @@ fn complete_once_or_lookup(
             "ingressSha256":hex(&Sha256::digest(ingress)),
             "claimSha256":hex(&Sha256::digest(&evidence.committed))});
         write_new(dir, "op38-requested.json", &serde_json::to_vec(&marker)?)?;
-        let frame = operator.invoke(38, ingress)?;
+        let frame = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, ingress)?;
         write_new(dir, "op38-frame.bin", &frame)?;
-        let payload = framed_payload(&frame, 38, OUTCOME_TAG)?;
+        let payload = framed_payload("lifecycle completion submit", &frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_SUBMIT, OUTCOME_TAG)?;
         let input = write_new(dir, "op38-outcome.bin", payload)?;
         let inspected =
             operator.tool("inspect", "outcome", &input, &dir.join("op38-outcome.json"))?;
@@ -1092,8 +1035,8 @@ fn complete_once_or_lookup(
     let anchor = retained_completion_anchor(operator, dir, &evidence.claim_receipt)?;
     let probe = fresh_probe(dir, "op39-lookup")?;
     DirBuilder::new().mode(0o700).create(&probe)?;
-    let frame = operator.invoke(39, ingress)?;
-    let payload = framed_payload(&frame, 39, OUTCOME_TAG)?;
+    let frame = operator.invoke(crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, ingress)?;
+    let payload = framed_payload("lifecycle completion lookup", &frame, crate::host_operations::APPLICATION_LIFECYCLE_COMPLETION_LOOKUP, OUTCOME_TAG)?;
     let input = write_new(&probe, "outcome.bin", payload)?;
     let inspected = operator.tool("inspect", "outcome", &input, &probe.join("outcome.json"))?;
     let view: Value = serde_json::from_slice(&inspected)?;
@@ -1151,14 +1094,14 @@ fn set_aside_pure_begin(config: &StopConfig, journal_dir: &Path) -> io::Result<(
         return Ok(());
     }
     let mut random = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    File::open("/dev/urandom").ctx("open", &"/dev/urandom")?.read_exact(&mut random)?;
     let aside = journal_dir.join(format!("stop-begin-plan-only-{}", hex(&random)));
-    fs::rename(attempt, &aside)?;
-    File::open(journal_dir)?.sync_all()?;
+    fs::rename(attempt, &aside).ctx("rename", &attempt)?;
+    File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     if !absent(&active)? {
-        fs::rename(&active, aside.join("active-marker.json"))?;
-        File::open(&aside)?.sync_all()?;
-        File::open(journal_dir)?.sync_all()?;
+        fs::rename(&active, aside.join("active-marker.json")).ctx("rename", &active)?;
+        File::open(&aside).ctx("open", &aside)?.sync_all()?;
+        File::open(&journal_dir).ctx("open", &journal_dir)?.sync_all()?;
     }
     Ok(())
 }
@@ -1215,8 +1158,24 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     let audit = match phase {
         Phase::Running => {
             set_aside_pure_begin(&config, &pins.journal_dir)?;
-            // Any prior source or physical marker makes this run an uncertain
-            // attempt. It cannot be converted into a second fresh op26.
+            // A lost op22/op26 reply is reconciled by Lean's op23/op27
+            // lookup: resume from an accepted BEGIN, set aside an absent
+            // attempt, or refuse by name (lifecycle_v3_stop_recovery).
+            let recovered = crate::lifecycle_v3_stop_recovery::reconcile_running(
+                &operator,
+                &crate::lifecycle_v3_stop_recovery::StopAttempts {
+                    journal_dir: &pins.journal_dir,
+                    begin: &config.begin_attempt_dir,
+                    claim_author: &config.claim_author_attempt_dir,
+                    claim: &config.claim_attempt_dir,
+                },
+            )?;
+            // Any other prior source or physical marker makes this run an
+            // uncertain attempt. It cannot be converted into a second fresh op26.
+            let begin_markers = [
+                config.begin_attempt_dir.clone(),
+                pins.journal_dir.join("lifecycle-stop-begin-v3-active.json"),
+            ];
             for path in [
                 &config.begin_attempt_dir,
                 &config.claim_author_attempt_dir,
@@ -1226,6 +1185,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 &pins.journal_dir.join("lifecycle-stop-begin-v3-active.json"),
                 &pins.journal_dir.join("lifecycle-stop-claim-v3-active.json"),
             ] {
+                if recovered.is_some() && begin_markers.contains(path) {
+                    continue;
+                }
                 if !absent(path)? {
                     return Err(invalid(
                         "STOP prior attempt on Running journal requires audit",
@@ -1236,14 +1198,17 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 serde_json::from_slice(&read_private(&pins.begin_management_custody, MAX_CONFIG)?)?;
             let claim_signers: FixedStopClaimSigners =
                 serde_json::from_slice(&read_private(&pins.claim_management_custody, MAX_CONFIG)?)?;
-            let begin = lifecycle_v3_stop_begin_native::submit_once(
-                &operator,
-                &begin_signers,
-                pins.app_uid,
-                &launch,
-                &pins.begin_operation_ledger,
-                &config.begin_attempt_dir,
-            )?;
+            let begin = match recovered {
+                Some(begin) => begin,
+                None => lifecycle_v3_stop_begin_native::submit_once(
+                    &operator,
+                    &begin_signers,
+                    pins.app_uid,
+                    &launch,
+                    &pins.begin_operation_ledger,
+                    &config.begin_attempt_dir,
+                )?,
+            };
             if begin.volume_id_hex() != volume.volume_id {
                 return Err(invalid("STOP BEGIN volume differs from root attestation"));
             }

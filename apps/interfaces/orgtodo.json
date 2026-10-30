@@ -1,0 +1,302 @@
+{
+  "format": "mini-app-interface-v1",
+  "interfaceVersion": 1,
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "name": "orgtodo",
+  "appId": "sfs5m16cjy4rxeqe3vfvqef4397szm5k6yxkmrj391u4sprpk6fh",
+  "packageId": "727e6323ee98810826f91b15530e74f4",
+  "appVersion": "0.1.7",
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/fixermark/orgtodo/blob/b904d2ade56b2f89d960c49c97b4bf2b023a54b5/src/handlers.ts",
+    "https://github.com/fixermark/orgtodo/blob/b904d2ade56b2f89d960c49c97b4bf2b023a54b5/src/db/Db.ts",
+    "https://github.com/fixermark/orgtodo/blob/b904d2ade56b2f89d960c49c97b4bf2b023a54b5/src/orgdata/Hash.ts",
+    "scripts/spk-platform/market-writes/b2.sh"
+  ],
+  "$defs": {
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fulltext": {
+          "type": "string"
+        },
+        "epochUpdateMsecs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "hash",
+        "fulltext",
+        "epochUpdateMsecs"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "operations": {
+    "task.list": {
+      "description": "Read full Org tasks; the package has no pagination and the reply is bounded.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Entry"
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "tasks"
+        ],
+        "query": {
+          "resolution": "full"
+        },
+        "decode": "json",
+        "status": [
+          200
+        ]
+      },
+      "projection": {
+        "collection": "entries",
+        "values": true,
+        "where": {}
+      }
+    },
+    "task.read": {
+      "description": "Read one task by its stable Org entry identity; absent identity returns an empty array.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Entry"
+        },
+        "maxItems": 1
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "tasks"
+        ],
+        "query": {
+          "resolution": "full"
+        },
+        "decode": "json",
+        "status": [
+          200
+        ]
+      },
+      "projection": {
+        "collection": "entries",
+        "values": true,
+        "where": {
+          "id": {
+            "arg": "id"
+          }
+        }
+      }
+    },
+    "task.put": {
+      "description": "Upsert an Org entry using a UTF-8 content hash. If it exists, expectedHash must match the current hash unless the exact new content hash already exists. A missing entry is inserted.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "fulltext": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          },
+          "expectedHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "id",
+          "fulltext",
+          "expectedHash"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "tasks/",
+          {
+            "arg": "id",
+            "encoding": "segment"
+          }
+        ],
+        "query": {
+          "oldhash": {
+            "arg": "expectedHash"
+          }
+        },
+        "json": {
+          "id": {
+            "arg": "id"
+          },
+          "hash": {
+            "sha256": {
+              "arg": "fulltext"
+            }
+          },
+          "fulltext": {
+            "arg": "fulltext"
+          }
+        },
+        "decode": "status",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "absent",
+      "op": "task.read",
+      "args": {
+        "id": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [],
+          "equals": []
+        }
+      ]
+    },
+    {
+      "id": "put",
+      "op": "task.put",
+      "args": {
+        "id": {
+          "context": "runId"
+        },
+        "fulltext": {
+          "concat": [
+            "* TODO typed task\n:PROPERTIES:\n:ID: ",
+            {
+              "context": "runId"
+            },
+            "\n:END:\n"
+          ]
+        },
+        "expectedHash": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "id": "read",
+      "op": "task.read",
+      "args": {
+        "id": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "id": {
+              "context": "runId"
+            },
+            "fulltext": {
+              "concat": [
+                "* TODO typed task\n:PROPERTIES:\n:ID: ",
+                {
+                  "context": "runId"
+                },
+                "\n:END:\n"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "op": "task.list",
+      "args": {},
+      "assert": [
+        {
+          "contains": {
+            "id": {
+              "context": "runId"
+            },
+            "fulltext": {
+              "concat": [
+                "* TODO typed task\n:PROPERTIES:\n:ID: ",
+                {
+                  "context": "runId"
+                },
+                "\n:END:\n"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

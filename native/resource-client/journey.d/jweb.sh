@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# journey.d/jweb.sh — WEB-ENTRANCE + WEB-2: `mini web`, the read-only loopback
-# hypertext face, on the docuverse braid. Runs after K12C (paper, notes, an
+# journey.d/jweb.sh — WEB-ENTRANCE: `mini web`, the loopback hypertext face
+# (reads, plus the document editor and creation POST forms the member server
+# serves; this journey drives the reads) on the docuverse braid; the same renders
+# reach the browser through the web front end (journey.d/jweb-frontend.sh). Runs after K12C (paper, notes, an
 # annotation; carol and dave), K12M (mpaper, marked), K12T (wall, page with
 # three transclusions; the readers tdave and the late joiner tlate) and K12H
 # (hist, six edits, the third key granted after h2).
@@ -25,10 +27,10 @@
 #   link-out                 C's /doc/notes links out (the links view)       -> 9101 -> paper
 #   doc-page-reads           signed reads one /doc/notes view makes          -> 3 (page, links, backlinks)
 #   page-order-equals-show   R's /doc/page element order = R's doc-show       -> equal
-#   r-transclusions-inline   R's /doc/page renders                           -> invalidated live snapshot
+#   r-transclusions-inline   R's /doc/page renders                           -> invalidated live snapshot unavailable
 #   r-snapshot-at-height     T1 shown as read at its opening height (snapshot@H) -> present
-#   late-joiner-placeholder  tlate's /doc/page renders                       -> invalidated live moved
-#   d-placeholders           tdave's /doc/page                               -> unavailable x3
+#   late-joiner-placeholder  tlate's /doc/page renders                       -> invalidated live moved unavailable
+#   d-placeholders           tdave's /doc/page                               -> unavailable x4
 #   d-page-no-bytes          no wall bytes on tdave's page; R's page has them -> absent:present
 #   transclusion-backlinks   R's /doc/wall backlinks of kind transclusion    -> 3 (page)
 #   d-paper-refused          D's /doc/paper (a reference with no grant)      -> 403 refusal page
@@ -46,7 +48,7 @@
 #   wrong-secret             /WRONG/doc/paper                                -> 404
 #   refused-requests-no-reads  signed reads made by the five refused requests -> 0
 #   stream-501               /stream/notes (k-stream is not on this braid)   -> 501
-#   board-fields             A's /board/wide (K4's) or /board/shared         -> fields >= 1
+#   board-fields             A's /board/wide (K4's) or /board/shared         -> fields >= 1 (wide) / 403 refusal (shared)
 #   room-children            A's /room/wlab lists wnote                      -> wnote
 #   room-members             A's /room/wlab members (the `who` view)         -> A present
 #   lynx-dump                lynx -dump of C's /doc/paper (if lynx exists)   -> text
@@ -92,8 +94,8 @@ same_html() { # PAGE SHOW-RUN -> equal | differs (the page's document vs `doc sh
 }
 show_elements() { jq -r '[.lines[].element] | join(" ")' "$D/$1.out"; }
 
-start() { # NAME WS -> sets URL_<NAME> and PORT_<NAME>
-  "$MINI" web --dir "$2" --listen 127.0.0.1:0 >"$D/web-$1.out" 2>"$D/web-$1.err" &
+start() { # NAME WS [FLAGS...] -> sets URL_<NAME> and PORT_<NAME>
+  "$MINI" web --dir "$2" --listen 127.0.0.1:0 "${@:3}" >"$D/web-$1.out" 2>"$D/web-$1.err" &
   PIDS+=($!)
   local i url
   for i in $(seq 1 100); do
@@ -168,16 +170,18 @@ reads=$(( $(signed_reads "$CW") - before ))
 row link-out "200:present:paper" "$code:$(grep -q 'data-link="9101"' "$D/pages/c-notes.html" && echo present || echo absent):$(grep -o 'data-link="9101"[^>]*>[^<]*<span class=id>[0-9]*</span> -> <a href="[^"]*/doc/[a-z]*">' "$D/pages/c-notes.html" | grep -o '/doc/[a-z]*' | cut -d/ -f3)" "the links view"
 row doc-page-reads 3 "$reads" "signed reads made by one /doc/notes view (notes holds no transclusion)"
 
-# Transclusions inline (K12T's page), as three readers see them.
+# Transclusions inline (K12T's page), as three readers see them.  K12T's jwall
+# step (a read judged by its ReadLeg alone) left a fourth transclusion record in
+# page: only C was granted jwall, so it renders `unavailable` to every web reader.
 code=$(get r-page.html "${URL_R}doc/page")
 run r-show-page "$MINI" workspace --action doc-show --dir "$NEWCOMER_WS" --name page --format json
 row page-order-equals-show "200:equal" "$code:$([ "$(elements r-page.html)" = "$(show_elements r-show-page)" ] && echo equal || echo differs)" "$(elements r-page.html)"
-row r-transclusions-inline "invalidated live snapshot" "$(renders r-page.html)" "R covers wall and page"
+row r-transclusions-inline "invalidated live snapshot unavailable" "$(renders r-page.html)" "R covers wall and page; jwall's fourth record R cannot read"
 row r-snapshot-at-height present "$(grep -q 'snapshot@[0-9]*' "$D/pages/r-page.html" && echo present || echo absent)" "$(grep -o 'from [a-z]* lines [0-9?]*\.\.[0-9?]*, snapshot@[0-9]*' "$D/pages/r-page.html" | head -1)"
 code=$(get l-page.html "${URL_L}doc/page")
-row late-joiner-placeholder "200:invalidated live moved" "$code:$(renders l-page.html)" "$(grep -o 'its lines moved since height [0-9]*[^<]*' "$D/pages/l-page.html" | head -1)"
+row late-joiner-placeholder "200:invalidated live moved unavailable" "$code:$(renders l-page.html)" "$(grep -o 'its lines moved since height [0-9]*[^<]*' "$D/pages/l-page.html" | head -1)"
 code=$(get td-page.html "${URL_TD}doc/page")
-row d-placeholders "200:unavailable unavailable unavailable" "$code:$(renders td-page.html)" "$(grep -o '\[transclusion: [0-9]* atoms of [^]]*' "$D/pages/td-page.html" | head -1 | sed 's/<[^>]*>//g')"
+row d-placeholders "200:unavailable unavailable unavailable unavailable" "$code:$(renders td-page.html)" "$(grep -o '\[transclusion: [0-9]* atoms of [^]]*' "$D/pages/td-page.html" | head -1 | sed 's/<[^>]*>//g')"
 row d-page-no-bytes "absent:present" "$(grep -q 'wall line' "$D/pages/td-page.html" && echo present || echo absent):$(grep -q 'wall line' "$D/pages/r-page.html" && echo present || echo absent)" "no wall bytes on tdave's page (control: R's page shows them)"
 code=$(get r-wall.html "${URL_R}doc/wall")
 row transclusion-backlinks "200:3" "$code:$(grep -c 'data-backlink="page" data-kind="transclusion"' "$D/pages/r-wall.html")" "page's three transclusion links count as backlinks of wall"
@@ -228,10 +232,16 @@ row refused-requests-no-reads 0 "$(( $(attempts "$CW") - before ))" "signed read
 row stream-501 501 "$(get stream.html "${URL_C}stream/notes")" "$(grep -o 'streams are[^<]*' "$D/pages/stream.html" | cut -c1-100)"
 
 # J8 leaves `shared` under deny-all; K4's `wide` (32 fields) is the board when K4 ran.
+# With K4 the fields render; without it the deny-all law refuses the read of shared,
+# and the face must answer with its refusal page, never the board's bytes.
 board=shared; [ -f "$SPONSOR_WS/refs/wide.json" ] && board=wide
 code=$(get a-board.html "${URL_A}board/$board")
 f=$(grep -o 'data-fields="[0-9]*"' "$D/pages/a-board.html" | grep -o '[0-9]*')
-row board-fields "200:yes" "$code:$([ "${f:-0}" -ge 1 ] && echo yes || echo no)" "${f:-0} field(s) in $board"
+if [ "$board" = wide ]; then
+  row board-fields "200:yes" "$code:$([ "${f:-0}" -ge 1 ] && echo yes || echo no)" "${f:-0} field(s) in $board"
+else
+  row board-fields "403:refusal" "$code:$(grep -q 'data-refusal' "$D/pages/a-board.html" && echo refusal || echo none)" "K4 did not run; J8's deny-all law refuses shared: $(grep -o 'refused: [^<]*' "$D/pages/a-board.html" | head -1)"
+fi
 code=$(get a-room.html "${URL_A}room/wlab")
 row room-children "200:wnote" "$code:$(grep -o 'data-child="[a-z0-9-]*"' "$D/pages/a-room.html" | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//')" "born --in wlab"
 row room-members present "$(grep -q "data-member=\"$A_SUBJECT\"" "$D/pages/a-room.html" && echo present || echo absent)" "$(grep -o 'data-members="[0-9]*"' "$D/pages/a-room.html") $(grep -o 'data-members-refused>[^<]*' "$D/pages/a-room.html")"
@@ -247,5 +257,5 @@ cleanup; PIDS=()
 cat "$rows" >&2
 total=$(wc -l <"$rows")
 [ "$bad" = 0 ] || { echo "$bad of $total web rows differ from expectation (see $rows)" >&2; exit 1; }
-echo "$total/$total web rows as expected: loopback-only, no write route, foreign Host/Origin refused before any read; pages in the kernel's order with transclusions inline; backlinks from the index; history, at-height and diff pages; refusals render as refusals" >&2
+echo "$total/$total web rows as expected: loopback-only, foreign Host/Origin refused before any read; pages in the kernel's order with transclusions inline; backlinks from the index; history, at-height and diff pages; refusals render as refusals" >&2
 echo "$rows"

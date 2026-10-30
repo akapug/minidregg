@@ -132,12 +132,27 @@ fn require_launchers(config:&Config,controller:Manager,worker:Manager)->Result<(
     }
     Ok(())
 }
+/// The exact owned controller config a root launcher projects (0600, owned,
+/// one link, canonical path), decoded and validated as `serve` would.
+fn scope_config(path: &Path) -> Result<(Vec<u8>, Config)> {
+    if !custody::canonical(path) {
+        return Err("launch config path must be canonical absolute".into());
+    }
+    let meta = fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !meta.is_file() || meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 || meta.nlink() != 1 {
+        return Err(format!("{} is not an owned private regular file", path.display()));
+    }
+    let bytes = bounded_regular_file(path, 262_144)?;
+    let config: Config = serde_json::from_slice(&bytes).map_err(|e| format!("controller config: {e}"))?;
+    validate(&config)?;
+    Ok((bytes, config))
+}
 pub(crate) fn launch_client(args: &[std::ffi::OsString]) -> Result<()> {
     let [config_path, registration] = args else {
         return Err("usage: grain-runtime controller-launch CONFIG ROOT_REGISTRATION".into());
     };
     let config_path=Path::new(config_path);let registration=Path::new(registration);
-    let (bytes,config)=config_migration::scope_config(config_path)?;
+    let (bytes,config)=scope_config(config_path)?;
     if !custody::canonical(registration)
         || registration.file_name().and_then(|v|v.to_str())!=Some(format!("{}.json",config.task).as_str()) {
         return Err("launch registry must canonically name exactly TASK.json".into());
@@ -356,14 +371,13 @@ fn incarnation(text: &str, pid: u32) -> Result<String> {
 /// unverified PID/InvocationID. The worker monitor binds this exact incarnation.
 pub(crate) fn lifetime_environment(task: &str, target: &mut Command) -> Result<()> {
     let context = current(task)?;
-    let output = command(context.controller, context.uid)
+    let output = crate::deadline::output(command(context.controller, context.uid)
         .args([
             "show",
             "--property=MainPID,ActiveState,InvocationID",
             &unit(task),
-        ])
-        .output()
-        .map_err(|e| format!("controller lifetime observation: {e}"))?;
+        ]), crate::deadline::MANAGER_QUERY)
+        .map_err(|e| crate::deadline::describe("controller lifetime observation", e))?;
     if !output.status.success() || output.stdout.len() > 16384 {
         return Err("controller lifetime observation unavailable".into());
     }
@@ -403,10 +417,9 @@ pub(crate) fn verify_launcher(task: &str, program: &Path) -> Result<()> {
 }
 fn require_launcher_protocol(controller:Manager,worker:Manager,program:&Path)->Result<()> {
     if controller != worker {
-        let output = Command::new(program)
-            .arg("--controller-manager-protocol")
-            .output()
-            .map_err(|e| format!("cross-manager launcher protocol: {e}"))?;
+        let output = crate::deadline::output(Command::new(program)
+            .arg("--controller-manager-protocol"), crate::deadline::MANAGER_QUERY)
+            .map_err(|e| crate::deadline::describe("cross-manager launcher protocol", e))?;
         if !output.status.success() || output.stdout != format!("{PROTOCOL}\n").as_bytes() {
             return Err(
                 "cross-manager worker requires source-owned controller lifetime protocol".into(),

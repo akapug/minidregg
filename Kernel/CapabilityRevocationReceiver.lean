@@ -6,7 +6,28 @@ The complete old authority, unchanged resource and selected policy source are
 guarded together; the source-created revocation and operation marker publish in one
 exact-image CAS. Exact historical ingress replays before fresh key/expiry checks.
 -/
-import Kernel.CapabilityRevocationController
+module
+
+public import Kernel.CapabilityRevocationController
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.CapabilityRevocationReceiver
 
@@ -36,20 +57,10 @@ def ingressStream : StreamCodec Ingress :=
 
 def ingressFrame : List UInt8 := "DREGG/CAPABILITY/REVOKE/SIGNED-INGRESS".toUTF8.toList ++ [1]
 
-def rawIngressCodec : LawfulCodec Ingress where
-  encode ingress := ingressFrame ++ ingressStream.encode ingress
-  decode bytes := if bytes.take ingressFrame.length = ingressFrame then
-    ingressStream.toLawful.decode (bytes.drop ingressFrame.length) else none
-  decode_encode := by
-    intro ingress
-    have decoded := ingressStream.toLawful.decode_encode ingress
-    change ingressStream.toLawful.decode (ingressStream.encode ingress) = some ingress at decoded
-    simp [decoded]
-
-def ingressCodec : LawfulCodec Ingress := strictCodec rawIngressCodec
+def ingressCodec : LawfulCodec Ingress := (StreamCodec.framed ingressFrame ingressStream).toLawful
 
 structure DecodedIngress where
-  private mk ::
+  mk ::
   ingress : Ingress
   command : PackedCommand
   commandExact : commandCodec.encode command = ingress.commandBytes
@@ -137,6 +148,13 @@ structure AcceptedRevocation [DecidableEq F] (deployment : Deployment)
   prepared : Prepared deployment profile ambient ground ingress.command.2
   accepted : Accepted prepared ingress.ingress.envelopeBytes
   physical : PhysicalShape prepared
+theorem AcceptedRevocation.sound [DecidableEq F] {ingress : DecodedIngress}
+    (accepted : AcceptedRevocation deployment profile ambient ground ingress) :
+    accepted.accepted.receipt.envelopeBytes = ingress.ingress.envelopeBytes ∧
+    RevocationKey.capability ingress.command.2.capability ∈
+      (authState accepted.accepted.semantic.prepared.post).revoked ∧
+    PhysicalShape accepted.prepared :=
+  ⟨accepted.accepted.envelopeExact, accepted.accepted.revoked, accepted.physical⟩
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (ground : Ground deployment)
@@ -157,7 +175,9 @@ def charge (accepted : AcceptedRevocation deployment profile ambient ground ingr
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
   | .memoryTouches => (writes accepted.prepared).length + (readGuards accepted.prepared).length
-  | .storageBytes => ((writes accepted.prepared).map fun write => write.canonicalPostBytes.length).sum
+  | .storageBytes => DeployedCharge.storageCharge ground.view
+      (writes accepted.prepared)
+      (event deployment.domain profile.semantics ingress)
   | .witnessBytes => ingress.ingress.envelopeBytes.length
   | .proofWork => 3
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
@@ -167,7 +187,7 @@ def intent (accepted : AcceptedRevocation deployment profile ambient ground ingr
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain profile.semantics ingress
   subject := some ingress.command.2.subject
   postRootsBound := writes_roots_bound accepted.prepared

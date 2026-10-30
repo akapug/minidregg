@@ -3,11 +3,30 @@ Native factory admission still checks all current grants, sources, charge,
 uniqueness and durable receiving. Initial descriptor content is empty; explicit
 authorized enrollment creates a canonical stable atom, then each governed
 renewal edits that atom with the new generation-bound payload. -/
-import Kernel.ApplicationGrainSession
-import Kernel.ApplicationGrainSessionEnrollment
-import Kernel.NativeHostGenesis
-import Kernel.ResourceBirthController
-import Kernel.ContentResource
+module
+
+public import Kernel.ApplicationGrainSession
+public import Kernel.ApplicationGrainSessionEnrollment
+public import Kernel.NativeHostGenesis
+public import Kernel.ResourceBirthController
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationGrainSessionBirth
 open Minidregg.Compiler
@@ -80,81 +99,81 @@ def Ready.births (ready : Ready) (config : NativeHostGenesis.Config) :
      (descriptorCell config ready.spec.descriptor)]
 
 private def ownerGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform)
     (height target : Nat) (owner : SubjectId) (identifier : CapabilityId) : AuthorityGrant :=
   ⟨.object, ⟨{ NativeHostGenesis.rootCapability profile config .object identifier owner target
       (ResourceBirthPolicyController.Concrete.ownerVerbs .object) with
-      notBefore := height, notAfter := height + profile.template.lifetime }, []⟩⟩
+      notBefore := height, notAfter := height + record.lifetime }, []⟩⟩
 
 private def controlGrant {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform)
     (height target : Nat) (owner : SubjectId) (identifier : CapabilityId) : AuthorityGrant :=
   ⟨.program, ⟨{ NativeHostGenesis.rootCapability profile config .program identifier owner target
       {.installPolicy, .revokeCapability} with
-      notBefore := height, notAfter := height + profile.template.lifetime }, []⟩⟩
+      notBefore := height, notAfter := height + record.lifetime }, []⟩⟩
 
 def Ready.grants {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (height : Nat) : List AuthorityGrant :=
-  [ownerGrant profile config height ready.spec.session ready.spec.participant
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (height : Nat) : List AuthorityGrant :=
+  [ownerGrant profile config record height ready.spec.session ready.spec.participant
      ready.spec.sessionOwnerCapability,
-   controlGrant profile config height ready.spec.session ready.spec.participant
+   controlGrant profile config record height ready.spec.session ready.spec.participant
      ready.spec.sessionControlCapability,
-   ownerGrant profile config height ready.spec.descriptor ready.spec.participant
+   ownerGrant profile config record height ready.spec.descriptor ready.spec.participant
      ready.spec.descriptorOwnerCapability,
-   controlGrant profile config height ready.spec.descriptor ready.spec.participant
+   controlGrant profile config record height ready.spec.descriptor ready.spec.participant
      ready.spec.descriptorControlCapability]
 
 /-- Loaded-state grants use the authority epochs at the receiving prefix.
 Genesis fixes identity and scope, never a later issuer generation. -/
 private def currentRootCapability {F : Type} [Field F] (kind : ResourceKind)
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform)
     (authority : AuthState) (height target : Nat) (participant : SubjectId)
     (identifier : CapabilityId) (verbs : Finset (Verb kind)) : Capability kind :=
   { NativeHostGenesis.rootCapability profile config kind identifier participant target verbs with
     notBefore := height
-    notAfter := height + profile.template.lifetime
+    notAfter := height + record.lifetime
     issuerEpoch := authority.issuerEpoch profile.template.issuer
     policyEpoch := authority.policyEpoch ⟨target⟩ }
 
 private theorem currentRootCapability_current {F : Type} [Field F]
     (kind : ResourceKind) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (authority : AuthState)
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (authority : AuthState)
     (height target : Nat) (participant : SubjectId) (identifier : CapabilityId)
     (verbs : Finset (Verb kind)) :
-    (currentRootCapability kind profile config authority height target participant identifier verbs).issuerEpoch =
+    (currentRootCapability kind profile config record authority height target participant identifier verbs).issuerEpoch =
         authority.issuerEpoch profile.template.issuer ∧
-      (currentRootCapability kind profile config authority height target participant identifier verbs).policyEpoch =
+      (currentRootCapability kind profile config record authority height target participant identifier verbs).policyEpoch =
         authority.policyEpoch ⟨target⟩ ∧
-      (currentRootCapability kind profile config authority height target participant identifier verbs).notBefore =
+      (currentRootCapability kind profile config record authority height target participant identifier verbs).notBefore =
         height := by
   exact ⟨rfl, rfl, rfl⟩
 
 private def ownerGrantCurrent {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform)
     (authority : AuthState) (height target : Nat) (participant : SubjectId)
     (identifier : CapabilityId) : AuthorityGrant :=
-  ⟨.object, ⟨currentRootCapability .object profile config authority height target participant identifier
+  ⟨.object, ⟨currentRootCapability .object profile config record authority height target participant identifier
     (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
 
 private def controlGrantCurrent {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config)
+    (profile : CanonicalRuntimeProfile.Profile F) (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform)
     (authority : AuthState) (height target : Nat) (participant : SubjectId)
     (identifier : CapabilityId) : AuthorityGrant :=
-  ⟨.program, ⟨currentRootCapability .program profile config authority height target participant identifier
+  ⟨.program, ⟨currentRootCapability .program profile config record authority height target participant identifier
     {.installPolicy, .revokeCapability}, []⟩⟩
 
 def Ready.grantsCurrent {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (authority : AuthState) (height : Nat) :
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
     List AuthorityGrant :=
-  [ownerGrantCurrent profile config authority height ready.spec.session ready.spec.participant
+  [ownerGrantCurrent profile config record authority height ready.spec.session ready.spec.participant
      ready.spec.sessionOwnerCapability,
-   controlGrantCurrent profile config authority height ready.spec.session ready.spec.participant
+   controlGrantCurrent profile config record authority height ready.spec.session ready.spec.participant
      ready.spec.sessionControlCapability,
-   ownerGrantCurrent profile config authority height ready.spec.descriptor ready.spec.participant
+   ownerGrantCurrent profile config record authority height ready.spec.descriptor ready.spec.participant
      ready.spec.descriptorOwnerCapability,
-   controlGrantCurrent profile config authority height ready.spec.descriptor ready.spec.participant
+   controlGrantCurrent profile config record authority height ready.spec.descriptor ready.spec.participant
      ready.spec.descriptorControlCapability]
 
 def Ready.policyRecords {F : Type} [Field F]
@@ -177,7 +196,7 @@ def Ready.initialPolicies {F : Type} [Field F]
 
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (height : Nat)
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (height : Nat)
     (creator : SubjectId) (nonce payer : Nat)
     (funding : List InitialFunding := []) :
     Descriptor CanonicalCellRegistry.registry :=
@@ -187,43 +206,43 @@ def Ready.descriptor {F : Type} [Field F]
     { factory := ⟨config.deployment.factoryId⟩, creator := creator,
       transactionId := identity, nonce := nonce,
       births := ready.births config, auxiliaryCreates := [],
-      grants := ready.grants profile config height,
+      grants := ready.grants profile config record height,
       initialPolicies := ready.initialPolicies profile config,
       authorityNullifier := identity.value,
       funding := funding,
-      fee := ⟨payer, config.tariff.collector, config.tariff.asset, 0⟩ }
-  { draft with fee := { draft.fee with amount := draft.quotedFee config.tariff } }
+      fee := ⟨payer, record.creation.collector, record.creation.asset, 0⟩ }
+  { draft with fee := { draft.fee with amount := draft.quotedFee record.creation } }
 
 def Ready.descriptorCurrent {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (authority : AuthState) (height : Nat)
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat)
     (creator : SubjectId) (nonce payer : Nat)
     (funding : List InitialFunding := []) :
     Descriptor CanonicalCellRegistry.registry :=
-  let previous := ready.descriptor profile config height creator nonce payer funding
-  let updated := { previous with grants := ready.grantsCurrent profile config authority height }
+  let previous := ready.descriptor profile config record height creator nonce payer funding
+  let updated := { previous with grants := ready.grantsCurrent profile config record authority height }
   let draft := { updated with fee := { updated.fee with amount := 0 } }
-  { draft with fee := { draft.fee with amount := draft.quotedFee config.tariff } }
+  { draft with fee := { draft.fee with amount := draft.quotedFee record.creation } }
 
 theorem Ready.descriptorCurrent_grants {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (authority : AuthState) (height : Nat)
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat)
     (creator : SubjectId) (nonce payer : Nat) (funding : List InitialFunding) :
-    (ready.descriptorCurrent profile config authority height creator nonce payer funding).grants =
-      ready.grantsCurrent profile config authority height := rfl
+    (ready.descriptorCurrent profile config record authority height creator nonce payer funding).grants =
+      ready.grantsCurrent profile config record authority height := rfl
 
 theorem Ready.current_grant_count {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (authority : AuthState) (height : Nat) :
-    (ready.grantsCurrent profile config authority height).length = 4 := rfl
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (authority : AuthState) (height : Nat) :
+    (ready.grantsCurrent profile config record authority height).length = 4 := rfl
 
 theorem Ready.birth_count (ready : Ready) (config : NativeHostGenesis.Config) :
     (ready.births config).length = 2 := rfl
 
 theorem Ready.grant_count {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)
-    (config : NativeHostGenesis.Config) (height : Nat) :
-    (ready.grants profile config height).length = 4 := rfl
+    (config : NativeHostGenesis.Config) (record : PlatformCellLayout.Platform) (height : Nat) :
+    (ready.grants profile config record height).length = 4 := rfl
 
 theorem Ready.policy_count {F : Type} [Field F]
     (ready : Ready) (profile : CanonicalRuntimeProfile.Profile F)

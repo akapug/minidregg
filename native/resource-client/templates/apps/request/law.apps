@@ -1,0 +1,11 @@
+-- apps/request: one member's request to run one signed Sandstorm package as a grain (docs/APP-MARKET-2026-10-27.md §3).
+-- Written by scripts/AppsRequestTemplate.lean: the Host's rendering of Kernel/AppsRequest.lean `law`.
+-- Placeholders: {REQUESTER} the member's subject; {MANAGER} the hosting manager's subject.
+-- Fields in fields.json: 1 state (0 requested, 1 running, 2 refused); 2, 3 the packageId as two 64-bit words;
+-- 4-7 the appId as four 64-bit words; 8 class (1 S, 2 M, 3 L); 9 grain; 10 generation.
+-- 0 management: anyone holding a grant reads and writes (the clauses below judge every write); the requester delegates the manager's observe grant; nobody installs or revokes, so the law and the grants stand.
+any [ verb == read, verb == write, all [ verb == delegate, subject == {REQUESTER} ] ];
+-- 1 setup, once, by the requester: state 0, grain and generation 0, a nonzero packageId (fields 2, 3), the appId (fields 4-7), a class 1 S / 2 M / 3 L (field 8); then the choice is frozen.
+any [ not (verb == write), all [ not (field 1 before == field 1 before), subject == {REQUESTER}, field 1 == 0, field 9 == 0, field 10 == 0, any [ not (field 2 == 0), not (field 3 == 0) ], any [ field 8 == 1, field 8 == 2, field 8 == 3 ] ], all [ field 1 before == field 1 before, all [ field 2 delta == 0, field 3 delta == 0, field 4 delta == 0, field 5 delta == 0, field 6 delta == 0, field 7 delta == 0, field 8 delta == 0 ] ] ];
+-- 2 outcome, once, by the manager: state 0 -> 1 running with a nonzero grain (field 9) and its generation (field 10), or 0 -> 2 refused; the outcome fields move in no other write.
+any [ not (verb == write), not (field 1 before == field 1 before), all [ field 1 delta == 0, field 9 delta == 0, field 10 delta == 0 ], all [ subject == {MANAGER}, field 1 before == 0, any [ all [ field 1 == 1, not (field 9 == 0) ], field 1 == 2 ] ] ];

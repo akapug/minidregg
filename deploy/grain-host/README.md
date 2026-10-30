@@ -38,9 +38,12 @@ uses a dedicated root-owned bubblewrap executable and AppArmor profile because
 the generic executable cannot create the required namespaces under that
 host's policy. That evidence covers confined ACP startup, not a model prompt.
 
-Compile `launch-gate.rs` on the Linux host with
-`rustc --edition=2021 launch-gate.rs -o launch-gate` and install it beside
-`bwrap`; both must be executable. The launcher verifies the sibling gate's
+`launch-gate` is the candidate's `bin/launch-gate` (role `launchGate`,
+`deploy/candidate/package.py` `ROLES`), built only by `cargo build -p launch-gate`
+from `native/launch-gate`, whose binary target is `launch-gate.rs` in this
+directory (`native/launch-gate/Cargo.toml`, `libc` pinned there). Journeys take
+that binary as `LAUNCH_GATE` (`native/grain-runtime/hermes-journey.sh`); only
+`probe.sh` compiles its small socket helper (`probe_socket.rs`) with a bare `rustc`. Install it beside `bwrap`; both must be executable. The launcher verifies the sibling gate's
 exact protocol response before advertising its own protocol to the runtime.
 Before spawning, the controller durably arms
 the operation gate and records the exact unit name in its private state. The
@@ -57,16 +60,32 @@ entry alone must never trigger an automatic kill of a possibly reused unit.
 
 ## Controller unit installation
 
-`install-controller` creates a direct `mini-grain-controller@TASK.service`
-user unit for a persistent `grain-runtime serve` process. The historical
-`mini-grain-controller@.service` template shows the same service limits, but
-the installer writes the exact task, executable and config paths so the
-operator need not edit a template. The runtime JSON must configure
+`install-controller` writes the one unit shape grain-runtime's own checks
+accept: `mini-grain-controller@TASK.service`, running a persistent
+`grain-runtime serve`, with the exact task, executable and config paths. It
+has two modes (`native/grain-runtime/src/systemd_manager.rs` `load` is the contract);
+there is no template unit to edit (the cross-manager launch gate a SYSTEM controller
+needs for USER workers is in [CONTROLLER-LIFETIME.md](CONTROLLER-LIFETIME.md)):
+
+- **user** (default, run as the task account): a user unit under that
+  account's user manager with all three of `MINI_GRAIN_CONTROLLER_MANAGER=user`,
+  `MINI_GRAIN_WORKER_MANAGER=user` and `MINI_GRAIN_CONTROLLER_UNIT=<unit>`.
+  Setting only some of them is a hard error at open; setting none opens the
+  controller unscoped, and its first sandboxed prompt then fails.
+- **system** (`--system --service-user NAME`, run as root): a system unit with
+  `User=NAME`, controller manager `system`, worker manager `user`, and the
+  root-owned registration `/etc/mini/controllers/TASK.json`
+  (`mini-controller-registration-v1`: task, config, managers, service uid,
+  optional `residentConfig`). Workers are still user units, so the account
+  needs linger, and the scoped launcher must answer
+  `--controller-manager-protocol` (the shipped `bwrap` does).
+
+The runtime JSON must configure
 `controlSocket` directly inside its durable private `stateDir` (for example,
 `/var/lib/mini/grains/task-7001/control.sock`). The task account must own
-that directory and keep it at mode 0700. The service
-sets `MINI_GRAIN_CONTROLLER_UNIT` for the launcher, which adds a `BindsTo=`
-dependency: stopping the controller service also stops its worker units.
+that directory and keep it at mode 0700. The launcher reads
+`MINI_GRAIN_CONTROLLER_UNIT` and adds a `BindsTo=` dependency: stopping the
+controller service also stops its worker units.
 
 Run the installer as the task account after placing the runtime JSON and
 executables. The pins file is JSON with one entry per executable, including
@@ -95,6 +114,10 @@ install-controller --config /opt/mini/grains/7001.json \
 systemd-analyze --user verify "$HOME/.config/systemd/user/mini-grain-controller@7001.service"
 # After inspecting the unit and signed Mini task state:
 systemctl --user enable --now mini-grain-controller@7001.service
+# Or, as root, the system shape with its registration:
+install-controller --system --service-user grain-7001 \
+  --config /opt/mini/grains/7001.json --runtime /opt/mini/bin/grain-runtime \
+  --pins /opt/mini/grains/7001-pins.json --render-only
 ```
 
 The installer never enables or starts a unit. The unit directory must already
@@ -108,6 +131,33 @@ by the same Unix account can change later. Their provenance and compatibility
 still need the separately retained source/build evidence. Deploy executable
 artifacts in immutable, administrator-owned locations before starting a
 friend's controller.
+
+### Creating an agent that can call applications
+
+`grain-runtime create SPEC.json` accepts an optional `dispatch` purse alongside
+its parent, tool and provider tasks. This births a separate funded task and
+delegates its parent witness through ordinary Mini operations. It does not
+install an application or issue an application grant.
+
+The `dispatch` object contains `key` (the enrolled subject, private key path and
+`noPrerotation`, as for `provider`), `task`, `observeCapability`,
+`controlCapability`, `budget`, and `transport`. The transport supplies
+`reserve`, `charge`, `socketPath`, `hostUid`, `operatorSocket`,
+`operatorPeerUid` when needed, and `reserveSigner` using the controller's
+existing dispatch format. `create` derives the identity and witness fields;
+transport cannot override them. Task IDs, subjects, keys and capability IDs
+must not collide with the other configured roles.
+
+The application operator and controller run as separate Unix accounts. The
+controller's ordinary Host socket and private dispatch operator socket are
+separate endpoints. Create the transport directories and operator route before
+running the controller's part of `create`; its normal validation checks the
+socket ownership and peer restrictions. The existing `--birth-socket` phase
+lets the operator fund the grains before the resident takes custody.
+
+The resulting `controller.json` includes `dispatchTask`. Application attachment
+then adds the routes and service catalogue backed by that same world's accepted
+grants. A route copied from another controller or Store is not an attachment.
 
 For two controllers sharing one Mini content page, run
 `check-hosted-pair ABS_CONFIG_A ABS_CONFIG_B` after both JSON files and worker
@@ -126,6 +176,8 @@ readback and retained build/acceptance evidence. The
 [hosted pair recipe](HOSTED-PAIR.md) uses `render-hosted-pair` to produce two
 private command overlays and pin manifests from already-provisioned base
 configs; it does not start either service.
+Offering one already-provisioned grain to a friend over SSH (`render-friend-key`,
+`grain-ssh`) is [FRIEND-GRAINS.md](FRIEND-GRAINS.md).
 
 `grain-ssh` is an SSH
 forced-command front end for the runtime's `connect ABS_CONTROL_SOCKET
@@ -134,8 +186,8 @@ runtime and socket paths and uses OpenSSH's `restrict` option. For example,
 after installing the persistent service and task configuration:
 
 ```text
-restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock" ssh-ed25519 AAAA... hard-key
-restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/controller.sock soft" ssh-ed25519 AAAA... soft-key
+restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/control.sock" ssh-ed25519 AAAA... hard-key
+restrict,command="/opt/mini/deploy/grain-host/grain-ssh /opt/mini/bin/grain-runtime /var/lib/mini/grains/task-7001/control.sock soft" ssh-ed25519 AAAA... soft-key
 ```
 
 The two-argument entry defaults to **hard**: SSH EOF interrupts an active
@@ -162,13 +214,19 @@ unprivileged user namespaces. The runtime root should contain only the fixed
 worker executable and its nonsecret assets. The workspace is the worker's
 sole host writable mount. The launcher clears inherited environment variables
 and does not mount the controller's key, configuration or state directory.
-`--network none` has no network access. `--network host` permits the worker to
+`--network none` has no network access; the Hermes room resident uses it
+(`worker.network` in `deploy/hermes/demo/install-hermes`; `grain-runtime grain-create`
+refuses sandbox tools on any other network, `check_values` in `native/grain-runtime/src/grain_create.rs`).
+`--network host` permits the worker to
 reach the host network, including loopback services, and is suitable only
 when those services have their own authorization boundary. Provider credentials
 and network policy still need a dedicated deployment decision.
 
-The unit has a 600 second runtime ceiling, 2 GiB memory ceiling and 128 task
-ceiling. Those are physical backstops, not Mini allowance units or provider
+The unit's runtime ceiling is the command's `wallTimeSeconds`, which the
+runtime passes as `MINI_GRAIN_RUNTIME_MAX_SEC` (`worker_env` in `native/grain-runtime/src/main.rs`);
+without it the launcher uses 600 seconds and accepts 1 to 1800 (`runtime_max_sec` in `bwrap`).
+The memory ceiling defaults to 2 GiB and the task ceiling to 128 (`memory_max` and `tasks_max` in
+`bwrap`, overridable by `MINI_GRAIN_MEMORY_MAX` and `MINI_GRAIN_TASKS_MAX`). Those are physical backstops, not Mini allowance units or provider
 usage measurements. A `--network host` worker cannot be treated as having
 network egress containment. Do not use this script to start a task until its
 Mini host, custody key, task IDs, budget and reconciliation records are

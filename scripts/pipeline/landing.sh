@@ -45,12 +45,19 @@ pipeline_log "landing.sh $here/landing.sh sha256:$(self_sha "$here/landing.sh");
 # --- the verdict (step 5), also alone with --check ------------------------------------------------
 judge() {
   local J=$JOURNEY_ROOT/$tip req decl
-  req=$W/src/scripts/pipeline/required-rows; [ -f "$req" ] || req=$here/required-rows
   decl=$PIPELINE_ROOT/absent-inputs.tsv; [ -f "$decl" ] || decl=/dev/null
   # BASELINE: main's own most recent standing run on THIS box ($ARTIFACT_ROOT/main -> its journeys DONE)
   local base_t base_res=/dev/null
   base_t=$(readlink "$ARTIFACT_ROOT/main" 2>/dev/null || true)
   if [ -n "$base_t" ] && [ -f "$JOURNEY_ROOT/$base_t/DONE" ]; then base_res=$JOURNEY_ROOT/$base_t/results.tsv; fi
+  # POLICY: the required-rows of the BASELINE's own tree (the tree main's standing run executed,
+  # $JOURNEY_ROOT/.trees/<main>), never the candidate's (a candidate cannot drop its own required
+  # rows) and never the warm base's (a build cache, not policy; ROOT 2026-10-16). No baseline tree:
+  # no policy, so no verdict.
+  req=$JOURNEY_ROOT/.trees/${base_t:-none}/scripts/pipeline/required-rows
+  if [ -z "$base_t" ] || [ ! -f "$req" ]; then
+    echo "NO POLICY: no required-rows in main's standing-run tree ($req); run main's standing run on this box first"; return 13
+  fi
   [ -f "$J/DONE" ] || { pipeline_log "no finished standing run at $J"; return 12; }
   # Which tree the standing run executed, and whether that runner is TIP's own: a greppable line, never an
   # absence. The dispatch record is the service's (install-journey-units); the reference sha is TIP's blob
@@ -82,13 +89,11 @@ judge() {
   python3 - "$req" "$J/results.tsv" "$decl" "$base_res" <<'PY'
 import re, sys
 req_f, res_f, decl_f, base_f = sys.argv[1:]
-req, pending, known = [], [], {}
+req, pending = [], []
 for l in open(req_f):
     l = l.strip()
     if not l or l.startswith('#'): continue
     if l.startswith('pending '): pending.append(l[8:]); continue
-    if l.startswith('known-red '):
-        p = l.split(None, 3); known[p[1]] = (p[2], p[3] if len(p) > 3 else ''); continue
     req.append(l)
 rows = [l.rstrip('\n').split('\t') for l in open(res_f) if l.strip()]
 base = {}
@@ -132,6 +137,17 @@ for rid in req:
         unmet.append((r[0], st, (r[4] if len(r) > 4 else '')[:200]))
 for p in pending:
     pid = p.split()[0]
+    green_gate = len(p.split()) > 1 and p.split()[1] == 'when-green-at-main'
+    mine_base = {k: st for k, st in base.items() if k == pid or k.startswith(pid + '/')}
+    if green_gate and not (mine_base and all(st == 'PASS' for st in mine_base.values())):
+        # required only once main's baseline has it PASS; (b) above still judges it line by line
+        mine = [r for r in rows if r[0] == pid or r[0].startswith(pid + '/')]
+        now = ', '.join(f"{r[0]} {r[1]}" for r in mine) or 'no line'
+        was = ', '.join(f"{k} {st}" for k, st in mine_base.items()) or 'no line'
+        print(f"pending   {pid} (when green at main; main's baseline: {was}; candidate: {now})")
+        for r in mine:
+            if r[1] != 'PASS': print(f"  not yet  {r[0]} {r[1]}: {(r[4] if len(r) > 4 else '')[:200]}")
+        continue
     if any(r[0] == pid or r[0].startswith(pid + '/') for r in rows):
         # a pending row that now exists is required (required-rows header)
         for r in [r for r in rows if r[0] == pid or r[0].startswith(pid + '/')]:
@@ -142,18 +158,15 @@ for p in pending:
         print(f"required  {pid} (was pending; the row exists now)")
     else:
         print(f"pending   {p}")
-# (c) a required line unmet in the candidate that was ALSO non-PASS at main's baseline is pre-existing: it
-# blocks nothing only when required-rows lists it as `known-red ROW CV-ID note` (the fix has an owner).
+# (c) a required line unmet in the candidate that was ALSO non-PASS at main's baseline is PRE-EXISTING: printed
+# by name, blocks nothing (reds are named in the run, never ledgered: docs/COORDINATION-2026-10-27.md §2).
 pre, blocking = [], []
 for rid, st, det in unmet:
-    top = rid.split('/')[0]
     was = base.get(rid)
-    if was is not None and was != 'PASS' and (rid in known or top in known):
-        cv = known.get(rid, known.get(top))[0]
-        pre.append(f"{rid} (cv {cv})"); print(f"PRE-RED   {rid} {st} (non-PASS at main's baseline too: {was}; cv {cv}): {det}")
+    if was is not None and was != 'PASS':
+        pre.append(rid); print(f"PRE-RED   {rid} {st} (non-PASS at main's baseline too: {was}): {det}")
     else:
-        why = "" if was is None or was == 'PASS' else f" (non-PASS at main's baseline too: {was}, but no known-red cv task in required-rows: open one)"
-        blocking.append(rid); print(f"NOT MET   {rid} {st}{why}: {det}")
+        blocking.append(rid); print(f"NOT MET   {rid} {st}: {det}")
 bad += len(blocking)
 print(f"required unmet: {[u[0] for u in unmet]} (of which pre-existing at main: {pre})")
 ok = not new and not bad
@@ -192,6 +205,11 @@ done
 
 # --- 2. gate ----------------------------------------------------------------------------------------
 tag=land-${tip:0:8}
+# The shared Lake cache's guard, from the tip's own tree (lib.sh pipeline_cache_audit): poisoned or
+# written-through entries are purged before the gate's builds can fetch them; an audit that cannot run
+# refuses the landing.
+pipeline_cache_audit "$L/src" || pipeline_die "lake-cache-audit could not run on ${LAKE_CACHE_DIR:-?}: the gate does not build on an unguarded cache"
+pipeline_log "cache-audit done (${LAKE_CACHE_DIR:-cache off})"
 while :; do
   load=$(cut -d' ' -f1 /proc/loadavg)
   awk -v l="$load" -v m="${PIPELINE_GATE_MAX_LOAD:-20}" 'BEGIN {exit !(l <= m)}' && break

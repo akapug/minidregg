@@ -4,8 +4,27 @@ ticket, payer and funding, but every birth allocation and signing header is
 derived from the currently verified Mini image. Assembly only inserts detached
 signatures; native receiving rechecks both branches and the exact final source.
 -/
-import Kernel.ApplicationShareIssueAdmission
-import Kernel.NativeHost
+module
+
+public import Kernel.ApplicationShareIssueAdmission
+public import Kernel.NativeHost
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationShareIssueAuthoring
 open Minidregg.Compiler
@@ -70,9 +89,12 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let height := NativeHost.logicalHeight config opened.durable
   let .ok ready := ApplicationShareIssueSource.prepare profile config spec
     | throw "share ticket source refused"
-  if opened.pins.tariff != config.tariff then
-    throw "share ticket factory tariff differs from loaded host"
-  let draft := ready.expectedDescriptor profile config
+  let some record := ResourceBirthPolicyController.Concrete.platformRecordAt config.deployment
+      opened.durable
+    | throw "platform cell unavailable: the image holds no platform record to price a share ticket from"
+  if opened.pins.tariff != record.creation then
+    throw "share ticket factory tariff differs from the platform record"
+  let draft := ready.expectedDescriptor profile config record
     opened.authority.snapshot.authState height payer funding
   let .ok prepared := ResourceBirthController.Concrete.prepareDraft
     profile.compilerProfile profile.disabledEvaluators config.deployment opened.pins

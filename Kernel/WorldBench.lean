@@ -1,5 +1,5 @@
 /-
-# Kernel.WorldBench -- a compiled 1000-turn fold (DATAMODEL §5 B2 exit)
+# Kernel.WorldBench -- a compiled 1000-turn fold (docs/DATAMODEL.md §5 B2 exit)
 
 A deterministic log over the real `World.step`: 100 creates (one cell each,
 allocating key 0), then 900 writes, each guarded at the cell's current value
@@ -57,6 +57,9 @@ def benchH : History benchR Nat Unit UInt64 where
   -- The bench measures the fold, not the meter: no leg is charged storage.
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
+  eventBytes := fun _ => 0
+  -- Bench turns carry no pins.
+  cellDigest := fun _ => 0
 
 def benchGenesis : BenchWorld := genesis benchH 0
 

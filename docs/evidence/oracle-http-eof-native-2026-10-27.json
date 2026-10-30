@@ -1,0 +1,72 @@
+{
+  "behavior": [
+    "Original app HTTP status is one bounded metadata header; cannot override transport status or host authority.",
+    "Multiplexed delivery failures are logged for the operator.",
+    "Worker releases both descriptor-copy vectors after successful spawn; uncertainty and no-resend semantics remain."
+  ],
+  "date": "2026-10-27",
+  "host": "hbox",
+  "host_source_basis": "Previously qualified37472d58 host plus the three source files below; unrelated Oracle bridge built and verified separately in runtime-v4 receipt.",
+  "host_source_commit": "7578daed",
+  "logs": {
+    "native-checks-eof-public-data.log": {
+      "path": "/othersys/lanes/oracle-u2-20261027/native-checks-eof-public-data.log",
+      "sha256": "6db35761af90a25b9d1a12d0e021ce1a13a2a504f7c3b7a851b7d0d527fef5e2"
+    },
+    "native-checks-http-response.log": {
+      "path": "/othersys/lanes/oracle-u2-20261027/native-checks-http-response.log",
+      "sha256": "ac91632537a4cbd550c9af75a6bf8523054e95d750e1ed0b0cfc8eaf32f6259f"
+    },
+    "native-release-http-eof.log": {
+      "path": "/othersys/lanes/oracle-u2-20261027/native-release-http-eof.log",
+      "sha256": "0446985b17325bc5107a42f5877cbc1165597e1369272e63302572eb9dc79f98"
+    }
+  },
+  "mapped_worker_eof": {
+    "fixed_output_eof_before_wait_or_kill": true,
+    "fixed_reaped_exit": 42,
+    "fixed_rpc_eof_before_wait_or_kill": true,
+    "logs": {
+      "mapped-early-exit-before.log": {
+        "path": "/tank/dregg-build/attachment-worker-review/mapped-early-exit-before.log",
+        "sha256": "ca68637209d3790060cb57bf1b341a3cedaa78542c3fe58835aed6ade353d502"
+      },
+      "mapped-early-exit.log": {
+        "path": "/tank/dregg-build/attachment-worker-review/mapped-early-exit.log",
+        "sha256": "b8518edc0dd2bb3399d0468945cc3143abac5710289da89cf2d252ab42bad0f1"
+      }
+    },
+    "old_output_eof_not_measured": true,
+    "old_rpc_eof_timed_out_seconds": 3,
+    "scope": "Actual mapped namespace/worker/gate/bwrap with isolated test initializer; no Mini request replay or admission."
+  },
+  "release_binary_sha256": {
+    "mini-spk-broker": "5f4bdbfcbe4d79f62b662eb1eb0e88cd0b5e0ff914a6c668becc7ec6b2d5b4ce",
+    "mini-spk-volume-helper": "5124589e5a53e76ed4d38a5af48e67afdbd048d1d6b6cb488a62e0d9332bded7",
+    "spk-data-publish": "a40b278677f7abca724311a3d37dbd331195c94ef52581b35449985e9f65a059",
+    "spk-host": "a587e2b57c6bcdcb47f857da2e9d5538ce9e15299247aabd76b29342c4230fce"
+  },
+  "release_build": {
+    "cpus": [
+      20,
+      21
+    ],
+    "elapsed": "1m32s",
+    "exit": 0,
+    "jobs": 2,
+    "memory_max": "4G"
+  },
+  "schema": "mini-oracle-http-eof-checks-v1",
+  "scope": "Physical protocol and lifetime checks. Full receiving acceptance is recorded separately.",
+  "scoped_checks": {
+    "failed": 0,
+    "hostd_invalid_response_uncertainty_and_slot_release": 1,
+    "http_response_module": 8,
+    "public_data_and_worker_protocol": 4
+  },
+  "source_sha256": {
+    "native/spk-host/src/http_entrance.rs": "cb450011dd6e807221f725e2d075b028bfb5431bb2193c040be878cbe6dbd888",
+    "native/spk-host/src/http_response.rs": "1158fb8e2bc82922d56732b5b6a3e952a5b47082ec2d88426e9041ec806ca2da",
+    "native/spk-host/src/resident_privilege.rs": "a1d8cc4148e7f7c99a5d3c0a966ae3014f8da85b96f9df82248c95d507304e96"
+  }
+}

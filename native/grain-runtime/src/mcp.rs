@@ -68,6 +68,10 @@ pub struct ToolCatalog {
     pub session_families: Vec<String>,
     pub applications: Vec<String>,
     pub api_applications: Vec<String>,
+    pub oracle_applications: Vec<String>,
+    /// Typed application attachments the operator configured (discovery and encoding only;
+    /// every call is still admitted by the controller under the room's apps grant).
+    pub typed_applications: Vec<crate::typed_applications::CatalogEntry>,
     pub resource_workspace: bool,
     pub resource_workspace_create: bool,
     /// The grain's Hermes was summoned into a room: the room tools.
@@ -187,6 +191,8 @@ fn serve_broker_connection(
                 "sessionFamilies":snapshot.session_families,
                 "applications":snapshot.applications,
                 "apiApplications":snapshot.api_applications,
+                "oracleApplications":snapshot.oracle_applications,
+                "typedApplications":snapshot.typed_applications,
                 "resourceWorkspace":snapshot.resource_workspace,
                 "resourceWorkspaceCreate":snapshot.resource_workspace_create,
                 "roomTools":snapshot.room_tools})
@@ -256,6 +262,14 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         session_families: catalog_names(reply, "sessionFamilies", 8)?,
         applications: catalog_names(reply, "applications", 64)?,
         api_applications: catalog_names(reply, "apiApplications", 16)?,
+        oracle_applications: if reply.get("oracleApplications").is_some() {
+            catalog_names(reply, "oracleApplications", 16)?
+        } else { Vec::new() },
+        typed_applications: match reply.get("typedApplications") {
+            None => Vec::new(),
+            Some(value) => serde_json::from_value(value.clone())
+                .map_err(|e| format!("controller typed application catalog: {e}"))?,
+        },
         resource_workspace: reply
             .get("resourceWorkspace")
             .and_then(Value::as_bool)
@@ -276,6 +290,20 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         .any(|name| !name.ends_with("-app"))
     {
         return Err("controller MCP application selector is not a named app".into());
+    }
+    if catalog.oracle_applications.iter().any(|name| !catalog.api_applications.contains(name)) {
+        return Err("controller Oracle application is not an API route".into());
+    }
+    if catalog.typed_applications.len() > 8 {
+        return Err("controller typed application catalog exceeds bound".into());
+    }
+    let mut typed_names = std::collections::HashSet::new();
+    for entry in &catalog.typed_applications {
+        for tool in crate::typed_applications::listed_tools(entry)? {
+            if !typed_names.insert(tool["name"].as_str().unwrap_or_default().to_owned()) {
+                return Err("controller typed application tool names collide".into());
+            }
+        }
     }
     Ok(catalog)
 }
@@ -370,7 +398,8 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "application":application_selector},
                 "required":["family","application"],"additionalProperties":false}}));
     }
-    if !catalog.api_applications.is_empty() {
+    // A restricted room resident reaches applications only through the Oracle tools below.
+    if !catalog.api_applications.is_empty() && !(catalog.room_tools && !catalog.resource_workspace) {
         tools.push(json!({"name":"mini_gitweb_read",
             "description":"Read one bounded UTF-8 file from a named Mini GitWeb app through fresh authorized Git smart-HTTP requests.",
             "inputSchema":{"type":"object","properties":{
@@ -394,9 +423,15 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "path":{"type":"string","maxLength":8192},
                 "query":{"type":"string","maxLength":8192},
                 "headers":{"type":"array","maxItems":128,"items":{"type":"object","properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"],"additionalProperties":false}},
-                "bodyHex":{"type":"string","maxLength":49152}},
+                "bodyHex":{"type":"string","maxLength":131072,"description":"At most 65536 decoded bytes; MCP also caps the entire JSON request line at 65536 bytes, so hex bodies through MCP must be smaller."}},
                 "required":["application","method","path","query","headers","bodyHex"],
                 "additionalProperties":false}}));
+    }
+    tools.extend(crate::oracle_tools::tool_specs(&catalog.oracle_applications));
+    for entry in &catalog.typed_applications {
+        if let Ok(typed) = crate::typed_applications::listed_tools(entry) {
+            tools.extend(typed);
+        }
     }
     json!({"tools":tools})
 }
@@ -547,11 +582,28 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
                         Ok(value) => json!({"isError":false,"text":value.to_string()}),
                         Err(error) => json!({"isError":true,"text":error}),
                     }
+                } else if name.starts_with("mini_app_") {
+                    // A typed application tool: the SDK executor runs here, in the confined
+                    // worker; each HTTP request it prepares is one controller dispatch.
+                    let catalog = call_controller(path, "__catalog", json!({}));
+                    match catalog_from_reply(&catalog) {
+                        Ok(catalog) => match catalog.typed_applications.iter().find(|entry| crate::typed_applications::owns_tool(entry, name)) {
+                            Some(entry) => crate::typed_applications::call_tool(entry, name, &arguments, &mut |request| {
+                                call_controller(path, crate::typed_applications::RAW_TOOL, request)
+                            }),
+                            None => json!({"isError":true,"text":json!({"refusal":"typed-app-not-attached","uncertain":false,"nativeReceipts":[]}).to_string()}),
+                        },
+                        Err(reason) => json!({"isError":true,"text":json!({"refusal":"typed-catalog-unavailable","uncertain":false,"detail":reason,"nativeReceipts":[]}).to_string()}),
+                    }
                 } else {
                     call_controller(path, name, arguments)
                 };
-                json!({"content":[{"type":"text","text":response.get("text").and_then(Value::as_str).unwrap_or("tool returned no text")}],
-                    "isError":response.get("isError").and_then(Value::as_bool).unwrap_or(true)})
+                let mut result = json!({"content":[{"type":"text","text":response.get("text").and_then(Value::as_str).unwrap_or("tool returned no text")}],
+                    "isError":response.get("isError").and_then(Value::as_bool).unwrap_or(true)});
+                if let Some(structured) = response.get("structured") {
+                    result["structuredContent"] = structured.clone();
+                }
+                result
             }
             _ => json!({"error":format!("unsupported MCP method {method}")}),
         };
@@ -677,6 +729,26 @@ mod tests {
     }
 
     #[test]
+    fn oracle_catalog_is_explicit_and_must_be_a_subset_of_api_routes() {
+        let mut reply = json!({"type":"mini-grain-tool-catalog-v2",
+            "birthFamilies":[],"applicationFamilies":[],"sessionFamilies":[],
+            "applications":[],"apiApplications":["oracle-app","git-app"],
+            "resourceWorkspace":false,"resourceWorkspaceCreate":false,"roomTools":false});
+        let legacy = catalog_from_reply(&reply).unwrap();
+        assert!(legacy.oracle_applications.is_empty());
+        reply["oracleApplications"] = json!(["oracle-app"]);
+        let catalog = catalog_from_reply(&reply).unwrap();
+        let listed = tools_for_catalog(&catalog);
+        for name in ["mini_oracle_discover", "mini_oracle_call"] {
+            let spec = listed["tools"].as_array().unwrap().iter().find(|t| t["name"] == name).unwrap();
+            assert_eq!(spec["inputSchema"]["properties"]["application"]["enum"], json!(["oracle-app"]));
+            assert_eq!(spec["inputSchema"]["additionalProperties"], false);
+        }
+        reply["oracleApplications"] = json!(["unregistered-app"]);
+        assert!(catalog_from_reply(&reply).is_err());
+    }
+
+    #[test]
     fn birth_catalog_lists_only_named_confirmed_routes_before_prompt() {
         let (mut client, broker) = UnixStream::pair().unwrap();
         let (tx, rx) = mpsc::sync_channel(1);
@@ -693,6 +765,8 @@ mod tests {
                     session_families: vec!["office-web".into()],
                     applications: vec!["office-0-app".into()],
                     api_applications: vec![],
+                    oracle_applications: vec![],
+                    typed_applications: vec![],
                     resource_workspace: false,
                     resource_workspace_create: false,
                     room_tools: false,
@@ -909,6 +983,18 @@ mod tests {
             let name = tool["name"].as_str().unwrap();
             assert!(crate::resource_tools::is_room_tool(name) || name == "mini_room_attempts", "{name}");
         }
+    }
+
+    #[test]
+    fn a_restricted_room_resident_is_offered_the_oracle_tools_and_no_raw_application_api() {
+        let apps = vec!["oracle-app".to_owned()];
+        let catalog = tools_for_catalog(&ToolCatalog { room_tools: true, api_applications: apps.clone(),
+            oracle_applications: apps, ..Default::default() });
+        let names: Vec<&str> = catalog["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"mini_oracle_discover") && names.contains(&"mini_oracle_call"));
+        assert!(!names.contains(&"mini_application_api"), "only the Oracle tools reach applications");
+        assert!(names.iter().all(|n| crate::resource_tools::is_room_tool(n) || *n == "mini_room_attempts"
+            || crate::oracle_tools::is_tool(n)), "{names:?}");
     }
 
     #[test]

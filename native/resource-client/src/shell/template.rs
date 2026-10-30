@@ -1,4 +1,4 @@
-//! Room templates: files of shell lines (PLACE §4.9). A template is exactly
+//! Room templates: files of shell lines (docs/PLACE.md §4.9). A template is exactly
 //! what a friend could type: `room new NAME --template T` binds `$ROOM` and
 //! `$ME` (the founder's subject) and runs the lines in order as the founder;
 //! `room welcome NAME SUBJECT --template T` runs the template's member lines
@@ -6,7 +6,7 @@
 //! ordinary verb, and the Host judges each (the birth gate judges every
 //! `--in $ROOM`).
 //!
-//! The built-in templates are the files under `deploy/shell/templates/room/`,
+//! The built-in templates are the files under `native/resource-client/templates/room/`,
 //! compiled in so a shell always has them; `room template show T` prints the
 //! file byte for byte, and a friend's own copy is `--template @FILE` (from
 //! HOME/requests). The files are the documentation.
@@ -25,17 +25,17 @@ struct Builtin {
 const BUILTINS: &[Builtin] = &[
     Builtin {
         name: "workroom",
-        room: include_str!("../../../../deploy/shell/templates/room/workroom/template.shell"),
+        room: include_str!("../../templates/room/workroom/template.shell"),
         member: None,
     },
     Builtin {
         name: "social",
-        room: include_str!("../../../../deploy/shell/templates/room/social/template.shell"),
-        member: Some(include_str!("../../../../deploy/shell/templates/room/social/member.shell")),
+        room: include_str!("../../templates/room/social/template.shell"),
+        member: Some(include_str!("../../templates/room/social/member.shell")),
     },
     Builtin {
         name: "story",
-        room: include_str!("../../../../deploy/shell/templates/room/story/template.shell"),
+        room: include_str!("../../templates/room/story/template.shell"),
         member: None,
     },
 ];
@@ -134,7 +134,7 @@ pub(super) fn bind(label: &str, text: &str, vars: &[(&str, &str)]) -> Result<Vec
 /// `room template list`: each built-in, what it is (its first comment line),
 /// and whether it has member lines.
 pub(super) fn list() -> String {
-    let mut out = String::from("# room templates (deploy/shell/templates/room/); `room template show T` prints one\n");
+    let mut out = String::from("# room templates (native/resource-client/templates/room/); `room template show T` prints one\n");
     for builtin in BUILTINS {
         let about = builtin
             .room

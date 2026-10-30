@@ -1,4 +1,4 @@
-//! K-INSPECT-VIEWS (DEOS #13): `inspect caps|law|receipt|turn`, `why`.
+//! K-INSPECT-VIEWS (docs/DEOS.md §9 row 13): `inspect caps|law|receipt|turn`, `why`.
 //!
 //! Each view gathers bytes this workspace already holds, or reads with its
 //! own signed views (the same reads `read` and `can` make), writes them into
@@ -74,7 +74,7 @@ fn signed_view_bytes(
             Ok(Ok(bytes))
         }
         Err(error) => match take_host_decision() {
-            Some(HostDecision::RefusedFrame { encoded, .. }) => Ok(Err(encoded)),
+            Some(HostDecision::Frame { encoded, .. }) => Ok(Err(encoded)),
             _ => Err(error),
         },
     }
@@ -261,9 +261,10 @@ fn turn(root: &Path, workspace: &Value, what: &str, json_out: bool) -> Result<()
             // The Host refused: hand the frame back as the Host's decision, so
             // the shell ends `refused` (exit 3) and retains it like any other.
             if let Ok(encoded) = fs::read(attempt.join("refusal.frame")) {
-                note_host_decision(HostDecision::RefusedFrame {
+                note_host_decision(HostDecision::Frame {
                     command: "dry-run".into(),
-                    byte: 255,
+                    // `host_decided` keeps a frame only for a decided refusal: NO_RECORD.
+                    byte: crate::RESPONSE_NO_RECORD,
                     encoded,
                     decoded: None,
                 });
@@ -288,6 +289,15 @@ fn refusals(root: &Path, extra: Option<&Path>) -> Vec<(SystemTime, String, PathB
             if let Some(time) = modified(&path) {
                 let intent = attempt.join("intent.json");
                 found.push((time, name.clone(), path, intent.is_file().then_some(intent)));
+            }
+            // A fleet turn's plan refusal (op 96): the Host's own decoding, retained
+            // by `fleet::plan_refusal`, decided only when that decoding says
+            // `refused` — the same typed record that closes the operation.
+            let plan = attempt.join("plan-refusal.bin");
+            if let (Some(time), Ok(value)) = (modified(&plan), bounded_json(&plan.with_extension("json"))) {
+                if value["type"] == "refused" {
+                    found.push((time, name.clone(), plan, None));
+                }
             }
             // A submitted call's outcome, and each retry's (`retry-NNNN`), when refused.
             let mut outcomes = vec![attempt.join("outcome.bin")];
@@ -320,7 +330,7 @@ fn refusals(root: &Path, extra: Option<&Path>) -> Vec<(SystemTime, String, PathB
         .iter()
         .filter_map(|entry| fs::read(&entry.2).ok())
         .map(|mut bytes| {
-            if bytes.first() == Some(&255) {
+            if bytes.first().is_some_and(|b| crate::is_outcome_frame(*b)) {
                 bytes.remove(0);
             }
             bytes
@@ -365,7 +375,7 @@ fn why(root: &Path, workspace: &Value, attempt: Option<&str>, extra: Option<&Pat
     };
     let mut frame = fs::read(frame_path).map_err(|error| error.to_string())?;
     if frame_path.file_name().and_then(|f| f.to_str()) == Some("pre-submit-refusal.frame")
-        && frame.first() == Some(&255)
+        && frame.first().is_some_and(|b| crate::is_outcome_frame(*b))
     {
         frame.remove(0);
     }
@@ -432,5 +442,31 @@ pub(super) fn run(
         "turn" => turn(root, workspace, need("PROPOSAL")?, json_out),
         "why" => why(root, workspace, name, refusal_dir, json_out),
         _ => Err("--view must be caps, law, receipt, turn or why".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `refusals` lists a fleet attempt's plan refusal from the Host's own
+    /// decoding (`plan-refusal.bin`/`.json`, retained by `fleet::plan_refusal`),
+    /// decided only when that decoding says `refused`: an undecided envelope in
+    /// the same place decides nothing, exactly as `recover_operation` reads it.
+    #[test]
+    fn why_lists_a_decided_plan_refusal_and_not_an_undecided_envelope() {
+        let root = std::env::temp_dir().join(format!("mini-why-plan-refusal-{}-{}", std::process::id(), crate::workspace::random_nonce().unwrap()));
+        let refused = root.join("attempts").join("a-refused");
+        let undecided = root.join("attempts").join("b-undecided");
+        for (dir, kind) in [(&refused, "refused"), (&undecided, "unavailable")] {
+            fs::create_dir_all(dir).unwrap();
+            fs::write(dir.join("plan-refusal.bin"), [kind.as_bytes()].concat()).unwrap();
+            fs::write(dir.join("plan-refusal.json"),
+                format!("{{\"type\":\"{kind}\",\"reason\":\"bookRefused\"}}")).unwrap();
+        }
+        let found = refusals(&root, None);
+        assert_eq!(found.len(), 1, "only the decided plan refusal is listed");
+        assert!(found[0].2.ends_with("a-refused/plan-refusal.bin"));
+        let _ = fs::remove_dir_all(&root);
     }
 }

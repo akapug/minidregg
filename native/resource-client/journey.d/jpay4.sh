@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-4 (PAY.md P4): the payment rail through the client, on a fresh private Store, with the
+# J-PAY-4 (PAY P4): the payment rail through the client, on a fresh private Store, with the
 # P1/P1b fixture watcher driven by the real tick script (deploy/pay/mini-pay-watcher).
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST, MINI, STORE,
@@ -48,6 +48,7 @@ TICK_SCRIPT, ACCEPTANCE = os.environ["PAY_TICK_SCRIPT"], os.environ["ACCEPTANCE"
 ROWS, STARTED = [], time.time()
 EMBER, FACTORY_CONTROL, OBSERVER, OBSERVER_CAP = 7, 53, 30, 4030
 FRIENDS = [8, 9]
+FLOAT = 31  # the enrollment float (docs/PAY.md §11.2): the subject that holds the enrollment row's book index
 def acct(s): return 100 + s
 CAP, RATE, MIN_TICK, INITIAL = 2000000000, 1, 1500, 100
 
@@ -112,7 +113,7 @@ finally:
         except ProcessLookupError: pass
 
 # ------------------------------------------------------------ genesis
-SUBJECTS = [EMBER, OBSERVER] + FRIENDS
+SUBJECTS = [EMBER, OBSERVER, FLOAT] + FRIENDS
 os.makedirs(path("keys"))
 public = {}
 for s in SUBJECTS:
@@ -136,15 +137,19 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
            "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
            "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
-           "clockTickers": [], "tailBound":"1000000",
+           "clockTickers": [], "tailBound":"1000000", "issuanceCap":"1000000000000000",
            "factoryPredicate": {"type": "all", "predicates": []},
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(EMBER), "factoryControllerCapability": str(FACTORY_CONTROL),
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
+           "payControlCapability": "4031",
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": "4031", "enrolCapability": "4032"}}
+                            "enrolCapability": "4032"}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 mini("bootstrap", "--host", HOST, "--config", path("operator.json"), "--source", path("genesis.json"),
@@ -185,7 +190,7 @@ for s in SUBJECTS:
     os.makedirs(path("ws"), exist_ok=True)
     mini("workspace", "--action", "init", "--host", HOST, "--config", CONFIG, "--socket", SOCKET,
          "--key", path("keys", f"{s}.key"), "--subject", s, "--dir", WS[s], "--no-prerotation", check=True)
-for s in FRIENDS:
+for s in FRIENDS + [FLOAT]:
     mini("workspace", "--action", "import", "--dir", WS[s], "--name", "account", "--kind", "account",
          "--target", acct(s), "--observe-capability", 1000 + s, "--operation-capability", 1000 + s,
          check=True)
@@ -214,6 +219,12 @@ def endpoints(tag, tip, primary, extras=()):
     for side in ("a", "b"):
         dest = path("ticks", tag, side)
         shutil.copytree(os.path.join(FIXTURES, primary, "endpoints", side), dest)
+        # the standing run executes from a read-only tree (journeys/.trees/<tip>): copytree keeps
+        # its modes, so the copy is made writable before the tip is rewritten and the dir removed
+        for base, dirs, files in os.walk(dest):
+            os.chmod(base, 0o755)
+            for name in files:
+                os.chmod(os.path.join(base, name), 0o644)
         for extra in extras:
             src = os.path.join(FIXTURES, extra, "endpoints", side)
             for base, _, files in os.walk(src):
@@ -236,7 +247,7 @@ def tick(tag, tip, primary, extras=(), enrol_row=False, background=False):
                PAY_RPC_FIXTURES=" ".join(endpoints(tag, tip, primary, extras)))
     env.pop("PAY_RPC_ENDPOINTS", None)
     if enrol_row:
-        env.update(PAY_ENROL_INDEX="2", PAY_JOURNAL_FLOOR="1000000")
+        env.update(PAY_WATCH_ENROL="yes")
     if background:
         return subprocess.Popen(["sh", TICK_SCRIPT], env=env, stdout=open(path(f"tick-{tag}.out"), "w"),
                                 stderr=subprocess.STDOUT, start_new_session=True)
@@ -273,12 +284,13 @@ r = mini("pay", "address", "--dir", WS[8])
 row("pay address before a valid tariff", r.returncode == 3 and "refused undisclosed" in r.stderr,
     f"exit={r.returncode} {r.stderr.strip()[-100:]}")
 
+TARIFF = {"version": "1", "asset": "0", "mint": b58encode(bytes.fromhex(MINT)),
+          "tokenProgram": PROGRAM, "decimals": "6", "creditPerAtomic": str(RATE),
+          "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK),
+          "nodeWeekRate": "999999840", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}
 json.dump({"control": str(FACTORY_CONTROL),
            "book": [b58encode(bytes.fromhex(ROW0)), ROW1, b58encode(bytes.fromhex(ENROL_ROW)), FILLER],
-           "tariff": {"version": "1", "asset": "0", "mint": b58encode(bytes.fromhex(MINT)),
-                      "tokenProgram": PROGRAM, "decimals": "6", "creditPerAtomic": str(RATE),
-                      "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK),
-                      "nodeWeekRate": "999999840", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}},
+           "tariff": TARIFF},
           open(path("book.json"), "w"))
 r = mini("pay", "book", "--dir", WS[EMBER], "--source", path("book.json"))
 row("operator installs a 4-row book (base58 and hex rows) and the tariff", r.returncode == 0 and "confirmed" in r.stdout,
@@ -340,7 +352,7 @@ row("tick A's records submitted again: every record already credited (receipt)",
     r.returncode == 0 and len(lines(r, "already-credited")) == 1 and lines(r, "already-credited")[0][3] == "receipt"
     and balance(8) == bal8, summary(r))
 
-# The observer's retained reports are lost (PAY §3.4: "if the attempt directory is lost"): the
+# The observer's retained reports are lost (docs/PAY.md §3.4: "if the attempt directory is lost"): the
 # receipts are derived from the credited attempts, so both go. They come back after tick D, as a
 # restored backup would, so the audit below sees every report.
 LOST = path("lost-observer-state")
@@ -430,6 +442,20 @@ row("kernel per-observation refusals: the report is probed; each record quaranti
     r.returncode == 3 and q == {"addressMismatch", "unassignedIndex"}
     and len(os.listdir(os.path.join(OBS, "pay", "quarantine"))) == 2 and balance(8) == bal8,
     f"quarantined={sorted(q)} {summary(r)}")
+
+# The enrollment row (docs/PAY.md §11). The watcher reads its index and the journal floor from the SIGNED tariff
+# (`--enrol tariff`; the operator flags are retired), and the kernel admits a tariff naming an index only once
+# the enrollment float holds it (`PayBookReceiver.enrolReady`): the float takes the next free index, 2 (friends
+# 8 and 9 hold 0 and 1), and the operator installs the tariff's next version naming it. This happens after the
+# doctored probe above, whose index-2 record is `unassignedIndex` only while the row is unassigned and unnamed.
+a2 = mini("pay", "address", "--dir", WS[FLOAT])
+json.dump({"control": str(FACTORY_CONTROL), "book": [], "tariff": dict(TARIFF, version="2", enrolIndex="2")},
+          open(path("tariff-enrol.json"), "w"))
+r = mini("pay", "book", "--dir", WS[EMBER], "--source", path("tariff-enrol.json"))
+row("the enrollment float takes index 2 (the enrollment row); tariff v2 names it as enrolIndex",
+    a2.returncode == 0 and a2.stdout.startswith(f"index 2 → {b58encode(bytes.fromhex(ENROL_ROW))}")
+    and r.returncode == 0 and "confirmed" in r.stdout,
+    f"{a2.stdout.splitlines()[0] if a2.stdout else a2.stderr[-120:]} | {r.stdout.strip() or r.stderr.strip()[-160:]}")
 
 journal_dir = os.path.join(STATE, "tick", "ticks")
 def journal_lines():

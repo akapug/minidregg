@@ -106,7 +106,6 @@ then schedules source validation; neither path grants Input.checked itself. -/
 def receive {config : SourceConfig} (p : Participant config) (bytes : Bytes) :
     IO (Participant config × GenericSimplexIO.Result) := do
   let some (tag,payload) := frameStream.toLawful.decode bytes | return (p,.invalid)
-  if frameStream.encode (tag,payload) != bytes then return (p,.invalid)
   if tag == 2 then
     let (result,block) ← GenericSimplexNative.receiveCandidate p.runtime payload
     match result,block with
@@ -154,8 +153,6 @@ codec. This is decoding, not admission: propose still calls deriveVerified. -/
 def sourceIngressOfCall (config : SourceConfig) (callBytes : Bytes) : Except String Bytes := do
   let some call := Minidregg.Compiler.NativeHostCodec.callCodec.decode callBytes
     | throw "unsupported or noncanonical native signed call"
-  unless Minidregg.Compiler.NativeHostCodec.callCodec.encode call == callBytes do
-    throw "noncanonical native signed call"
   unless sourceCallShape call do
     throw "native signed call tag does not match its ingress"
   match call with
@@ -314,8 +311,6 @@ def applyNext {config : SourceConfig} (p : Participant config)
   let some bytes := records[index]? | return (p,"source already caught up")
   let some record := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode bytes
     | return (p,"certificate payload is not a source record")
-  if Minidregg.Compiler.DurableCheckpointCodec.recordFrame.encode record != bytes then
-    return (p,"noncanonical source record")
   match ← Minidregg.Kernel.JointOrderedSourceReceiver.apply
       p.source.verified p.runtime.context certificate record.event.canonicalBytes with
   | .applied receipt =>

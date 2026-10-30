@@ -3,7 +3,7 @@
 //! Honest crash WAL only, no native authority or independent rollback claim.
 use crate::{
     authenticated_ingress::{CommitteeParty, Outcome},
-    codec::{bad, bytes, Nat, Reader},
+    codec::{bad, bytes, Nat},
     consensus_wire::Cursor,
     recipient_seal::{self, DecryptedEnvelope, HidingDraft, RecipientSpec, SealedIngress},
     transition_journal::{Journal, Machine},
@@ -23,20 +23,6 @@ pub fn nullifier(party: &CommitteeParty, sequence: u64) -> Vec<u8> {
     b.extend(sequence.to_le_bytes());
     b
 }
-fn nat(c: &mut Cursor<'_>) -> Result<Nat> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.nat()?;
-    r.finish()?;
-    Ok(n)
-}
 fn put_spec(s: &RecipientSpec, b: &mut Vec<u8>) {
     s.algorithm.put(b);
     s.key_epoch.put(b);
@@ -45,10 +31,10 @@ fn put_spec(s: &RecipientSpec, b: &mut Vec<u8>) {
 }
 fn get_spec(c: &mut Cursor<'_>) -> Result<RecipientSpec> {
     let s = RecipientSpec {
-        algorithm: nat(c)?,
-        key_epoch: nat(c)?,
+        algorithm: c.nat()?,
+        key_epoch: c.nat()?,
         key_id: c.bytes()?,
-        plaintext_bound: usize::try_from(nat(c)?.value()?).map_err(|_| bad("padding bound"))?,
+        plaintext_bound: usize::try_from(c.nat()?.value()?).map_err(|_| bad("padding bound"))?,
     };
     s.validate()?;
     Ok(s)
@@ -513,11 +499,11 @@ impl Store {
         opened: &DecryptedEnvelope,
         receipts: &[&DraftReceipt],
     ) -> Result<SealedBatchReceipt> {
-        if outcome.progress_claim().signing_bytes != opened.inner().signing_bytes() {
+        if outcome.signing_bytes() != opened.inner().signing_bytes() {
             return Err(bad("outbox original received protocol binding"));
         }
         let mut cursor = Cursor::new(outcome.outbox())?;
-        let count = usize::try_from(nat(&mut cursor)?.value()?).map_err(|_| bad("outbox count"))?;
+        let count = usize::try_from(cursor.nat()?.value()?).map_err(|_| bad("outbox count"))?;
         if count != receipts.len() || count > 65536 {
             return Err(bad("actual recursive outbox count"));
         }
@@ -631,9 +617,9 @@ impl ActualProgress {
         opened: &DecryptedEnvelope,
         sealed: &SealedBatchReceipt,
     ) -> Result<Self> {
-        let raw = outcome.progress_claim();
-        if raw.signing_bytes != opened.inner().signing_bytes()
-            || sealed.received_semantic != raw.signing_bytes
+        let raw = outcome.signing_bytes();
+        if raw != opened.inner().signing_bytes()
+            || sealed.received_semantic != raw
             || sealed.original_outbox != outcome.outbox()
         {
             return Err(bad("sealed progress actual protocol binding"));
@@ -973,6 +959,7 @@ mod tests {
             outer_start = fs::metadata(&wp).unwrap().len();
             store.attach_outer(&receipt, vec![8; 32]).unwrap();
             custody.generate_epoch(Nat::new(8)).unwrap();
+            adopt(&mut custody, 7).unwrap();
         }
         // Simulate an incomplete UNRELEASED outer attachment. Retained sealed
         // bytes from the completed prior event must not be rerandomized.
@@ -1006,20 +993,143 @@ mod tests {
             public
         );
         let sealed = SealedIngress::decode(&final_raw).unwrap();
+        assert_eq!(custody.current_epoch(), Some(&Nat::new(7)));
         assert_eq!(
             custody
-                .open_capsule(&sealed, &p, 9, &sp)
+                .open_current(&sealed, &p, 9)
                 .unwrap()
                 .inner()
                 .message,
             vec![42; 32]
         );
-        let rotated = custody
-            .generate_epoch(Nat::new(8))
-            .unwrap()
-            .recipient_spec(4096)
+        custody.generate_epoch(Nat::new(8)).unwrap();
+        adopt(&mut custody, 8).unwrap();
+        let stale = custody.open_current(&sealed, &p, 9).err().unwrap();
+        assert!(stale.to_string().contains("stale recipient key epoch"), "{stale}");
+        // Rotation survives restart and never moves backward.
+        drop(custody);
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 3).unwrap();
+        assert_eq!(custody.current_epoch(), Some(&Nat::new(8)));
+        let back = adopt(&mut custody, 7).unwrap_err();
+        assert!(back.to_string().contains("backward"), "{back}");
+    }
+    fn adopt(custody: &mut RecipientKeyCustody, epoch: u32) -> std::io::Result<()> {
+        let public = custody.generate_epoch(Nat::new(epoch as u64)).unwrap().public_key().to_vec();
+        custody.adopt_current(&crate::current_recipient::fixture::verified(epoch, &public))
+    }
+    fn custody_unknown_epoch(public: &[u8]) -> std::io::Error {
+        let kp = path("unknown-epoch");
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 2).unwrap();
+        custody
+            .adopt_current(&crate::current_recipient::fixture::verified(99, public))
+            .unwrap_err()
+    }
+    fn sealed_at(
+        custody: &mut RecipientKeyCustody,
+        epoch: u64,
+        wp: &std::path::Path,
+        p: &CommitteeParty,
+    ) -> SealedIngress {
+        let key = custody.generate_epoch(Nat::new(epoch)).unwrap();
+        let sp = key.recipient_spec(4096).unwrap();
+        let mut store = Store::open(wp, b"party-1", 4).unwrap();
+        let receipt = store
+            .prepare(p.clone(), 9, vec![42; 32], sp, key.public_key().to_vec())
             .unwrap();
-        assert!(custody.open_capsule(&sealed, &p, 9, &rotated).is_err());
+        store.seal(&receipt, vec![3; 32]).unwrap();
+        let raw = store.attach_outer(&receipt, vec![8; 32]).unwrap();
+        SealedIngress::decode(&raw).unwrap()
+    }
+    #[test]
+    fn capsule_epoch_is_custodys_current_epoch_not_the_capsules_choice() {
+        let kp = path("cur-keys");
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+        let at7 = sealed_at(&mut custody, 7, &path("cur-w7"), &p);
+        let at8 = sealed_at(&mut custody, 8, &path("cur-w8"), &p);
+        let at9 = sealed_at(&mut custody, 9, &path("cur-w9"), &p);
+        // Nothing adopted yet: nothing opens, even though every key is retained.
+        let none = custody.open_current(&at7, &p, 9).err().unwrap();
+        assert!(none.to_string().contains("current epoch not adopted"), "{none}");
+        // Adopting an epoch custody does not hold is refused.
+        let public = custody.generate_epoch(Nat::new(8)).unwrap().public_key().to_vec();
+        let unknown = custody_unknown_epoch(&public);
+        assert!(unknown.to_string().contains("not a retained epoch"), "{unknown}");
+        adopt(&mut custody, 8).unwrap();
+        assert_eq!(custody.open_current(&at8, &p, 9).unwrap().inner().message, vec![42; 32]);
+        let stale = custody.open_current(&at7, &p, 9).err().unwrap();
+        assert!(stale.to_string().contains("stale recipient key epoch"), "{stale}");
+        let future = custody.open_current(&at9, &p, 9).err().unwrap();
+        assert!(future.to_string().contains("future recipient key epoch"), "{future}");
+    }
+    #[test]
+    fn capsule_is_bound_to_the_key_bytes_and_the_record_to_custodys_x25519_key() {
+        let kp = path("bytes-keys");
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+        let public = custody.generate_epoch(Nat::new(8)).unwrap().public_key().to_vec();
+        let sealed = sealed_at(&mut custody, 8, &path("bytes-w"), &p);
+        assert_eq!(public.len(), 1216);
+        // A record whose 32-byte Suite1 key is not custody's X25519 half is refused.
+        let s = crate::current_recipient::fixture::scope();
+        let wrong = crate::current_recipient::VerifiedCurrentRecipient::from_host_readback(
+            &crate::current_recipient::fixture::readback(&s, 8, &[9; 32], &[4; 32]),
+            &s,
+        )
+        .unwrap();
+        let refused = custody.adopt_current(&wrong).unwrap_err();
+        assert!(refused.to_string().contains("encryption key differs from custody's X25519 key"), "{refused}");
+        assert_eq!(custody.current_epoch(), None);
+        adopt(&mut custody, 8).unwrap();
+        assert!(custody.open_current(&sealed, &p, 9).is_ok());
+        // The digest of the 32-byte Suite1 key is not the digest of the 1216-byte hybrid key.
+        assert_ne!(crate::recipient_seal::recipient_key_id(&public[..32]), crate::recipient_seal::recipient_key_id(&public));
+        let mut confused = sealed.clone();
+        confused.recipient.key_id = crate::recipient_seal::recipient_key_id(&public[..32]);
+        let refused = custody.open_current(&confused, &p, 9).err().unwrap();
+        assert!(refused.to_string().contains("key digest differs from the current recipient key bytes"), "{refused}");
+        // And the other way: a digest over some other hybrid key.
+        let other = crate::crypto_transit::generate_keypair().unwrap();
+        confused.recipient.key_id = crate::recipient_seal::recipient_key_id(&other.public);
+        let refused = custody.open_current(&confused, &p, 9).err().unwrap();
+        assert!(refused.to_string().contains("key digest differs"), "{refused}");
+    }
+    #[test]
+    fn nat_order_is_numeric() {
+        assert!(Nat::new(300) > Nat::new(255));
+        assert!(Nat::new(255) > Nat::new(254));
+        assert!(Nat::new(65026) > Nat::new(65025));
+        assert!(Nat::new(0) < Nat::new(1));
+    }
+    #[test]
+    fn recipient_seeds_are_wrapped_at_rest_and_reopen_recovers_them() {
+        let kp = path("wrap-keys");
+        let p = party(Protocol::PrivateSend, 1, 2);
+        let seed;
+        let sealed;
+        {
+            let mut custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+            sealed = sealed_at(&mut custody, 7, &path("wrap-w"), &p);
+            adopt(&mut custody, 7).unwrap();
+            seed = custody.journal_secret_for_test(&Nat::new(7));
+        }
+        let wal = fs::read(&kp).unwrap();
+        for window in [&seed[..32], &seed[32..]] {
+            assert!(
+                !wal.windows(window.len()).any(|w| w == window),
+                "plaintext seed bytes on disk"
+            );
+        }
+        let wrapkey = fs::read(kp.with_extension("wrapkey")).unwrap();
+        assert_eq!(wrapkey.len(), 32);
+        let custody = RecipientKeyCustody::open(&kp, b"party-2", 4).unwrap();
+        assert_eq!(custody.journal_secret_for_test(&Nat::new(7)), seed);
+        assert_eq!(custody.open_current(&sealed, &p, 9).unwrap().inner().message, vec![42; 32]);
+        drop(custody);
+        // A populated journal with its wrap key gone is refused, never re-keyed.
+        fs::remove_file(kp.with_extension("wrapkey")).unwrap();
+        let gone = RecipientKeyCustody::open(&kp, b"party-2", 4).err().unwrap();
+        assert!(gone.to_string().contains("wrap key missing"), "{gone}");
     }
     // Native source admission is NOT implemented by this fixture. It models a
     // separately authorized opaque commitment signature inside the endpoint.
@@ -1159,7 +1269,7 @@ mod tests {
             .unwrap();
         assert!(outcome.outbox().len() > 2);
         let mut cursor = Cursor::new(outcome.outbox()).unwrap();
-        let count = nat(&mut cursor).unwrap().value().unwrap();
+        let count = cursor.nat().unwrap().value().unwrap();
         assert_eq!(count, 4);
         let mut outgoing = Store::open(&path("outgoing"), b"party-2", 32).unwrap();
         let mut receipts = vec![];
@@ -1233,8 +1343,6 @@ mod tests {
             assert!(!contains(wire, &opened.inner().signing_bytes()));
             assert!(!contains(wire, opened.hiding_nonce()));
         }
-        assert_ne!(progress, outcome.progress_claim().encode().unwrap());
-        assert!(ProgressDigestClaim::decode(&outcome.progress_claim().encode().unwrap()).is_err());
         // A separately retained/sealed wrong body, wrong destination or reversed
         // order may not certify the actual protocol outbox.
         let mut reversed = refs.clone();

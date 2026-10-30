@@ -1,8 +1,27 @@
 /- Stable profile data, arithmetic premises and request projection shared by
 receivers. Current runtime markers and the only current-profile constructor
 remain in CanonicalRuntimeProfile. Native ingress cannot select a manifest. -/
-import Compiler.CanonicalPolicyAdmission
-import Compiler.ResourceBirthCodec
+module
+
+public import Compiler.CanonicalPolicyAdmission
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.CanonicalRuntimeProfile
 
@@ -121,14 +140,29 @@ structure Profile (F : Type) [Field F] where
   disabledEvaluators : List Digest := []
   /-- Source manifest supplied by the compiled native builder, never an ingress field. -/
   runtimeComponents : List (List UInt8)
+  /-- The receiver semantics (a cSHAKE over the whole compiled manifest), deferred and
+  computed at most once per profile value. -/
+  receiverSemanticsCache : Thunk Digest
+  receiverSemanticsExact : receiverSemanticsCache.get =
+    receiverSemanticsFrom runtimeComponents template receiverParameters disabledEvaluators
+  /-- The complete compiler-semantics digest, deferred and computed at most once. -/
+  semanticsCache : Thunk Digest
+  semanticsExact : semanticsCache.get =
+    (sourceCompilerDescriptor
+      (receiverSemanticsFrom runtimeComponents template receiverParameters disabledEvaluators)
+      fieldIdentity characteristic (.scalar orderWidth)).digest
 
 def Profile.fromComponents {F : Type} [Field F] (components : List (List UInt8)) (template : FactoryTemplate)
     (fieldIdentity : Digest) (characteristic : Nat)
     (characteristicCorrect : CharP F characteristic) (orderWidth : Nat)
     (orderNoWrap : PredOrder.NoWrap F orderWidth) (receiverParameters : List UInt8 := [])
     (disabledEvaluators : List Digest := []) : Profile F :=
+  let receiver := Thunk.mk fun _ =>
+    receiverSemanticsFrom components template receiverParameters disabledEvaluators
+  let semantics := Thunk.mk fun _ =>
+    (sourceCompilerDescriptor receiver.get fieldIdentity characteristic (.scalar orderWidth)).digest
   ⟨template, fieldIdentity, characteristic, characteristicCorrect, orderWidth, orderNoWrap,
-    receiverParameters, disabledEvaluators, components⟩
+    receiverParameters, disabledEvaluators, components, receiver, rfl, semantics, rfl⟩
 
 def Profile.compilerProfile {F : Type} [Field F] (profile : Profile F) :
     PolicyCompilerProfile F :=
@@ -137,8 +171,37 @@ def Profile.compilerProfile {F : Type} [Field F] (profile : Profile F) :
     profile.characteristic profile.characteristicCorrect
     (.scalar profile.orderWidth) profile.orderNoWrap
 
+/-- The compiler profile as compiled code builds it: over the cached receiver semantics,
+so the manifest is hashed once per profile value, not once per policy configuration. -/
+def Profile.compilerProfileCached {F : Type} [Field F] (profile : Profile F) :
+    PolicyCompilerProfile F :=
+  .source profile.receiverSemanticsCache.get
+    profile.fieldIdentity
+    profile.characteristic profile.characteristicCorrect
+    (.scalar profile.orderWidth) profile.orderNoWrap
+
+@[csimp] theorem Profile.compilerProfile_eq_compilerProfileCached :
+    @Profile.compilerProfile = @Profile.compilerProfileCached := by
+  funext F _ profile
+  unfold Profile.compilerProfile Profile.compilerProfileCached
+  rw [profile.receiverSemanticsExact]
+
+#assert_axioms Profile.compilerProfile_eq_compilerProfileCached
+
 def Profile.semantics {F : Type} [Field F] (profile : Profile F) : Digest :=
   profile.compilerProfile.semantics
+
+/-- The semantics as compiled code reads it: hashed on the first read of this
+profile value and never again. -/
+def Profile.semanticsCached {F : Type} [Field F] (profile : Profile F) : Digest :=
+  profile.semanticsCache.get
+
+@[csimp] theorem Profile.semantics_eq_semanticsCached :
+    @Profile.semantics = @Profile.semanticsCached := by
+  funext F _ profile
+  exact profile.semanticsExact.symm
+
+#assert_axioms Profile.semantics_eq_semanticsCached
 
 theorem Profile.receiverSemantics_exact {F : Type} [Field F] (profile : Profile F) :
     profile.compilerProfile.descriptor?.map (·.receiverSemantics) =

@@ -33,16 +33,13 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use crate::canonical::hex;
 
 const MAX_APP_RESPONSE: usize = 65_536;
 const MAX_SOURCE_INSPECTION: usize = 12_102_759;
 
 fn refused(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
@@ -59,26 +56,7 @@ fn child<'a>(value: &'a Value, name: &str) -> io::Result<&'a Value> {
 }
 
 fn unhex(value: &str) -> io::Result<Vec<u8>> {
-    if !value.len().is_multiple_of(2)
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(refused("lifetime request hex refused"));
-    }
-    value
-        .as_bytes()
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|pair| {
-            u8::from_str_radix(
-                std::str::from_utf8(pair).map_err(|_| refused("lifetime hex UTF-8"))?,
-                16,
-            )
-            .map_err(|_| refused("lifetime hex byte"))
-        })
-        .collect()
+    crate::canonical::unhex(value).ok_or_else(|| refused("lifetime request hex refused"))
 }
 
 pub(crate) struct ResidentLifetimeAgent<'a> {
@@ -99,30 +77,61 @@ pub(crate) fn poll_once(
     listener: &AgentApiListener,
     resident: &mut ResidentLifetimeAgent<'_>,
 ) -> io::Result<bool> {
-    let Some(mut stream) = listener.accept_authenticated()? else {
-        return Ok(false);
+    // An accept that fails (socket identity or ACL drift, a getfacl that
+    // cannot run, EMFILE) refuses that one connection, loudly; no frame was
+    // read, so nothing is uncertain, and the generation keeps serving.
+    let mut stream = match listener.accept_authenticated() {
+        Ok(Some(stream)) => stream,
+        Ok(None) => return Ok(false),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 connection refused at accept: {error}");
+            return Ok(true);
+        }
     };
     let frame = match agent_api_wire::read_frame(&mut stream) {
         Ok(frame) => frame,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 connection closed unread: {error}");
+            return Ok(true);
+        }
     };
     let request = match Request::parse(&frame) {
         Ok(request) => request,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 request refused unparsed: {error}");
+            return Ok(true);
+        }
     };
     let watch = match CallerWatch::start(&stream) {
         Ok(watch) => watch,
-        Err(_) => return Ok(true),
+        Err(error) => {
+            eprintln!("spk-host: agent v3 operation not started: caller watch: {error}");
+            return Ok(true);
+        }
     };
     // On a failed dispatch, close the socket. Before a source reserve, no
     // operation fingerprint exists; after it, an error may mean native or
     // physical uncertainty. A fabricated RefusedV3 would be unsafe.
-    if let Ok(reply) = resident.handle_once(&stream, request, &watch.cancelled) {
-        if let Ok(bytes) = serde_json::to_vec(&reply) {
-            if bytes.len() <= wire::MAX_REPLY_FRAME {
-                let _ = agent_api_wire::write_frame(&mut stream, &bytes);
+    let operation = match &request {
+        Request::HelloV3 { .. } => "hello".to_owned(),
+        Request::DispatchV3 { operation_id, .. } | Request::InspectV3 { operation_id, .. } => operation_id.clone(),
+    };
+    match resident.handle_once(&stream, request, &watch.cancelled) {
+        Ok(reply) => {
+            match &reply {
+                Reply::RefusedV3 { code, .. } => eprintln!("spk-host: lifetime agent operation {operation} refused: {code}"),
+                Reply::UncertainV3 { phase, .. } => eprintln!("spk-host: lifetime agent operation {operation} uncertain at {phase}"),
+                _ => {}
+            }
+            if let Ok(bytes) = serde_json::to_vec(&reply) {
+                if bytes.len() <= wire::MAX_REPLY_FRAME {
+                    let _ = agent_api_wire::write_frame(&mut stream, &bytes);
+                }
             }
         }
+        // This diagnostic belongs only to the operator log. Closing transport
+        // still means uncertainty; an internal error is not a native refusal.
+        Err(error) => eprintln!("spk-host: lifetime agent operation {operation} failed: {error}"),
     }
     Ok(true)
 }
@@ -221,8 +230,10 @@ impl ResidentLifetimeAgent<'_> {
             path_and_query: &path_and_query,
             ordered_headers: &ordered_headers,
             body: &body,
-            route: Route::Api {
-                signed_path: self.signed_api_path,
+            route: match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web { .. }) => Route::Browser,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api { signed_prefix }) => Route::Api { signed_path: signed_prefix },
+                None => Route::Api { signed_path: self.signed_api_path },
             },
         };
         let (app_path, _) = app_route_path(&http)?;
@@ -294,8 +305,20 @@ impl ResidentLifetimeAgent<'_> {
         )?;
         write_new(&client_dir, "op76-fresh-v3.json", b"fresh-installed-op76")?;
         let matched = matched_v3(&permit, &reserve, method, &app_path, query)?;
+        let web_origin = match &binding.route {
+            Some(crate::agent_api_lifetime_v3::HostedRoute::Web { origin }) => origin.as_str(),
+            _ => "",
+        };
         let physical =
-            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, "")?;
+            physical_web_input(&matched, &http, self.display_name, self.preferred_handle, web_origin)?;
+        let hosted_custody=if method==crate::hosted_conversation::METHOD {
+            let api_prefix=match &binding.route {
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Web {..})=>None,
+                Some(crate::agent_api_lifetime_v3::HostedRoute::Api {signed_prefix})=>Some(signed_prefix.clone()),
+                None=>Some(self.signed_api_path.to_owned()),
+            };
+            Some(crate::hosted_conversation::Custody::admitted(client_dir.clone(),api_prefix,operation_id,&body,&permit)?)
+        } else {None};
         caller_still_present(stream, cancelled)?;
         let record = self
             .journal
@@ -354,13 +377,14 @@ impl ResidentLifetimeAgent<'_> {
                 .finish_dispatch_uncertain_released(&identity, fence);
             return Err(error);
         }
-        let (web_reply, success_fence) = match prequeue.dispatch(
-            physical.binding,
-            physical.request,
-            MAX_APP_RESPONSE,
-            Duration::from_secs(30),
-            Arc::clone(cancelled),
-        ) {
+        let delivery = if method == crate::hosted_conversation::METHOD {
+            prequeue.dispatch_hosted(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled),hosted_custody.expect("checked hosted custody"))
+        } else {
+            prequeue.dispatch(physical.binding,physical.request,MAX_APP_RESPONSE,
+                Duration::from_secs(30),Arc::clone(cancelled))
+        };
+        let (web_reply, success_fence) = match delivery {
             Ok(reply) => reply,
             Err(failure) => {
                 let (error, fence) = failure.into_parts();
@@ -495,7 +519,7 @@ impl ResidentLifetimeAgent<'_> {
             || u32::from_le_bytes(outer[..4].try_into().unwrap()) as usize + 4 != outer.len()
             || outer[4] != 76
             || &outer[5..] != committed_bytes.as_slice()
-            || field(&committed, "frameHex")? != hex(&committed_bytes)
+            || !crate::canonical::hex_matches(field(&committed, "frameHex")?, &committed_bytes)
         {
             return Err(refused("lifetime recovered fresh op76 frame drift"));
         }

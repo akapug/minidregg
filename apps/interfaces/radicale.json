@@ -1,0 +1,519 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "radicale",
+  "interfaceVersion": 1,
+  "appId": "8kr4rvyrggvzfvc160htzdt4u5rfvjc2dgdn27n5pt66mxa40m1h",
+  "packageId": "4b137047cf1bdf5832397c3abc75efd6",
+  "appVersion": "1.1.1+v14",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "calendar.create": {
+      "description": "Initialize a VCALENDAR collection using packaged extended MKCOL under the signed owner principal. Existing collections are not refused. No timezone property is supported.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "calendar": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          }
+        },
+        "required": [
+          "calendar"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "MKCOL",
+        "path": [
+          "radicale/owner/",
+          {
+            "arg": "calendar",
+            "encoding": "segment"
+          },
+          ".ics/"
+        ],
+        "decode": "status",
+        "status": [
+          201
+        ],
+        "headers": {
+          "content-type": "application/xml; charset=utf-8"
+        },
+        "text": "<?xml version=\"1.0\"?><d:mkcol xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:set><d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name=\"VEVENT\"/></c:supported-calendar-component-set></d:prop></d:set></d:mkcol>"
+      }
+    },
+    "event.create": {
+      "description": "Create one UTC VEVENT at calendar/event identity, refusing existing resource. Restricted ASCII summary excludes iCalendar escaping/folding; app parses timestamps. No recurrence, timezone or general iCalendar claims.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "calendar": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "event": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "startUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          },
+          "endUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 60,
+            "pattern": "^[A-Za-z0-9 _.-]{1,60}$"
+          },
+          "stampUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          }
+        },
+        "required": [
+          "calendar",
+          "event",
+          "startUtc",
+          "endUtc",
+          "summary",
+          "stampUtc"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "radicale/owner/",
+          {
+            "arg": "calendar",
+            "encoding": "segment"
+          },
+          ".ics/",
+          {
+            "arg": "event",
+            "encoding": "segment"
+          },
+          ".ics"
+        ],
+        "decode": "status",
+        "status": [
+          201
+        ],
+        "headers": {
+          "content-type": "text/calendar; charset=utf-8",
+          "if-none-match": "*"
+        },
+        "text": {
+          "concat": [
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mini//Typed app interface//EN\r\nBEGIN:VEVENT\r\nUID:",
+            {
+              "arg": "event"
+            },
+            "\r\nDTSTAMP:",
+            {
+              "arg": "stampUtc"
+            },
+            "\r\nDTSTART:",
+            {
+              "arg": "startUtc"
+            },
+            "\r\nDTEND:",
+            {
+              "arg": "endUtc"
+            },
+            "\r\nSUMMARY:",
+            {
+              "arg": "summary"
+            },
+            "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+          ]
+        }
+      }
+    },
+    "event.read": {
+      "description": "Read complete iCalendar resource from this calendar/event identity. The returned text is exact app serialization, not a parsed occurrence expansion.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "calendar": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "event": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          }
+        },
+        "required": [
+          "calendar",
+          "event"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "radicale/owner/",
+          {
+            "arg": "calendar",
+            "encoding": "segment"
+          },
+          ".ics/",
+          {
+            "arg": "event",
+            "encoding": "segment"
+          },
+          ".ics"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    },
+    "event.list": {
+      "description": "List bounded VEVENT resources in this calendar with ETags and iCalendar data. This package ignores time-range filters: no date filtering or occurrence expansion is advertised. No pagination; oversized replies refuse rather than silently truncate.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "calendar": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          }
+        },
+        "required": [
+          "calendar"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "href": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "etag": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "calendarData": {
+              "type": "string",
+              "maxLength": 1048576
+            }
+          },
+          "required": [
+            "href",
+            "etag",
+            "calendarData"
+          ],
+          "additionalProperties": false
+        },
+        "maxItems": 1000
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "REPORT",
+        "path": [
+          "radicale/owner/",
+          {
+            "arg": "calendar",
+            "encoding": "segment"
+          },
+          ".ics/"
+        ],
+        "decode": "caldav-multistatus",
+        "status": [
+          207
+        ],
+        "headers": {
+          "depth": "1",
+          "content-type": "application/xml; charset=utf-8"
+        },
+        "text": "<?xml version=\"1.0\"?><c:calendar-query xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VEVENT\"/></c:comp-filter></c:filter></c:calendar-query>"
+      }
+    },
+    "event.update": {
+      "description": "Replace event only when current ETag equals the supplied ETag from event.list. Stale precondition fails; uncertain mutation is never retried automatically.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "calendar": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "event": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,80}$"
+          },
+          "startUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          },
+          "endUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 60,
+            "pattern": "^[A-Za-z0-9 _.-]{1,60}$"
+          },
+          "etag": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\r\\n\\x00]+$"
+          },
+          "stampUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          }
+        },
+        "required": [
+          "calendar",
+          "event",
+          "startUtc",
+          "endUtc",
+          "summary",
+          "etag",
+          "stampUtc"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "PUT",
+        "path": [
+          "radicale/owner/",
+          {
+            "arg": "calendar",
+            "encoding": "segment"
+          },
+          ".ics/",
+          {
+            "arg": "event",
+            "encoding": "segment"
+          },
+          ".ics"
+        ],
+        "decode": "status",
+        "status": [
+          201
+        ],
+        "headers": {
+          "content-type": "text/calendar; charset=utf-8",
+          "if-match": {
+            "arg": "etag"
+          }
+        },
+        "text": {
+          "concat": [
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Mini//Typed app interface//EN\r\nBEGIN:VEVENT\r\nUID:",
+            {
+              "arg": "event"
+            },
+            "\r\nDTSTAMP:",
+            {
+              "arg": "stampUtc"
+            },
+            "\r\nDTSTART:",
+            {
+              "arg": "startUtc"
+            },
+            "\r\nDTEND:",
+            {
+              "arg": "endUtc"
+            },
+            "\r\nSUMMARY:",
+            {
+              "arg": "summary"
+            },
+            "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+          ]
+        }
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "calendar",
+      "op": "calendar.create",
+      "args": {
+        "calendar": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "event",
+      "op": "event.create",
+      "args": {
+        "calendar": {
+          "context": "runId"
+        },
+        "event": "typed-event",
+        "startUtc": "20261101T120000Z",
+        "endUtc": "20261101T130000Z",
+        "summary": "Typed calendar event",
+        "stampUtc": "20261028T000000Z"
+      }
+    },
+    {
+      "id": "read",
+      "op": "event.read",
+      "args": {
+        "calendar": {
+          "context": "runId"
+        },
+        "event": "typed-event"
+      },
+      "assert": [
+        {
+          "containsText": "SUMMARY:Typed calendar event",
+          "path": []
+        },
+        {
+          "containsText": "DTSTART:20261101T120000Z",
+          "path": []
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "op": "event.list",
+      "args": {
+        "calendar": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "contains": {
+            "href": {
+              "concat": [
+                "/radicale/owner/",
+                {
+                  "context": "runId"
+                },
+                ".ics/typed-event.ics"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "update",
+      "op": "event.update",
+      "args": {
+        "calendar": {
+          "context": "runId"
+        },
+        "event": "typed-event",
+        "startUtc": "20261101T120000Z",
+        "endUtc": "20261101T140000Z",
+        "summary": "Revised calendar event",
+        "etag": {
+          "result": [
+            "list",
+            0,
+            "etag"
+          ]
+        },
+        "stampUtc": "20261028T000000Z"
+      }
+    },
+    {
+      "id": "readback",
+      "op": "event.read",
+      "args": {
+        "calendar": {
+          "context": "runId"
+        },
+        "event": "typed-event"
+      },
+      "assert": [
+        {
+          "containsText": "SUMMARY:Revised calendar event",
+          "path": []
+        },
+        {
+          "containsText": "DTEND:20261101T140000Z",
+          "path": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/synchrone/sandstorm-radicale",
+    "package:4b137047cf1bdf5832397c3abc75efd6/opt/app/radicale.config",
+    "package:4b137047cf1bdf5832397c3abc75efd6/opt/app/caldav.nginx.conf",
+    "https://github.com/Kozea/Radicale/blob/1.1.1/radicale/__init__.py",
+    "https://github.com/Kozea/Radicale/blob/1.1.1/radicale/xmlutils.py"
+  ]
+}

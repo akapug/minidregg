@@ -28,7 +28,7 @@ STORE = "c" * 64
 class World:
     def __init__(self, root, members=3, grains=None):
         self.root = root
-        self.grains = grains or root / "grains"
+        self.grains = grains or Path("/var/lib/mini-t/0123456789abcdef")  # named by the fixture seed's Store id; never created, short enough for sun_path wherever TMPDIR is
         self.manifest = {"sourceCommit": "d" * 40, "sha256": {}}
         for role in ["host", "mini", "store", "verifier", "spkHost", "bwrap"]:
             image = root / role
@@ -72,7 +72,7 @@ class World:
                 "tool": {"task": "79022", "managementCapability": "8101"}}}
         for name in ["controller", "tool"]:
             seed = root / (name + ".key"); seed.write_bytes(bytes(32)); seed.chmod(0o600); (root / (name + ".pub")).write_bytes(bytes(32))
-        self.selection = {"protocol": inputs.SELECTION, "evidence": str(root / "evidence"), "grainsRoot": str(self.grains), "brokerSocket": str(self.grains / "broker.sock"),
+        self.selection = {"protocol": inputs.SELECTION, "evidence": str(root / "evidence"), "grainsRoot": str(self.grains), "brokerSocket": str(f.broker_endpoint(self.grains)),
             "package": {"path": str(self.package), "sha256": f.sha(self.package)},
             "app": {"owner": self.subjects[1], "room": "lab", "resources": "640001", "capabilities": "970001",
                 "members": {"m" + str(i): {"subject": s, "expectedHost": f"m{i}.spk.localhost:18443"} for i, s in enumerate(self.subjects[:members])}}}
@@ -131,6 +131,9 @@ class InputTests(unittest.TestCase):
         self.assertEqual(value["management"], {"subject": MANAGER, "keyId": "90812", "keyEpoch": "2",
             "seedPath": str(self.w.root / "tool.key"), "publicKeyPath": str(self.w.root / "tool.pub")})
         self.assertEqual((value["semantics"], value["bwrap"], value["expectedSourceCommit"]), ("445566", str(self.w.root / "bwrap"), "d" * 40))
+        self.assertEqual(value["agentRouteProfile"], "standard-v1")
+        self.w.selection["agentRouteProfile"] = "shared-64-v1"
+        self.assertEqual(inputs.profile(self.w.build())["agentRouteProfile"], "shared-64-v1")
         self.run.assert_not_called()
 
     def test_member_owned_attachment_satisfies_the_attach_adapter(self):
@@ -197,7 +200,7 @@ class InputTests(unittest.TestCase):
 
     def test_socket_bound_is_checked_on_the_actual_state_path(self):
         root = Path(self.tmp.name) / "framed"; root.mkdir()
-        self.w = World(root, grains=Path("/var/lib/mini-bigstep-hbox-r1/grains"))
+        self.w = World(root, grains=Path("/var/lib/mini-bh-r1/0123456789abcdef"))
         world = self.w.build()
         world.socket_bound("530101", [inputs.route_name("member-0")])
         with self.assertRaisesRegex(RuntimeError, "exceeds 107 bytes"):

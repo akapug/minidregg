@@ -27,7 +27,26 @@ reads its registration from the cell. A renounce therefore does not depend on
 the holder possessing any revocation secret; it depends on the holder's
 current signing key (checked by the kernel, `Kernel.CapabilityRenounce`).
 -/
-import Theory.CredentialAuthorityEffects
+module
+
+public import Theory.CredentialAuthorityEffects
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.Renounce
 

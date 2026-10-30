@@ -2,11 +2,30 @@
 Package/declaration and canonical annotated Core4 packet are distinct identities.
 Checking establishes typed core only; a captured-source elaboration witness and
 current source-read/authority remain receiving obligations. -/
-import Compiler.NativeInvocationStatement
-import Compiler.PolicyRecordCodec
-import Compiler.ObjectiveBendLawCodec
-import Theory.ObjectiveBendTyping
-import Theory.AssertAxioms
+module
+
+public import Compiler.NativeInvocationStatement
+public import Compiler.PolicyRecordCodec
+public import Compiler.ObjectiveBendLawCodec
+public import Theory.ObjectiveBendTyping
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ObjectiveBendSourceArtifact
 open Minidregg.Theory
@@ -42,21 +61,18 @@ def stream : StreamCodec Artifact :=
 
 /-- Version 2: the artifact carries the package's enforced laws; a version-1 artifact refuses. -/
 def frame : List UInt8 := "DREGG/OBJECTIVE-BEND/SOURCE-ARTIFACT".toUTF8.toList ++ [2]
-def rawCodec : LawfulCodec Artifact where
-  encode a := frame ++ stream.encode a
-  decode bytes := if bytes.take frame.length = frame then
-    stream.toLawful.decode (bytes.drop frame.length) else none
-  decode_encode := by
-    intro a
-    have exact := stream.toLawful.decode_encode a
-    change stream.toLawful.decode (stream.encode a) = some a at exact
-    simp [exact]
-def codec : LawfulCodec Artifact := ResourceBirthCodec.strictCodec rawCodec
+def codec : LawfulCodec Artifact := (StreamCodec.framed frame stream).toLawful
 abbrev encode := codec.encode
 abbrev decode := codec.decode
 
+/-- `decode` straight from a file's buffer, with no list in between (`decodeBytes_eq`). -/
+def decodeBytes (bytes : ByteArray) : Option Artifact := (StreamCodec.framed frame stream).decodeBytes bytes
+
+theorem decodeBytes_eq (bytes : ByteArray) : decodeBytes bytes = decode bytes.toList :=
+  (StreamCodec.framed frame stream).decodeBytes_eq bytes
+
 def identity (a : Artifact) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v2".toUTF8.toList (encode a)).digest
+  (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT/v6".toUTF8.toList (encode a)).digest
 
 def schema : Digest :=
   (Sp800185Cshake256.hash "DREGG.OBJECTIVE-BEND.SOURCE-ARTIFACT-SCHEMA/v2".toUTF8.toList frame).digest
@@ -115,7 +131,7 @@ theorem encode_injective {a b : Artifact} (same : encode a = encode b) : a = b :
 
 theorem decoded_canonical {bytes : List UInt8} {a : Artifact}
     (accepted : decode bytes = some a) : encode a = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 theorem selected_core_exact {a : Artifact} {maxBytes : Nat} (checked : Checked a maxBytes) :
     decodePacket checked.packetJson = .ok checked.packet := checked.packetExact

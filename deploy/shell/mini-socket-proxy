@@ -9,7 +9,7 @@
 # their signing key, workspace and attempts stay on their machine.
 #
 #   mini --remote friend@host shell --workspace W --home H   (the friend's side)
-#   mini --remote friend@host key --action set ...          signed exchange, relayed to mini-keys
+#   ssh friend@host mini-provider-credentials-v1             one signed credential exchange, relayed to mini-keys
 #   ssh friend@host 'anything'                               refused, exit 64
 set -euo pipefail
 if [[ $# -ne 2 && $# -ne 3 ]]; then

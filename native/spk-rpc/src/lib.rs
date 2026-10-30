@@ -8,14 +8,15 @@ mod bridge_config;
 mod permission_schema;
 mod protocol;
 mod web;
-pub use bridge_config::{decode_bridge_config, BridgeConfig};
+pub use bridge_config::{decode_bridge_config, default_bridge_config_bytes, BridgeConfig};
 pub use permission_schema::{permission_schema_source, permission_schema_source_bytes};
 pub use protocol::{
-    InlineResponse, LocalizedText, PermissionDefinition, RoleDefinition, SessionParameters,
-    SupervisorConnection, ViewInfo,
+    CustodyRefusal, IdentityCustody, InlineResponse, LocalizedText, MemoryIdentityCustody,
+    PermissionDefinition, RoleDefinition, SavedIdentity, SessionParameters, SupervisorConnection,
+    ViewInfo,
 };
 pub use web::{
-    dispatch_web, open_web_socket, send_to_app, Body, Cookie, CookieExpiry, ETag,
+    dispatch_web, open_web_socket, send_to_app, Body, Cookie, CookieExpiry, DavArgs, Depth, ETag,
     ETagPrecondition, Header, Method, RequestContext, SetCookie, WebRequest, WebResponse,
     WebResult, WebSocketOpen, WebSocketSession, MAX_WEBSOCKET_MESSAGE,
 };
@@ -57,6 +58,14 @@ pub mod api_session_capnp {
     include!(concat!(env!("OUT_DIR"), "/api_session_capnp.rs"));
 }
 #[allow(clippy::all)]
+pub mod email_capnp {
+    include!(concat!(env!("OUT_DIR"), "/email_capnp.rs"));
+}
+
+pub mod hack_session_capnp {
+    include!(concat!(env!("OUT_DIR"), "/hack_session_capnp.rs"));
+}
+
 pub mod package_rust_capnp {
     include!(concat!(env!("OUT_DIR"), "/package_rust_capnp.rs"));
 }

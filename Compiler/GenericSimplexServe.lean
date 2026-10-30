@@ -229,7 +229,7 @@ def awaitCall (replicas : List System.FilePath) (proposer : Nat) (id : String) (
     for replica in replicas do
       let path := requestDirectory replica / (id ++ ".receipt")
       if ← path.pathExists then
-        if let some decoded := receiptFileStream.toLawful.decode (← IO.FS.readBinFile path).toList then
+        if let some decoded := receiptFileStream.decodeBytes (← IO.FS.readBinFile path) then
           found := found ++ [decoded]
     if found.length == replicas.length then
       let some (receiptBytes,prefixRecords,_) := found.head? | return .uncertain

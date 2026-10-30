@@ -3,11 +3,31 @@ Operator-private current-image signing plan for resident INSTALL/START BEGIN-v2.
 Only the signed SPK descriptor, kind and operation ID enter the request. Mini
 derives the current app state, roots, generation, command and exact headers.
 -/
-import Kernel.NativeHost
-import Kernel.NativeHostReplay
-import Kernel.ApplicationLifecycleBeginV2Admission
-import Kernel.ApplicationLifecycleResidentProfile
-import Kernel.ApplicationLifecycleClaimCurrent
+module
+
+public import Kernel.NativeHost
+public import Kernel.NativeHostReplay
+public import Kernel.NativeHostStoreIdentity
+public import Kernel.ApplicationLifecycleBeginV2Admission
+public import Kernel.ApplicationLifecycleResidentProfile
+public import Kernel.ApplicationLifecycleClaimCurrent
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ApplicationLifecycleBeginOperator
 
@@ -119,7 +139,7 @@ def prepareVerified (config : Config) {target : Durable}
       imageIdentity := descriptor.imageIdentity
       processGeneration := before.generation + 1
       processIdentity := ApplicationLifecycleResidentProfile.processIdentity
-        config.expectedSeed pin.app (before.generation + 1) }
+        config.storeIdentity pin.app (before.generation + 1) }
   unless source.valid do throw "current application does not admit requested BEGIN phase"
   let command := ApplicationLifecycleBegin.command config.deployment.domain
     config.profile.semantics source
@@ -181,7 +201,7 @@ def prepareRequestVerified (config : Config) {target : Durable}
 
 /-- Insert the detached signatures in the exact plan order. Decoding a plan
 does not make it current; op22 rechecks the complete ingress on a fresh tip.
-`store` is the assembling Host's `Config.expectedSeed`: the unit must be this
+`store` is the assembling Host's `Config.storeIdentity`: the unit must be this
 Store's name. -/
 def assemble (store : Minidregg.Theory.TypedAuthorization.Digest) (plan : Plan) (signatures : List (List UInt8)) :
     Except String (List UInt8) := do

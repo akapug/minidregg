@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# journey.d/jfields.sh — K-FIELDS (DATAMODEL B3, PLACE item 10): a scope names
+# journey.d/jfields.sh — K-FIELDS (docs/DATAMODEL.md §5 B3, docs/PLACE.md §5 item 10): a scope names
 # the fields of a cell it covers and bounds each field's change per write.
 # Runs on the journey's fresh Store after J5 (A = sponsor, B = newcomer).
 #
@@ -21,7 +21,7 @@
 # `admission: request refused` (NativeHost.public_refusal_uniform); the named
 # reason is read from the operator's log (the service's stderr), and rows with
 # a NAME check it there.
-# Paper (content; PLACE J12d): A delegates fields {annotations} to B.
+# Paper (content; J12d, docs/PLACE.md §5 item 10): A delegates fields {annotations} to B.
 #   rv-annotates      B links (an annotation)                         -> installed
 #   rv-edits-body     B creates an atom (body)                        -> refused (fieldNotNamed)
 #   rv-reads          B reads: links present, A's atom absent         -> read
@@ -30,6 +30,7 @@
 # NEWCOMER_SUBJECT JOURNEY_STEP_DIR. Exit 0 = every row as expected. Last
 # stdout line = the rows file.
 set -uo pipefail
+. "$(dirname -- "$0")/lib/attempt.sh"
 D=$JOURNEY_STEP_DIR
 mkdir -p "$D/req"
 rows=$D/field-rows.tsv
@@ -39,7 +40,7 @@ REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d45
 
 run() { local name=$1; shift; "$@" >"$D/$name.out" 2>"$D/$name.err"; echo $? >"$D/$name.rc"; }
 host_refused() { [ "$(cat "$D/$1.rc")" != 0 ] && grep -q "encoded refusal: $REFUSAL_TAG" "$D/$1.err"; }
-submit_refused() { jq -e '.type == "refused"' "$1" >/dev/null 2>&1; }
+submit_refused() { attempt_answer "$1" | jq -e '.type == "refused"' >/dev/null 2>&1; }
 # The service's stderr: the journey and its hooks restart `mini serve` into
 # fresh serve*.log files (J6, K11), so the operator log is all of them, oldest first.
 oplog() { local f; for f in $(ls -tr "$JOURNEY_WORLD"/public/serve*.log 2>/dev/null); do cat "$f"; done; }
@@ -50,7 +51,7 @@ refusal_text() {
   grep -o 'encoded refusal: [0-9a-f]*' "$D/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \
     | tr -c '[:print:]' ' ' | tr -s ' ' | cut -c1-200
 }
-installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
+installed() { attempt_answer "$1" | jq -e '.type == "confirmed" and .confirmation == "installed"' >/dev/null 2>&1; }
 must() { [ "$(cat "$D/$1.rc")" = 0 ] || { echo "setup $1 failed: $(tail -1 "$D/$1.err")" >&2; exit 1; }; }
 record() { # NAME EXPECT GOT DETAIL [NEEDLE]
   printf '%s\texpect=%s\tgot=%s\t%s\n' "$1" "$2" "$3" "$4" >>"$rows"
@@ -166,7 +167,7 @@ record r-redelegates-12 refused "$got" "$( [ "$got" = refused ] && echo "$(refus
 got=$(delegate "$BW" narrow-1 ledger "$SPONSOR_SUBJECT" '["observe"]' '{"fields":["3"]}')
 record r-redelegates-1 installed "$got" "$(tail -1 "$D/narrow-1.err" | cut -c1-160)"
 
-# ---- paper (content): fields {annotations}  (PLACE J12d)
+# ---- paper (content): fields {annotations}  (J12d, docs/PLACE.md §5 item 10)
 run create-paper "$MINI" workspace --action create --dir "$SPONSOR_WS" --name fpaper --storage content --predicate "$P"
 must create-paper
 content fpaper '{"type":"createAtom","atom":"501","kind":{"type":"text"},"payload":"68656c6c6f"}' >"$D/req/p-atom.json"

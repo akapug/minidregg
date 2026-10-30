@@ -1,0 +1,7 @@
+a7223d3b7f46cdd336709c783a8b116f7790a41d28ca36f1a2bb3af5fa5d74c4  scripts/spk-platform/prepare-enrollment-observe-overlay.sh
+98799aef2b23910c92da4842eaba8e48dda0c2607e0004e3eadd9553b4b6814d  scripts/spk-platform/delegate-enrollment-observe.sh
+914b7f1b4af7d8c5519efd524b5f94c6b486aead534c3125b39a3b153c64fbc6  scripts/spk-platform/tests/delegate-enrollment-observe-mock.sh
+719da0c3676eca3e841a895fa4a0978bd0cf59d61cbf87e485d0e670a6946d67  docs/evidence/2026-09-27-enrollment-observe-delegation/README.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-enrollment-observe-delegation/syntax.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-enrollment-observe-delegation/shellcheck.log
+0486d32e5d15f4e63774e3894beb15a53a8a0629d2719db71c042688e21ff5bf  docs/evidence/2026-09-27-enrollment-observe-delegation/schema-mock.log

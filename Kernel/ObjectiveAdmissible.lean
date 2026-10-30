@@ -1,11 +1,32 @@
 /- Stage-0 certificates bind the exact source intent and its derived Turn.
 The durable log still encodes the intent; World-indexed host state is FD-1.
 -/
-import Kernel.ObjectiveActivityReceiverCore
-import Kernel.SeatReceiverCore
-import Kernel.HostRefinesWorldCore
-import Kernel.DeployedHistory
-import Kernel.ObjectiveCheckpointInvariant
+module
+
+public import Kernel.ObjectiveActivityReceiverCore
+public import Kernel.SeatReceiverCore
+public import Kernel.HostRefinesWorldCore
+public import Kernel.DeployedHistory
+public import Kernel.ObjectiveCheckpointInvariant
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ObjectiveAdmissible
 
@@ -118,6 +139,9 @@ structure CheckedCommit (ob : ObjectiveActivity.Config) (p : Durable) (t : T) wh
   intent : DataIntent ResourceBirthCodec.rootBytes
   source : Source ob p intent
   derived : Turn.ofLoaded bridge DeployedHistory.history p intent = .ok t
+  /-- The turn is charged what the intent charges, on every lane (the append
+  path refuses any other). -/
+  charged : t.charge = intent.exactCharge
   installs : Installs (execute .complete p.snapshot intent) = true
 
 /-- Derivation is checked against the current loaded image; a failed check
@@ -128,8 +152,11 @@ def Proposal.check {p : Durable} (proposal : Proposal p) :
   match derived : Turn.ofLoaded bridge DeployedHistory.history p proposal.intent with
   | .error reason => .error s!"receiver intent has no World turn: {repr reason}"
   | .ok t =>
+    match charged : DeployedCharge.mismatch t.charge proposal.intent.exactCharge with
+    | some lane => .error s!"receiver intent's charge is not its turn's: {repr lane}"
+    | none =>
     if installs : Installs (execute .complete p.snapshot proposal.intent) = true then
-      .ok ⟨t, ⟨proposal.intent, proposal.source, derived, installs⟩, rfl⟩
+      .ok ⟨t, ⟨proposal.intent, proposal.source, derived, DeployedCharge.mismatch_none charged, installs⟩, rfl⟩
     else .error "receiver intent does not install at this opening"
 
 /-- The logical certificate adds the represented World to the same data used

@@ -6,6 +6,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod support;
+
+/// The crash fixtures' child (`support`): a no-op unless re-executed as one.
+#[test]
+fn fixture_child() {
+    support::run_if_child()
+}
+
 fn directory() -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "mini-anchor-crash-{}-{}",
@@ -37,6 +45,7 @@ fn killed_publisher_recovers_before_and_after_commit_and_anchor() {
         s.durable_init(b"genesis").unwrap();
         s.durable_append(1, b"one", b"tag-one", &[]).unwrap();
         let snapshot = dir.join("before.sqlite3");
+        s.wal_checkpoint().unwrap();
         fs::copy(s.database_path(), &snapshot).unwrap();
         drop(s);
         let record = dir.join("record");
@@ -45,18 +54,12 @@ fn killed_publisher_recovers_before_and_after_commit_and_anchor() {
         fs::write(&tag, b"tag-two").unwrap();
         let nodes = dir.join("nodes");
         fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_minidregg-link-sqlite-store"))
-            .arg("durable-append-crash")
-            .arg(&root)
-            .arg("2")
-            .arg(&record)
-            .arg(&tag)
-            .arg(&nodes)
-            .arg(phase)
+        let output = support::fixture(&[std::ffi::OsStr::new("durable-append-crash"), root.as_os_str(), "2".as_ref(),
+            record.as_os_str(), tag.as_os_str(), nodes.as_os_str(), phase.as_ref()])
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(code));
-        assert!(output.stdout.is_empty(), "crashed publisher must never ACK");
+        assert!(support::fixture_stdout(&output.stdout).is_empty(), "crashed publisher must never ACK");
         let reopened = SqliteByteStore::open(&root).unwrap();
         assert_eq!(reopened.durable_read(1, true).unwrap().head, expected);
         if expected == 2 {
@@ -220,10 +223,11 @@ fn serve_reply(stream: &mut impl std::io::Read) -> (u32, Vec<u8>, Vec<u8>) {
 }
 
 /// The server answers ordinary commands in-process with the one-shot
-/// command's exact reply (run against a twin store), and a crash fixture
-/// still ends only its own child: the server keeps serving afterwards.
+/// command's exact reply (run against a twin store), and the deployed binary
+/// has no crash or hold verb: one is refused as usage and the server keeps
+/// serving.
 #[test]
-fn serve_answers_in_process_and_crash_fixtures_keep_their_own_process() {
+fn serve_answers_in_process_and_the_production_binary_has_no_crash_verbs() {
     use std::io::Write;
     let dir = directory();
     let (served_root, twin_root) = (dir.join("served"), dir.join("twin"));
@@ -274,7 +278,12 @@ fn serve_answers_in_process_and_crash_fixtures_keep_their_own_process() {
         nodes.display().to_string(), "after-commit".into()];
     input.write_all(&serve_frame(&crash)).unwrap();
     input.flush().unwrap();
-    assert_eq!(serve_reply(&mut output).0, 88, "crash fixture ends only its own child");
+    let (code, stdout, _) = serve_reply(&mut output);
+    assert_eq!((code, stdout.len()), (2, 0), "a crash verb is not a command of the production binary");
+    for verb in ["cas-crash", "publish-crash", "publish-hold", "journal-append-crash"] {
+        let one_shot = Command::new(binary).arg(verb).arg(&served_root).output().unwrap();
+        assert_eq!(one_shot.status.code(), Some(2), "{verb}");
+    }
     let read = vec!["--anchor-identity".into(), id, "durable-read".into(), served_root.display().to_string(),
         "1".into(), "1".into(), dir.join("after-crash").display().to_string()];
     input.write_all(&serve_frame(&read)).unwrap();
@@ -282,4 +291,91 @@ fn serve_answers_in_process_and_crash_fixtures_keep_their_own_process() {
     assert_eq!(serve_reply(&mut output).0, 0, "server still serves after a crash fixture");
     drop(input);
     assert!(server.wait().unwrap().success());
+}
+
+/// A bound violation is not contention: the CLI exits 6 (Lean maps 4 to
+/// "reload and recompute", which would retry the same bytes forever).
+#[test]
+fn an_append_over_a_bound_exits_six_not_conflict() {
+    let dir = directory();
+    let root = dir.join("store");
+    let s = SqliteByteStore::open(&root).unwrap();
+    s.durable_init(b"genesis").unwrap();
+    assert!(matches!(s.durable_append(1, b"one", &[0u8; 4097], &[]), Err(StoreError::Bound(_))));
+    assert!(matches!(s.durable_append(0, b"one", b"t", &[]), Err(StoreError::Bound(_))));
+    assert!(matches!(s.journal_append(0, b"one", b"t"), Err(StoreError::Bound(_))));
+    drop(s);
+    let (record, tag, nodes) = (dir.join("record"), dir.join("tag"), dir.join("nodes"));
+    fs::write(&record, b"one").unwrap();
+    fs::write(&tag, vec![0u8; 4097]).unwrap();
+    fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_minidregg-link-sqlite-store"))
+        .arg("durable-append").arg(&root).arg("1").arg(&record).arg(&tag).arg(&nodes)
+        .output().unwrap();
+    assert_eq!(out.status.code(), Some(6));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not contention"), "{}", String::from_utf8_lossy(&out.stderr));
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A read of a current Store needs no write: with the Store directory and the
+/// anchor's directory made unwritable, it still answers. A disk that refuses a
+/// needed write is its own error (exit 7), never "absent".
+#[test]
+fn a_read_needs_no_writable_disk_and_a_refused_write_is_typed() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = directory();
+    let root = dir.join("store");
+    let s = SqliteByteStore::open(&root).unwrap();
+    s.durable_init(b"genesis").unwrap();
+    s.durable_append(1, b"one", b"tag-one", &[]).unwrap();
+    assert_eq!(s.durable_read(1, true).unwrap().head, 1);
+    drop(s);
+    for d in [&root, &dir] {
+        fs::set_permissions(d, fs::Permissions::from_mode(0o500)).unwrap();
+    }
+    if unsafe { libc::geteuid() } != 0 {
+        let reopened = SqliteByteStore::open(&root).unwrap();
+        assert_eq!(reopened.durable_read(1, true).unwrap().head, 1);
+        assert_eq!(reopened.journal_read(1).unwrap().entries.len(), 0);
+    }
+    for d in [&dir, &root] {
+        fs::set_permissions(d, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    for errno in [libc::ENOSPC, libc::EROFS, libc::EDQUOT] {
+        assert!(StoreError::from(std::io::Error::from_raw_os_error(errno)).is_unwritable());
+    }
+    assert!(!StoreError::from(std::io::Error::from_raw_os_error(libc::EACCES)).is_unwritable());
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// WAL with synchronous=FULL: a writer killed right after COMMIT (before the
+/// anchor, before any checkpoint) leaves the record only in `-wal`, and the
+/// next open recovers it exactly. The database file says WAL (header byte 18).
+#[test]
+fn a_crash_after_commit_keeps_the_record_in_the_wal() {
+    let dir = directory();
+    let root = dir.join("store");
+    let s = SqliteByteStore::open(&root).unwrap();
+    s.durable_init(b"genesis").unwrap();
+    let database = s.database_path().to_owned();
+    drop(s);
+    let header = fs::read(&database).unwrap();
+    assert_eq!((header[18], header[19]), (2, 2), "the Store file is in WAL mode");
+    let (record, tag, nodes) = (dir.join("record"), dir.join("tag"), dir.join("nodes"));
+    fs::write(&record, b"the committed record").unwrap();
+    fs::write(&tag, b"its tag").unwrap();
+    fs::write(&nodes, 0u64.to_be_bytes()).unwrap();
+    let output = support::fixture(&[std::ffi::OsStr::new("durable-append-crash"), root.as_os_str(), "1".as_ref(),
+        record.as_os_str(), tag.as_os_str(), nodes.as_os_str(), "after-commit".as_ref()])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(88));
+    let wal = fs::metadata(format!("{}-wal", database.display())).unwrap().len();
+    assert!(wal > 0, "the committed frames are in the WAL, not yet checkpointed");
+    let reopened = SqliteByteStore::open(&root).unwrap();
+    let read = reopened.durable_read(1, false).unwrap();
+    assert_eq!(read.head, 1);
+    assert_eq!((read.entries[0].record.as_slice(), read.entries[0].tag.as_slice()), (&b"the committed record"[..], &b"its tag"[..]));
+    assert_eq!(reopened.durable_append(1, b"the committed record", b"its tag", &[]).unwrap(), PublishStatus::AlreadyPresent);
+    fs::remove_dir_all(&dir).unwrap();
 }

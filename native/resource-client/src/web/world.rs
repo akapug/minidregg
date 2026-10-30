@@ -138,7 +138,7 @@ fn fields(object: &Value) -> String {
             let label = field.and_then(|f| f["name"].as_str()).unwrap_or(id);
             let value = entry["value"].as_str().unwrap_or("?");
             let shown = if field.is_some_and(|f| f["codec"] == "bytes") {
-                crate::decode_hex(value)
+                mini_sdk::hex::decode(value)
                     .ok()
                     .and_then(|bytes| String::from_utf8(bytes).ok())
                     .filter(|text| {

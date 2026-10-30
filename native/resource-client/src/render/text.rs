@@ -16,12 +16,12 @@
 //!
 //! Marks apply innermost first: code, italic, bold, link, heading.
 
-use super::{Annotation, Body, Deco, Rendered, RenderedLine};
+use super::{Annotation, Body, Deco, Rendered, RenderedLine, SharedName};
 
 /// Document data is never terminal control syntax. Keep controls visible,
 /// including both ESC-prefixed sequences and single-codepoint C1 controls.
 /// Line separators are supplied by the renderer, never by document content.
-fn one_line(text: &str) -> String {
+pub(crate) fn one_line(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
@@ -85,8 +85,11 @@ fn annotation(indent: &str, a: &Annotation) -> String {
 
 pub fn document(rendered: &Rendered) -> String {
     let mut out = Vec::new();
-    for binding in &rendered.shared_names {
-        out.push(format!("  {} → {}:{}", binding.name, binding.kind, binding.target));
+    for name in &rendered.shared_names {
+        out.push(match name {
+            SharedName::Bound(binding) => format!("  {} → {}:{}", binding.name, binding.kind, binding.target),
+            SharedName::Invalid { link, reason } => format!("  ✗ invalid shared-name link {link}: {reason}"),
+        });
     }
     for a in &rendered.document_annotations {
         out.push(annotation("", a).replacen("     ↳", "  ¶  ↳", 1));

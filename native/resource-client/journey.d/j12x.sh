@@ -5,9 +5,12 @@
 # request the grammar refuses — through the client (`mini author`, the path a
 # friend's draft takes: the client's own pure native Host, which refuses with exit 2
 # and the encoded outcome) or as raw socket frames — and asserts:
-#   * the answer is the named refusal: a Host frame `refused malformed`, phase
-#     `op N`, with the decoder's position; or the socket's own 254 refusal for an
-#     envelope the Host never sees;
+#   * the answer is the named, DECIDED refusal: a Host frame `refused malformed`,
+#     phase `op N`, with the decoder's position, under NO_RECORD (253: a grammar
+#     verdict on the client's own bytes provably left no record,
+#     `Host/RequestRefusal.lean` exceptionAnswer; before lane/lean-critical the
+#     same frame went out under 255, which now carries only undecided outcomes);
+#     or the socket's own 254 refusal for an envelope the Host never sees;
 #   * the Host process that answered is the SAME process that started the row
 #     (a Host exit masked by `mini serve` restarting it is a FAIL here);
 #   * a describe (op 0) is answered afterwards.
@@ -21,12 +24,12 @@ D=$JOURNEY_STEP_DIR/j12x
 mkdir -p -m 700 "$D"
 export D
 python3 - <<'PY'
-import json, os, re, signal, socket, struct, subprocess, sys, time
+import hashlib, json, os, re, signal, socket, struct, subprocess, sys, time
 
 D = os.environ["D"]; MINI = os.environ["MINI"]; HOST = os.environ["HOST"]
 CONFIG = os.environ["CONFIG"]; SOCKET = os.environ["SOCKET"]
 SPONSOR = os.environ["SPONSOR_WS"]; WORLD = os.environ["JOURNEY_WORLD"]
-TAG = b"DREGG/NATIVE-HOST/OUTCOME/v5"
+TAG = b"DREGG/NATIVE-HOST/OUTCOME/v8"
 rows = []; failed = []
 
 def server_pid():
@@ -49,10 +52,11 @@ def frame_of(sock):
     return exact(struct.unpack("<I", head)[0])
 
 config = open(CONFIG, "rb").read()
-def raw(request, version=1, body=None, timeout=120):
+HOST_PIN = hashlib.sha256(open(os.environ["HOST"], "rb").read()).digest()  # envelope v2: the Host image pin
+def raw(request, version=2, body=None, timeout=120):
     s = socket.socket(socket.AF_UNIX); s.settimeout(timeout); s.connect(SOCKET)
     if body is None:
-        body = bytes([version]) + struct.pack("<I", len(config)) + config + request
+        body = bytes([version]) + struct.pack("<I", len(config)) + config + (HOST_PIN if version == 2 else b"") + request
     s.sendall(struct.pack("<I", len(body)) + body)
     try: return frame_of(s)
     finally: s.close()
@@ -78,12 +82,13 @@ def check(name, act):
     row(name, ok and same and live,
         f"{detail}; host pid {before}->{after}; describe {'answered' if live else 'FAILED'}")
 
-def host_refused(reply, op, needle, answer=255):
+NO_RECORD = 253  # protocol/host-operations.json response_markers: the decided no-append refusal
+def host_refused(reply, op, needle, answer=NO_RECORD):
     if reply is None: return False, "no reply (connection closed)"
-    if reply[0] != answer: return False, f"reply op {reply[0]}"
+    if reply[0] != answer: return False, f"reply op {reply[0]} (expected {answer})"
     body = reply[1:]
     ok = body.startswith(TAG) and f"op {op}".encode() in body and needle.encode() in body
-    return ok, "255 " + body[len(TAG):].decode("utf-8", "replace").replace("\n", " ")[:160]
+    return ok, f"{answer} " + body[len(TAG):].decode("utf-8", "replace").replace("\n", " ")[:160]
 
 def socket_refused(reply, needle):
     if reply is None: return False, "no reply"
@@ -137,14 +142,17 @@ for name, data, needle in cases:
 # ------------------------------------------------------------- raw rows
 def kind_frame(kind, body):
     return struct.pack("<H", len(kind)) + kind + body
+# A grammar verdict on the client's own bytes (`RequestRefusal.malformed`, raised by the Host's decoders before
+# any receiver runs) provably left no record, so it is answered NO_RECORD (253) with the refusal named, never the
+# undecided envelope 255 (Host/RequestRefusal.lean, the L1 ruling: 253 is the refusal class, 255 is undecided).
 check("raw op 7 kind frame shorter than its width",
-      lambda: host_refused(raw(bytes([7, 9])), 7, "short native host kind frame"))
+      lambda: host_refused(raw(bytes([7, 9])), 7, "short native host kind frame", answer=253))
 check("raw op 7 kind width past the payload",
-      lambda: host_refused(raw(bytes([7]) + struct.pack("<H", 500) + b"intent"), 7, "invalid native host kind length"))
+      lambda: host_refused(raw(bytes([7]) + struct.pack("<H", 500) + b"intent"), 7, "invalid native host kind length", answer=253))
 check("raw op 10 pair width past the payload",
-      lambda: host_refused(raw(bytes([10]) + struct.pack("<I", 1 << 20) + b"xx"), 10, "invalid native host pair length"))
+      lambda: host_refused(raw(bytes([10]) + struct.pack("<I", 1 << 20) + b"xx"), 10, "invalid native host pair length", answer=253))
 check("raw op 11 noncanonical plan",
-      lambda: host_refused(raw(bytes([11]) + struct.pack("<I", 3) + b"abc" + b"\x00"), 11, "noncanonical signing plan"))
+      lambda: host_refused(raw(bytes([11]) + struct.pack("<I", 3) + b"abc" + b"\x00"), 11, "noncanonical signing plan", answer=253))
 # Ops 0 and 6 take no body: the service refuses one (254, never forwarded; 8ac769d7) before the
 # Host would answer 255 `describe does not accept a payload`. Both are definite and named.
 check("raw op 0 describe with a payload (service refusal, never forwarded)",
@@ -159,6 +167,8 @@ def blind_submission():
     return ok, f"{reply[0]} " + body[len(TAG):].decode("utf-8", "replace")[:120]
 # A submission's refusal stays undisclosed (MR): phase admission, "request refused".
 check("raw op 2 submit of garbage call bytes (blind submission refusal)", blind_submission)
+check("raw envelope version 1, unpinned (socket refusal by name: v1 is retired)",
+      lambda: socket_refused(raw(bytes([0]), version=1), "envelope v1 is retired"))
 check("raw envelope version 3 (socket refusal; Host never sees it)",
       lambda: socket_refused(raw(b"", body=bytes([3]) + struct.pack("<I", len(config)) + config + b"\x00"), "invalid socket envelope"))
 check("raw operation 200 on the public socket (socket refusal)",

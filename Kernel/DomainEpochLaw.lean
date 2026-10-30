@@ -1,5 +1,5 @@
 /-
-# Kernel.DomainEpochLaw — the kernel's side of the channel epoch record (CHANNELS.md §2.4, §9 row 8)
+# Kernel.DomainEpochLaw — the kernel's side of the channel epoch record (docs/CHANNELS.md §2.4, §9 row 8)
 
 `Kernel.DomainEpoch` is what the relay, the members and the witnesses run (codecs, commitment, seal,
 opening, tick roots). This module is what the KERNEL runs on an append, in the same namespace and under
@@ -14,11 +14,30 @@ the same names it had when both were one file (CH-EPOCH):
   `one_record_per_epoch`). Historical linkage follows from admission transitions;
   a head alone does not assert arbitrary prior cells form an admitted history.
 
-The split keeps Mathlib out of the runtime library (`channel-lib/build.sh` links the import closure of
-`Kernel.DomainEpochExport`, which no longer reaches this module). Pins: `Kernel.DomainEpochAudit`.
+The split keeps Mathlib out of the import closure of `Kernel.DomainEpochExport`, the closure a relay,
+member or witness links; that closure does not reach this module. Pins: `Kernel.DomainEpochAudit`.
 -/
-import Kernel.DomainEpoch
-import Compiler.StreamCell
+module
+
+public import Kernel.DomainEpoch
+public import Compiler.StreamCell
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.DomainEpoch
 

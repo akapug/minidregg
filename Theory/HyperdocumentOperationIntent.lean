@@ -12,7 +12,26 @@ After content acceptance, the final `VersionEventRecord` binds this operation
 id to the actual post root and request/effect identities.  Its separately
 derived `VersionEventId` belongs in the append-only event-log cell.
 -/
-import Theory.Hyperdocument
+module
+
+public import Theory.Hyperdocument
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Theory.HyperdocumentOperationIntent
 
@@ -38,10 +57,10 @@ structure OperationIntent where
   actionBytes : List UInt8
   deriving DecidableEq, Repr
 
-/-- The deployed hyperdocument document schema: the schema every witness intent
-and version event names.  Its id and version are the deployed content cell's
-schema ref; `Compiler.DeployedCellRegistry.documentSchema_deployed` is the drift
-gate between this constant and the registry's wire pin. -/
+/-- The hyperdocument document schema every witness intent and version event
+names.  It is a witness-level constant of this module; the live registry's content
+schema ref is `Compiler.CanonicalCellRegistry.schemaRef .content`, a different value
+that nothing here is tied to. -/
 def documentSchema : CausalVersionDag.SchemaRef := { schemaId := ⟨14⟩, version := 2 }
 
 /-- One selected canonical intent codec and abstract digest projection.  The

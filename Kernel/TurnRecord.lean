@@ -19,8 +19,27 @@ Two bridges from the pre-B2 durable model to `Kernel.World`:
   The torn install (cells without the system half) refutes the premise
   (`Example.torn_not_refinement`).
 -/
-import Kernel.World
-import Theory.AcceptedCellEffect
+module
+
+public import Kernel.World
+public import Theory.AcceptedCellEffect
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.TurnRecord
 
@@ -90,13 +109,15 @@ theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
   rw [hpost]
   simp
 
-/-- The turn carrying one accepted leg at cell `c`, charged its storage bytes. -/
+/-- The turn carrying one accepted leg at cell `c`, charged its storage bytes:
+the leg's and the retained event's. -/
 def singleTurn {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
     (H : History R TxId Ev D) (c : CellId) (x : TxId) (ev : Ev)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome) : Turn R TxId Ev D :=
   { txId := x, creates := [], legs := [Leg.ofAccepted c accepted], retires := [], event := ev,
-    charge := fun lane => if lane = .storageBytes then H.legBytes (Leg.ofAccepted c accepted) else 0 }
+    charge := fun lane =>
+      if lane = .storageBytes then H.legBytes (Leg.ofAccepted c accepted) + H.eventBytes ev else 0 }
 
 /-- Satisfiable pole at the seam: a one-leg turn carrying an accepted effect,
 charged its storage bytes, at a fresh id, a present head and a meter that
@@ -108,7 +129,7 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
     (holds : w.cells c = some ⟨k, pre.logical⟩)
     {height : Nat} {logRoot : D} (hh : w.head = some (height, logRoot))
     (fresh : w.journal x = none)
-    (funded : H.legBytes (Leg.ofAccepted c accepted) ≤ w.meter .storageBytes) :
+    (funded : H.legBytes (Leg.ofAccepted c accepted) + H.eventBytes ev ≤ w.meter .storageBytes) :
     ∃ w', World.step H w (singleTurn H c x ev accepted) = some w' ∧
       w'.cells c = some ⟨k, accepted.validated.apply.logical⟩ := by
   let t : Turn R TxId Ev D := singleTurn H c x ev accepted
@@ -126,11 +147,13 @@ theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
     · simp [t, singleTurn, e]
   have hk : turnCheck H w t height = none := by
     rw [turnCheck_eq_none_iff]
-    refine ⟨by simp [t, singleTurn], ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩,
+    refine ⟨by simp [t, singleTurn], by simp [t, singleTurn],
+      ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩,
       by simp [t, singleTurn], by simp [t, singleTurn, patchBytes], covered⟩
   have hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) := by
     refine sysPatch_valid_plain H rfl rfl fresh hh ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩ ?_
     intro lane hl
+    replace hl : t.charge lane ≠ 0 := hl.resolve_right (by simp [t, singleTurn])
     have pos : 0 < w.meter lane := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (covered lane)
     rw [meter_system] at pos ⊢
     revert pos

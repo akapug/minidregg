@@ -3,51 +3,16 @@
 //! Honest crash disk only; this store does not authorize declassification.
 use crate::{
     acss_id::{AcssId, Body, Message, Send},
-    asks::PhaseMessage,
-    codec::{bad, bytes, Generation, Nat, Reader},
-    consensus_wire::Cursor,
+    codec::{bad, bytes, Generation, Nat},
+    consensus_wire::{get_phase, put_phase, Cursor},
     dzk_store, private_send_store,
     reconstruction::Field,
     transition_journal::{Journal, Machine},
 };
 use std::{
-    fs::File,
-    io::{Read, Result},
+    io::Result,
     path::Path,
 };
-pub(crate) fn count(c: &mut Cursor<'_>) -> Result<usize> {
-    let mut b = vec![];
-    loop {
-        let v = c.byte()?;
-        b.push(v);
-        if v == 255 {
-            break;
-        }
-    }
-    let mut r = Reader::new(&b)?;
-    let n = r.count()?;
-    r.finish()?;
-    Ok(n)
-}
-fn put_phase(p: &PhaseMessage, b: &mut Vec<u8>) {
-    let (t, v) = match p {
-        PhaseMessage::Init(v) => (0, v),
-        PhaseMessage::Echo(v) => (1, v),
-        PhaseMessage::Ready(v) => (2, v),
-    };
-    b.push(t);
-    bytes(v, b);
-}
-fn phase(c: &mut Cursor<'_>) -> Result<PhaseMessage> {
-    let t = c.byte()?;
-    let v = c.bytes()?;
-    match t {
-        0 => Ok(PhaseMessage::Init(v)),
-        1 => Ok(PhaseMessage::Echo(v)),
-        2 => Ok(PhaseMessage::Ready(v)),
-        _ => Err(bad("ACSS phase")),
-    }
-}
 pub fn encode_message(m: &Message) -> Vec<u8> {
     let mut b = b"DREGG.ACSS.ID.WIRE\x01".to_vec();
     b.extend(m.context);
@@ -113,23 +78,23 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
             column: c.u16()?,
             message: dzk_store::decode_message(&c.bytes()?)?,
         },
-        2 => Body::Termination(phase(&mut c)?),
+        2 => Body::Termination(get_phase(&mut c)?),
         3 => Body::Complaint {
             holder: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         4 => Body::OpenRequest {
             holder: c.u16()?,
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         5 => Body::ReconstructionRequest {
             requester: c.u16()?,
-            phase: phase(&mut c)?,
+            phase: get_phase(&mut c)?,
         },
         6 => {
             let column = c.u16()?;
-            let n = count(&mut c)?;
+            let n = c.count()?;
             if n > 128 {
                 return Err(bad("public column vector bound"));
             }
@@ -148,39 +113,14 @@ pub fn decode_message(b: &[u8]) -> Result<Message> {
     Ok(m)
 }
 fn outbox(ps: &[Send]) -> Vec<u8> {
-    let mut b = vec![];
-    Nat::new(ps.len() as u64).put(&mut b);
-    for p in ps {
-        b.extend(p.to.to_le_bytes());
-        bytes(&encode_message(&p.message), &mut b);
-    }
-    b
+    crate::consensus_wire::put_outbox(ps, encode_message)
 }
 pub(crate) fn parse_outbox(b: &[u8], n: usize) -> Result<Vec<Send>> {
-    let mut c = Cursor::new(b)?;
-    let len = count(&mut c)?;
-    if len > crate::codec::MAX / 40 {
-        return Err(bad("ACSS outbox bound"));
-    }
-    let mut out = vec![];
-    for _ in 0..len {
-        let to = c.u16()?;
-        if to as usize >= n {
-            return Err(bad("ACSS outbox recipient"));
-        }
-        out.push(Send {
-            to,
-            message: decode_message(&c.bytes()?)?,
-        });
-    }
-    c.finish()?;
-    if outbox(&out) != b {
-        return Err(bad("ACSS outbox canonical"));
-    }
-    Ok(out)
+    crate::consensus_wire::get_outbox(b, n, crate::codec::MAX / 40, "ACSS", decode_message, encode_message)
 }
-/// The journaled dealer event: tag 0, the dealing seed, and every input polynomial.
-pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
+/// The journaled commit event: tag 0, the dealing seed, and every input
+/// polynomial. It publishes nothing; tag 4 (`EMIT_EVENT`) emits the deal.
+pub(crate) fn commit_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
     let mut e = vec![0];
     e.extend(seed);
     Nat::new(polys.len() as u64).put(&mut e);
@@ -191,9 +131,24 @@ pub(crate) fn dealer_event(seed: [u8; 32], polys: &[Vec<Field>]) -> Vec<u8> {
     }
     e
 }
+pub(crate) const EMIT_EVENT: [u8; 1] = [4];
 #[derive(Clone)]
 pub struct AcssMachine {
     pub state: AcssId,
+    committed: Option<([u8; 32], Vec<Vec<Field>>)>,
+    emitted: bool,
+}
+impl AcssMachine {
+    pub fn new(state: AcssId) -> Self {
+        Self {
+            state,
+            committed: None,
+            emitted: false,
+        }
+    }
+    pub fn is_committed(&self) -> bool {
+        self.committed.is_some()
+    }
 }
 impl Machine for AcssMachine {
     fn apply(&mut self, e: &[u8]) -> Result<Vec<u8>> {
@@ -201,7 +156,7 @@ impl Machine for AcssMachine {
         let out = match c.byte()? {
             0 => {
                 let seed = c.fixed32()?;
-                let n = count(&mut c)?;
+                let n = c.count()?;
                 if n != self.state.count {
                     return Err(bad("ACSS dealer polynomial count"));
                 }
@@ -214,7 +169,26 @@ impl Machine for AcssMachine {
                     polys.push(p);
                 }
                 c.finish()?;
-                self.state.dealer(&polys, seed)?
+                if self.committed.is_some() {
+                    return Err(bad("ACSS dealer already committed"));
+                }
+                // Dry run on a clone: a commit that could never emit is refused.
+                self.state.clone().dealer(&polys, seed)?;
+                self.committed = Some((seed, polys));
+                vec![]
+            }
+            4 => {
+                c.finish()?;
+                if self.emitted {
+                    return Err(bad("ACSS dealer already emitted"));
+                }
+                let (seed, polys) = self
+                    .committed
+                    .clone()
+                    .ok_or_else(|| bad("ACSS emit without committed dealer"))?;
+                let out = self.state.dealer(&polys, seed)?;
+                self.emitted = true;
+                out
             }
             1 => {
                 let holder = c.u16()?;
@@ -250,12 +224,12 @@ impl Store {
         count: usize,
     ) -> Result<Self> {
         let state = AcssId::new(me, dealer, n, f, g, count)?;
-        let mut id = b"DREGG.ACSS.ID.PARTY.WAL.V1".to_vec();
+        let mut id = b"DREGG.ACSS.ID.PARTY.WAL.V2".to_vec();
         g.put(&mut id);
         id.extend(state.context);
         id.extend(me.to_le_bytes());
         Ok(Self {
-            journal: Journal::open(path, &id, AcssMachine { state })?,
+            journal: Journal::open(path, &id, AcssMachine::new(state))?,
         })
     }
     pub fn state(&self) -> &AcssId {
@@ -265,15 +239,31 @@ impl Store {
         let b = self.journal.append(e)?;
         parse_outbox(&b, self.state().n)
     }
+    /// The deal is two journalled steps: commit the seed and inputs (nothing
+    /// published), then emit. An exact retry replays the retained outbox; a
+    /// tear of the emit record re-derives the same deal from the committed seed.
     pub fn dealer(&mut self, polys: &[Vec<Field>]) -> Result<Vec<Send>> {
         if polys.len() != self.state().count || polys.iter().any(|p| p.len() != self.state().f + 1)
         {
             return Err(bad("ACSS dealer inputs"));
         }
-        let mut seed = [0; 32];
-        File::open("/dev/urandom")?.read_exact(&mut seed)?;
-        let e = dealer_event(seed, polys);
-        self.apply(&e)
+        let m = self.journal.state();
+        if let Some((_, old)) = &m.committed {
+            if old != polys {
+                return Err(bad("ACSS changed dealer retry"));
+            }
+            if m.emitted {
+                return self.replay_outboxes();
+            }
+        } else {
+            let mut seed = [0; 32];
+            crate::entropy::os_fill(&mut seed)?;
+            self.apply(&commit_event(seed, polys))?;
+        }
+        self.apply(&EMIT_EVENT)
+    }
+    pub fn torn_tail(&self) -> Option<&crate::transition_journal::TornTail> {
+        self.journal.torn_tail()
     }
     pub fn request_open(&mut self, holder: u16) -> Result<Vec<Send>> {
         let mut e = vec![1];
@@ -346,6 +336,60 @@ mod tests {
         wrong.command.push(1);
         assert!(Store::open(&p, 0, 0, 4, 1, &wrong, 2).is_err());
     }
+    fn cut_last_byte(p: &std::path::Path) {
+        let len = fs::metadata(p).unwrap().len();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(p)
+            .unwrap()
+            .set_len(len - 1)
+            .unwrap();
+    }
+    fn two() -> [Vec<Field>; 2] {
+        [vec![Field(42), Field(7)], vec![Field(91), Field(11)]]
+    }
+    #[test]
+    fn torn_emit_rederives_the_same_deal_never_a_redraw() {
+        let p = path();
+        let out = {
+            let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 2).unwrap();
+            s.dealer(&two()).unwrap()
+        };
+        cut_last_byte(&p);
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 2).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(s.dealer(&[vec![Field(1), Field(2)], vec![Field(3), Field(4)]]).is_err());
+        assert_eq!(s.dealer(&two()).unwrap(), out);
+        assert_eq!(s.dealer(&two()).unwrap(), out);
+    }
+    #[test]
+    fn torn_commit_published_nothing_so_a_fresh_deal_is_safe() {
+        let p = path();
+        let after_open = {
+            let s = Store::open(&p, 0, 0, 4, 1, &g(), 2).unwrap();
+            let n = fs::metadata(&p).unwrap().len();
+            drop(s);
+            n
+        };
+        Store::open(&p, 0, 0, 4, 1, &g(), 2)
+            .unwrap()
+            .dealer(&two())
+            .unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_len(after_open + 5)
+            .unwrap();
+        let mut s = Store::open(&p, 0, 0, 4, 1, &g(), 2).unwrap();
+        assert!(s.torn_tail().is_some());
+        assert!(s.replay_outboxes().unwrap().is_empty());
+        assert!(!s
+            .dealer(&[vec![Field(1), Field(2)], vec![Field(3), Field(4)]])
+            .unwrap()
+            .is_empty());
+    }
     #[test]
     fn canonical_public_column_and_early_permission_refusals() {
         let m = Message {
@@ -366,5 +410,43 @@ mod tests {
         assert!(s.request_open(0).is_err());
         assert!(s.request_public_reconstruction().is_err());
         assert_eq!(fs::metadata(&p).unwrap().len(), len);
+    }
+}
+
+#[cfg(test)]
+mod pin_wire {
+    use super::*;
+    use crate::asks::PhaseMessage as PinPhase;
+    fn pin_sends() -> Vec<Send> {
+        vec![
+            Send { to: 1, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Echo(vec![1])) } },
+            Send { to: 3, message: Message { context: [7; 32], body: Body::Termination(PinPhase::Ready(vec![1])) } },
+        ]
+    }
+    /// Outbox wire: Nat count, then per packet u16 LE recipient and the
+    /// length-prefixed message wire; canonical, bounded, recipient-checked.
+    #[test]
+    fn pin_outbox_wire() {
+        let ps = pin_sends();
+        let b = outbox(&ps);
+        let mut want = vec![2, 255];
+        for s in &ps {
+            want.extend(s.to.to_le_bytes());
+            let m = encode_message(&s.message);
+            crate::codec::Nat::new(m.len() as u64).put(&mut want);
+            want.extend(m);
+        }
+        assert_eq!(&b[..4], &[2, 255, 1, 0]);
+        assert_eq!(b, want);
+        assert_eq!(parse_outbox(&b, 4).unwrap(), ps);
+        assert!(parse_outbox(&b, 3).is_err(), "recipient 3 is outside n = 3");
+        let mut trailing = b.clone();
+        trailing.push(0);
+        let b = trailing;
+        assert!(parse_outbox(&b, 4).is_err(), "trailing bytes refuse");
+        let mut huge = vec![];
+        crate::codec::Nat::new(crate::codec::MAX as u64).put(&mut huge);
+        let b = huge;
+        assert!(parse_outbox(&b, 4).is_err(), "an absurd count refuses");
     }
 }

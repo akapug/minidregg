@@ -2,7 +2,7 @@
 # Source-owned mutations of the canonical hyperdocument content cell
 
 A content cell is one `Store` over `Hyperdocument.layout` at the declared
-`HyperdocumentCell.contentWire` (DATAMODEL B1); the cell's identifier is the
+`HyperdocumentCell.contentWire` (docs/DATAMODEL.md §5 B1); the cell's identifier is the
 document's identity (`documentOf`).  The transaction receiver supplies
 authenticated author and operation identity.  The command contains edits,
 never proposed stores or authority decisions: each action lowers to guarded
@@ -55,9 +55,28 @@ whose state holds the opening (`openingHolds`).  A reader sees the transcluded
 bytes only through its own read of the source, current or `at` the opening's
 height (`renderTransclusion`).
 -/
-import Theory.AssertAxioms
-import Compiler.HyperdocumentCell
-import Compiler.ResourceBirthCodec
+module
+
+public import Theory.AssertAxioms
+public import Compiler.HyperdocumentCell
+public import Compiler.ResourceBirthCodec
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ContentResource
 
@@ -230,6 +249,35 @@ def markSpecStream : StreamCodec MarkSpec where
     cases value <;>
       simp [MarkSpec.kind, markKindTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
         (identifierStream .v1 .link).decodePrefix_encode, linkTargetStream.decodePrefix_encode]
+  encode_decodePrefix := by
+    intro bytes value suffix decoded
+    cases tagOk : StreamCodec.nat.decodePrefix bytes with
+    | none => simp [tagOk] at decoded
+    | some pair =>
+      obtain ⟨tag, afterTag⟩ := pair
+      have tagBytes := StreamCodec.nat.encode_decodePrefix _ _ _ tagOk
+      subst tagBytes
+      simp only [tagOk, bind, Option.bind] at decoded
+      split at decoded
+      all_goals first
+        | (cases decoded; done)
+        | (simp only [Option.some.injEq, Prod.mk.injEq] at decoded
+           obtain ⟨rfl, rfl⟩ := decoded
+           rfl)
+        | (cases linkOk : (identifierStream .v1 .link).decodePrefix afterTag with
+           | none => simp [linkOk] at decoded
+           | some pair =>
+             obtain ⟨linkId, afterLink⟩ := pair
+             cases targetOk : linkTargetStream.decodePrefix afterLink with
+             | none => simp [linkOk, targetOk] at decoded
+             | some pair =>
+               obtain ⟨target, rest⟩ := pair
+               simp only [linkOk, targetOk, bind, Option.bind, Option.some.injEq,
+                 Prod.mk.injEq] at decoded
+               obtain ⟨rfl, rfl⟩ := decoded
+               simp only [MarkSpec.kind, markKindTag, List.append_assoc,
+                 linkTargetStream.encode_decodePrefix _ _ _ targetOk,
+                 (identifierStream .v1 .link).encode_decodePrefix _ _ _ linkOk])
 
 /-- A mark of `target` as its author read it at `revision`. -/
 structure MarkRequest where
@@ -386,10 +434,27 @@ def Action.ofWire : ActionWire → Action
 
 def actionStream : StreamCodec Action :=
   StreamCodec.xmap actionWireStream Action.toWire Action.ofWire Action.ofWire_toWire
+    (by
+      intro wire
+      rcases wire with (⟨_, _⟩ | ⟨_, _, _⟩ | _ | ⟨_, _, _, _⟩ | ⟨_, _⟩ | ⟨_, _, _, _⟩ | ⟨_, _, _⟩ | _ | _ |
+          _ | ⟨_, _⟩ | _ | ⟨_, _, _⟩) | ⟨_, _, _⟩ | ⟨_, _, _⟩ <;> rfl)
 
 structure Command where
   actions : List Action
   deriving DecidableEq
+
+/-- An append-only action: a new atom, and in a document its leaf at the end of the root's
+children (`appendLeaf`).  Its atom id is the author's fresh draw, never read from the cell. -/
+def Action.appendOnly : Action → Bool
+  | .createAtom .. => true
+  | _ => false
+
+/-- **A commuting command**: nonempty and append-only.  Two of them on one document are both
+admitted in either order, each computed at the cell it meets, so the controller does not pin
+its plan to the observed whole root (`computeTarget`, `Kernel.ContentCommutingAppend`).
+Every other command still names, and is refused away from, the root it was planned over. -/
+def Command.commutes (command : Command) : Bool :=
+  !command.actions.isEmpty && command.actions.all Action.appendOnly
 
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap (StreamCodec.list actionStream) Command.actions
@@ -401,19 +466,7 @@ def commandVersion : Nat := 10
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
 
-def rawCommandCodec : LawfulCodec Command where
-  encode command := commandFrame ++ commandStream.encode command
-  decode bytes :=
-    if bytes.take commandFrame.length = commandFrame then
-      commandStream.toLawful.decode (bytes.drop commandFrame.length)
-    else none
-  decode_encode := by
-    intro command
-    have decoded := commandStream.toLawful.decode_encode command
-    change commandStream.toLawful.decode (commandStream.encode command) = some command at decoded
-    simp [decoded]
-
-def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
+def commandCodec : LawfulCodec Command := (StreamCodec.framed commandFrame commandStream).toLawful
 
 @[simp] theorem command_roundtrip (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command :=
@@ -422,20 +475,21 @@ def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawComm
 theorem command_canonical {bytes : List UInt8} {command : Command}
     (accepted : commandCodec.decode bytes = some command) :
     commandCodec.encode command = bytes :=
-  ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
+  StreamCodec.toLawful_canonical _ _ _ accepted
 
 /-- Version-1 through version-9 command frames refuse to decode. -/
 theorem retired_command_refused (version : UInt8)
     (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6 ∨ version = 7 ∨ version = 8 ∨ version = 9)
     (payload : List UInt8) :
-    rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
+    commandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
     rcases retired with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
-  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
-    simp [rawCommandCodec, lengthExact, different]
+  have refused : commandCodec.decode (oldFrame ++ payload) = none := by
+    simp [commandCodec, StreamCodec.toLawful, StreamCodec.framed, StreamCodec.xmap,
+      StreamCodec.product, StreamCodec.literal, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
 
 inductive Reject where

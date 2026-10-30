@@ -24,8 +24,29 @@ reached and answers `conflict`, and which never checkpoints or seeds.
   otherwise the outcome the submission produced (a refusal names its reason, a
   law refusal at plan time names its clause).
 -/
-import Kernel.NativeHost
-import Theory.AssertAxioms
+module
+
+public import Kernel.NativeHost
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Host.DryRun
 
@@ -180,7 +201,7 @@ theorem dryReceive_refusal_agrees (t : DurableReceiverIO.Transport) (reached : I
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
   split <;> first | rfl | (rename_i h; exact absurd h (refused _))
 
 /-- The dry transport names the Store's system cell, so the tail law
@@ -217,7 +238,7 @@ theorem dryReceive_tail_refusal_agrees (t : DurableReceiverIO.Transport) (reache
     DurableReceiverIO.receiveLoadedDetailedWithFresh (dryTransport t reached) rootBytes loaded intent =
       DurableReceiverIO.receiveLoadedDetailedWithFresh t rootBytes loaded intent := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
   simp only [admitted, dryTransport_judge, bounded]
 
 /-- The dry transport's only write marks `reached` and observes a conflict,
@@ -252,7 +273,7 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
         | .ok prepared =>
             DurableReceiverIO.publish (dryTransport t reached) rootBytes loaded commit prepared) := by
   unfold DurableReceiverIO.receiveLoadedDetailedWithFresh DurableReceiverIO.receiveCandidateWithFresh
-  simp only [DurableReceiverIO.Candidate.intent]
+  simp only [DurableReceiverIO.Candidate.intent, DurableReceiverIO.Loaded.prepare_eq]
   simp only [admitted, dryTransport_judge, judged, dryTransport_key, dryTransport_prepareAppend]
   simp only [DurableReceiverIO.publish, DurableReceiverIO.Candidate.intent]
   congr 1

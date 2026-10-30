@@ -103,7 +103,6 @@ def inspectReadback (config : Config) (input output : System.FilePath) : IO UInt
         Minidregg.Compiler.Tower256ConcreteBackend.bytesStream))))
     let body := bytes.toList.drop frame.length
     let some decoded := stream.toLawful.decode body | return (1 : UInt32)
-    if stream.encode decoded != body then return (1 : UInt32)
     let (query,domain,semantics,keyID,keyEpoch,publicKey) := decoded
     let some request := decode query | return (1 : UInt32)
     let some claim := Minidregg.Compiler.CurrentRecipientRecord.decode request.member request.payload | return (1 : UInt32)

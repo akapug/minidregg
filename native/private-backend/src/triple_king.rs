@@ -10,7 +10,7 @@ use crate::{
     codec::{bad, bytes, Correlation, Generation, Journal, Nat, Purpose},
     consensus_wire::Cursor,
     custody::{self, hash},
-    reconstruction::Field,
+    reconstruction::{eval, Field},
     sh2t_id::{self, Sh2tId},
 };
 use std::{
@@ -18,9 +18,6 @@ use std::{
     io::{Error, ErrorKind, Result},
     path::Path,
 };
-fn eval(p: &[Field], x: Field) -> Field {
-    p.iter().rev().fold(Field(0), |a, c| a.mul(x).add(*c))
-}
 fn power(x: Field, n: usize) -> Field {
     (0..n).fold(Field(1), |a, _| a.mul(x))
 }
@@ -371,38 +368,19 @@ pub(crate) fn burn_preparation(
     anchor: &Path,
     local: &Path,
 ) -> Result<Vec<u8>> {
-    let _guard = custody::lock(&local.with_extension("preparation.lock"))?;
-    let before = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    before.reserve_batch(ids, g.clone(), Purpose::Triple)?;
     let mut req = vec![2];
     req.extend(crate::codec::batch_request(ids, g, Purpose::Triple));
-    let confirmed = Journal::decode(&custody::rpc(anchor, &req)?)?;
-    let indexed = confirmed
-        .allocations
-        .iter()
-        .map(|a| (&a.id, a))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    if !confirmed.extends(&before)
-        || !confirmed.preserves_allocations(&before)
-        || ids.iter().any(|id| {
-            indexed
-                .get(id)
-                .is_none_or(|a| a.generation != *g || a.purpose != Purpose::Triple || a.consumed)
-        })
-    {
-        return Err(bad("preparation batch allocation binding/retention"));
-    }
-    // Persist exact original manifest with the whole completed reservation.
-    let mut receipt = burn_receipt_prefix(binding, g);
-    bytes(&confirmed.encode(), &mut receipt);
-    custody::snapshot(local, &receipt)?;
-    if std::fs::read(local)? != receipt {
-        return Err(bad("preparation burn readback"));
-    }
-    let latest = Journal::decode(&custody::rpc(anchor, &[0])?)?;
-    if !latest.extends(&confirmed) || !latest.preserves_allocations(&confirmed) {
-        return Err(bad("preparation anchor regression"));
-    }
+    let (_, receipt) = custody::reserve_with_receipt(
+        &local.with_extension("preparation.lock"),
+        &req,
+        ids,
+        g,
+        Purpose::Triple,
+        burn_receipt_prefix(binding, g),
+        anchor,
+        local,
+        "preparation burn",
+    )?;
     Ok(receipt)
 }
 fn burn_receipt_prefix(binding: &[u8], g: &Generation) -> Vec<u8> {
@@ -466,11 +444,7 @@ pub struct Message {
     pub context: [u8; 32],
     pub body: Body,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Send {
-    pub to: u16,
-    pub message: Message,
-}
+pub type Send = crate::codec::Packet<Message>;
 #[derive(Clone)]
 pub struct CheckedTriples {
     generation: Generation,
@@ -771,7 +745,7 @@ impl TripleKing {
                 .take(2 * f + 1)
                 .map(|(h, v)| (*h, v.clone()))
                 .collect::<Vec<_>>();
-            let polys = acss_id::polynomial(&points, 2 * count + 1)?;
+            let polys = crate::reconstruction::polynomial(&points, 2 * count + 1)?;
             let values = polys.iter().map(|p| p[0]).collect::<Vec<_>>();
             if !self.initial_published {
                 self.initial_published = true;
@@ -794,7 +768,7 @@ impl TripleKing {
                         )
                     })
                     .collect::<Vec<_>>();
-                let polys = acss_id::polynomial(&points, 2)?;
+                let polys = crate::reconstruction::polynomial(&points, 2)?;
                 let mut masked = vec![];
                 for i in count + 1..=2 * count {
                     let at = Field(i as u128 + 1);
@@ -835,7 +809,7 @@ impl TripleKing {
                         .add(c[i]);
                     points.push((i as u16, vec![value]));
                 }
-                self.h = Some(acss_id::polynomial(&points, 1)?[0].clone());
+                self.h = Some(crate::reconstruction::polynomial(&points, 1)?[0].clone());
                 self.masked_sent = true;
                 out.extend(self.to_king(Body::ChallengePoint(self.basis.random.check_r)));
             }
@@ -1193,19 +1167,14 @@ fn one(p: &PhaseMessage) -> Result<()> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "demo"))]
 pub(crate) mod tests {
+    #![cfg_attr(not(test), allow(dead_code, unused_imports))]
     use super::*;
     use std::{
         collections::VecDeque,
         fs,
-        os::unix::net::UnixListener,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-        thread,
-        time::{Duration, SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH},
     };
     fn generation(tag: u64) -> Generation {
         Generation {
@@ -1227,70 +1196,6 @@ pub(crate) mod tests {
         ));
         fs::create_dir(&p).unwrap();
         p
-    }
-    pub(crate) struct AnchorFixture {
-        sock: std::path::PathBuf,
-        stop: Arc<AtomicBool>,
-        task: Option<thread::JoinHandle<Journal>>,
-    }
-    impl AnchorFixture {
-        /// Serve the anchor authority kept under `root`. A socket file left by a
-        /// killed predecessor is removed first; the authority log is what persists.
-        pub(crate) fn new(root: &Path) -> Self {
-            let sock = root.join("anchor.sock");
-            let _ = fs::remove_file(&sock);
-            let listener = UnixListener::bind(&sock).unwrap();
-            listener.set_nonblocking(true).unwrap();
-            let stop = Arc::new(AtomicBool::new(false));
-            let halt = stop.clone();
-            let authority = root.join("authority");
-            let task = thread::spawn(move || {
-                let mut a = custody::Anchor::open(&authority).unwrap();
-                while !halt.load(Ordering::SeqCst) {
-                    match listener.accept() {
-                        Ok((mut s, _)) => {
-                            // BSD sockets inherit the listener's nonblocking flag.
-                            s.set_nonblocking(false).unwrap();
-                            let b = custody::read_packet(&mut s).unwrap();
-                            let out = a.handle(&b);
-                            let mut reply = vec![];
-                            match out {
-                                Ok(b) => {
-                                    reply.push(0);
-                                    reply.extend(b)
-                                }
-                                Err(e) => {
-                                    reply.push(1);
-                                    reply.extend(e.to_string().as_bytes())
-                                }
-                            }
-                            custody::write_packet(&mut s, &reply).unwrap();
-                        }
-                        Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(1))
-                        }
-                        Err(e) => panic!("{e}"),
-                    }
-                }
-                a.journal
-            });
-            Self {
-                sock,
-                stop,
-                task: Some(task),
-            }
-        }
-    }
-    impl AnchorFixture {
-        pub(crate) fn socket(&self) -> &Path {
-            &self.sock
-        }
-    }
-    impl Drop for AnchorFixture {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::SeqCst);
-            self.task.take().unwrap().join().unwrap();
-        }
     }
     fn prepared() -> Vec<Vec<PreparedSource>> {
         prepared_with_zero_fault(None)
@@ -1440,7 +1345,7 @@ pub(crate) mod tests {
     }
     fn kings() -> (
         Vec<TripleKing>,
-        Vec<AnchorFixture>,
+        Vec<crate::custody::AnchorHandle>,
         Vec<Vec<PreparedSource>>,
     ) {
         let material = prepared();
@@ -1448,14 +1353,14 @@ pub(crate) mod tests {
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&i.to_string());
-            let a = AnchorFixture::new(&r);
+            let a = crate::custody::AnchorHandle::new(&r);
             let basis = PreparedBasis::reserve_new(
                 &generation(300),
                 0,
                 1,
                 0,
                 sources.clone(),
-                &a.sock,
+                a.socket(),
                 &r.join("burn"),
             )
             .unwrap();
@@ -1509,7 +1414,7 @@ pub(crate) mod tests {
                 (n.basis.me, vec![a, b, c])
             })
             .collect::<Vec<_>>();
-        let polys = acss_id::polynomial(&points, 3).unwrap();
+        let polys = crate::reconstruction::polynomial(&points, 3).unwrap();
         assert_ne!(polys[0][0], Field(0));
         assert_ne!(polys[1][0], Field(0));
         assert_eq!(polys[0][0].mul(polys[1][0]), polys[2][0]);
@@ -1536,11 +1441,11 @@ pub(crate) mod tests {
             1,
             0,
             material[0].clone(),
-            &anchors[0].sock,
+            anchors[0].socket(),
             &p.join("burn")
         )
         .is_err());
-        let j = Journal::decode(&custody::rpc(&anchors[0].sock, &[0]).unwrap()).unwrap();
+        let j = Journal::decode(&custody::rpc(anchors[0].socket(), &[0]).unwrap()).unwrap();
         assert_eq!(j.spent.len(), 6);
     }
     #[test]
@@ -1651,14 +1556,14 @@ pub(crate) mod tests {
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&format!("nonzero-{i}"));
-            let a = AnchorFixture::new(&r);
+            let a = crate::custody::AnchorHandle::new(&r);
             let basis = PreparedBasis::reserve_new(
                 &generation(500),
                 3,
                 1,
                 12,
                 sources.clone(),
-                &a.sock,
+                a.socket(),
                 &r.join("burn"),
             )
             .unwrap();
@@ -1712,20 +1617,20 @@ pub(crate) mod tests {
             })
             .collect::<Vec<_>>();
         let r = root("incomplete");
-        let a = AnchorFixture::new(&r);
+        let a = crate::custody::AnchorHandle::new(&r);
         let e = PreparedBasis::reserve_new(
             &generation(403),
             0,
             1,
             0,
             sources.clone(),
-            &a.sock,
+            a.socket(),
             &r.join("burn"),
         )
         .err()
         .unwrap();
         assert_eq!(e.kind(), ErrorKind::WouldBlock);
-        let j = Journal::decode(&custody::rpc(&a.sock, &[0]).unwrap()).unwrap();
+        let j = Journal::decode(&custody::rpc(a.socket(), &[0]).unwrap()).unwrap();
         assert_eq!(j.spent.len(), 6);
         assert!(r.join("burn").exists());
         assert!(PreparedBasis::reserve_new(
@@ -1734,7 +1639,7 @@ pub(crate) mod tests {
             1,
             0,
             sources,
-            &a.sock,
+            a.socket(),
             &r.join("burn2")
         )
         .is_err());
@@ -1764,14 +1669,14 @@ pub(crate) mod tests {
         let mut nodes = vec![];
         for (i, sources) in material.iter().enumerate() {
             let r = root(&format!("consumer-{i}"));
-            let a = AnchorFixture::new(&r);
+            let a = crate::custody::AnchorHandle::new(&r);
             let basis = PreparedBasis::reserve_new(
                 consumer,
                 0,
                 count,
                 0,
                 sources.clone(),
-                &a.sock,
+                a.socket(),
                 &r.join("burn"),
             )
             .unwrap();
@@ -1804,10 +1709,35 @@ pub(crate) mod tests {
 
     pub(crate) fn evaluator_anchor(
         label: &str,
-    ) -> (AnchorFixture, std::path::PathBuf, std::path::PathBuf) {
+    ) -> (crate::custody::AnchorHandle, std::path::PathBuf, std::path::PathBuf) {
         let r = root(label);
-        let a = AnchorFixture::new(&r);
-        let sock = a.sock.clone();
+        let a = crate::custody::AnchorHandle::new(&r);
+        let sock = a.socket().to_path_buf();
         (a, sock, r)
+    }
+    /// The burn half of the lost-reply law: the anchor committed the batch but
+    /// the caller never got (or never persisted) its receipt. The retry returns
+    /// the identical receipt, the receipt opens against the manifest, and the
+    /// anchor still holds each row once. Fault that must turn this red: make the
+    /// held batch fall through to `reserve_batch` in `custody::reserve_with_receipt`.
+    #[test]
+    fn burn_preparation_lost_reply_is_recovered_not_refused() {
+        let r = root("lost-burn");
+        let a = crate::custody::AnchorHandle::new(&r);
+        let g = generation(910);
+        let ids = (0..5)
+            .map(|row| Correlation { pool: Nat::new(61), row: Nat::new(row) })
+            .collect::<Vec<_>>();
+        let local = r.join("burn");
+        let first = burn_preparation(&ids, &g, b"binding", a.socket(), &local).unwrap();
+        std::fs::remove_file(&local).unwrap();
+        let again = burn_preparation(&ids, &g, b"binding", a.socket(), &local).unwrap();
+        assert_eq!(again, first);
+        open_burn_receipt(&ids, &g, b"binding", &again).unwrap();
+        let j = Journal::decode(&custody::rpc(a.socket(), &[0]).unwrap()).unwrap();
+        assert_eq!(j.spent.len(), 5, "no double burn");
+        // A different manifest over the same rows is not the retained request.
+        std::fs::remove_file(&local).unwrap();
+        assert!(burn_preparation(&ids, &g, b"other binding", a.socket(), &local).is_err());
     }
 }

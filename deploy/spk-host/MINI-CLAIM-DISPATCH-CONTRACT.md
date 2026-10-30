@@ -1,105 +1,70 @@
-# Mini-to-SPK-host claim and dispatch contract (staged)
+# Mini-to-SPK-host dispatch contract
 
-This is the host-side contract for the pending native lifecycle claim and
-current dispatch projection. It is a **required interface**, not a claim that
-Mini's Host opcodes or a production HTTP route already exist. The public
-`spk-hostd` endpoint continues to answer `unavailable` for `begin` and
-`dispatch`. A caller-supplied JSON object, decoded BEGIN ingress, generic DRC
-receipt, or unsigned observation must never construct the Rust permit types.
+Present state of `native/spk-host/src/dispatch_{native,delivery,fence,inspection}.rs`.
+Lean admits every request; Rust holds the physical fd 3 and the evidence.
 
-## Source-owned launch claim
+## One request
 
-The operator host invokes a pinned Mini executable against its protected Host
-config/socket and receives Mini's canonical verified result. The result must
-bind all of these values on one loaded image:
+1. Preflight of the projected request (no operation number, no Store write).
+2. The physical fd 3 slot (`<journal>/dispatch-active.json`, hostd) must be
+   free; it is held only while one delivery is in the app.
+3. `dispatch_fence::admit_new_call`: at most 8 undecided calls per generation
+   journal (one op 35 lookup of the oldest per new call; settled attempts keep
+   markers only, at most 256 retained).
+4. A fresh fsynced operation ID, then author (op 36 plan, custodial signatures,
+   op 37 assembly) under `dispatch-op-<N>/`. A refused plan or assembly keeps
+   its frame and helper stderr as refusal evidence; nothing was submitted.
+5. `submit-requested.json` and `submit-active.json` are written (create-new,
+   fsynced) before op 34, or op 164 for a route sealed to an admitted binding.
+   The same attempt can never be submitted twice.
+6. Only Lean's fresh committed permit is inspected (`inspect
+   application-dispatch-committed`), matched against the request, recorded
+   DeliveryRequested in hostd, and delivered to fd 3 once.
 
-- Original accepted special BEGIN ingress and its original event/nullifier,
-  transaction and operation identities; accepted historical prefix.
-- The one-shot special CLAIM event/nullifier (event codec v16), transaction,
-  app resource, BEGIN kind, process generation, and claimed app phase. The
-  only claim phases are install 8, start 9, stop 10, and upgrade 11.
-- Exact installed package digest and immutable image identity, process/unit
-  identity, current app/package/authority roots, and current world root.
-- Fresh current signed mutation authority under the original BEGIN subject
-  and capability, the installed v2 app/package management policies, and fresh
-  signed app/package observations. The native result must establish these;
-  Rust does not reimplement Lean admission from display fields.
+## The fence is per signed call
 
-The host compares the source-derived image/unit identity to the operator-pinned
-package and exact systemd unit, durably records the original and claim
-identities, and consumes the generation-specific claim under the same flock as
-its launch tombstone. It requests a fresh current native claim check immediately
-before `ExecStart` and before exposing a serving session. A mismatch, absent
-claim, uncertain Mini response, or physical identity drift retains Fenced; it
-does not retry a launch. The native canonical response and its checked
-projection must be bounded and versioned. Unknown versions and any integer
-that cannot be represented by the selected physical unit naming scheme are
-refused, never truncated. Mini resource and subject zero are not rejected by
-fixture convention; the exact source-owned claim determines validity.
+Lean's exactly-once unit is the signed call (its transaction identity comes
+from the call's own operation ID). No generation-wide marker exists: one
+undecided call never stops another member. A call is settled only from Lean's
+answers:
 
-## Source-owned request admission
+| Lean's answer | settlement | member sees |
+|---|---|---|
+| op 164 `DISPATCH-NO-RECORD-REFUSAL` frame | no record | 403 `refused` |
+| NO_RECORD frame (marker 253: Lean's proven no-append outcome; no lookup) | no record | 503 `contention` / 403 `refused` / 503 `unavailable` per Lean's outcome, retry `new-request` |
+| op 34 outcome `confirmed` (non-winner or historical) | recorded, never delivered | 502 `recorded-undelivered` |
+| any other reply or a lost reply, then op 35 `confirmed replayed` | recorded, never delivered | 502 `recorded-undelivered` |
+| an op 34 outcome frame, then op 35 `absent` | no record | 503 `contention` / 403 `refused` / 503 `unavailable` per the original outcome |
+| HOST_OUTCOME frame (marker 255: undecided) or a lost reply, then op 35 `absent` | undecided | 503 `undecided`, retry `same-call` |
+| op 35 unanswerable (Host down, 255, malformed) | undecided | 503 `undecided`, retry `same-call` |
+| 8 undecided calls already | nothing authored | 503 `uncertain-backlog`, retry later |
 
-Every browser or API request requires its own accepted current Mini dispatch
-projection. The native source must select the accepted special share-issue
-event and current ticket, check issuer delegation lineage and participant
-ticket/app/session grants, enforce effective ordered bits within the immutable
-ticket ceiling, and derive the 32-byte app-visible principal. A participant's
-enrollment request, HTTP method, display label, raw ticket bytes, or headers
-do not grant a permission bit.
+`absent` after a lost reply is not read as never-happened (ruling
+2026-10-26): that would rest on the operator socket's ordering
+(`resource-client/src/transport.rs`, `ServeBounds`), which no theorem states.
+Lean's positive no-append frame is the NO_RECORD marker (253;
+`Host/RequestRefusal.lean` `returnedMarker`, `returnedMarker_noRecord_sound`):
+the Host answers op 34's rejected, contention and unavailable outcomes under it,
+and the resident settles the call on that frame alone (`dispatch_fence::decide`,
+resolution `by: no-record-marker`). The 255 envelope carries only undecided
+outcomes and never settles anything. Before submit (ops 36/37, append-free by
+the registry's `NO_APPEND_OPERATIONS`), a reply under either marker is the
+refusal it carries. The resident names both markers from the generated
+`host-operations.rs` constants, never by literal. Every outcome body carries
+`recorded`, the operation number, Lean's own outcome words and the retry. The
+host never resends a call.
 
-The checked projection must include exact app/process and session resource,
-generation, subject and kind; ticket/interface/schema/enrollment roots; the
-selected issue and pending dispatch event/transaction/operation identities;
-the ordered effective bits and source-derived principal; and the exact
-projected request method, path plus query, body, cookies and allowlisted
-ordinary headers. Mini must synthesize app security headers from checked
-identity/bits, ignoring caller-supplied `X-Sandstorm-*` and `generated` flags.
-Rust forwards only the projected request to fd 3 once and records uncertainty
-on timeout or disconnect. It never retries a possibly delivered write.
+## Lookups never authorize
 
-The source-only native `requestSafe` check is still evolving; its currently
-narrow-compiled shape bounds the relative UTF-8 path plus
-query to 8,192 bytes, the body to 8 MiB, and headers to 128 with names at
-most 128 and values at most 8,192 bytes. It permits GET, HEAD, POST, PUT,
-PATCH and DELETE; GET/HEAD/DELETE have no body. It rejects a leading slash,
-fragment, embedded second query separator, NUL/CR/LF, and any received
-`generated` header. The received lowercase ordinary-header allowlist is
-`cookie`, `accept`, `accept-encoding`, `content-type`, `user-agent`,
-`if-match`, `if-none-match`, `x-requested-with`, `x-csrftoken`,
-`x-csrf-token`, `oc-total-length`, `oc-chunk-size`, `x-oc-mtime`,
-`oc-fileid`, `oc-chunked`, `oc-checksum`, `oc-chunk-offset`, and
-`oc-lazyops`. Rust may mirror these as a transport refusal, but that check is
-not native authorization. In particular, a client cannot set Sandstorm
-permission headers by passing ordinary HTTP headers. The final wire schema and
-these exact request bounds must be rechecked against the frozen source before
-turning on dispatch.
+op 35 (`APPLICATION_DISPATCH_LOOKUP`, `Host/Main.lean`
+`applicationDispatchLookupSession` over
+`Kernel/ApplicationDispatchLookup.lookupVerified`) takes the exact retained
+ingress and returns a receipt or `absent`. It can never mint a delivery permit.
 
-Mini must supply a stable, source-owned 32-byte session fingerprint that
-changes when app-side identity or effective authority changes, but remains
-stable across ordinary requests under the same authority. The current
-source-only `ApplicationDispatchAdmission.CheckedCurrent.sessionFingerprint`
-uses cSHAKE256 under
-`DREGG/APPLICATION/DISPATCH-SESSION-FINGERPRINT/v2`. Its narrow-compiled
-source is `Kernel/ApplicationDispatchAdmission.lean` SHA-256
-`7ca185ef954169da45dcc4b6c09bf6a0022ec60e68a9fe409c5cbb7bd67c878e`.
-The
-typed preimage includes the current authority root, checked app with snapshot
-version set to zero, checked session and identity, ordered effective bits,
-ticket resource/root, enrollment resource/root, and exact selected issue
-ingress bytes. It excludes the request, session root, app root and durable tip.
-This source-only definition still needs an accepted two-request integration
-gate and a frozen Host wire; no Rust wire parser assumes the composition. The physical fd 3
-driver caches an app-side session
-by app, process generation, session resource, subject and Web/API kind, and
-reuses it only while this source fingerprint and every app-visible session
-parameter match. Any drift drops the old capability before another request.
-The cache is bounded to 32 live entries and selects its least recently used
-entry for eviction when a 33rd app-side session is created. A private GitWeb
-component run created 33 distinct read-only sessions, then revisited the
-oldest and observed a new app-side session with the cache still at 32. That
-run used synthetic projections and does not qualify Mini dispatch admission.
+## What Lean must still answer
 
-The pending native wire codec, Host opcode and CLI projection filenames remain
-to be frozen by the Mini owners. The Rust parser and endpoint connection are
-therefore intentionally unavailable; this document does not define an
-independent Rust authorization algorithm or a caller-authored permit format.
+- Answered (c5e268eb): op 34's rejected, contention and unavailable outcomes
+  are proven no-append and go out under NO_RECORD; the lookup is unnecessary
+  for them and the resident no longer performs it.
+- A stated independence property: admission of call B depends on call A's
+  unknown outcome only through the tip B's plan reads.

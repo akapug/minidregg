@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# J-PAY-6 (PAY.md P6): a Book burn funds an AgentGrain purse in one joint turn,
+# J-PAY-6 (PAY P6): a Book burn funds an AgentGrain purse in one joint turn,
 # on a fresh private Store.
 #
 # Follows the journey hook contract (journey.sh header): executed with HOST,
@@ -9,8 +9,8 @@
 # last stdout line; the last stdout line is the deciding artifact (rows.tsv).
 #
 # Standalone: HOST=... MINI=... STORE=... VERIFIER=... GRAIN=grain-runtime
-#   TEST_PROVIDER=mini-hermes-test-provider LAUNCH_GATE=launch-gate (rustc of
-#   deploy/grain-host/launch-gate.rs) JOURNEY_STEP_DIR=NEW_DIR jpay6.sh
+#   TEST_PROVIDER=mini-hermes-test-provider LAUNCH_GATE=launch-gate (the candidate's
+#   bin/launch-gate, native/launch-gate) JOURNEY_STEP_DIR=NEW_DIR jpay6.sh
 #
 # The Hermes half runs the real grain-runtime controller (a transient
 # `systemd-run --user` unit with Restart=on-failure) with a metered
@@ -75,6 +75,10 @@ mkdir -p "$DIR"
 python3 - "$DIR" <<'PY'
 import json, os, signal, socket, struct, subprocess, sys, time
 import nacl.signing
+def attempt_answer(p):  # an attempt's retained answer via `mini attempt-state` (repaired from seal.record), never the file
+    r = subprocess.run([MINI, "attempt-state", "--attempt", os.path.dirname(p), "--file", os.path.basename(p)], capture_output=True, text=True)
+    if r.returncode: raise OSError(r.stderr.strip() or "no answer")
+    return json.loads(r.stdout)
 
 DIR = sys.argv[1]
 HOST, MINI, STORE, VERIFIER = (os.environ[k] for k in ("HOST", "MINI", "STORE", "VERIFIER"))
@@ -104,6 +108,9 @@ CAPS = {OPERATOR: (41, 51, 54), TOOL: (42, 52, 55), PROVIDER: (43, 56, 57),
 BALANCE = {OPERATOR: 100, TOOL: 100, PROVIDER: 100, FRIEND: FRIEND_BALANCE, STRANGER: 100}
 
 def path(name): return os.path.join(DIR, name)
+# Consent anchors and resident providers of every mini this journey starts (the
+# controller unit too, by --setenv) stay in its own directory, never ~/.mini.
+os.environ["MINI_CONSENT_ANCHOR_DIR"] = path("consent-anchors")
 LIVE = []          # child processes to stop on any exit
 UNITS = []         # transient systemd units to stop on any exit
 def cleanup():
@@ -128,55 +135,60 @@ for s in SUBJECTS:
     keys[s] = nacl.signing.SigningKey.generate()
     fd = os.open(path(f"keys/{s}.key"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     os.write(fd, bytes(keys[s])); os.close(fd)
+TAIL_BOUND = 1000000
+NEXT_PUBLIC = {}   # subject -> its next public key (hex); genesis.sh commits the digest
 def enrollment(s):
+    # the compact form genesis.sh completes (keyEpoch, activity window, nextKeyDigest, accountPredicate)
     spend, control, observe = CAPS[s]
-    return {"key": {"keyId": str(7000 + s if s >= 20 else 1001 * s), "keyEpoch": "2", "algorithm": "1",
-                    "subject": str(s), "publicKey": keys[s].verify_key.encode().hex(),
-                    "activeFrom": "0", "activeUntil": "1000000", "nextKeyDigest": None},
-            "accountId": str(s), "spendCapabilityId": str(spend), "controlCapabilityId": str(control),
-            "factoryObserveCapabilityId": str(observe), "initialBalance": str(BALANCE[s]),
-            "accountPredicate": {"type": "all", "predicates": []}}
-operator = {"domain": 8501, "federation": 9, "factoryId": 10, "resourceBookId": 11,
-            "authorityCellId": 12, "issuer": 5, "ownerBudget": 100000, "lifetime": 10000,
-            "tariffBase": 3, "tariffPerBirth": 2, "tariffPerGrant": 1,
-            "tariffPerInitialPayloadByte": 0, "collector": 99, "asset": 0, "genesisHeight": 10,
-            "expectedSeed": 0, "storageBinary": STORE, "storageRoot": path("store"),
-            "signatureBinary": VERIFIER,
-            "continuityProviderResourceId": PURSE,
-            "providerMetering": {"providerResourceId": PURSE, "tariff": {
+    entry = {"subject": s, "keyId": 7000 + s if s >= 20 else 1001 * s,
+             "publicKey": keys[s].verify_key.encode().hex(), "accountId": s, "spendCapabilityId": spend,
+             "controlCapabilityId": control, "factoryObserveCapabilityId": observe, "initialBalance": BALANCE[s]}
+    if s in NEXT_PUBLIC: entry["nextPublicKey"] = NEXT_PUBLIC[s]
+    return entry
+# The provider service pin (the purse's per-route tariff), pinned at genesis.
+operator = {"providerServices": [{"providerResourceId": PURSE, "tariff": {
                 "version": "1", "model": MODEL, "routes": {
                     "user": {"perOp": str(USER_FEE)},
                     "pool": {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
                              "outputMicroPerMillion": str(RATE_OUT)},
                     "homelab": {"perOp": str(HOMELAB_FEE), "inputMicroPerMillion": "0",
-                                "outputMicroPerMillion": "0"}}}}}
-json.dump(operator, open(path("operator.json"), "w"), indent=1)
-profile = json.loads(subprocess.run([HOST, path("operator.json"), "profile"], check=True,
-                                    capture_output=True).stdout)
-genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authorityCellId": "12",
-           "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
-           "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
-           "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
-           "factoryPredicate": {"type": "all", "predicates": []},
-           "enrollments": [enrollment(s) for s in SUBJECTS],
-           "factoryControllerSubject": str(OPERATOR),
-           "factoryControllerCapability": str(FACTORY_CONTROL),
-           "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
-               "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
-               "feeDebit", "leaseByteBlocks")}}
-json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
-# The genesis clock: the one candidate helper (the extractors keep the dump line above as their seam).
-subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
+                                "outputMicroPerMillion": "0"}}}}]}
+# genesis seam: extractors adjust TAIL_BOUND, NEXT_PUBLIC and operator["providerServices"] here
+# The genesis is the one template's (scenario-genesis.sh): this journey passes only what its world
+# differs by. OPERATOR is the sponsor (its keyId, account and capabilities are the example's).
+with open(path("enrollments.json"), "w") as out:
+    json.dump([enrollment(s) for s in SUBJECTS if s != OPERATOR], out)
+spend, control, observe = CAPS[OPERATOR]
+# The clock subject keeps its frame role but not the example's capability numbers
+# 71-74: the historical birth installs 71/72 (the parent's owner and control
+# capabilities) and the delegations install 73 and 75 (the parent witnesses), and
+# a birth whose grants reuse an installed capability is refused at prepare
+# (ResourceBirthController `authorityBatch`) - the grain acceptance moves its
+# clock the same way (native/grain-runtime/acceptance.sh).
+overlay = (f"del(.grainPlatform) | .clock += {{tickCapabilityId: 4071, spendCapabilityId: 4072,"
+           f" controlCapabilityId: 4073, factoryObserveCapabilityId: 4074}}"
+           f" | .tailBound = {TAIL_BOUND} | .factoryControllerCapability = {FACTORY_CONTROL}"
+           f" | .sponsor.subject = {OPERATOR} | .sponsor.keyId = {1001 * OPERATOR} | .sponsor.accountId = {OPERATOR}"
+           f" | .sponsor.spendCapabilityId = {spend} | .sponsor.controlCapabilityId = {control}"
+           f" | .sponsor.factoryObserveCapabilityId = {observe} | .sponsor.initialBalance = {BALANCE[OPERATOR]}"
+           f" | .providerServices = {json.dumps(operator['providerServices'])}")
+subprocess.run(["sh", os.path.join(os.environ["REPO"], "native/resource-client/scenario-genesis.sh"), DIR,
+                keys[OPERATOR].verify_key.encode().hex(), overlay, path("enrollments.json")], check=True,
+               env=dict(os.environ, HOST=HOST, MINI=MINI, STORE=STORE, VERIFIER=VERIFIER))
+profile = json.load(open(path("profile.json")))
+# The birth intent embeds the FILLED genesis: the Host refuses a birth whose genesis lacks the clock
+# fields the helper wrote ("$.birth.genesis: missing field clockGenesisNow", the real JPAY6 red of a0db11f8).
+genesis = json.load(open(path("genesis.json")))
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
 if boot.returncode != 0:
     fail("bootstrap: " + (boot.stdout + boot.stderr).decode("utf-8", "replace")[-400:])
 CONFIG = path("deployment/pinned-config.json")
-# The provider pins are in force from the first event: the purse's birth reads
-# the Host's per-route tariff to install its route law.
+# The provider service pin is in force from the first event: the purse's birth
+# reads the Host's per-route tariff to install its route law, and the local
+# consent provider (same settings file) refuses a purse law without it.
 pinned = json.load(open(CONFIG))
-for key in ("continuityProviderResourceId", "providerMetering"):
-    pinned.setdefault(key, operator[key])
+pinned.setdefault("providerServices", operator["providerServices"])
 CONFIG = path("deployment/continuity-config.json")
 json.dump(pinned, open(CONFIG, "w"), indent=1)
 
@@ -225,7 +237,7 @@ def mini_submit(name, intent, signer, kind=None):
     if kind: words[words.index("--intent"):words.index("--intent")] = ["--intent-kind", kind]
     done = subprocess.run(words, capture_output=True)
     open(path(f"{name}.stderr"), "wb").write(done.stdout + done.stderr)
-    try: return json.load(open(path(f"{name}-attempt/outcome.json")))
+    try: return attempt_answer(path(f"{name}-attempt/outcome.json"))
     except (OSError, ValueError): return {"type": "no-outcome", "exit": done.returncode}
 query_nonce = [40000]
 def mini_query(name, subject, target, capability):
@@ -469,18 +481,20 @@ os.chmod(RUNTIME, 0o755)
 for source, name in ((GRAIN, "grain-runtime"), (STANDIN, "hermes-acp")):
     data = open(source, "rb").read()
     open(os.path.join(RUNTIME, name), "wb").write(data); os.chmod(os.path.join(RUNTIME, name), 0o755)
-launcher = open(os.path.join(REPO, "deploy/grain-host/bwrap")).read()
-probe = subprocess.run(["/usr/bin/bwrap", "--unshare-user", "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin",
-                        "/bin", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64", "/usr/bin/true"],
-                       capture_output=True)
-BWRAP = "/usr/bin/bwrap"
-if probe.returncode != 0 and os.access("/usr/local/libexec/mini-grain-bwrap", os.X_OK):
-    # hbox restricts unprivileged user namespaces; its operator installed an
-    # AppArmor-profiled root-owned copy of the distro bwrap for exactly this.
-    BWRAP = "/usr/local/libexec/mini-grain-bwrap"
-    launcher = launcher.replace("/usr/bin/bwrap ", BWRAP + " ")
+# The physical bwrap (MINI_BWRAP selects; see resolve-bwrap) and the launcher materialized for it.
+resolved = subprocess.run(["sh", os.path.join(REPO, "deploy/grain-host/resolve-bwrap")], capture_output=True, text=True)
+if resolved.returncode != 0:
+    fail("bwrap: " + resolved.stderr.strip())
+BWRAP = resolved.stdout.strip()
 LAUNCHER = path("launcher/bwrap")
-open(LAUNCHER, "w").write(launcher); os.chmod(LAUNCHER, 0o700)
+materialized = subprocess.run([sys.executable, os.path.join(REPO, "deploy/grain-host/materialize-bwrap.py"),
+                               "--physical-bwrap", BWRAP, "--physical-sha256",
+                               hashlib.sha256(open(BWRAP, "rb").read()).hexdigest(), "--output", LAUNCHER],
+                              capture_output=True, text=True)
+if materialized.returncode != 0:
+    fail("materialize-bwrap: " + materialized.stderr.strip())
+open(path("launcher.json"), "w").write(materialized.stdout)
+os.chmod(LAUNCHER, 0o700)
 open(path("launcher/launch-gate"), "wb").write(open(LAUNCH_GATE, "rb").read())
 os.chmod(path("launcher/launch-gate"), 0o700)
 # HERMES-KEYS/-TARIFF: the provider request's route is a row of the operator's
@@ -497,13 +511,21 @@ TABLE_ROWS = {
              "models": [MODEL], "credential": "user"},
     "pool": {"name": "local", "endpoint": ENDPOINT, "kind": "openai-compatible",
              "models": [MODEL], "credential": "pool", "caps": {"perCall": "64", "perDay": "10"}}}
+INSTALL = "/usr/bin/install"
+# The one root step of this journey, probed as the one rule it needs (a targeted sudoers rule satisfies it;
+# a broad one is never required): RUNNER ALL=(root) NOPASSWD: /usr/bin/install
+probe = subprocess.run(["sudo", "-n", "-l", INSTALL], capture_output=True)
+if probe.returncode != 0:
+    import pwd
+    fail(f"missing input: sudoers rule {pwd.getpwuid(os.getuid()).pw_name} ALL=(root) NOPASSWD: {INSTALL} "
+         "(the provider table is root-owned, as in production): " + probe.stderr.decode("utf-8", "replace")[-160:])
 def install_table(*routes):
     json.dump({"type": "mini-provider-table-v2", "providers": [TABLE_ROWS[r] for r in routes]},
               open(TABLE_SOURCE, "w"))
-    installed = subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644",
+    installed = subprocess.run(["sudo", "-n", INSTALL, "-o", "root", "-g", "root", "-m", "0644",
                                 TABLE_SOURCE, TABLE], capture_output=True)
     if installed.returncode != 0:
-        fail("the provider table must be root-owned; sudo -n install failed: "
+        fail(f"the provider table must be root-owned; sudo -n {INSTALL} failed: "
              + installed.stderr.decode("utf-8", "replace")[-200:])
 install_table("user", "pool")
 # Credential custody is the key broker's (native/mini-keys): same account in this
@@ -528,8 +550,12 @@ mini_key("pool", "--action", "set", "--pool", "true", "--provider", "local", sec
 # The friend's own provider key, in the friend's own namespace (their
 # workspace's subject and signing key), granted to the provider runner 9.
 FRIEND_WS = path("friend-workspace")
-ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG,
-                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS],
+# `workspace init` and the key grants reach the Host through --socket, so the Hermes half's Serve
+# starts here and lives until that half stops it.
+serve = Serve()
+ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG, "--socket", SOCKET,
+                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS,
+                     "--no-prerotation"],  # a fixture key with no next key (jpay-v2.sh idiom)
                     capture_output=True)
 if ws.returncode != 0:
     fail("friend workspace: " + (ws.stdout + ws.stderr).decode("utf-8", "replace")[-300:])
@@ -538,9 +564,8 @@ mini_key("friend-grant", "--action", "grant", "--dir", FRIEND_WS, "--provider", 
          "--runner", str(PROVIDER), "--per-call", "64", "--per-day", "10", "--until", "1000000")
 pinned = json.load(open(CONFIG))
 added = []
-for key in ("continuityProviderResourceId", "providerMetering"):
-    if key not in pinned:
-        pinned[key] = operator[key]; added.append(key)
+if "providerServices" not in pinned:
+    pinned["providerServices"] = operator["providerServices"]; added.append("providerServices")
 CONFIG_B = CONFIG
 if added:
     # as docs/evidence/2026-09-26-provider-gateway-continuity/configure-case.sh
@@ -548,7 +573,8 @@ if added:
     json.dump(pinned, open(CONFIG_B, "w"), indent=1)
 prof = json.loads(subprocess.run([MINI, "profile", "--host", HOST, "--config", CONFIG_B],
                                  capture_output=True).stdout or b"{}")
-pin = prof.get("providerMetering") or {}
+services = prof.get("providerMeterings") or []
+pin = services[0] if len(services) == 1 else {}
 routes = pin.get("routes") or {}
 row(f"the Host profile pins the per-route provider tariff in credit for purse {PURSE}",
     f"providerResourceId {PURSE}, model {MODEL}, user fee {USER_FEE}; pool fee {POOL_FEE} + {RATE_IN}/{RATE_OUT} per million tokens; homelab fee {HOMELAB_FEE}",
@@ -558,6 +584,50 @@ row(f"the Host profile pins the per-route provider tariff in credit for purse {P
     and routes.get("pool") == {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
                                "outputMicroPerMillion": str(RATE_OUT)}
     and (routes.get("homelab") or {}).get("perOp") == str(HOMELAB_FEE))
+# PLANT (consent honours the pinned service, Kernel.ProviderRouteConsent): the
+# purse's birth intent authored under another tariff (user fee + 1) carries a
+# route law the pin does not; the local consent provider, reading the pinned
+# config, refuses it by name at intent consent (frame 230) before any key
+# signs, while the same intent authored under the pinned config is consented.
+CONSENT = os.path.join(os.path.dirname(HOST), "minidregg-client-consent")
+rogue = json.load(open(CONFIG_B))
+rogue["providerServices"][0]["tariff"]["routes"]["user"]["perOp"] = str(USER_FEE + 1)
+json.dump(rogue, open(path("rogue-tariff-config.json"), "w"), indent=1)
+def consent_230(author_config, label, source="birth-intent.json"):
+    out = path(f"{label}-birth-intent.bin")
+    subprocess.run([HOST, author_config, "author", "birth-intent", path(source), out],
+                   check=True, capture_output=True)
+    intent = open(out, "rb").read()
+    signer = keys[OPERATOR].verify_key.encode()
+    payload = struct.pack("<I", len(intent)) + intent + struct.pack("<I", len(signer)) + signer
+    frame = struct.pack("<I", len(payload) + 1) + bytes([230]) + payload
+    done = subprocess.run([CONSENT, CONFIG_B, "stdio"], input=frame, capture_output=True, timeout=600)
+    reply = done.stdout
+    if len(reply) < 5: return (None, (done.stderr or b"").decode("utf-8", "replace")[-200:])
+    return (reply[4], reply[5:].decode("utf-8", "replace") if reply[4] == 255 else f"{len(reply) - 5} intent bytes")
+ok_op, ok_body = consent_230(CONFIG_B, "pinned")
+bad_op, bad_body = consent_230(path("rogue-tariff-config.json"), "rogue")
+row(f"consent refuses a purse law off the pinned tariff (plant) and consents to the pinned one",
+    f"pinned: op 230; rogue: op 255 'provider service {PURSE}: ... does not carry the pinned per-route schedule'",
+    f"pinned: op {ok_op} ({ok_body}); rogue: op {bad_op} ({bad_body})",
+    ok_op == 230 and bad_op == 255
+    and f"provider service {PURSE}: the law this draft installs does not carry the pinned per-route schedule" in bad_body)
+# PLANT (the thin birth arm's discriminator, NativeThinBirth.thinBirthIntent): an ordinary
+# (declared, not grain-backed) birth on the thin intent frame is refused by name, since it is
+# consented only with the member's source (frames 234/235); the grain purse birth above is not
+# a thin birth and must never reach that refusal (a red here is the purse consent routed to the
+# thin birth arm again).
+THIN_BIRTH_REFUSAL = "a thin birth is consented with the member's source (thin birth frames 234/235)"
+ordinary = json.loads(json.dumps(birth))
+ordinary["nonce"] = ordinary["birth"]["nonce"] = "22001"
+ordinary["birth"]["resources"] = [r for r in ordinary["birth"]["resources"] if r["storage"] == "declared"]
+json.dump(ordinary, open(path("ordinary-birth-intent.json"), "w"))
+plain_op, plain_body = consent_230(CONFIG_B, "ordinary", "ordinary-birth-intent.json")
+row("discriminator (plant): an ordinary birth on frame 230 is refused for its source; the grain purse birth is not",
+    f"ordinary: op 255 '{THIN_BIRTH_REFUSAL}'; purse: op 230, no thin birth refusal",
+    f"ordinary: op {plain_op} ({plain_body}); purse: op {ok_op} ({ok_body})",
+    plain_op == 255 and THIN_BIRTH_REFUSAL in plain_body
+    and ok_op == 230 and THIN_BIRTH_REFUSAL not in ok_body)
 runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOCKET,
            "controlSocket": os.path.join(STATE, "control.sock"), "custodyKey": path(f"keys/{OPERATOR}.key"),
            "stateDir": STATE, "cwd": DIR, "task": str(PARENT), "subject": "7", "capability": "71",
@@ -594,7 +664,6 @@ if CONFIG_B != CONFIG:
 upstream = subprocess.Popen([TEST_PROVIDER, f"127.0.0.1:{UPORT}", path("upstream.log"), "--metered-usage"],
                             stdout=open(path("upstream.stdout"), "wb"), stderr=open(path("upstream.stderr"), "wb"))
 LIVE.append(upstream)
-serve = Serve()
 # grain-runtime's systemdScope requires the controller to be the active
 # MainPID of exactly mini-grain-controller@<task>.service.
 UNIT = f"mini-grain-controller@{PARENT}"
@@ -608,6 +677,13 @@ def unit_prop(name):
 controller = subprocess.run(["systemd-run", "--user", "--collect", f"--unit={UNIT}",
                              "--property=KillMode=control-group", "--property=Restart=on-failure",
                              "--property=RestartSec=2", "--property=RuntimeMaxSec=3600s",
+                             f"--setenv=MINI_CONSENT_ANCHOR_DIR={os.environ['MINI_CONSENT_ANCHOR_DIR']}",
+                             # Explicit user fixture selection (grain-runtime systemd_manager::fixture): no
+                             # root registration exists for a journey task, and without it the controller
+                             # refuses "managed proof requires root registration or explicit user fixture
+                             # selection" and never launches the worker (the Hermes-half red on hbox).
+                             "--setenv=MINI_GRAIN_CONTROLLER_MANAGER=user", "--setenv=MINI_GRAIN_WORKER_MANAGER=user",
+                             f"--setenv=MINI_GRAIN_CONTROLLER_UNIT={UNIT}.service",
                              f"--property=StandardOutput=append:{path('controller.stdout')}",
                              f"--property=StandardError=append:{path('controller.stderr')}",
                              GRAIN, "serve", path("runtime-config.json")], capture_output=True, text=True)
@@ -725,10 +801,18 @@ try:
         time.sleep(3)
         return owner if owner.poll() is None else None
     owner = wait_for("owner connection to the restarted controller", owner_connected, 600, 2)
+    # Recovery fences the uncertain send rather than settling it: the journaled
+    # record is sendStarted with no outcome (decision class crash-after-send) and
+    # the "provider reservation fenced" note; the "uncertain:crash-after-send"
+    # outcome string belongs to the LATER audited class-settle
+    # (provider_meter_class_inner), which this journey never drives.
     def recovered():
         j = journal()
-        notes = " ".join(str(n) for n in (j.get("unresolvedExternal") or []))
-        return j.get("connection") == "fenced" and "uncertain" in notes and j.get("providerAttempt") is not None
+        attempt = j.get("providerAttempt")
+        decision = ((attempt or {}).get("decision") or {}).get("class") or {}
+        return (j.get("connection") == "fenced" and attempt is not None
+                and attempt.get("sendStarted") is True and attempt.get("outcome") is None
+                and decision.get("kind") == "crash-after-send")
     wait_for("owner recovery", recovered, 900)
     # the connector prints the controller's replies on stdout, its own errors on stderr;
     # the attach-time recovery runs signed queries first, so its reply can trail the
@@ -747,7 +831,8 @@ try:
     row("recovery records the provider attempt as uncertain and keeps the hold",
         "sendStarted true, outcome null, hold reserveConfirmed, connection fenced",
         f"sendStarted={attempt.get('sendStarted')} outcome={attempt.get('outcome')} hold={hold.get('reserve')}/{hold.get('reserveConfirmed')} "
-        f"connection={j.get('connection')} note={[n for n in j.get('unresolvedExternal') or [] if 'uncertain' in str(n)][:1]}",
+        f"connection={j.get('connection')} decision={(((attempt.get('decision') or {}).get('class') or {}).get('kind'))}"
+        f" note={[n for n in j.get('unresolvedExternal') or [] if 'fenced' in str(n)][:1]}",
         attempt.get("sendStarted") is True and attempt.get("outcome") is None and hold.get("reserveConfirmed") is True)
     time.sleep(30)
     held, _ = mini_query("purse-held", PROVIDER, PURSE, 101)

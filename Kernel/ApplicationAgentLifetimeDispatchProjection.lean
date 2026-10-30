@@ -4,8 +4,27 @@ point-in-time projection, not a delivery permit. The original session-origin
 generation remains in the base dispatch; the separately projected parent is
 the current execution fence and may have a later generation.
 -/
-import Kernel.ApplicationAgentLifetimeDispatchCore
-import Kernel.ApplicationDispatchAgentProjection
+module
+
+public import Kernel.ApplicationAgentLifetimeDispatchCore
+public import Kernel.ApplicationDispatchAgentProjection
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationAgentLifetimeDispatchProjection
 

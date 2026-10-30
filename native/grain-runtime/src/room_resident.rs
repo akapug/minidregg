@@ -131,12 +131,20 @@ fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal:
     let prompt_sha256 = sha256_bytes(instruction.as_bytes())?;
     if instruction.len()+256>16_384 {return Err("resident program/brief exceeds controller prompt bound".into());}
     let resident_prompt_id = resident_preflight::prepare(config,config_path,&prompt_sha256)?;
+    resident_compute::intend(config, state.parent().ok_or("resident state parent absent")?, &resident_prompt_id, &instruction)?;
     let command = format!("terminal hermes-resident {attachment} 2 {resident_prompt_id} {prompt_sha256} {instruction}");
     if command.len() > 16_384 { return Err("resident program/brief exceeds controller prompt bound".into()); }
     let input = assignment_fingerprint(prepared)?;
     if prepared.get("selectedRequest").is_some() {
         resident_requests::started(state.parent().ok_or("resident state parent absent")?, &resident_prompt_id, &input)?;
     }
+    // Only a changed program revision opens maintenance; an unchanged one
+    // would otherwise retain a pending maintenance that bars delivery.
+    let queue=state.parent().ok_or("resident state parent absent")?;
+    let maintenance_revision=match maintenance_revision {
+        Some(r) if resident_requests::maintenance_needed(queue,r)? => Some(r),
+        _ => None,
+    };
     if let Some(revision)=maintenance_revision {
         resident_requests::maintenance_started(state.parent().ok_or("resident state parent absent")?,&resident_prompt_id,revision)?;
     }
@@ -174,6 +182,7 @@ fn prompt(config: &crate::Config, config_path: &Path, prepared: &Value, journal:
                     return Ok(true);
                 }
                 atomic_json(state, journal)?;
+                if close_refused_pending(config, journal, state)? { return Ok(true); }
                 return Err(format!("resident prompt ended {}; retained for review without replay", frame["outcome"]));
             }
             _ => {}
@@ -192,11 +201,11 @@ fn return_budget(room: &resource_tools::RoomToolsConfig, assignment: &Value,
     let record = state.parent().ok_or("resident state has no parent")?.join("return-operation.json");
     journal.return_pending = true;
     atomic_json(state, journal)?;
-    let output = Command::new(&room.mini).args(["credit", "--action", "return", "--dir"])
+    let output = crate::deadline::output(Command::new(&room.mini).args(["credit", "--action", "return", "--dir"])
         .arg(&room.workspace).arg("--account").arg(account).arg("--to").arg(to)
         .arg("--room").arg(&room.room).arg("--operation-record").arg(record)
-        .arg("--socket").arg(&room.socket).stdin(Stdio::null()).output()
-        .map_err(|e| format!("resident budget return: {e}"))?;
+        .arg("--socket").arg(&room.socket), crate::deadline::NATIVE_CALL)
+        .map_err(|e| crate::deadline::describe("resident budget return", e))?;
     let result = resource_tools::last_json(&String::from_utf8_lossy(&output.stdout));
     let confirmed = result.as_ref().is_some_and(|v|
         (v["type"] == "minidregg-hermes-return-v1" && v["returned"].is_string())
@@ -240,6 +249,37 @@ fn drain_preadmission_refusal(config:&Config,config_path:&Path,journal:&mut Resi
     Ok(true)
 }
 
+/// A prompt whose retained frame is not `completed` is decided only by the
+/// controller's typed outcome record (gr §4.3), never by the frame's label.
+/// `refused` closes it here: there is no completion receipt to wait for, the
+/// pending turn is cleared and counted, and `resident_requests::reconcile`
+/// then closes its request `failed-after-admission` from the same record.
+/// `undecided` (or no record yet) keeps it pending with the retry the record
+/// names; a failed frame over an `admitted` record is a conflict.
+fn close_refused_pending(config:&Config,journal:&mut ResidentState,state:&Path)->Result<bool> {
+    let (Some(pending),Some(frame))=(journal.pending.as_ref(),journal.last_completion.as_ref()) else{return Ok(false)};
+    if frame["type"]!="prompt-complete" || frame["outcome"]=="completed" {return Ok(false)}
+    if frame["residentPendingSha256"]!=json!(sha256_bytes(&serde_json::to_vec(pending).map_err(|e|e.to_string())?)?) {
+        return Err("retained failed completion does not bind the pending resident prompt".into());
+    }
+    let id=pending["residentPromptId"].as_str().ok_or("pending resident prompt has no unique identity")?;
+    let sha=pending["promptSha256"].as_str().ok_or("pending resident prompt has no digest")?;
+    validate_resident_origin(frame,id,sha)?;
+    let op=frame["residentOrigin"]["promptOperationId"].as_u64().ok_or("failed completion has no prompt operation")?;
+    let record=prompt_outcome::read_bound(&config.state_dir,op,id,sha)?;
+    match record.outcome {
+        prompt_outcome::Outcome::Refused{..}=>{}
+        prompt_outcome::Outcome::Undecided{retry,..}=>return Err(format!(
+            "resident prompt {op} is undecided; resolve it with admin {:?} (operation {:?}); it is never replayed",retry.admin,retry.operation)),
+        prompt_outcome::Outcome::Admitted{..}=>return Err(format!(
+            "resident prompt {op} ended {} over an admitted outcome record; retained for review",frame["outcome"])),
+    }
+    journal.completed=journal.completed.checked_add(1).ok_or("resident completed counter exhausted")?;
+    journal.pending=None;
+    atomic_json(state,journal)?;
+    Ok(true)
+}
+
 /// Publish owed request-status notices through the room-turn payment and the
 /// exact write record. Never an error for the driver: a notice that cannot be
 /// afforded is skipped, an undecided one is retried on a later pass, and no
@@ -268,6 +308,45 @@ fn publish_notices(room: &resource_tools::RoomToolsConfig, state: &Path) {
     }
 }
 
+/// Establish the resident's own typed custody before a first prompt. Existing
+/// custody is inspected under its lock and is never reset to a fresh state.
+pub(crate) fn initialize(controller: &Path, state: &Path) -> Result<()> {
+    let config: Config = serde_json::from_slice(&bounded_regular_file(controller, 262_144)?)
+        .map_err(|e| format!("resident controller config: {e}"))?;
+    validate(&config)?;
+    if config.tool_task.as_ref().and_then(|t| t.room.as_ref()).is_none() {
+        return Err("resident needs controller toolTask.room".into());
+    }
+    if !state.is_absolute() || state.parent() != Some(config.state_dir.as_path()) {
+        return Err("resident state must be an absolute direct child of controller stateDir".into());
+    }
+    let parent = fs::symlink_metadata(&config.state_dir).map_err(|e| e.to_string())?;
+    if !parent.is_dir() || parent.uid() != unsafe { libc::geteuid() } || parent.mode() & 0o077 != 0 {
+        return Err("resident parent must be a private owned real directory".into());
+    }
+    use std::os::unix::fs::DirBuilderExt;
+    let fresh = match fs::DirBuilder::new().mode(0o700).create(state) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
+        Err(e) => return Err(e.to_string()),
+    };
+    if fresh {
+        let lock = OpenOptions::new().create_new(true).read(true).write(true).mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW).open(state.join("resident.lock")).map_err(|e|e.to_string())?;
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err("another resident driver owns this room".into());
+        }
+        atomic_json(&state.join("resident.json"), &serde_json::to_value(ResidentState::default()).map_err(|e|e.to_string())?)?;
+        File::open(state).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+        File::open(&config.state_dir).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+    }
+    let guard = quiescence::ResidentGuard::acquire(&config, Some(state))?;
+    let _: ResidentState = serde_json::from_slice(guard.bytes()?).map_err(|e|format!("resident journal: {e}"))?;
+    guard.assert_unchanged()?;
+    println!("{}",json!({"type":"mini-hermes-room-resident-initialized-v1","state":state,"created":fresh}));
+    Ok(())
+}
+
 pub(crate) fn main(path: &Path) -> Result<()> {
     let bytes = bounded_regular_file(path, 65_536)?;
     let options: ResidentConfig = serde_json::from_slice(&bytes).map_err(|e| format!("resident config: {e}"))?;
@@ -290,7 +369,6 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     let config: crate::Config = serde_json::from_slice(&bounded_regular_file(&options.controller, 262_144)?)
         .map_err(|e| format!("resident controller config after lock: {e}"))?;
     if options.state.parent() != Some(config.state_dir.as_path()) { return Err("resident state/config changed during lock acquisition".into()); }
-    config_migration::ensure_resident_current(&config)?;
     validate(&config)?;
     let room = config.tool_task.as_ref().and_then(|t| t.room.clone()).ok_or("resident needs controller toolTask.room")?;
     let state = options.state.join("resident.json");
@@ -300,12 +378,15 @@ pub(crate) fn main(path: &Path) -> Result<()> {
     drain_preadmission_refusal(&config,&options.controller,&mut journal,&state)?;
     resident_completion::drain(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?; }
+    close_refused_pending(&config, &mut journal, &state)?;
     if journal.pending.is_some() { return Err("resident has an uncertain prior prompt; its durable controller state must be reviewed, never automatically replayed".into()); }
+    resident_requests::receive_maintenance(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
     resident_delivery::drain_completed(&config, &options.state, &lock)?;
     if state.exists() { journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?; }
     resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+    resident_compute::settle(&config, &room, &options.state, journal.last_completion.as_ref())?;
     publish_notices(&room, &options.state);
-    while (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) || journal.return_pending {
+    while options.max_prompts.is_none_or(|limit| journal.completed < limit) || journal.return_pending {
         let prepared = hermes_room::prepare_resident(&room, &options.inbox, &options.state, &config.task, limits.page_size)?;
         if prepared["dismissed"] == true {
             resident_requests::dismiss(&options.state)?;
@@ -339,18 +420,25 @@ pub(crate) fn main(path: &Path) -> Result<()> {
             }
             if !prompt(&config, &options.controller, &prepared, &mut journal, &state, Some(&maintenance_input))? {continue;}
             resident_completion::drain(&config, &options.state, &lock)?;
+            journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after completion: {e}"))?;
+            resident_requests::receive_maintenance(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
             resident_delivery::drain_completed(&config, &options.state, &lock)?;
             journal = serde_json::from_slice(&bounded_regular_file(&state, 65_536)?).map_err(|e| format!("resident journal after delivery: {e}"))?;
             if journal.pending.is_some() { return Err("source completion receipt did not receive this pending turn".into()); }
-            println!("{}", json!({"type":"resident-completed","completed":resident_outcomes::qualified_count(&options.state,journal.completed)?,"recordedCompletions":journal.completed}));
+            println!("{}", json!({"type":"resident-completed","completed":journal.completed}));
             resident_requests::reconcile(&options.state,&config.state_dir,journal.last_completion.as_ref())?;
+            resident_compute::settle(&config, &room, &options.state, journal.last_completion.as_ref())?;
             publish_notices(&room, &options.state);
             // Prompt count and final delivery are separate durable states.
         }
-        if (options.max_prompts.is_none() || resident_outcomes::qualified_count(&options.state,journal.completed)? < options.max_prompts.unwrap()) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
+        if options.max_prompts.is_none_or(|limit| journal.completed < limit) { thread::sleep(Duration::from_secs(options.interval_seconds)); }
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "room_resident_injection_tests.rs"]
+mod injection_tests;
 
 #[cfg(test)]
 mod tests {
@@ -377,10 +465,89 @@ mod tests {
     }
 
     #[test]
+    fn native_initialization_creates_typed_state_and_preserves_existing_work() {
+        let (root, rt) = crate::tests::restart_resolution_fixture("resident-init");
+        let mut config = rt.config.clone();
+        config.host_socket=Some(root.join("host.sock"));
+        let workspace=config.state_dir.join("workspace"); let home=config.state_dir.join("room-home");
+        for path in [&workspace,&workspace.join("refs"),&workspace.join("attempts"),&workspace.join("sources"),&workspace.join("proposals"),&home] {
+            fs::create_dir(path).unwrap();fs::set_permissions(path,fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let mut value = serde_json::to_value(&config).unwrap();
+        value["toolTask"] = json!({"task":"6001","subject":"9","capability":"12","queryCapability":"13",
+            "custodyKey":root.join("tool.key"),"parentCapability":"14","parentObserveCapability":"15",
+            "reserve":"5","charge":"0","allowedPublications":[],"resourceWorkspace":workspace,
+            "room":{"mini":config.mini,"host":config.host,"hostConfig":config.host_config,"socket":config.host_socket,
+                "workspace":workspace,"home":home,"room":"lab"}});
+        config = serde_json::from_value(value).unwrap();
+        let tool=config.tool_task.as_ref().unwrap();
+        atomic_json(&workspace.join("workspace.json"),&json!({"type":"minidregg-participant-workspace-v1",
+            "host":config.host,"config":config.host_config,"key":tool.custody_key,
+            "subject":tool.subject,"socket":config.host_socket,"birthContext":null,"namespaceRoot":null})).unwrap();
+        let path = root.join("resident-controller.json"); atomic_json(&path,&config).unwrap();
+        let state = config.state_dir.join("resident");
+        initialize(&path,&state).unwrap();
+        let mut retained = ResidentState::default(); retained.pending=Some(json!({"request":"uncertain"}));
+        atomic_json(&state.join("resident.json"),&retained).unwrap();
+        let before=fs::read(state.join("resident.json")).unwrap();
+        initialize(&path,&state).unwrap();
+        assert_eq!(fs::read(state.join("resident.json")).unwrap(),before);
+        let guard=quiescence::ResidentGuard::acquire(&config,Some(&state)).unwrap();
+        assert!(initialize(&path,&state).is_err()); drop(guard);
+        assert!(initialize(&path,&root.join("outside")).is_err());
+        let alias=config.state_dir.join("alias"); std::os::unix::fs::symlink(&state,&alias).unwrap();
+        assert!(initialize(&path,&alias).is_err());
+        drop(rt);fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn pending_resident_prompt_is_not_replayed_on_new_attachment() {
         let (root, rt) = crate::tests::restart_resolution_fixture("resident-pending");
         let mut state = ResidentState { pending:Some(json!({"requestId":2})), ..ResidentState::default() };
         assert!(prompt(&rt.config, &rt.config_path, &json!({}), &mut state, &root.join("journal.json"),None).unwrap_err().contains("uncertain"));
+        fs::remove_dir_all(root).unwrap();
+    }
+    fn failed_pending(outcome: Option<prompt_outcome::Outcome>, tag: &str) -> (PathBuf, Result<bool>, ResidentState) {
+        let (root, rt) = crate::tests::restart_resolution_fixture(tag);
+        let (id, sha) = ("a".repeat(64), "b".repeat(64));
+        let pending = json!({"selectedRequest":null,"residentPromptId":id,"inputSha256":"c".repeat(64),
+            "promptSha256":sha,"attachmentId":7,"requestId":2});
+        let frame = json!({"v":1,"type":"prompt-complete","attachmentId":7,"requestId":2,"outcome":"failed",
+            "residentOrigin":{"residentPromptId":id,"promptSha256":sha,"promptOperationId":42,"sessionId":"s"},
+            "residentPendingSha256":sha256_bytes(&serde_json::to_vec(&pending).unwrap()).unwrap()});
+        if let Some(outcome) = outcome {
+            prompt_outcome::write(&rt.config.state_dir, &prompt_outcome::Record { kind: prompt_outcome::KIND.into(),
+                prompt_operation_id: 42, resident_prompt_id: Some(id.clone()), prompt_sha256: Some(sha.clone()),
+                session_id: Some("s".into()), outcome }).unwrap();
+        }
+        let mut journal = ResidentState { completed: 3, pending: Some(pending), last_completion: Some(frame), ..ResidentState::default() };
+        let result = close_refused_pending(&rt.config, &mut journal, &root.join("resident.json"));
+        (root, result, journal)
+    }
+    #[test]
+    fn a_failed_prompt_refused_by_its_typed_record_is_closed_and_counted() {
+        let refused = prompt_outcome::Outcome::Refused { stage: prompt_outcome::RefusalStage::TurnFailure,
+            reason: "provider-refused:member-day-ceiling".into() };
+        let (root, result, journal) = failed_pending(Some(refused), "resident-failed-refused");
+        assert!(result.unwrap());
+        assert!(journal.pending.is_none(), "a decided refusal leaves nothing pending for the next pass");
+        assert_eq!(journal.completed, 4);
+        assert_eq!(journal.last_completion.as_ref().unwrap()["outcome"], "failed", "the frame stays for reconcile");
+        let durable: ResidentState = serde_json::from_slice(&fs::read(root.join("resident.json")).unwrap()).unwrap();
+        assert!(durable.pending.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_failed_prompt_without_a_refused_record_stays_pending() {
+        let (root, result, journal) = failed_pending(None, "resident-failed-unrecorded");
+        assert!(result.unwrap_err().contains("undecided until the controller writes one"));
+        assert!(journal.pending.is_some()); assert_eq!(journal.completed, 3);
+        fs::remove_dir_all(root).unwrap();
+        let undecided = prompt_outcome::Outcome::Undecided { retry: prompt_outcome::Retry {
+            admin: vec!["recover".into()], operation: Some(9) }, detail: "settle undecided".into() };
+        let (root, result, journal) = failed_pending(Some(undecided), "resident-failed-undecided");
+        assert!(result.unwrap_err().contains("is undecided"));
+        assert!(journal.pending.is_some()); assert_eq!(journal.completed, 3);
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -398,9 +565,9 @@ mod tests {
         let preparing_config=rt.config.clone();let preparing_path=rt.config_path.clone();
         let preflight=thread::spawn(move||{
             let (mut socket,_)=admin.accept().unwrap();
-            let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();reader.read_line(&mut line).unwrap();
+            let line=control::admin_read_frame(&mut socket).unwrap();
             let sha=line.trim().strip_prefix("resident prepare ").unwrap();
-            let ready=resident_preflight::fixture_preparation(&preparing_config,&preparing_path,sha);writeln!(socket,"{ready}").unwrap();
+            let ready=resident_preflight::fixture_preparation(&preparing_config,&preparing_path,sha);control::admin_write_frame(&mut socket,&ready.to_string()).unwrap();
         });
         let listener = std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let journal_path = root.join("resident.json");
@@ -467,8 +634,8 @@ mod tests {
         let proof=rt.resident_admission(&id,&sha).unwrap();
         let thread=thread::spawn(move||{
             for value in [proof_unrecorded,proof] {
-                let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();
-                reader.read_line(&mut line).unwrap();assert_eq!(line.trim(),request_line);writeln!(socket,"{value}").unwrap();
+                let (mut socket,_)=admin.accept().unwrap();
+                let line=control::admin_read_frame(&mut socket).unwrap();assert_eq!(line.trim(),request_line);control::admin_write_frame(&mut socket,&value.to_string()).unwrap();
             }
         });
         assert!(!drain_preadmission_refusal(&rt.config,&rt.config_path,&mut resident,&state).unwrap());
@@ -491,9 +658,9 @@ mod tests {
         let admin=std::os::unix::net::UnixListener::bind(rt.config.state_dir.join("admin.sock")).unwrap();
         let control=std::os::unix::net::UnixListener::bind(&rt.config.control_socket).unwrap();
         let preflight=thread::spawn(move||{
-            let (mut socket,_)=admin.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());
-            let mut line=String::new();reader.read_line(&mut line).unwrap();assert!(resident_origin::valid_digest(line.trim().strip_prefix("resident prepare ").unwrap()));
-            writeln!(socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
+            let (mut socket,_)=admin.accept().unwrap();
+            let line=control::admin_read_frame(&mut socket).unwrap();assert!(resident_origin::valid_digest(line.trim().strip_prefix("resident prepare ").unwrap()));
+            control::admin_write_frame(&mut socket,"error: cross-manager worker requires source-owned controller lifetime protocol").unwrap();
         });
         let server=thread::spawn(move||{
             let (mut socket,_)=control.accept().unwrap();let mut reader=BufReader::new(socket.try_clone().unwrap());let mut line=String::new();

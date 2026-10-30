@@ -121,15 +121,19 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "federation": "9", "tariffBase": "3", "tariffPerBirth": "2", "tariffPerGrant": "1",
            "tariffPerInitialPayloadByte": "0", "collector": "99", "asset": "0",
            "expectedSemantics": profile["semantics"], "issuerEpoch": "2", "genesisHeight": "10",
-           "clockTickers": [], "tailBound":"1000000",
+           "clockTickers": [], "tailBound":"1000000", "issuanceCap":"1000000000000000",
            "factoryPredicate": {"type": "all", "predicates": []},
            "enrollments": [enrollment(s) for s in SUBJECTS],
            "factoryControllerSubject": str(EMBER), "factoryControllerCapability": str(FACTORY_CONTROL),
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
+           "payControlCapability": str(PAY_CONTROL),
+           "clockControlCapability": "4093",
+           "platform": {"ownerBudget": "100000", "lifetime": "10000",
+                        "grainBirthTariff": None, "completionCustodianKey": None},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(PAY_CONTROL), "enrolCapability": str(ENROL_CAP)}}
+                           "enrolCapability": str(ENROL_CAP)}}
 with open(path("genesis.json"), "w") as out: json.dump(genesis, out)
 subprocess.run(["sh", os.environ["GENESIS_PARAMS_SH"], "fill-source", path("genesis.json")], check=True)
 mini("bootstrap", "--host", HOST, "--config", path("operator.json"), "--source", path("genesis.json"),
@@ -201,7 +205,7 @@ row("bootstrap: 8-row book (row 0 = the enrollment address), the float takes ind
     f"{b1.stdout.strip()} | {a0.stdout.splitlines()[0] if a0.stdout else a0.stderr[-120:]} | {b2.stdout.strip() or b2.stderr[-160:]}")
 
 def enrolment_view():
-    r = mini("enrollment-view", "--socket", SOCKET)
+    r = mini("enrollment-view", "--socket", SOCKET, "--host", HOST)
     if r.returncode != 0: fail(f"enrollment-view: {r.stderr[-300:]}")
     return json.loads(r.stdout)
 def ledger_well():
@@ -294,7 +298,7 @@ def tick(tag):
         dirs.append(target)
     env=dict(os.environ,MINI=MINI,PAY_WATCHER=WATCHER,PAY_STATE=STATE,
              PAY_OBSERVER_WS=OBS,PAY_OBSERVER_CAPABILITY=str(OBSERVER_CAP),
-             PAY_ENROL_INDEX="0",PAY_JOURNAL_FLOOR=str(FLOOR),
+             PAY_WATCH_ENROL="yes",
              PAY_ENROL_CAPABILITY=str(ENROL_CAP),PAY_OPERATOR_SOCKET=OPSOCK,
              PAY_RPC_FIXTURES=" ".join(dirs),PAY_ENROL_ROUNDS="0")
     env.pop("PAY_RPC_ENDPOINTS",None)

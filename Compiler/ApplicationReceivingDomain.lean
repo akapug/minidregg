@@ -3,7 +3,13 @@ CanonicalRuntimeProfile. Keep this leaf free of receivers/NativeHost imports.
 A frame preserves representation; receivingContract also commits the authority,
 freshness, replay, renewal and physical-custody distinctions behind those bytes.
 -/
-import Init
+module
+
+public import Init
+public import Effects.Revival.HostedDav
+public import Effects.Revival.HostedConversation
+
+@[expose] public section
 
 namespace Minidregg.Compiler.ApplicationReceivingDomain
 
@@ -71,6 +77,12 @@ def receivingContract : List UInt8 :=
    "owner-signed-policy-install-and-current-revocable-object-delegation-required;" ++
    "lifecycle-manager-no-program-admin-or-share-issuer-transfer;" ++
    "managed-app-package-exact-same-owner-manager-source-linkage;" ++
-   "dispatch-owner-issuer-preserved-manager-derived-from-authenticated-app-law").toUTF8.toList
+   "dispatch-owner-issuer-preserved-manager-derived-from-authenticated-app-law;" ++
+   "dav-api-destination-exact-relative-signed-prefix-browser-same-origin;" ++
+   "hosted-route-v4-api-exact-signed-prefix-or-web-protected-same-member-origin;" ++
+   "hosted-route-kind-matches-current-source-enrollment-before-physical-delivery;" ++
+   "dav-method-specific-parameters-and-exact-values:").toUTF8.toList ++
+   Minidregg.Effects.Revival.HostedDav.contract ++
+   Minidregg.Effects.Revival.HostedConversation.contract
 
 end Minidregg.Compiler.ApplicationReceivingDomain

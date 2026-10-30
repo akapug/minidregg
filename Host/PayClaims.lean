@@ -5,9 +5,13 @@ its duplicate-key parser and 4096-byte raw-body limit before passing Json here.
 Byte values and 32-byte little-endian digests are hexadecimal. Natural scalars
 are canonical decimal strings. No signing, transfer, or pricing is done in JSON.
 -/
-import Kernel.NativeHostPayClaims
-import Kernel.PayStarterAllowance
-import Lean.Data.Json
+module
+
+public import Kernel.NativeHostPayClaims
+public import Kernel.PayStarterAllowance
+public import Lean.Data.Json
+
+@[expose] public section
 
 namespace Minidregg.Host.PayClaims
 
@@ -286,7 +290,7 @@ def quoteLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened con
   let normalized ← if obj.get? "kind" == some (.str "purchase") ∧
       obj.get? "starter" == some .null then do
     let recommended ← need "byte-priced deployment requires explicit starter"
-      (PayStarterAllowance.recommendation config.tariff (obj.get? "mode" == some (.str "renew")))
+      (PayStarterAllowance.recommendation opened.pins.tariff (obj.get? "mode" == some (.str "renew")))
     pure (Json.mkObj (obj.foldl (init := []) (fun fields key value =>
       (key, if key == "starter" then decimal recommended else value) :: fields)))
     else pure json

@@ -6,9 +6,28 @@ codec `activity`).
 
 Nothing here decides anything: commands are judged by
 `Kernel.ObjectiveActivityReceiver`, artifacts by the kernel's `publish`. -/
-import Kernel.NativeHost
-import Compiler.ObjectiveBendDataWire
-import Host.CapacityJson
+module
+
+public import Kernel.NativeHost
+public import Compiler.ObjectiveBendDataWire
+public import Host.CapacityJson
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Host.ObjectiveActivityJson
 open Lean (Json toJson)
@@ -392,7 +411,14 @@ def awaitJson (domain : Digest) (await : Await) : Json :=
     ("source", match await.source with
       | .reply slot decider => .mkObj [("kind", "reply"), ("slot", decimal slot.value),
           ("slotCell", decimal (AnswerSlot.cell domain slot).value), ("decider", decimal decider.value)]
-      | .height due => .mkObj [("kind", "height"), ("due", decimal due)]),
+      | .height due => .mkObj [("kind", "height"), ("due", decimal due)]
+      | .performed verdict => .mkObj [("kind", "performed"), ("verdict", match verdict with
+          | .settled => "settled"
+          | .refused _ => "refused"), ("reason", match verdict with
+          | .settled => Json.null
+          | .refused .unfunded => "unfunded"
+          | .refused .reserved => "reserved"
+          | .refused .closed => "closed")]),
     ("deadline", decimal await.deadline), ("yieldedAt", decimal await.yieldedAt)]
 
 open Minidregg.Kernel.ObjectiveActivity in

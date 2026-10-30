@@ -11,7 +11,7 @@ The upper join selects a historical share issuance through `NativeHostReplay.Ver
 | `Kernel/ApplicationDispatchPending.lean` | `528263f2de24f4cb670ade1a9a6bb604020f28e43a1324ebc6a3b34509e0bc58` |
 | `Kernel/ApplicationDispatchHistoricalCore.lean` | `93e19e0c0ae4c6ba98264477b4633a8ac22bbc8caf6344f4b1672418a9b77ff8` |
 | `Kernel/ApplicationShareIssueHistorical.lean` (fnMiniReview selector) | `c1ae4be48b528f37a654c49b815386c1892508383902fb0505d6efdd35a05576` |
-| `Kernel/ApplicationDispatchUpper.lean` | `0aba9a44a9049ffd6b3433f3c447ddfcde5b475dfd06f055413a29968b47ccb7` |
+| `Kernel.ApplicationDispatchUpper [deleted e4902421]` | `0aba9a44a9049ffd6b3433f3c447ddfcde5b475dfd06f055413a29968b47ccb7` |
 
 Serial direct `lake env lean` builds of those six modules passed in that order in independent private Persvati copy `/home/ember/build/minidregg-dispatch-upper-20260927-spkcompat`. Each command ran under `systemd-run --user --scope --collect -p MemoryMax=64G -p CPUQuota=200%` with `LEAN_NUM_THREADS=2`, emitted an OLean, exited 0, and had no Lean diagnostics. Captured per-module logs are `compile-<module>.log`; their SHA-256 values in the same order are `6c1345c84432baf82d56a5a4e21312f14897a7b31ea97633b02e6e6f501a4a03`, `b58050a3196d57de21061230196e2591f49100712a7b14c7c589f58a928e1775`, `fb06db518a6b7bdbf56e5efec53fcb132bb25af48d1a8e29cc5938d0467a04ad`, `fac3ed99727144a5c4a28c8f0162611ad95986d06a1e354aafbd133fcc59addf`, `34177f0053adec0192d0c83d72893e0a5cd7393dbee1c6c327798e81ee09125b`, and `ac84a344a8a3519351f008069766cbe6af433a9f110386fba7b4afebfe4eeb96`.
 

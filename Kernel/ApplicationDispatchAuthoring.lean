@@ -1,14 +1,28 @@
-import Compiler.CarriedDispatchProvenance
-/-
-Detached, source-owned authoring for one special application dispatch. A fixed
-participant custodian selects its admitted ticket and submits exact HTTP bytes;
-this module derives current image roots, identity, permissions, command and
-all signing headers. Assembly only inserts detached signatures. The native
-op34 receiver still checks the whole result against a fresh verified tip.
--/
-import Kernel.NativeHost
-import Kernel.ApplicationDispatchAdmission
-import Kernel.ApplicationDispatchHistoricalCore
+module
+
+public import Compiler.CarriedDispatchProvenance
+public import Kernel.NativeHost
+public import Kernel.ApplicationDispatchAdmission
+public import Kernel.ApplicationDispatchHistoricalCore
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+import all Init.System.ST
+import all Init.System.IO
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAuthoring
 
@@ -175,6 +189,10 @@ private def prepareForIssue (config : Config) (opened : Opened config)
     (ApplicationDispatchAdmission.installedTicket config.deployment.domain
       ticket.resource ticketCell)
   if currentTicket != ticket then throw "installed share ticket differs from admitted issue"
+  -- A restart moves the app to a new serving generation and the participant renews its own
+  -- (participant-signed) enrollment; name the stale case instead of the generic meaning refusal.
+  if enrollment.appGeneration != actualApp.generation then
+    throw s!"session enrollment names app generation {enrollment.appGeneration} but the app now serves generation {actualApp.generation}: renew it with `mini apps renew --grain <grain>` (a restart starts a new generation)"
   let requested ← NativeHost.need "enrollment role unresolved"
     (interface.schema.resolve enrollment.role)
   let ceiling ← NativeHost.need "share ceiling unresolved"
@@ -230,10 +248,10 @@ private def prepareForIssue (config : Config) (opened : Opened config)
   if ApplicationDispatchAdmission.selectedMeaning unsigned spec actualApp manifest
       enrollment currentTicket != some requested then
     throw "current app, ticket, enrollment or permission meaning differs"
-  if !ApplicationDispatchAdmission.linkedCurrentPolicies config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+  if let some clause := ApplicationDispatchAdmission.firstFailedLinkageClause config.deployment
+      config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       opened.ground unsigned spec selection prepared then
-    throw "current app/session/ticket policy linkage refused"
+    throw s!"current app/session/ticket policy linkage refused: {clause}"
   if !ApplicationDispatchAdmission.issuerLineageCurrentFromSourceBytes config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       opened.ground unsigned spec selection originalSourceBytes prepared then

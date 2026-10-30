@@ -1,7 +1,7 @@
 /-
 # Kernel.World -- the world, the turn record, and history as a fold
 
-DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
+docs/DATAMODEL.md §3.3/§3.9, step B2.  The kernel's durable state is one value:
 
 * `World` is a finite map of cells `Π₀ c : CellId, Option (Cell R)` together
   with a distinguished **system cell**, itself a `Theory.Store` over a fixed
@@ -30,7 +30,8 @@ append-only contents still enter a cell only through a guarded leg, and ROM
 contents enter only at birth: after it, no valid patch moves a ROM address
 (`step_rom_preserved`, `rom_cell_immutable_after_birth`).  The empty create is
 the image `0`.  The image's bytes are charged (`History.imageBytes`, part of
-`patchBytes`).
+`patchBytes`), and so are the bytes the turn's event retains
+(`History.eventBytes`).
 
 The system half of every accepted turn is the `sysPatch`: a `read retired c none`
 guard per create, one `allocate journal txId (height, H turn)`, one
@@ -43,7 +44,7 @@ room; then (T1) one `allocate spent n ()` per nullifier and one
 monotone height are the store's own allocation/write guards, not a second
 checker.
 
-## One home per fact (T1, SURPASS §2(b))
+## One home per fact (T1, docs/SURPASS.md §2(b))
 
 * **Spent nullifiers** live in `spent`; the deployed durable consumed set is the
   twin T4 deletes.  **The clock** is the head's height (`fold_head`); a turn's
@@ -73,10 +74,29 @@ The world root is a parameter here (`Checkpoint.check` takes the root
 function): its stage-F definition is C1's, its SMT definition D1/E1's.  The
 native store and the host's open/submit path are C2's.
 -/
-import Theory.Store
-import Theory.TypedAuthorization
-import Theory.ResourceCost
-import Theory.AssertAxioms
+module
+
+public import Theory.Store
+public import Theory.TypedAuthorization
+public import Theory.ResourceCost
+public import Theory.AssertAxioms
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.World
 
@@ -87,7 +107,7 @@ set_option autoImplicit false
 /- `World.World` is the world type of the `World` module. -/
 set_option linter.dupNamespace false
 
-/-- Cell identifiers are the `Nat`s `create` names (DATAMODEL §3.2). -/
+/-- Cell identifiers are the `Nat`s `create` names (docs/DATAMODEL.md §3.2). -/
 abbrev CellId := Nat
 
 /-! ## Cells and the registry -/
@@ -365,8 +385,8 @@ nothing is written as before):
   journaled in (`valid_until` is a block height, 09-29).  The wall clock is
   the K-CLOCK cell, pinned like any other read: by a read leg.
 
-The footprint includes the absence pins and the read ops of the legs
-(`Turn.footprint`), so it cannot disagree with what `admit` checks. -/
+The footprint includes the absence pins, the digest pins and the read ops of
+the legs (`Turn.footprint`), so it cannot disagree with what `admit` checks. -/
 structure Turn (R : Registry) (TxId Ev D : Type) where
   txId : TxId
   creates : List (CellId × Cell R × Option CellId)
@@ -382,6 +402,19 @@ structure Turn (R : Registry) (TxId Ev D : Type) where
   validUntil : Option Nat := none
   /-- Cells pinned absent and never retired, checked before creates. -/
   absent : List CellId := []
+  /-- The pre-state the turn asserts: each a cell and the digest
+  (`History.cellDigest`) its pre-slot must have, the cell unretired.  Checked
+  first of the turn's checks (`pinCheck`), so a turn whose asserted pre-state
+  has moved is refused as `guardFailed` before anything else is looked at.
+  A derived turn's pins are its intent's `expectedPre`/`expectedRoot` claims
+  (`TurnOfIntent.turnOf`), in intent order, duplicates kept. -/
+  pins : List (CellId × D) := []
+  /-- The meter credit the turn adds back after its debit (M2). Turn data: `admit` decides
+  nothing about it, as it decides nothing about `subject` or `capability`. Minting meter is
+  confined only by K3, `NativeAdmission.credit_confined` over the replay arms: a nonzero
+  credit is exactly an `AcceptedRefill`'s intent. No World theorem claims the meter never
+  increases; any future one must carry this term. -/
+  credit : Charge := 0
 
 /-- The `(cell, room)` rows a turn's creates record. -/
 def Turn.parentRows {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) :
@@ -402,7 +435,7 @@ def Leg.guards {R : Registry} (leg : Leg R) : Patch (R.layout leg.kind) :=
 
 /-- The cells the turn's footprint pins. -/
 def Turn.footprint {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) : List CellId :=
-  t.absent ++ (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
+  t.absent ++ t.pins.map Prod.fst ++ (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
 
 /-- The hash surface history needs: a turn digest and the log chain.  Stage F
 instantiates both with cSHAKE over the turn's canonical bytes (C1). -/
@@ -418,6 +451,15 @@ structure History (R : Registry) (TxId Ev D : Type) where
   birth, and is charged like a leg's writes.  Stage F counts the canonical
   encoding of the image's entries; no default, for the same reason. -/
   imageBytes : Cell R → Nat
+  /-- The bytes the turn's event retains: the event is archived with the turn
+  (the deployed event carries the admitted ingress), so its bytes are charged
+  like a leg's writes.  Stage F counts the event's canonical encoding; no
+  default, for the same reason. -/
+  eventBytes : Ev → Nat
+  /-- The digest of a slot, the absent slot included: what a turn's pin
+  (`Turn.pins`) is compared with.  Stage F is the per-cell root of the slot's
+  canonical bytes; no default, so no history pins nothing by omission. -/
+  cellDigest : Option (Cell R) → D
 
 /-- Refusal reasons.  Every refusal leaves the world unchanged (`admit` returns
 no world on any error branch). -/
@@ -433,6 +475,8 @@ inductive Reject
   | cellPresent (cell : CellId)
   | missingCell (cell : CellId)
   | kindMismatch (cell : CellId)
+  /-- A guard did not hold: for a leg, `index` is the position of its first
+  disabled op; for a pin (`pinCheck`), its position in `Turn.pins`. -/
   | guardFailed (cell : CellId) (index : Nat)
   | retireNonEmpty (cell : CellId)
   | missingParent (cell : CellId) (room : CellId)
@@ -485,31 +529,64 @@ def debits (lanes : List Lane) (charge avail : Charge) : Patch (sysLayout TxId D
   lanes.map fun lane =>
     Op.write (L := sysLayout TxId D) SysSpace.allowance lane (avail lane) (avail lane - charge lane)
 
+/-- The lanes a turn's meter patch writes: those it charges or credits. -/
+def meteredLanes (charge credit : Charge) : List Lane :=
+  meterLanes.filter fun lane => charge lane ≠ 0 ∨ credit lane ≠ 0
+
+/-- The meter patch: each listed lane goes from `avail` to `avail - charge + credit`.
+Exact, because `turnCheck` funds `charge` from the meter first (`fundedCheck`). With no
+credit it is `debits` (`meterPatch_uncredited`). -/
+def meterPatch (lanes : List Lane) (charge credit avail : Charge) : Patch (sysLayout TxId D) :=
+  lanes.map fun lane =>
+    Op.write (L := sysLayout TxId D) SysSpace.allowance lane (avail lane)
+      (avail lane - charge lane + credit lane)
+
 /-- The system half of a turn, as one guarded patch on the system cell: the
-core, then the spent marks, then the meter debit from `avail` (the world's
-`meter`). -/
+core, then the spent marks, then the meter patch from `avail` (the world's
+`meter`): debit the charge, add the credit. -/
 def sysPatch (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge) :
     Patch (sysLayout TxId D) :=
   sysCore H t height logRoot ++ spentAllocs t.nullifiers ++
-    debits (chargedLanes t.charge) t.charge avail
+    meterPatch (meteredLanes t.charge t.credit) t.charge t.credit avail
 
 /-- The patch bytes of a turn: the bytes its legs write, plus the bytes its
-births' images write (T3b). -/
+births' images write (T3b), plus the bytes its event retains. -/
 def patchBytes (t : Turn R TxId Ev D) : Nat :=
-  (t.legs.map H.legBytes).sum + (t.creates.map fun c => H.imageBytes c.2.1).sum
+  (t.legs.map H.legBytes).sum + (t.creates.map fun c => H.imageBytes c.2.1).sum +
+    H.eventBytes t.event
+
+/-- Whether a pin fails at a world: its cell is retired, or its slot's digest
+is not the asserted one. -/
+def pinFails (w : World R TxId D) (p : CellId × D) : Bool :=
+  (w.retired p.1).isSome || decide (H.cellDigest (w.cells p.1) ≠ p.2)
+
+/-- The first failing pin of a list whose head sits at index `i`. -/
+def pinCheckFrom (w : World R TxId D) : Nat → List (CellId × D) → Option Reject
+  | _, [] => none
+  | i, p :: ps => if pinFails H w p then some (.guardFailed p.1 i) else pinCheckFrom w (i + 1) ps
+
+/-- **The staleness refusal.**  The first pin (in `t.pins` order, at index
+`i`) whose cell is retired or whose slot's digest is not the asserted one
+refuses the turn as `guardFailed c i`. -/
+def pinCheck (w : World R TxId D) (t : Turn R TxId Ev D) : Option Reject :=
+  pinCheckFrom H w 0 t.pins
 
 /-- The T1 checks, each a named refusal of something the store guards would
-also refuse (or, for the charge rule and the window, something no store guard
-sees): distinct nullifiers, the height window, unspent nullifiers, the charge
-rule (storage lane = patch bytes), the charge within the meter. -/
+also refuse (or, for the pins, the charge rule and the window, something no
+store guard sees): the pins first (`pinCheck`, the one staleness refusal),
+distinct nullifiers, the height window, unspent nullifiers, the charge rule
+(storage lane = patch bytes), the charge within the meter. -/
 def turnCheck (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) : Option Reject :=
-  if ¬ t.nullifiers.Nodup then some .duplicateNullifier
-  else if ¬ (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) then
-    some .outsideWindow
-  else if ∃ n ∈ t.nullifiers, (w.spent n).isSome then some .nullifierSpent
-  else if t.charge .storageBytes ≠ patchBytes H t then some .chargeMismatch
-  else if Charge.fundedCheck t.charge w.meter = false then some .overAllowance
-  else none
+  match pinCheck H w t with
+  | some r => some r
+  | none =>
+    if ¬ t.nullifiers.Nodup then some .duplicateNullifier
+    else if ¬ (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) then
+      some .outsideWindow
+    else if ∃ n ∈ t.nullifiers, (w.spent n).isSome then some .nullifierSpent
+    else if t.charge .storageBytes ≠ patchBytes H t then some .chargeMismatch
+    else if Charge.fundedCheck t.charge w.meter = false then some .overAllowance
+    else none
 
 /-- A create's room, if it names one, is a present cell. -/
 def roomPresent (cells : Cells R) : Option CellId → Bool
@@ -597,15 +674,15 @@ theorem absentCheck_eq_none_iff (w : World R TxId D) (t : Turn R TxId Ev D) :
   intro _
   cases w.cells c <;> cases w.retired c <;> simp
 
-/-- A turn is well-shaped: it does something, and names each cell at most once
-per role. -/
+/-- A turn is well-shaped: it does or pins something, and names each cell at
+most once per role. -/
 def Shaped (t : Turn R TxId Ev D) : Prop :=
-  ¬ (t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty) ∧
+  ¬ (t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty) ∧
     (t.legs.map Leg.cell).Nodup ∧ (t.creates.map Prod.fst).Nodup ∧ t.retires.Nodup ∧ AbsentShaped t
 
 /-- **The one transition.**  Fail-closed: every error branch returns no world. -/
 def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (World R TxId D) :=
-  if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty then .error .emptyTurn
+  if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty then .error .emptyTurn
   else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLegCell
   else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateCreate
   else if ¬ t.retires.Nodup then .error .duplicateRetire
@@ -653,7 +730,7 @@ def genesis (cells : Cells R) : World R TxId D :=
 end Step
 
 
-/-! ## The fold: monoid-action laws and replay exactness (DATAMODEL §4.3) -/
+/-! ## The fold: monoid-action laws and replay exactness (docs/DATAMODEL.md §4.3) -/
 
 section Fold
 
@@ -776,7 +853,7 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev D}
       applyCells w.cells t = .ok w'.cells ∧
       w'.system = Patch.run w.system (sysPatch H t height logRoot w.meter) := by
   unfold World.admit at h
-  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty
+  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty
   · rw [if_pos hE] at h; cases h
   rw [if_neg hE] at h
   by_cases hL : (t.legs.map Leg.cell).Nodup
@@ -829,7 +906,7 @@ theorem admit_ok_turnCheck {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.admit H w t = .ok w') :
     ∃ height logRoot, w.head = some (height, logRoot) ∧ turnCheck H w t height = none := by
   unfold World.admit at h
-  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty
+  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty ∧ t.pins.isEmpty
   · rw [if_pos hE] at h; cases h
   rw [if_neg hE] at h
   by_cases hL : (t.legs.map Leg.cell).Nodup
@@ -1377,13 +1454,92 @@ theorem mem_chargedLanes {charge : Charge} {l : Lane} : l ∈ chargedLanes charg
 theorem chargedLanes_nodup (charge : Charge) : (chargedLanes charge).Nodup :=
   meterLanes_nodup.filter _
 
+theorem mem_meteredLanes {charge credit : Charge} {l : Lane} :
+    l ∈ meteredLanes charge credit ↔ charge l ≠ 0 ∨ credit l ≠ 0 := by
+  simp [meteredLanes, mem_meterLanes]
+
+theorem meteredLanes_nodup (charge credit : Charge) : (meteredLanes charge credit).Nodup :=
+  meterLanes_nodup.filter _
+
+/-- **Regression pole: an uncredited turn meters the lanes it charges.** -/
+theorem meteredLanes_uncredited (charge : Charge) : meteredLanes charge 0 = chargedLanes charge := by
+  simp [meteredLanes, chargedLanes]
+
+/-- **Regression pole: an uncredited meter patch is the debit.** -/
+theorem meterPatch_uncredited (lanes : List Lane) (charge avail : Charge) :
+    meterPatch (TxId := TxId) (D := D) lanes charge 0 avail = debits lanes charge avail := by
+  simp [meterPatch, debits]
+
+theorem run_meterPatch_ne (s : Store (sysLayout TxId D)) (lanes : List Lane)
+    (charge credit avail : Charge) (a : Address (sysLayout TxId D)) (ha : a.1 ≠ SysSpace.allowance) :
+    Patch.run s (meterPatch lanes charge credit avail) a = s a := by
+  induction lanes generalizing s with
+  | nil => rfl
+  | cons l rest ih =>
+      show Patch.run (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l + credit l)))
+        (meterPatch rest charge credit avail) a = s a
+      rw [ih]
+      exact Store.set_ne _ _ _ _ (fun e => ha (congrArg Sigma.fst e))
+
+theorem run_meterPatch_at (s : Store (sysLayout TxId D)) (lanes : List Lane)
+    (charge credit avail : Charge) (l : Lane) :
+    Patch.run s (meterPatch lanes charge credit avail) ⟨SysSpace.allowance, l⟩ =
+      if l ∈ lanes then some (avail l - charge l + credit l) else s ⟨SysSpace.allowance, l⟩ := by
+  induction lanes generalizing s with
+  | nil => simp only [List.not_mem_nil, if_false]; rfl
+  | cons l0 rest ih =>
+      show Patch.run (s.set ⟨SysSpace.allowance, l0⟩ (some (avail l0 - charge l0 + credit l0)))
+        (meterPatch rest charge credit avail) _ = _
+      rw [ih]
+      by_cases hr : l ∈ rest
+      · simp [hr]
+      · by_cases e : l = l0
+        · subst e
+          simp only [hr, if_false, List.mem_cons, true_or, if_true]
+          exact Store.set_eq _ _ _
+        · simp only [hr, if_false, List.mem_cons, e, false_or]
+          exact Store.set_ne _ _ _ _ (sys_key_ne e)
+
+/-- The meter patch over distinct lanes is valid exactly when each lane holds
+the quoted allowance. -/
+theorem validFrom_meterPatch (s : Store (sysLayout TxId D)) (lanes : List Lane)
+    (charge credit avail : Charge) (nodup : lanes.Nodup) :
+    Patch.ValidFrom s (meterPatch lanes charge credit avail) ↔
+      ∀ l ∈ lanes, s ⟨SysSpace.allowance, l⟩ = some (avail l) := by
+  induction lanes generalizing s with
+  | nil => exact ⟨fun _ _ m => absurd m (by simp), fun _ => trivial⟩
+  | cons l rest ih =>
+      simp only [List.nodup_cons] at nodup
+      show (Op.Enabled s (Op.write (L := sysLayout TxId D) SysSpace.allowance l (avail l)
+          (avail l - charge l + credit l)) ∧
+        Patch.ValidFrom (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l + credit l)))
+          (meterPatch rest charge credit avail)) ↔ _
+      rw [ih _ nodup.2]
+      simp only [Op.Enabled, List.mem_cons, forall_eq_or_imp]
+      have frame : ∀ x ∈ rest, (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l + credit l)))
+          ⟨SysSpace.allowance, x⟩ = s ⟨SysSpace.allowance, x⟩ := fun x mx =>
+        Store.set_ne _ _ _ _ (sys_key_ne (fun e => nodup.1 (e ▸ mx)))
+      constructor
+      · rintro ⟨⟨_, here⟩, rest_ok⟩
+        exact ⟨here, fun x mx => (frame x mx) ▸ rest_ok x mx⟩
+      · rintro ⟨here, rest_ok⟩
+        exact ⟨⟨rfl, here⟩, fun x mx => (frame x mx).symm ▸ rest_ok x mx⟩
+
+/-- **Regression pole: an uncredited turn's system patch is the pre-M2 one.** -/
+theorem sysPatch_uncredited (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge)
+    (uncredited : t.credit = 0) :
+    sysPatch H t height logRoot avail =
+      sysCore H t height logRoot ++ spentAllocs t.nullifiers ++
+        debits (chargedLanes t.charge) t.charge avail := by
+  rw [sysPatch, uncredited, meteredLanes_uncredited, meterPatch_uncredited]
+
 /-- Off the T1 namespaces, the system patch is its core. -/
 theorem run_sysPatch_core (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     (height : Nat) (logRoot : D) (avail : Charge) (a : Address (sysLayout TxId D))
     (hs : a.1 ≠ SysSpace.spent) (ha : a.1 ≠ SysSpace.allowance) :
     Patch.run s (sysPatch H t height logRoot avail) a = Patch.run s (sysCore H t height logRoot) a := by
   simp only [sysPatch, Patch.run_append]
-  rw [run_debits_ne _ _ _ _ _ ha, run_spentAllocs_ne _ _ _ hs]
+  rw [run_meterPatch_ne _ _ _ _ _ _ ha, run_spentAllocs_ne _ _ _ hs]
 
 /-- The system patch's validity, block by block. -/
 theorem validFrom_sysPatch (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
@@ -1392,7 +1548,8 @@ theorem validFrom_sysPatch (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
       Patch.ValidFrom s (sysCore H t height logRoot) ∧
         Patch.ValidFrom (Patch.run s (sysCore H t height logRoot)) (spentAllocs t.nullifiers) ∧
         Patch.ValidFrom (Patch.run (Patch.run s (sysCore H t height logRoot))
-          (spentAllocs t.nullifiers)) (debits (chargedLanes t.charge) t.charge avail) := by
+          (spentAllocs t.nullifiers))
+          (meterPatch (meteredLanes t.charge t.credit) t.charge t.credit avail) := by
   simp only [sysPatch, Patch.validFrom_append, Patch.run_append, and_assoc]
 
 /-- The core never touches the spent marks. -/
@@ -1422,19 +1579,21 @@ theorem sysPost_spent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.spent, n⟩ =
       if n ∈ t.nullifiers then some () else s ⟨SysSpace.spent, n⟩ := by
   simp only [sysPatch, Patch.run_append]
-  rw [run_debits_ne _ _ _ _ _ (fun e => SysSpace.noConfusion e), run_spentAllocs_at,
+  rw [run_meterPatch_ne _ _ _ _ _ _ (fun e => SysSpace.noConfusion e), run_spentAllocs_at,
     run_sysCore_spent]
 
-/-- **The meter after a turn**: each charged lane is debited from `avail`. -/
+/-- **The meter after a turn**: each charged or credited lane goes from `avail` to
+`avail - charge + credit`. -/
 theorem sysPost_allowance (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     (height : Nat) (logRoot : D) (avail : Charge) (l : Lane) :
     Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.allowance, l⟩ =
-      if t.charge l ≠ 0 then some (avail l - t.charge l) else s ⟨SysSpace.allowance, l⟩ := by
+      if t.charge l ≠ 0 ∨ t.credit l ≠ 0 then some (avail l - t.charge l + t.credit l)
+      else s ⟨SysSpace.allowance, l⟩ := by
   simp only [sysPatch, Patch.run_append]
-  rw [run_debits_at]
-  by_cases hl : t.charge l ≠ 0
-  · rw [if_pos (mem_chargedLanes.mpr hl), if_pos hl]
-  · rw [if_neg (fun m => hl (mem_chargedLanes.mp m)), if_neg hl,
+  rw [run_meterPatch_at]
+  by_cases hl : t.charge l ≠ 0 ∨ t.credit l ≠ 0
+  · rw [if_pos (mem_meteredLanes.mpr hl), if_pos hl]
+  · rw [if_neg (fun m => hl (mem_meteredLanes.mp m)), if_neg hl,
       run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
 
 theorem sysPost_parent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
@@ -1502,7 +1661,7 @@ theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev 
     (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
     (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
-    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    (hm : ∀ l, t.charge l ≠ 0 ∨ t.credit l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
     Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
   rw [validFrom_sysPatch]
   refine ⟨?_, ?_, ?_⟩
@@ -1514,10 +1673,10 @@ theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev 
     rfl
   · rw [validFrom_spentAllocs]
     exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
-  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+  · rw [validFrom_meterPatch _ _ _ _ _ (meteredLanes_nodup _ _)]
     intro l m
     rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
-    exact hm l (mem_chargedLanes.mp m)
+    exact hm l (mem_meteredLanes.mp m)
 
 end Decompose
 
@@ -1891,7 +2050,7 @@ theorem journal_exact {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
                   exact absurd hid.symm hx
                 · rw [if_neg hi'] at ht'; cases ht'
 
-/-- The DATAMODEL §4.9 form: the journal's height for an id is the log
+/-- The docs/DATAMODEL.md §4.9 form: the journal's height for an id is the log
 position carrying it. -/
 theorem journal_height_iff {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
     (hg : Genesis H g) (hf : fold H g log = some W) (x : TxId) (i : Nat) :
@@ -1992,15 +2151,71 @@ section TurnLaws
 variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
 variable (H : History R TxId Ev D)
 
-/-- `turnCheck` passes exactly when every T1 condition holds. -/
+/-- A pin holds exactly when its cell is unretired and its slot has the
+asserted digest. -/
+theorem pinFails_eq_false_iff {w : World R TxId D} {p : CellId × D} :
+    pinFails H w p = false ↔ w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 := by
+  unfold pinFails
+  cases w.retired p.1 <;> simp
+
+theorem pinCheckFrom_eq_none_iff {w : World R TxId D} :
+    ∀ {i : Nat} {ps : List (CellId × D)},
+      pinCheckFrom H w i ps = none ↔ ∀ p ∈ ps, pinFails H w p = false
+  | _, [] => by simp [pinCheckFrom]
+  | i, p :: ps => by
+      unfold pinCheckFrom
+      cases hp : pinFails H w p
+      · simp only [Bool.false_eq_true, if_false, List.mem_cons, forall_eq_or_imp, hp, true_and]
+        exact pinCheckFrom_eq_none_iff
+      · simp only [if_true, reduceCtorEq, false_iff]
+        intro h
+        have := h p List.mem_cons_self
+        rw [hp] at this
+        cases this
+
+theorem pinCheckFrom_some {w : World R TxId D} :
+    ∀ {i : Nat} {ps : List (CellId × D)} {r : Reject},
+      pinCheckFrom H w i ps = some r → ∃ c j, r = .guardFailed c j
+  | _, [], _, h => by simp [pinCheckFrom] at h
+  | i, p :: ps, r, h => by
+      unfold pinCheckFrom at h
+      split at h
+      · exact ⟨p.1, i, (Option.some.inj h).symm⟩
+      · exact pinCheckFrom_some h
+
+/-- `pinCheck` passes exactly when every pin holds. -/
+theorem pinCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} :
+    pinCheck H w t = none ↔
+      ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 := by
+  unfold pinCheck
+  rw [pinCheckFrom_eq_none_iff]
+  exact forall₂_congr fun _ _ => pinFails_eq_false_iff H
+
+/-- `pinCheck` refuses only as `guardFailed`. -/
+theorem pinCheck_some {w : World R TxId D} {t : Turn R TxId Ev D} {r : Reject}
+    (h : pinCheck H w t = some r) : ∃ c i, r = .guardFailed c i :=
+  pinCheckFrom_some H h
+
+/-- `turnCheck` passes exactly when every pin and every T1 condition holds. -/
 theorem turnCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} :
     turnCheck H w t height = none ↔
+      (∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2) ∧
       t.nullifiers.Nodup ∧
       (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) ∧
       (∀ n ∈ t.nullifiers, w.spent n = none) ∧
       t.charge .storageBytes = patchBytes H t ∧
       t.charge ≤ w.meter := by
   unfold turnCheck
+  cases hp : pinCheck H w t with
+  | some r =>
+      have : ¬ ∀ p ∈ t.pins, w.retired p.1 = none ∧ H.cellDigest (w.cells p.1) = p.2 :=
+        fun h => by rw [(pinCheck_eq_none_iff H).2 h] at hp; cases hp
+      simp only [reduceCtorEq, false_iff]
+      exact fun h => this h.1
+  | none =>
+  have hp' := (pinCheck_eq_none_iff H).1 hp
+  rw [and_iff_right hp']
+  simp only
   constructor
   · intro h
     split_ifs at h with h1 h2 h3 h4 h5 <;> try cases h
@@ -2014,6 +2229,33 @@ theorem turnCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} {heigh
       (Charge.fundedCheck_eq_true_iff _ _).2 h5
     simp only [h1, h2, h3', h4, h5', not_true_eq_false, not_false_eq_true, and_self, if_false,
       ne_eq, reduceCtorEq]
+
+/-- **A stale pin is refused as `guardFailed`.**  A well-shaped turn at a
+world with a head, its transaction id unjournaled, one of whose pins fails
+(the cell retired, or its slot's digest not the asserted one) is refused by
+`admit` as `guardFailed c i`: the pins are the first check after replay. -/
+theorem admit_pin_refused {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} {logRoot : D}
+    (shaped : Shaped t) (hh : w.head = some (height, logRoot)) (hj : w.journal t.txId = none)
+    (stale : ∃ p ∈ t.pins, w.retired p.1 ≠ none ∨ H.cellDigest (w.cells p.1) ≠ p.2) :
+    ∃ c i, World.admit H w t = .error (.guardFailed c i) := by
+  obtain ⟨hE, hL, hC, hR, hA⟩ := shaped
+  cases hp : pinCheck H w t with
+  | none =>
+      obtain ⟨p, m, bad⟩ := stale
+      have := (pinCheck_eq_none_iff H).1 hp p m
+      rcases bad with bad | bad
+      · exact absurd this.1 bad
+      · exact absurd this.2 bad
+  | some r =>
+      obtain ⟨c, i, rfl⟩ := pinCheck_some H hp
+      refine ⟨c, i, ?_⟩
+      have hk : turnCheck H w t height = some (.guardFailed c i) := by
+        unfold turnCheck; rw [hp]
+      unfold World.admit
+      rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR),
+        if_neg (not_not.mpr hA)]
+      simp only [hh]
+      rw [if_neg (by simp [hj]), hk]
 
 /-- The meter, read off the system cell. -/
 theorem meter_system {w : World R TxId D} (l : Lane) :
@@ -2055,34 +2297,41 @@ theorem spent_refused {w : World R TxId D} {t : Turn R TxId Ev D} {n : D}
   | none => rfl
   | some w' =>
       obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 hs)
-      have := ((turnCheck_eq_none_iff H).1 hk).2.2.1 n m
+      have := ((turnCheck_eq_none_iff H).1 hk).2.2.2.1 n m
       rw [spent] at this
       cases this
 
 /-- **The charge stays within the allowance**, and the meter is debited by
-exactly the charge. -/
+exactly the charge and credited by exactly the credit. -/
 theorem charge_le_allowance {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') :
-    t.charge ≤ w.meter ∧ ∀ l, w'.meter l = w.meter l - t.charge l := by
+    t.charge ≤ w.meter ∧ ∀ l, w'.meter l = w.meter l - t.charge l + t.credit l := by
   have ha := (step_eq_some H).1 h
   obtain ⟨height, logRoot, hh, hk⟩ := admit_ok_turnCheck H ha
   obtain ⟨_, height', logRoot', hh', _, _, _, hsys⟩ := admit_ok H ha
   rw [hh] at hh'
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hh')
-  refine ⟨((turnCheck_eq_none_iff H).1 hk).2.2.2.2, fun l => ?_⟩
+  refine ⟨((turnCheck_eq_none_iff H).1 hk).2.2.2.2.2, fun l => ?_⟩
   rw [meter_system, meter_system (w := w), hsys, sysPost_allowance]
-  by_cases hl : t.charge l ≠ 0
+  by_cases hl : t.charge l ≠ 0 ∨ t.credit l ≠ 0
   · rw [if_pos hl]; rfl
   · rw [if_neg hl]
-    simp only [not_not] at hl
-    rw [hl, Nat.sub_zero]
+    simp only [not_or, not_not] at hl
+    rw [hl.1, hl.2, Nat.sub_zero, Nat.add_zero]
+
+/-- **Satisfiable pole: the meter after a step**, on every lane: debited by the charge,
+credited by the credit (an untouched lane has both zero). -/
+theorem step_meter {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (stepped : World.step H w t = some w') (l : Lane) :
+    w'.meter l = w.meter l - t.charge l + t.credit l :=
+  (charge_le_allowance H stepped).2 l
 
 /-- **The storage charge is the patch bytes** (D2's
-`storage_charge_is_written_bytes`, as SURPASS §2(b).6's `charge_is_patch_bytes`). -/
+`storage_charge_is_written_bytes`, as docs/SURPASS.md §2(b).6's `charge_is_patch_bytes`). -/
 theorem charge_is_patch_bytes {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') : t.charge .storageBytes = patchBytes H t := by
   obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
-  exact ((turnCheck_eq_none_iff H).1 hk).2.2.2.1
+  exact ((turnCheck_eq_none_iff H).1 hk).2.2.2.2.1
 
 /-- **The clock pin.**  An accepted turn was journaled at a height inside its
 window. -/
@@ -2091,7 +2340,7 @@ theorem step_window {w w' : World R TxId D} {t : Turn R TxId Ev D}
     ∃ height logRoot, w.head = some (height, logRoot) ∧ t.notBefore ≤ height ∧
       ∀ u ∈ t.validUntil, height ≤ u := by
   obtain ⟨height, logRoot, hh, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
-  obtain ⟨lo, hi⟩ := ((turnCheck_eq_none_iff H).1 hk).2.1
+  obtain ⟨lo, hi⟩ := ((turnCheck_eq_none_iff H).1 hk).2.2.1
   refine ⟨height, logRoot, hh, lo, fun u m => ?_⟩
   rw [Option.mem_def] at m
   rw [m] at hi
@@ -2133,14 +2382,14 @@ theorem footprint_pinned {w : World R TxId D} {t : Turn R TxId Ev D} (leg : Leg 
       rw [← split, Patch.validFrom_append] at hv
       exact absurd (validFrom_reads (fun o mo => List.all_eq_true.mp List.all_takeWhile o mo) hv.1 op pinned) moved
 
-/-- A turn that writes, creates and retires nothing is refused whether or not
-it spends: a spend must be pinned by at least one guard leg (the deployed
-`unguardedEventOnly` rule, which `emptyTurn` already is). -/
+/-- A turn that writes, creates, retires and pins nothing is refused whether
+or not it spends: a spend must be pinned by at least one leg or pin (the
+deployed `unguardedEventOnly` rule, which `emptyTurn` already is). -/
 theorem spend_needs_guard (w : World R TxId D) (t : Turn R TxId Ev D)
-    (hl : t.legs = []) (hc : t.creates = []) (hr : t.retires = []) :
+    (hl : t.legs = []) (hc : t.creates = []) (hr : t.retires = []) (hp : t.pins = []) :
     rejectOf (World.admit H w t) = some .emptyTurn := by
   unfold World.admit
-  simp [hl, hc, hr, rejectOf]
+  simp [hl, hc, hr, hp, rejectOf]
 
 end TurnLaws
 
@@ -2232,6 +2481,8 @@ def toyH : History toyR Nat Unit Nat where
   -- The B2 toy charges no storage; `Kernel.TurnCensus` exercises the meter.
   legBytes := fun _ => 0
   imageBytes := fun _ => 0
+  eventBytes := fun _ => 0
+  cellDigest := fun o => o.elim 0 fun c => c.kind.toNat + 1
 
 def g : ToyWorld := genesis toyH 0
 
@@ -2341,6 +2592,24 @@ theorem reject_kindMismatch :
 theorem reject_guardFailed :
     rejectOf (World.admit toyH w1 (turn 5 [] [leg 0 [rd 0 (some 5), wr 0 4 6]])) =
       some (.guardFailed 0 1) := by
+  decide +kernel
+/-- A stale pin: cells 0 and 1 hold kind `false` (toy digest 1), cell 7 is
+absent (digest 0); the third pin asserts digest 7 of cell 0 and is refused at
+its index, before the (valid) leg is looked at. -/
+theorem reject_stalePin :
+    rejectOf (World.admit toyH w1
+      { turn 5 [] [leg 0 [wr 0 5 6]] with pins := [(1, 1), (7, 0), (0, 7)] }) =
+      some (.guardFailed 0 2) := by
+  decide +kernel
+/-- The same turn with every pin true is admitted. -/
+theorem admit_truePins :
+    rejectOf (World.admit toyH w1
+      { turn 5 [] [leg 0 [wr 0 5 6]] with pins := [(1, 1), (7, 0), (0, 1)] }) = none := by
+  decide +kernel
+/-- A pin alone is an effect: a turn that only pins (and spends nothing) is
+not empty. -/
+theorem admit_pinOnly :
+    rejectOf (World.admit toyH w1 { turn 5 [] [] with pins := [(0, 1)] }) = none := by
   decide +kernel
 theorem reject_retireNonEmpty :
     rejectOf (World.admit toyH w1 (turn 5 [] [] [0])) = some (.retireNonEmpty 0) := by
@@ -2491,6 +2760,8 @@ def romH : History romR Nat Unit Nat where
   logRoot0 := 0
   legBytes := fun _ => 0
   imageBytes := fun b => if b.store = 0 then 0 else 16
+  eventBytes := fun _ => 0
+  cellDigest := fun o => if o.isSome then 1 else 0
 
 /-- Genesis, with 64 storage bytes funded. -/
 def g : World romR Nat Nat :=
@@ -2783,6 +3054,13 @@ end RomExample
 #assert_axioms absent_present_refused
 #assert_axioms admit_ok_turnCheck
 #assert_axioms turnCheck_eq_none_iff
+#assert_axioms pinFails_eq_false_iff
+#assert_axioms pinCheck_eq_none_iff
+#assert_axioms pinCheck_some
+#assert_axioms admit_pin_refused
+#assert_axioms Example.reject_stalePin
+#assert_axioms Example.admit_truePins
+#assert_axioms Example.admit_pinOnly
 #assert_axioms meter_system
 #assert_axioms spent_monotone
 #assert_axioms fold_spent_monotone
@@ -2810,5 +3088,14 @@ end RomExample
 #assert_axioms run_sysCore_allowance
 #assert_axioms sysPost_spent
 #assert_axioms sysPost_allowance
+#assert_axioms mem_meteredLanes
+#assert_axioms meteredLanes_nodup
+#assert_axioms meteredLanes_uncredited
+#assert_axioms meterPatch_uncredited
+#assert_axioms run_meterPatch_ne
+#assert_axioms run_meterPatch_at
+#assert_axioms validFrom_meterPatch
+#assert_axioms sysPatch_uncredited
+#assert_axioms step_meter
 
 end Minidregg.Kernel.World

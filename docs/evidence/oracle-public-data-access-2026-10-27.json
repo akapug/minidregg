@@ -1,0 +1,84 @@
+{
+  "changed_source_sha256": {
+    "native/spk-host/src/resident_launch.rs": "6700797f2e92db35d704241424e572630ce63b9d1a1e6f6b15ac5c0405206f03",
+    "native/spk-host/src/resident_privilege.rs": "2361423133ba39dfcd4e02d7588fdcc28771bfe82d7e510287635a96dd852e8f",
+    "native/spk-host/src/resident_service.rs": "5bc73081af40af836617d93f451838f9f318fb0e21654598e6de2ed7ce264d38",
+    "native/spk-host/src/shared_data.rs": "9cc9ec2af615e58510cfb1249327638cf1f83aa2feb7cff4d262cfa2ca8af892"
+  },
+  "date": "2026-10-27",
+  "focused_checks": {
+    "bootstrap_descriptor": 1,
+    "inspection_example": 2,
+    "log": "/othersys/lanes/oracle-u2-20261027/native-checks-public-access.log",
+    "log_sha256": "5ef5f92238c10686ef94b9650542c2f1fcbd45f6d4c480fee195b0589011e010",
+    "passed_marker": "ORACLE_SHARED_NATIVE_CHECKS_PASS",
+    "profile_retention": 1,
+    "public_data_and_worker_protocol": 4,
+    "stream_library": 9
+  },
+  "host": "hbox",
+  "limits": [
+    "preflight checks current pinned-directory path under exact app identity; later LSM, I/O, or administrative changes can still cause startup failure",
+    "existing private directories are never chmodded by publication",
+    "previous namespace pin-count and RLIMIT limits remain"
+  ],
+  "mapped_worker_mount": {
+    "logs": {
+      "acl": {
+        "path": "/tank/dregg-build/attachment-worker-review/mapped-acl.log",
+        "sha256": "b1ec5a80ffcd7ad0ea0890b3f9104ef08d183b5b2db5b9a0f202d6587332f6be"
+      },
+      "positive": {
+        "path": "/tank/dregg-build/attachment-worker-review/mapped-positive.log",
+        "sha256": "b73b54f09dcdfda431dce8d1ebbe0997d5708997711cb760332d3a0fee9484ea"
+      },
+      "private": {
+        "path": "/tank/dregg-build/attachment-worker-review/mapped-private.log",
+        "sha256": "2a4ed281aa8c85d00820c6f004e22c100fdefc7add932cdb8f89ba516dcdb7c1"
+      }
+    },
+    "negative": [
+      "existing0700 store refused before spawn and mode unchanged",
+      "0755 store with app-specific deny ACL refused before spawn"
+    ],
+    "new_store_mode": "0755",
+    "new_store_umask": "077",
+    "passed": 3,
+    "positive": [
+      "public bytes readable",
+      "data write refused",
+      "fd7 closed before app",
+      "private /var writable"
+    ],
+    "scope": "Independent snapshot-only initializer mirrors production namespace/fork/drop/filter sequence; actual worker/preflight/SCM_RIGHTS/spawn gate/bubblewrap. No Mini BEGIN in this fixture."
+  },
+  "release_binary_sha256": {
+    "mini-spk-broker": "41601340bb232adeee4cf81a36cdcd6110866db01d757655d32190ba63038cbd",
+    "mini-spk-volume-helper": "2b4f3ac076b0d516e24887c157a5fe678cb0cd35e58b97cb081a1caa16583f1b",
+    "spk-data-publish": "ca06b115db58872c44b00e09ac6180d382a0f56a065c25c08d4dde9625477a0d",
+    "spk-host": "2c594dbe5c5c933fc4ea9b1e884fc058a68b52fba329f398abf1cefd6e8aaf8f"
+  },
+  "release_build": {
+    "command": "SWARM_MEM_MAX=4G swarm-build taskset -c 20,21 cargo build --offline --locked --release -j2 -p minidregg-spk-host --bin spk-host --bin mini-spk-broker --bin mini-spk-volume-helper --bin spk-data-publish",
+    "cpus": [
+      20,
+      21
+    ],
+    "elapsed": "1m26s",
+    "exit": 0,
+    "jobs": 2,
+    "log": "/othersys/lanes/oracle-u2-20261027/native-release-public-access.log",
+    "log_sha256": "bccd9acc925e5622c5dbc47b9fd24ad4fd723935c6785c26ca8fc0ab949d6018",
+    "memory_max": "4G"
+  },
+  "schema": "mini-public-data-access-checks-v1",
+  "scope": "Native app-identity preflight and mapped-worker mount regression; full signed Mini lifecycle is recorded separately. No new Lean authority theorem.",
+  "snapshot": "/othersys/lanes/oracle-u2-20261027",
+  "source_commit": "37472d58",
+  "source_manifest": {
+    "files": 1647,
+    "mismatches_with_committed_native_and_cargo_files": [],
+    "path": "/othersys/lanes/oracle-u2-20261027/native-public-access-source-files.json",
+    "sha256": "25e657e80932a4f2dbfe51defac32bd864784f7abde31b7704e91e6c082d72ab"
+  }
+}

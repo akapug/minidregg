@@ -1,23 +1,11 @@
-# Law component source/codec integration sketch
+# Law component source and codec integration
 
-2026-10-02, Codex. Companion to the pure module, now `Pred/LawComposition.lean` (it was
-`Theory/LawComposition.lean` on the independent `codex/law-composition` snapshot).
-
-**Status at main 5216e02f (READ, import closure computed over the `import` lines of the
-tree).** The modules this sketch names are in the closure of `Minidregg.lean` and of
-`Host.Main`: `Pred/LawComposition.lean` (imported by `Compiler/CanonicalPolicyAdmission`
-and `Compiler/WorldKindLawDependencies`), `Compiler/PolicyComponentResolution.lean`
-(imported by `Compiler/ComposedPolicyAdmission` and `Compiler/CandidateLawResolution`),
-`Compiler/PolicyRecordCodec.lean`, `Compiler/PolicyHistoryResolution.lean` and
-`Compiler/ResolvedLawCompilation.lean`. This note does not say whether the proof
-obligations below are discharged; read the modules for that.
-
-What the note itself recorded on 2026-10-02, before that integration: scoped shared-seat
-Lean checks passed the pure module, CanonicalPolicyAdmission, PolicyRecordCodec v5,
-PolicyHistoryResolution, ResolvedLawCompilation and PolicyComponentResolution; no full
-consumer closure rebuild or native journey had run; active receivers had not been
-switched to this schema. Root decisions and the full product contract are in
-a scholar planning note of 2026-10-02 on law composition (outside this repository).
+Companion to the pure module `Pred/LawComposition.lean`. Every module this note names is in the
+closure of `Minidregg.lean` and of `Host.Main`: `Pred/LawComposition.lean` (imported by
+`Compiler/CanonicalPolicyAdmission` and `Compiler/WorldKindLawDependencies`),
+`Compiler/PolicyComponentResolution.lean` (imported by `Compiler/ComposedPolicyAdmission` and
+`Compiler/CandidateLawResolution`), `Compiler/PolicyRecordCodec.lean`,
+`Compiler/PolicyHistoryResolution.lean` and `Compiler/ResolvedLawCompilation.lean`.
 
 ## Small receiving interface
 
@@ -124,8 +112,9 @@ presentation TODO for missing mandatory conjunction terms.
 
 ## Proof/build work remaining
 
-Scoped modules compile. Full dependency rebuilding and native consumer journeys
-remain required, together with:
+The modules build in the Host closure. No native journey exercises composed laws. The
+proof items below were open when this note was written and have not been re-checked
+against the modules:
 
 - establish resolve success completeness and absence of closureInvariant for
   authenticated finite input with an acyclic reachable graph;
@@ -137,7 +126,7 @@ remain required, together with:
   diamond deduplication, P@2 inheriting pinned P@1, self/head and long cycles,
   and a pinned/current intersection that deliberately denies every request.
 
-PolicyComponentResolution now loads components and dependencies from actual
+PolicyComponentResolution loads components and dependencies from actual
 LoadedPolicy snapshots, source histories and authority parentage. It returns an
 authenticated LoadedGraph with exact dependency-loading equations plus checked DAG
 coverage. It does not yet install a portal or durable physical read guards.

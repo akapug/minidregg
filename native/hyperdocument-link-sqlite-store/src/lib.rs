@@ -1,11 +1,12 @@
 //! Opaque, fallible exact-byte SQLite compare-and-swap transport.
 //!
 //! This crate assigns no Hyperdocument, link, authorization, replay, checksum,
-//! or acceptance meaning to the bytes.  It uses SQLite's rollback-journal
-//! transaction boundary and returns only bytes, control status, or an error.
-//! Lean owns all semantic decoding and acceptance.
+//! or acceptance meaning to the bytes.  It uses SQLite's write-ahead-log
+//! transaction boundary (`journal_mode=WAL`, `synchronous=FULL`: every commit
+//! is synced to the `-wal` before it returns) and returns only bytes, control
+//! status, or an error. Lean owns all semantic decoding and acceptance.
 //!
-//! Successful `PRAGMA synchronous=EXTRA`, `BEGIN IMMEDIATE`, and `COMMIT`
+//! Successful `PRAGMA synchronous=FULL`, `BEGIN IMMEDIATE`, and `COMMIT`
 //! calls are observations of the linked SQLite/host stack.  They are not a
 //! proof of SQLite, POSIX locks, filesystem ordering, `fsync`, stable media,
 //! power-loss survival, or behavior under hostile directory mutation.
@@ -85,7 +86,13 @@ extern "C" {
     fn sqlite3_column_int(statement: *mut sqlite3_stmt, column: c_int) -> c_int;
     fn sqlite3_column_int64(statement: *mut sqlite3_stmt, column: c_int) -> i64;
     fn sqlite3_bind_int64(statement: *mut sqlite3_stmt, index: c_int, value: i64) -> c_int;
+    fn sqlite3_file_control(database: *mut sqlite3, name: *const c_char, op: c_int, argument: *mut c_void) -> c_int;
 }
+
+/// `SQLITE_FCNTL_PERSIST_WAL`: keep the `-wal` and `-shm` files after the last
+/// connection closes (truncated, by `journal_size_limit=0`, after the closing
+/// checkpoint), so a later read never has to create a file.
+const SQLITE_FCNTL_PERSIST_WAL: c_int = 10;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublishStatus {
@@ -120,6 +127,19 @@ pub enum StoreError {
     RetiredSchema(i32),
     InvalidRoot(PathBuf),
     InvalidPath,
+    /// An append that can never succeed as written (height or sequence 0, a
+    /// tag, node key or node value over 4096 bytes, more than 4096 nodes, a
+    /// duplicate node key). Not contention: retrying the same bytes refuses
+    /// the same way, so it is never reported as `Conflict`.
+    Bound(&'static str),
+    /// The disk refused a write the operation needed: full (`ENOSPC`,
+    /// `EDQUOT`, `SQLITE_FULL`) or read-only (`EROFS`, `SQLITE_READONLY`).
+    /// Distinct from `Missing` (absent) and from an opaque failure.
+    Unwritable(String),
+    /// SQLITE_PROTOCOL (15) on every one of the bounded retries: the WAL lock could not be
+    /// taken. SQLite returns it after repeated failed WAL-lock attempts and says to try again;
+    /// the busy handler never covers it.
+    WalLockProtocol(u32),
     Sqlite {
         code: i32,
         message: String,
@@ -152,6 +172,12 @@ impl fmt::Display for StoreError {
                 )
             }
             Self::InvalidPath => formatter.write_str("store path cannot be passed to SQLite"),
+            Self::Bound(what) => write!(formatter, "append refused: {what} (a bound, not contention; the same bytes never succeed)"),
+            Self::Unwritable(what) => write!(formatter, "store disk refused a write (full or read-only): {what}"),
+            Self::WalLockProtocol(attempts) => write!(
+                formatter,
+                "WAL lock protocol retries exhausted after {attempts} attempts (SQLITE_PROTOCOL)"
+            ),
             Self::Sqlite { code, message } => {
                 write!(formatter, "opaque SQLite failure {code}: {message}")
             }
@@ -171,8 +197,48 @@ impl std::error::Error for StoreError {
 
 impl From<io::Error> for StoreError {
     fn from(error: io::Error) -> Self {
-        Self::Io(error)
+        match error.raw_os_error() {
+            Some(libc::ENOSPC | libc::EDQUOT | libc::EROFS) => Self::Unwritable(error.to_string()),
+            _ => Self::Io(error),
+        }
     }
+}
+
+impl StoreError {
+    /// The disk is full or read-only.
+    pub fn is_unwritable(&self) -> bool {
+        matches!(self, Self::Unwritable(_))
+    }
+}
+
+/// SQLITE_PROTOCOL: returned after repeated failed WAL-lock attempts, never handled by the busy
+/// handler; SQLite's guidance is to try again.
+const SQLITE_PROTOCOL: c_int = 15;
+/// Attempts at a step that met SQLITE_PROTOCOL, with a doubling backoff from 25 ms: at most
+/// 25+50+...+1600 = 3175 ms of waiting in all, under the 5 s busy timeout.
+const PROTOCOL_ATTEMPTS: u32 = 8;
+
+/// Run `attempt` again while it fails with SQLITE_PROTOCOL, `PROTOCOL_ATTEMPTS` times in all,
+/// then refuse by name. Only for a step that has applied nothing when it fails that way: the
+/// WAL lock is taken at the start of a read or write transaction, before the statement runs.
+fn retry_protocol<T>(
+    mut attempt: impl FnMut() -> Result<T, StoreError>,
+    mut wait: impl FnMut(std::time::Duration),
+) -> Result<T, StoreError> {
+    let mut delay = std::time::Duration::from_millis(25);
+    for made in 1..=PROTOCOL_ATTEMPTS {
+        match attempt() {
+            Err(StoreError::Sqlite { code, .. }) if code & 0xff == SQLITE_PROTOCOL => {
+                if made == PROTOCOL_ATTEMPTS {
+                    return Err(StoreError::WalLockProtocol(made));
+                }
+                wait(delay);
+                delay *= 2;
+            }
+            other => return other,
+        }
+    }
+    unreachable!("the loop returns on its last attempt")
 }
 
 struct Database {
@@ -193,6 +259,11 @@ impl Database {
                 CStr::from_ptr(pointer).to_string_lossy().into_owned()
             }
         };
+        let primary = if code == SQLITE_OK { fallback_code } else { code } & 0xff;
+        // SQLITE_FULL (13) and SQLITE_READONLY (8): the disk, not the data.
+        if primary == 13 || primary == 8 {
+            return StoreError::Unwritable(format!("SQLite {code}: {message}"));
+        }
         StoreError::Sqlite {
             code: if code == SQLITE_OK {
                 fallback_code
@@ -204,6 +275,10 @@ impl Database {
     }
 
     fn exec(&self, sql: &'static [u8]) -> Result<(), StoreError> {
+        retry_protocol(|| self.exec_once(sql), std::thread::sleep)
+    }
+
+    fn exec_once(&self, sql: &'static [u8]) -> Result<(), StoreError> {
         debug_assert_eq!(sql.last(), Some(&0));
         // SAFETY: `sql` is nul terminated and the database handle is live.
         let code = unsafe {
@@ -223,6 +298,10 @@ impl Database {
     }
 
     fn prepare(&self, sql: &'static [u8]) -> Result<Statement<'_>, StoreError> {
+        retry_protocol(|| self.prepare_once(sql), std::thread::sleep)
+    }
+
+    fn prepare_once(&self, sql: &'static [u8]) -> Result<Statement<'_>, StoreError> {
         debug_assert_eq!(sql.last(), Some(&0));
         let mut raw = ptr::null_mut();
         // SAFETY: arguments satisfy SQLite's prepare contract and `raw` is an
@@ -274,6 +353,23 @@ impl Statement<'_> {
     }
 
     fn step(&self) -> Result<c_int, StoreError> {
+        // A first step that meets SQLITE_PROTOCOL failed taking the WAL lock and has returned
+        // no row, so it is reset and stepped again; SQLITE_PROTOCOL can not come later.
+        let mut retried = false;
+        retry_protocol(
+            || {
+                if std::mem::take(&mut retried) {
+                    // SAFETY: a live prepared statement; its bindings are kept by reset.
+                    unsafe { sqlite3_reset(self.raw.as_ptr()) };
+                }
+                retried = true;
+                self.step_once()
+            },
+            std::thread::sleep,
+        )
+    }
+
+    fn step_once(&self) -> Result<c_int, StoreError> {
         // SAFETY: `raw` is a prepared, non-finalized statement.
         let code = unsafe { sqlite3_step(self.raw.as_ptr()) };
         if code == SQLITE_ROW || code == SQLITE_DONE {
@@ -467,8 +563,27 @@ impl SqliteByteStore {
             return Err(database.error(busy));
         }
         database.exec(b"PRAGMA trusted_schema=OFF\0")?;
-        database.exec(b"PRAGMA journal_mode=DELETE\0")?;
-        database.exec(b"PRAGMA synchronous=EXTRA\0")?;
+        // WAL with synchronous=FULL: a commit returns only after its frames are
+        // synced to `-wal` (about three syncs per write, against seven for the
+        // rollback journal at EXTRA), so a committed write survives power loss.
+        // The WAL is truncated to empty whenever it is reset, so a copied-in
+        // older database never meets newer frames left in it.
+        database.exec(b"PRAGMA journal_size_limit=0\0")?;
+        let mut persist: c_int = 1;
+        // SAFETY: an open handle, a nul-terminated schema name and an int out/in argument.
+        let persisted = unsafe {
+            sqlite3_file_control(database.raw.as_ptr(), b"main\0".as_ptr() as *const c_char, SQLITE_FCNTL_PERSIST_WAL, &mut persist as *mut c_int as *mut c_void)
+        };
+        if persisted != SQLITE_OK {
+            return Err(database.error(persisted));
+        }
+        {
+            let statement = database.prepare(b"PRAGMA journal_mode=WAL\0")?;
+            if statement.step()? != SQLITE_ROW || statement.column_blob_at(0)?.as_slice() != b"wal" {
+                return Err(StoreError::Sqlite { code: 0, message: "the Store could not enter WAL mode".to_owned() });
+            }
+        }
+        database.exec(b"PRAGMA synchronous=FULL\0")?;
         database.exec(b"PRAGMA fullfsync=ON\0")?;
         database.exec(b"PRAGMA checkpoint_fullfsync=ON\0")?;
         let store = Self {
@@ -489,7 +604,41 @@ impl SqliteByteStore {
         &self.database_path
     }
 
+    /// Fold the WAL into the database file and truncate it, so the database
+    /// file alone is a whole copy (the tamper tests' "older database"). The
+    /// online backup (`sqlite3 DB .backup`) needs no such step.
+    pub fn wal_checkpoint(&self) -> Result<(), StoreError> {
+        self.database.exec(b"PRAGMA wal_checkpoint(TRUNCATE)\0")
+    }
+
+    /// After a read verified the retained anchor against the database, bring
+    /// the anchor up to the head it read. On a full or read-only disk the read
+    /// still answers: the anchor it verified is at or below the head (never
+    /// ahead), so a lagging anchor loses nothing, and the next write or read
+    /// with room repairs it. Any other failure refuses.
+    fn refresh_anchor(guard: &anchor::Guard, head: &anchor::Head) -> Result<(), StoreError> {
+        match guard.publish(head) {
+            Err(error) if error.is_unwritable() => Ok(()),
+            other => other,
+        }
+    }
+
+    fn schema_version(&self) -> Result<i32, StoreError> {
+        let statement = self.database.prepare(b"PRAGMA user_version\0")?;
+        if statement.step()? != SQLITE_ROW {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        // SAFETY: the pragma result has one integer column and is on ROW.
+        Ok(unsafe { sqlite3_column_int(statement.raw.as_ptr(), 0) })
+    }
+
     fn upgrade_schema(&self) -> Result<(), StoreError> {
+        // A current Store is opened without the write lock: reads (and every
+        // `serve` request) neither serialize behind writers nor need a
+        // writable disk. Anything else is re-read under BEGIN IMMEDIATE.
+        if self.schema_version()? == 5 {
+            return Ok(());
+        }
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
         let transaction = Transaction {
             store: self,
@@ -970,7 +1119,7 @@ impl SqliteByteStore {
             }
         }
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(DurableRead {
             head,
             base,
@@ -1023,7 +1172,7 @@ impl SqliteByteStore {
             found.push((*space, key.clone(), version));
         }
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(HistoryRead {
             head,
             entries,
@@ -1074,17 +1223,22 @@ impl SqliteByteStore {
         F: FnMut(PublishPhase),
     {
         Self::validate_bound(record)?;
-        if height == 0
-            || tag.len() > 4096
-            || nodes.len() > 4096
-            || nodes.iter().any(|node| node.key.len() > 4096 || node.value.len() > 4096 || node.space > i64::MAX as u64)
-        {
-            return Err(StoreError::Conflict);
+        if height == 0 {
+            return Err(StoreError::Bound("height 0"));
+        }
+        if tag.len() > 4096 {
+            return Err(StoreError::Bound("tag over 4096 bytes"));
+        }
+        if nodes.len() > 4096 {
+            return Err(StoreError::Bound("more than 4096 nodes"));
+        }
+        if nodes.iter().any(|node| node.key.len() > 4096 || node.value.len() > 4096 || node.space > i64::MAX as u64) {
+            return Err(StoreError::Bound("a node key or value over 4096 bytes, or a node space over i64"));
         }
         let mut proposed_nodes = nodes.to_vec();
         proposed_nodes.sort();
         if proposed_nodes.windows(2).any(|pair| pair[0].space == pair[1].space && pair[0].key == pair[1].key) {
-            return Err(StoreError::Conflict);
+            return Err(StoreError::Bound("duplicate node key"));
         }
         let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
@@ -1182,8 +1336,11 @@ impl SqliteByteStore {
         F: FnMut(PublishPhase),
     {
         Self::validate_bound(record)?;
-        if seq == 0 || tag.len() > 4096 {
-            return Err(StoreError::Conflict);
+        if seq == 0 {
+            return Err(StoreError::Bound("journal sequence 0"));
+        }
+        if tag.len() > 4096 {
+            return Err(StoreError::Bound("tag over 4096 bytes"));
         }
         let guard = anchor::Guard::lock(&self.root)?;
         self.database.exec(b"BEGIN IMMEDIATE\0")?;
@@ -1266,7 +1423,7 @@ impl SqliteByteStore {
             }
         }
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(JournalRead { head, entries })
     }
 
@@ -1322,7 +1479,7 @@ impl SqliteByteStore {
         };
         drop(statement);
         transaction.commit()?;
-        guard.publish(&anchor_head)?;
+        Self::refresh_anchor(&guard, &anchor_head)?;
         Ok(found)
     }
 }
@@ -1493,6 +1650,33 @@ pub fn encode_journal_read(read: &JournalRead) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    fn protocol() -> StoreError {
+        StoreError::Sqlite { code: SQLITE_PROTOCOL, message: "locking protocol".to_owned() }
+    }
+
+    #[test]
+    fn sqlite_protocol_is_retried_and_exhaustion_names_itself() {
+        let mut waits = Vec::new();
+        let mut calls = 0;
+        let got = retry_protocol(|| { calls += 1; if calls < 3 { Err(protocol()) } else { Ok(calls) } }, |d| waits.push(d));
+        assert_eq!(got.unwrap(), 3);
+        assert_eq!(waits.len(), 2, "two waits before the third attempt");
+
+        let mut waits = std::time::Duration::ZERO;
+        let mut calls = 0;
+        let error = retry_protocol::<()>(|| { calls += 1; Err(protocol()) }, |d| waits += d).unwrap_err();
+        assert_eq!(calls, PROTOCOL_ATTEMPTS);
+        assert!(matches!(error, StoreError::WalLockProtocol(n) if n == PROTOCOL_ATTEMPTS));
+        assert!(error.to_string().contains("WAL lock protocol retries exhausted after 8 attempts"), "{error}");
+        assert!(waits < std::time::Duration::from_millis(5_000), "within the busy timeout: {waits:?}");
+
+        // any other failure is returned at once, unretried
+        let mut calls = 0;
+        let other = retry_protocol::<()>(|| { calls += 1; Err(StoreError::Sqlite { code: 1, message: "x".into() }) }, |_| panic!("no wait"));
+        assert!(matches!(other, Err(StoreError::Sqlite { code: 1, .. })));
+        assert_eq!(calls, 1);
+    }
+
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1938,6 +2122,7 @@ mod anchor_tests {
     fn whole_database_replacement_is_detected_by_sibling_anchor() {
         let s = store();
         let backup = s.root().join("earlier.sqlite3");
+        s.wal_checkpoint().unwrap();
         fs::copy(s.database_path(), &backup).unwrap();
         s.durable_append(3, b"third", b"tag-three", &[]).unwrap();
         let root = s.root().to_owned();
@@ -1980,7 +2165,7 @@ mod anchor_tests {
         ));
         assert!(matches!(
             store.durable_append(2, b"r2", b"t2", &[node(2, b"k", b"a"), node(2, b"k", b"b")]),
-            Err(StoreError::Conflict)
+            Err(StoreError::Bound(_))
         ));
         store.durable_append(2, b"r2", b"t2", &[node(2, b"path", b"v2")]).unwrap();
         let request = vec![(1, b"leaf-1".to_vec()), (2, b"path".to_vec()), (2, b"absent".to_vec())];

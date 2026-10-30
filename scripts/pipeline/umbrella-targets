@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# scripts/pipeline/umbrella-targets [--check] -- THE umbrella target list, in one place.
+#
+# Every umbrella build (run-gate-burst, advance-base-burst, mk-lane --verify, publish-artifacts,
+# burst/cold-build, the integrator chains) runs `lake build $(bash scripts/pipeline/umbrella-targets)`.
+# Before 2026-10-17 each caller spelled `Minidregg +Host.Main:leanArts ObjectiveProofs` itself, and
+# the list had two holes: it never built Host.ClientConsentSession, the root of the shipped
+# minidregg-client-consent binary (batch 2 read umbrella-green while that root did not elaborate),
+# and it could not leave out a recorded run (Fixtures) without losing it.
+#
+#   Minidregg                          the research umbrella (every library module under it)
+#   Fixtures                           recorded native runs replayed in Lean (imported by no umbrella)
+#   ObjectiveProofs                    the Objective Bend metatheory
+#   CensusChecks                       the token census's self-test and its scoped run over Fixtures
+#   +Host.Main:leanArts                every Lean root the candidate SHIPS (deploy/candidate/lane-build.sh)
+#   +Host.ClientConsentSession:leanArts
+#
+# The merge gate's exe-roots row separately builds EVERY lean_exe (cv 01a1147a-f80e).
+#
+# --unshipped: the libraries in the list that no shipped root imports (the candidate's `umbrellas` stage).
+#
+# --check (gate row `umbrella-targets`): RED unless the list names Fixtures, Minidregg, ObjectiveProofs, CensusChecks
+# and every Lean root deploy/candidate/lane-build.sh ships; then a self-test drops each required entry
+# in turn and must see the check go red.
+set -euo pipefail
+targets=(Minidregg Fixtures ObjectiveProofs CensusChecks +Host.Main:leanArts +Host.ClientConsentSession:leanArts)
+unshipped=(Fixtures ObjectiveProofs CensusChecks)
+[ "${1:-}" != --unshipped ] || { echo "${unshipped[*]}"; exit 0; }
+[ "${1:-}" = --check ] || { echo "${targets[*]}"; exit 0; }
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel); cd "$root"
+shipped=$( { grep -o -- '--root [A-Za-z0-9_.]*' deploy/candidate/lane-build.sh | awk '{print $2}'
+             grep -oE '[a-zA-Z]+Root: "[A-Za-z0-9_.]+"' deploy/candidate/lane-build.sh | sed 's/.*"\(.*\)"/\1/'; } | sort -u)
+[ -n "$shipped" ] || { echo "umbrella-targets RED: no shipped Lean root found in deploy/candidate/lane-build.sh (pattern disarmed)"; exit 1; }
+required=(Minidregg Fixtures ObjectiveProofs CensusChecks)
+for r in $shipped; do required+=("+$r:leanArts"); done
+missing() { local list=" $* " m=""; for r in "${required[@]}"; do case "$list" in *" $r "*) ;; *) m="$m $r";; esac; done; echo "$m"; }
+m=$(missing "${targets[@]}")
+[ -z "$m" ] || { echo "umbrella-targets RED: the umbrella does not build:$m"; exit 1; }
+for r in "${required[@]}"; do
+  drop=(); for t in "${targets[@]}"; do [ "$t" = "$r" ] || drop+=("$t"); done
+  [ -n "$(missing "${drop[@]}")" ] || { echo "umbrella-targets RED: self-test: dropping $r went unseen"; exit 1; }
+done
+echo "umbrella-targets PASS: ${targets[*]} (shipped roots: $(echo $shipped); self-test: ${#required[@]} drops seen)"

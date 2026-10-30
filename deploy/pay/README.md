@@ -1,6 +1,11 @@
 # The PAY watcher on a Mini box
 
-The pay rail is described in PAY.md. This directory has what runs it on the box:
+The pay rail's state and rules are the Lean pay cell (`Kernel/PayCell.lean`: tariff, deposit address book,
+assignments, enrolments), its observation receiver (`Kernel/PayObservation.lean`) and its self-enrollment
+receiver (`Kernel/PayEnrolReceiver.lean`). Comments in that code and in `native/pay-watcher` cite
+`docs/PAY.md §N` and lane names such as P3b; `docs/PAY.md` describes the rail as shipped and lists
+the lanes in its §6 and §11.9. The Lean modules are the authority. This directory has what runs it
+on the box:
 
 - `mini-pay-watcher`: one tick. It derives the watcher config from the signed pay view, runs
   `pay-watcher`, retains and archives the complete tick, and submits one report with `mini pay observe`;
@@ -9,24 +14,36 @@ The pay rail is described in PAY.md. This directory has what runs it on the box:
 - `mini-pay-watcher.service` / `.timer`: the tick runs as a oneshot in `mini.slice`, 60 s after
   the previous tick finished.
 
-The watcher keeps no ledger, and no cursor except the enrollment row's (P1b, gated by receipts). The ticks connect only through the observer
+The watcher keeps no ledger, and no cursor except the enrollment row's (gated by receipts). The ticks connect only through the observer
 workspace's retained attempts and the kernel's nullifiers.
 
-## The price and the address: one source
+## The price, the address and the network
 
-Ember's ruling (2026-10-04): enrollment costs **50 DREGG per node week**, paid to the Solana pubkey
-**`5N2uUG4TEwvM4acjWRpZ981CJa4p5e9RcuAYQvuUZLp6`** (a fresh devnet-quality key). Both live in
-exactly one file, `enrol-terms.json`, and `render-enrol` turns it into every consumer:
+Ember's ruling (2026-10-04): enrollment costs **50 DREGG per node week**. The price lives in exactly one
+file, `enrol-terms.json`.
+
+**The receiving address is a deployment parameter, never a literal in the repo.** At install time
+`mini-enrol-keygen` (deploy/door/infra/) makes a FRESH Ed25519 key with the candidate's own `mini keygen`:
+the seed stays in `/var/lib/mini-core/secret/enrol.key` (mini-core 0600, with a Solana CLI keypair copy
+`enrol-solana.json` for ember to move what it receives), and it prints the base58 address. `render-enrol`
+reads the public half; `mini pay book` signs it into the book (row 0, the tariff's `enrolIndex`); the
+door's join page shows it from the rendered pin.
+
+**The network is a switch.** `--network mainnet` uses the terms' DREGG mint. `--network devnet` has no
+DREGG mint and needs the devnet mint and token program given explicitly; nothing defaults silently. The
+RPC endpoints follow the same switch (step 4).
 
 ```
 python3 deploy/pay/render-enrol --out OUT --version N --control CAP \
-    --observer-capability C --enrol-capability E [--book-extra FILE]
+    --observer-capability C --enrol-capability E \
+    --enrol-address-file /var/lib/mini-core/secret/enrol.pub --network mainnet \
+    [--book-extra FILE] [--mint BASE58 --token-program BASE58]
 ```
 
 (`CAP` is genesis `factoryControllerCapability`, `C`/`E` are `payObserver.capability` / `.enrolCapability`
 of THIS genesis, `N` exceeds the installed tariff version.) It writes `book.json` and `tariff-on.json`
-(for `mini pay book`, below), `enrol.json` / `enrol-v2.json` (the friend's pin) and `watcher.env`. Nothing
-else in the repo states the address or the rate; `test-render-enrol.py` pins the integers.
+(for `mini pay book`, below), `enrol.json` / `enrol-v2.json` (the pins) and `watcher.env`.
+`test-render-enrol.py` pins the integers and refuses an address in the terms.
 
 **The exact integers.** The mint has 6 decimals (`decimals: 6`, READ `native/pay-watcher/README.md`) and
 `creditPerAtomic` is 1, so 50 DREGG is `weekPriceAtomic = 50000000` atomic units. The tariff's unit is the
@@ -66,7 +83,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
    - the observer's root capability C: verb `observePayment`, target and policy the pay cell;
    - the controller's pay-cell capability K (replace the observer: revoke C, delegate anew);
    - `C_enrol` E: the observer's `installPolicy` on the factory, narrowed by the factory law
-     to self-enrollment (PAY P3b).
+     to self-enrollment.
 
    `native/resource-client/newparticipant-acceptance.sh` does exactly this (subject 30,
    capabilities 4030/4031/4032) and is the template. A genesis without `payObserver` has no
@@ -91,7 +108,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
 
    ```
    mini pay book --dir EMBER-WS --source OUT/book.json       # row 0 = the receiving address; tariff N, enrolIndex null
-   mini pay address --dir FLOAT-WS                           # the enrollment float takes row 0 (prints "index 0 → 5N2u…")
+   mini pay address --dir FLOAT-WS                           # the enrollment float takes row 0 (prints "index 0 → " and the enrollment address)
    mini pay book --dir EMBER-WS --source OUT/tariff-on.json  # tariff N+1 names the enrollment index
    ```
 
@@ -110,28 +127,37 @@ tariff before any enrollment can be decided; it is not an operating source of th
    - Rows are appended at the view's `bookSize`.
    - `"tariff": null` changes only the book.
    - A tariff's version must increase.
-4. **`/etc/mini/pay/rpc.env`** (0600, `mini`):
+4. **`/etc/mini/pay/rpc.env`** (root 0600, read by systemd): the endpoints, which carry the API key.
+   The demo's provider is Helius; its key lives in ember's `~/.helius-key` and the infra lane installs
+   this file from it on the box. It is never in git, argv or a log.
 
    ```
-   PAY_RPC_ENDPOINTS=https://…?api-key=… https://…
+   # --network mainnet
+   PAY_RPC_ENDPOINTS=https://mainnet.helius-rpc.com/?api-key=KEY https://api.mainnet-beta.solana.com
+   # --network devnet
+   PAY_RPC_ENDPOINTS=https://devnet.helius-rpc.com/?api-key=KEY https://api.devnet.solana.com
    ```
 
-   Use two providers. The URLs never reach argv or a log.
+   The watcher requires every configured endpoint to agree (`minEndpoints` defaults to 2), so a second,
+   independent endpoint stands beside Helius; the public cluster endpoint is the default second. With one
+   endpoint only, `PAY_MIN_ENDPOINTS=1` in `watcher.env` is an explicit weakening (one provider's word
+   decides what is final).
 5. **`/etc/mini/pay/watcher.env`:** `render-enrol` writes it (installed with
    `mini-config install pay-watcher-env`). The enrollment variables are all or none:
 
    ```
    PAY_OBSERVER_WS=/var/lib/mini/pay/observer
    PAY_OBSERVER_CAPABILITY=C                 # genesis payObserver.capability
-   PAY_ENROL_INDEX=0                         # from enrol-terms.json (PAY §11: the enrollment row)
-   PAY_JOURNAL_FLOOR=1000000                 # from enrol-terms.json, atomic units
+   PAY_WATCH_ENROL=yes                       # watch the enrollment row
    PAY_ENROL_CAPABILITY=E                    # genesis payObserver.enrolCapability (C_enrol)
    PAY_OPERATOR_SOCKET=/var/lib/mini/store/node/operator/mini.sock
    ```
 
    (`MINI`, `PAY_WATCHER` and `PAY_STATE` are the unit's, set from the candidate; they do not go here.)
-   The file holds neither the address nor the rate: the tick reads both from the Host's signed pay view,
-   i.e. from what step 3 installed.
+   The file holds neither the address, the rate, the enrollment row nor the journal floor: the tick
+   reads all four from the Host's signed pay view (`mini pay watch-config --enrol tariff`), i.e. from
+   what step 3 installed. A floor taken from an operator variable could drift from the tariff's and
+   skip real enrollments for good, so `PAY_ENROL_INDEX`/`PAY_JOURNAL_FLOOR` are refused by name.
 
    **Self-enrollment needs the Host's operator socket.** Ops 117-120 (the self-enrollment plan,
    assembly, submit and lookup) are admitted only on an owner-private operator socket, never on the
@@ -143,8 +169,8 @@ tariff before any enrollment can be decided; it is not an operating source of th
    The old single-socket entry (`run.sh serve`, DEPLOY-2b's `5688775a`) has no operator socket, so
    self-enrollment cannot run there. The operator socket checks the peer UID: the tick must run as the
    Store's uid (`mini`; in split tenancy `install.sh` runs every Mini unit as `mini-core`, tick
-   included). `mini-pay-watcher.service` keeps `ReadWritePaths=/var/lib/mini`, which covers
-   connecting to that socket. Without `PAY_ENROL_CAPABILITY` and `PAY_OPERATOR_SOCKET`, an
+   included). `mini-pay-watcher.service` keeps `ReadWritePaths=/var/lib/mini/pay`; connecting to that socket needs no write access
+   to its directory. Without `PAY_ENROL_CAPABILITY` and `PAY_OPERATOR_SOCKET`, an
    enrollment-index record is left undecided every tick (`enrol-unconfigured`, exit 3) and holds the
    enrollment cursor.
 
@@ -152,7 +178,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
 6. **Install the units:**
 
    ```
-   install -m 755 mini-pay-watcher /opt/mini/bin/
+   install -m 755 mini-pay-watcher /usr/local/lib/mini/
    install -m 644 mini-pay-watcher.service mini-pay-watcher.timer /etc/systemd/system/
    systemctl daemon-reload && systemctl enable --now mini-pay-watcher.timer
    ```
@@ -163,6 +189,11 @@ tariff before any enrollment can be decided; it is not an operating source of th
    watcher events, observations, tip, and cursor transition. A tick awaiting an exact
    observer decision stays in `tick/pending.json`; it is retained before the cursor advances.
    Existing `journal/YYYY-MM-DD.jsonl` files are historical and remain untouched.
+
+   A pending tick the observer can never settle stalls every later payment. After reading why
+   (`tick/pending.json`, the observer workspace's last attempt), move it aside with
+   `mini-pay-watcher --quarantine-tick ID REASON...`: it lands whole in `tick/quarantine/ID.json`
+   and the next tick re-reads its unreceipted transfers at a fresh tip (native/pay-watcher/README.md).
 
    To inspect retained events (including an unresolved pending tick):
 
@@ -188,8 +219,8 @@ tariff before any enrollment can be decided; it is not an operating source of th
   | `confirmed` | Credited. Each record gets a receipt, `pay/receipts/SIGNATURE.ADDRESS` → the attempt. |
   | `stalePay` / `staleAuthority` | An assignment or tariff change landed after the read. Re-read and re-sign once. |
   | `tickTooSoon` / `tipBehindClock` | Wait for the next tick. |
-  | `alreadyConsumed` at a tip equal to the clock | That tip is already reported. Wait. |
-  | `alreadyConsumed` at a newer tip, or a per-observation refusal | Probe the records one per report (below). |
+  | `alreadyConsumed` while the clock is at the tip (in the view read before the submit, or in a view read after the refusal and retained as `after-refusal/`) | That tip is already reported, possibly by another report. Wait. |
+  | `alreadyConsumed` with the clock behind the tip in both views, or a per-observation refusal | Probe the records one per report (below). |
   | anything else | Stop: exit 3 (refused) or 4 (undecided). |
 
   - **Probing.** A refused report consumes nothing, so the client submits the records one per
@@ -201,7 +232,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   looked up exactly (op 111) before anything new is sent. If it was confirmed, its records get
   their receipts. If it is `absent`, its records are simply observed again.
 
-## What one tick decides at the enrollment index (PAY §11)
+## What one tick decides at the enrollment index
 
 - **Never in a report.** A record at the tariff's `enrolIndex` is routed out of the report (the
   observation receiver would refuse the whole report: `enrolIndexNeedsReceiver`). Each one is
@@ -223,7 +254,7 @@ tariff before any enrollment can be decided; it is not an operating source of th
   |---|---|
   | `confirmed` | Decided (enrolled, renewed or journalled). Receipt `pay/receipts/SIGNATURE.ADDRESS` → the attempt; the enrollment cursor may pass it. |
   | `alreadyConsumed` at a newer tip than the clock | Decided before (`already-decided`). Receipt. Next record at the same tip. |
-  | `alreadyConsumed` at the clock's tip, `tipBehindClock` | Wait for the next tip. |
+  | `alreadyConsumed` with the clock at the tip (either view, as above), `tipBehindClock` | Wait for the next tip. |
   | `stalePay` / `staleAuthority` | Re-read and re-sign once. |
   | `verifier:…` (the native verifier failed) | Nothing decided or consumed: wait, exit 4, retry next tick. |
   | `decision:…`, `keyTaken`, `allocation`, … (refused, nothing consumed) | Quarantined, no receipt (read again next tick). Next record. |
@@ -237,9 +268,9 @@ tariff before any enrollment can be decided; it is not an operating source of th
   `enrol-v2.json`) is rendered from `enrol-terms.json` and published with the friend bundle. The client
   refuses a pin whose address differs from the box's book row at the enrollment index, and refuses an
   unset one (`EMBER_ENROL_ADDRESS`). The roster sync reads the same view with
-  `mini enrollment-view --socket PUBLIC/mini.sock`.
+  `mini enrollment-view --socket PUBLIC/mini.sock --host HOST` (the v2 envelope pins the Host image).
 
-## What a friend sees (PAY §5)
+## What a friend sees
 
 ```
 mini> pay address
@@ -277,23 +308,3 @@ The exact admission price buys enrollment and the first week. A member needs an
 additional deposit or renewal remainder to pay for resource/app creation. The
 v1 enrollment memo has no next-key commitment; it does not provide prerotation
 recovery merely because ordinary `mini keygen` supports that feature.
-
-## Current composed rehearsal (2026-10-02)
-
-With the source-matched native Host from `6a085328` (SHA-256
-`9afaf8ecaabde58e42975023260bcc455b519a39ee9e3322582ed64e11a09d42`), the
-adapted client and fresh private stores passed:
-
-- J-PAY-E4 **32/32**: Token-2022 fixture enrollment, exact replay, refusal cases,
-  renewal, rendered forced SSH proxy line, Mini shell subject, own-account read,
-  member-funded content birth (500 → 493), foreign-genesis refusal without debit,
-  cold read, and online/offline ledger audits.
-- J-PAY4 **25/25**: observer killed after submit marker, pending tick recovery,
-  exact lookup, one credit, retained below-floor audit events, and conservation.
-- J-ROSTER **26/26** in dregg-infra: actual private SSH server, live/lapsed keys,
-  forced commands, pin refusals, and rejection of old/malformed views.
-
-Evidence on persvati: `/tmp/pay-entry-a22-4/jpay-e4/rows.tsv`,
-`/tmp/pay-rail-a22-1/rt/jpay4/rows.tsv`, and
-`/tmp/jroster-paid-v3/jroster-result.json`. These use recorded/constructed chain
-responses; no mainnet transaction or public-service change was performed.

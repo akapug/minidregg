@@ -43,20 +43,12 @@ def projectionStream : StreamCodec Projection :=
     (fun (pin,h,host,c,g,d,e,p) => ⟨pin,h,host,c,g,d,e,p⟩)
     (by intro p; cases p; rfl)
 
-def framed {α : Type} (domain : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
-  ResourceBirthCodec.strictCodec {
-    encode := fun value => domain ++ stream.encode value
-    decode := fun bytes => if bytes.take domain.length = domain then
-      stream.toLawful.decode (bytes.drop domain.length) else none
-    decode_encode := by
-      intro value
-      have exact := stream.toLawful.decode_encode value
-      change stream.toLawful.decode (stream.encode value) = some value at exact
-      simp [exact] }
+/-- Each codec is its domain frame, checked, then the canonical stream. -/
 def credentialCodec : LawfulCodec WorkerCredential :=
-  framed "DREGG.PORTABLE.HOME-WORKER/v1".toUTF8.toList credentialStream
+  (StreamCodec.framed "DREGG.PORTABLE.HOME-WORKER/v1".toUTF8.toList credentialStream).toLawful
 def projectionCodec : LawfulCodec Projection :=
-  framed "DREGG.PORTABLE.HOME-DISPATCH-PROJECTION/v1".toUTF8.toList projectionStream
+  (StreamCodec.framed "DREGG.PORTABLE.HOME-DISPATCH-PROJECTION/v1".toUTF8.toList
+    projectionStream).toLawful
 
 def project (pin : PortableHomeTransferFrame.Pin) (state : State) : Projection :=
   ⟨pin,state.home,state.currentHost,state.currentCredential,state.privateGeneration,

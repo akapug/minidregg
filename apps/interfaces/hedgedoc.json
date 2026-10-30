@@ -1,0 +1,150 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "hedgedoc",
+  "interfaceVersion": 1,
+  "appId": "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
+  "packageId": "8452968c1fc59a324106009faa14dedd",
+  "appVersion": "1.12.0",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "note.create": {
+      "description": "Create a new named note with exact markdown content. Existing note names conflict; this does not replace or concurrently edit a note.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8192
+          }
+        },
+        "required": [
+          "note",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "enum": [
+              302,
+              303
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "new/",
+          {
+            "arg": "note",
+            "encoding": "segment"
+          }
+        ],
+        "headers": {
+          "content-type": "text/markdown"
+        },
+        "text": {
+          "arg": "text"
+        },
+        "decode": "status",
+        "status": [
+          302,
+          303
+        ]
+      }
+    },
+    "note.read": {
+      "description": "Read exact persisted markdown by grain-scoped note ID.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string",
+        "maxLength": 1048576
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          {
+            "arg": "note",
+            "encoding": "segment"
+          },
+          "/download"
+        ],
+        "decode": "text",
+        "status": [
+          200
+        ]
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "write",
+      "op": "note.create",
+      "args": {
+        "note": {
+          "context": "runId"
+        },
+        "text": "typed HedgeDoc note\n"
+      }
+    },
+    {
+      "id": "read",
+      "op": "note.read",
+      "args": {
+        "note": {
+          "context": "runId"
+        }
+      },
+      "assert": [
+        {
+          "path": [],
+          "equals": "typed HedgeDoc note\n"
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route"
+  },
+  "sources": [
+    "https://github.com/hedgedoc/hedgedoc/blob/1.12.0/lib/web/note/router.js",
+    "https://github.com/hedgedoc/hedgedoc/blob/1.12.0/lib/web/note/util.js",
+    "https://github.com/hedgedoc/hedgedoc/blob/1.12.0/lib/web/note/controller.js",
+    "apps/packages/hedgedoc/config.json"
+  ]
+}

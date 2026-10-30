@@ -1,0 +1,4 @@
+{"type": "any",
+ "predicates":
+ [{"values": ["1", "7"], "type": "memberOf", "slot": "request/verb"},
+  {"value": "@FOUNDER", "type": "eq", "slot": "request/subject"}]}

@@ -3,7 +3,7 @@
 
 A friend's Nock program is a kernel object: one immutable cell holding the
 MINIMAL jam bytes of the program noun and the `Abi` the kernel reads to build
-the program's sample and decode its writes (NOCK §2.1, §2.3).
+the program's sample and decode its writes (docs/NOCK.md §2.1, §2.3).
 
 * **Code.** `jam` must be exactly `Noun.jam` of the noun it cues to
   (`Noun.canonical`), so a noun has one byte string here (`admissible_jam_unique`,
@@ -43,9 +43,28 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
 * **Immutability.** The single address is ROM: after birth no patch changes it
   (`program_immutable`), and the registry's final-post law pins its bytes.
 -/
-import Compiler.PolicyRecordCodec
-import Theory.ResourceBirth
-import Theory.Noun
+module
+
+public import Compiler.PolicyRecordCodec
+public import Theory.ResourceBirth
+public import Theory.Noun
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Compiler.NockProgramCodec
 
@@ -123,7 +142,7 @@ structure OutputSlot where
   type : SlotType
   deriving DecidableEq, Repr
 
-/-- A NockApp kernel door (NOCK §2.7, N11). The program's jam is the kernel
+/-- A NockApp kernel door (docs/NOCK.md §2.7, N11). The program's jam is the kernel
 trap (booted with `[9 2 0 1]`); the params' arm is the poke axis (NockApp: 23) and
 `peek` the peek axis (NockApp: 22). The door's state (core axis 6) lives as the
 atom of its jam in object field `state` of the command's target 0, its event
@@ -151,7 +170,7 @@ structure Abi where
 /-- A program record. `evaluator` is the registry id of the evaluator the code is
 for (`Compiler.Evaluator.id`; Nock's is `idOf "nock" "4K/Theory.Nock/v1"`): the kernel
 re-executes the program on that evaluator and on no other, and `programId` covers it,
-so the same bytes under another evaluator are another program (EVAL §1.4). -/
+so the same bytes under another evaluator are another program (docs/EVAL.md §1.4). -/
 structure Program where
   evaluator : Digest
   jam : List UInt8
@@ -164,12 +183,12 @@ structure Program where
 /-! ## Codecs `DREGG/ABI/v5`, `DREGG/PROGRAM/v1` -/
 
 def slotTypeStream : StreamCodec SlotType :=
-  StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
+  StreamCodec.retract StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
     (fun n => if n = 1 then .int else if n = 2 then .noun else .nat)
     (by intro value; cases value <;> rfl)
 
 def contextStream : StreamCodec ContextMode :=
-  StreamCodec.xmap StreamCodec.nat (fun | .live => 0 | .pinned => 1)
+  StreamCodec.retract StreamCodec.nat (fun | .live => 0 | .pinned => 1)
     (fun n => if n = 1 then .pinned else .live) (by intro value; cases value <;> rfl)
 
 def sampleSlotStream : StreamCodec SampleSlot :=
@@ -212,13 +231,11 @@ def programStream : StreamCodec Program :=
     (fun p => (p.evaluator, p.jam, p.abi, p.params)) (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- A frame-tagged stream codec that accepts only its own re-encoding. -/
+/-- A frame-tagged stream codec. The frame is checked and the stream is
+canonical, so it accepts exactly its own encodings (`framedDecode_canonical`). -/
 def framedDecode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
     (bytes : List UInt8) : Option α :=
-  if bytes.take frame.length = frame then
-    match stream.toLawful.decode (bytes.drop frame.length) with
-    | some value => if frame ++ stream.encode value = bytes then some value else none
-    | none => none
+  if bytes.take frame.length = frame then stream.toLawful.decode (bytes.drop frame.length)
   else none
 
 theorem framedDecode_encode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
@@ -232,11 +249,10 @@ theorem framedDecode_canonical {α : Type} {frame : List UInt8} {stream : Stream
     frame ++ stream.encode value = bytes := by
   unfold framedDecode at accepted
   split at accepted
-  · split at accepted
-    · split at accepted
-      · cases accepted; assumption
-      · cases accepted
-    · cases accepted
+  · rename_i framed
+    rw [stream.toLawful_canonical _ _ accepted]
+    conv => rhs; rw [← List.take_append_drop frame.length bytes]
+    rw [framed]
   · cases accepted
 
 def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α where
@@ -247,7 +263,7 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
 /-- `DREGG/ABI/v5` -/
 def abiFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 65, 66, 73, 47, 118, 53]
-/-- `DREGG/PROGRAM/v1` (E3, EVAL §1.4: the evaluator-generic record — evaluator id, code, ABI,
+/-- `DREGG/PROGRAM/v1` (E3, docs/EVAL.md §1.4: the evaluator-generic record — evaluator id, code, ABI,
 params; the `DREGG/NOCK/PROGRAM/v1..v3` frames do not decode, and every `programId` changes). -/
 def programFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
@@ -469,7 +485,7 @@ theorem padded_refused (jam : List UInt8) (canonical : Noun.canonical jam = true
     simp at this
 
 /-- An admitted program's bytes are a function of its noun: `programId` and
-`codeDigest` are functions of the program (NOCK §2.10), never of an encoding
+`codeDigest` are functions of the program (docs/NOCK.md §2.10), never of an encoding
 choice. -/
 theorem admissible_jam_unique {left right : Program} (hl : Noun.canonical left.jam = true)
     (hr : Noun.canonical right.jam = true) (same : Noun.cue left.jam = Noun.cue right.jam) :
@@ -525,39 +541,43 @@ def wireFrame : List UInt8 :=
 def encode (state : Store layout) : List UInt8 :=
   wireFrame ++ payloadStream.encode (wireVersion, programAt state)
 
-def decodeRaw (bytes : List UInt8) : Option (Store layout) :=
+/-- The frame is checked, `payloadStream` is canonical, and the version is
+pinned, so the decoder accepts exactly the encodings (`decode_canonical`):
+`programAt (stateOfOption program) = program`. -/
+def decode (bytes : List UInt8) : Option (Store layout) :=
   if bytes.take wireFrame.length = wireFrame then do
     let (version, program) ← payloadStream.toLawful.decode (bytes.drop wireFrame.length)
     if version = wireVersion then some (stateOfOption program) else none
   else none
 
-@[simp] theorem decodeRaw_encode (state : Store layout) :
-    decodeRaw (encode state) = some state := by
+@[simp] theorem decode_encode (state : Store layout) : decode (encode state) = some state := by
   have decoded := payloadStream.toLawful.decode_encode (wireVersion, programAt state)
   change payloadStream.toLawful.decode
     (payloadStream.encode (wireVersion, programAt state)) =
       some (wireVersion, programAt state) at decoded
-  simp [decodeRaw, encode, decoded, ← state_ext state]
-
-def decode (bytes : List UInt8) : Option (Store layout) := do
-  let state ← decodeRaw bytes
-  if encode state = bytes then some state else none
-
-@[simp] theorem decode_encode (state : Store layout) : decode (encode state) = some state := by
-  simp [decode]
+  simp [decode, encode, decoded, ← state_ext state]
 
 theorem decode_canonical {bytes : List UInt8} {state : Store layout}
     (accepted : decode bytes = some state) : encode state = bytes := by
   unfold decode at accepted
-  cases raw : decodeRaw bytes with
-  | none => simp [raw] at accepted
-  | some selected =>
-      simp only [raw, bind, Option.bind] at accepted
+  split at accepted
+  · rename_i framed
+    cases payload : payloadStream.toLawful.decode (bytes.drop wireFrame.length) with
+    | none => simp [payload] at accepted
+    | some pair =>
+      obtain ⟨version, program⟩ := pair
+      simp only [payload, bind, Option.bind] at accepted
       split at accepted
-      next canonical =>
+      · rename_i current
         cases Option.some.inj accepted
-        exact canonical
-      next => contradiction
+        subst current
+        have exact := payloadStream.toLawful_canonical _ _ payload
+        simp only [encode, programAt_stateOfOption]
+        rw [exact]
+        conv => rhs; rw [← List.take_append_drop wireFrame.length bytes]
+        rw [framed]
+      · cases accepted
+  · cases accepted
 
 theorem wrong_version_refused (version : Nat) (program : Option Program)
     (different : version ≠ wireVersion) :
@@ -565,7 +585,7 @@ theorem wrong_version_refused (version : Nat) (program : Option Program)
   have decoded := payloadStream.toLawful.decode_encode (version, program)
   change payloadStream.toLawful.decode (payloadStream.encode (version, program)) =
     some (version, program) at decoded
-  simp [decode, decodeRaw, decoded, different]
+  simp [decode, decoded, different]
 
 def stateCodec : LawfulCodec (Store layout) where
   encode := encode

@@ -1,0 +1,46 @@
+# /etc/systemd/system/mini-web-spawn.service — the web front end's ONE privileged process
+# (minidregg docs/WEB-FRONTEND-2026-10-27.md §2): root, synchronous, ~600 lines. It consumes the
+# login codes the door's processor wrote under /var/lib/mini-web-spawn/logins, mints sessions, and
+# starts `mini shell` (under a pty) and `mini web --body` as mini-s-NAME through the same setpriv
+# line mini-session-run uses, inside the member's user-UID.slice (systemd-run --scope). It refuses
+# any peer but uid mini-web, any malformed line, any account that is not a hosted member with its
+# 0700 home, and any session it did not itself create.
+[Unit]
+Description=Mini web helper (root: spawns member shells and bodies for the gateway)
+After=mini-store.service
+Requires=mini-web-spawn.socket
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mini-web-spawn --state /var/lib/mini-web-spawn --run /run/mini-web-spawn --gateway mini-web
+Restart=on-failure
+RestartSec=2
+Slice=mini.slice
+UMask=0077
+StateDirectory=mini-web-spawn
+StateDirectoryMode=0700
+RuntimeDirectory=mini-web-spawn
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+# Root, but only what spawning as another uid needs: setuid/setgid, the member homes, the pty.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_KILL CAP_SYS_ADMIN
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mini-web-spawn /run/mini-web-spawn /var/lib/mini/sessions
+ReadOnlyPaths=/var/lib/mini/store /var/lib/mini/candidate /usr/local/lib/mini
+# No ProtectHome: the member homes are under /var/lib/mini/sessions, but setpriv needs the passwd
+# database and the pty needs /dev/pts (so no PrivateDevices either).
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+SystemCallArchitectures=native
+MemoryMax=256M
+TasksMax=512
+[Install]
+WantedBy=multi-user.target

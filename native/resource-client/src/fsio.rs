@@ -88,6 +88,12 @@ pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     mini_sdk::fsread::read_regular(path, 1, limit).map_err(String::from)
 }
 
+/// Repair `path` from the `seal.record` beside it if it is a cache the record names
+/// (`mini_sdk::phase`, invariant 3), for a reader that does not go through [`read_bounded`].
+pub(crate) fn repair_cache(path: &Path) -> Result<()> {
+    mini_sdk::phase::repair_file(path, std::fs::read(path).ok().as_deref()).map(|_| ()).map_err(String::from)
+}
+
 /// [`read_bounded`], an empty file also acceptable.
 pub(crate) fn read_bounded_or_empty(path: &Path, limit: usize) -> Result<Vec<u8>> {
     mini_sdk::fsread::read_regular(path, 0, limit).map_err(String::from)
@@ -100,7 +106,7 @@ pub(crate) fn check_private_dir(path: &Path) -> Result<()> {
 
 /// Refuse unless `socket` is an owner-private socket under an owner-private directory.
 pub(crate) fn check_private_socket(socket: &Path) -> Result<()> {
-    mini_sdk::private::check_socket(socket).map_err(String::from)
+    crate::operator_peer::check_socket(socket)
 }
 
 /// Create (0700) or accept an owner-private directory.

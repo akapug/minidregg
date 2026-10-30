@@ -1,5 +1,24 @@
 /- Exact durable recovery intent with current package guard, original-claim stable nullifier and complete event66 evidence. The receiver must bind historical admission and confirm the complete post-CAS image. -/
-import Kernel.ApplicationFailedStartRecoveryAdmission
+module
+
+public import Kernel.ApplicationFailedStartRecoveryAdmission
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationFailedStartRecoveryCore
 
@@ -29,7 +48,8 @@ def extraGuards {config : Config} {store : StoreIdentity} {head : Head store} {g
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
     (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
     List ReadGuard :=
-  if ingress.source.needsPackageWrite then [] else [packageGuard accepted]
+  accepted.custodian.guard ::
+    if ingress.source.needsPackageWrite then [] else [packageGuard accepted]
 
 theorem extraGuards_readonly {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -37,11 +57,14 @@ theorem extraGuards_readonly {config : Config} {store : StoreIdentity} {head : H
     (guard : ReadGuard) (member : guard ∈ extraGuards accepted) :
     guard.cellId ∉ (DeclaredResourceController.writes accepted.prepared).map DataWrite.cellId := by
   unfold extraGuards at member
-  split at member
-  · simp at member
-  · simp only [List.mem_singleton] at member
-    subst guard
-    exact accepted.packageGuardReadOnly (by simp_all)
+  rcases List.mem_cons.mp member with platform | rest
+  · subst guard
+    exact accepted.platformReadOnly
+  · split at rest
+    · simp at rest
+    · simp only [List.mem_singleton] at rest
+      subst guard
+      exact accepted.packageGuardReadOnly (by simp_all)
 
 theorem extraGuards_current {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -49,33 +72,40 @@ theorem extraGuards_current {config : Config} {store : StoreIdentity} {head : He
     (guard : ReadGuard) (member : guard ∈ extraGuards accepted) :
     guard.expectedRoot = ground.view.model.roots guard.cellId := by
   unfold extraGuards at member
-  split at member
-  · simp at member
-  · simp only [List.mem_singleton] at member
-    subst guard
-    exact accepted.packageRead.physicalCurrent
+  rcases List.mem_cons.mp member with platform | rest
+  · subst guard
+    exact accepted.custodian.guard_current
+  · split at rest
+    · simp at rest
+    · simp only [List.mem_singleton] at rest
+      subst guard
+      exact accepted.packageRead.physicalCurrent
 
 /-- Storage charge is the DRC's actual output write bytes plus the special
 event ingress and new nullifier bytes. The ordinary event does not occupy a
 second stored record. Extra work counts the package observation and physical
-custodian verification, without charging an unperformed OS effect. -/
-def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+custodian verification, without charging an unperformed OS effect. `chargeOf`
+takes the already-derived writes and source charge, so its lane closure captures values. -/
+def chargeOf {config : Config} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
-    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
-    Charge :=
-  let ws := DeclaredResourceController.writes accepted.prepared
-  let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
-  let base := DeclaredResourceController.sourceChargeFrom accepted.prepared ingress.signed ws guards
+    (ws : List DataWrite) (base : Charge) : Charge :=
   fun dimension => match dimension with
     | .incidences => base .incidences + 1
     | .turnBytes => ingress.canonicalBytes.length
     | .witnessBytes => ingress.canonicalBytes.length
     | .proofWork => base .proofWork + 2
     | .memoryTouches => base .memoryTouches + 2
-    | .storageBytes => base .storageBytes + ingress.canonicalBytes.length +
-        (ApplicationFailedStartRecoveryIngress.stableNullifier ingress).canonicalBytes.length +
-        (ingress.creationMarker.map (·.canonicalBytes.length)).getD 0
+    | .storageBytes => DeployedCharge.storageCharge ground.view ws (ApplicationFailedStartRecoveryIngress.event ingress)
     | other => base other
+
+def charge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
+    Charge :=
+  let ws := DeclaredResourceController.writes accepted.prepared
+  let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
+  chargeOf (config := config) (ground := ground) (ingress := ingress) ws
+    (DeclaredResourceController.sourceChargeFrom accepted.prepared ingress.signed ws guards)
 
 def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -83,6 +113,7 @@ def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground
     DataIntent rootBytes := by
   let ws := DeclaredResourceController.writes accepted.prepared
   let guards := DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
+  let base := DeclaredResourceController.sourceChargeFrom accepted.prepared ingress.signed ws guards
   have guarded : ∀ guard ∈ guards, guard.cellId ∉ ws.map DataWrite.cellId := by
     intro guard member
     rcases List.mem_append.mp member with old | extra
@@ -98,11 +129,18 @@ def intent {config : Config} {store : StoreIdentity} {head : Head store} {ground
           config.profile.semantics (ingress.source.command config.deployment.domain config.profile.semantics)),
         ApplicationFailedStartRecoveryIngress.stableNullifier ingress] ++
         ingress.creationMarker.toList
-      exactCharge := charge accepted
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+        (chargeOf (config := config) (ground := ground) (ingress := ingress) ws base)).toCharge
       event := ApplicationFailedStartRecoveryIngress.event ingress
       subject := some (ingress.source.command config.deployment.domain config.profile.semantics).subject
       postRootsBound := DeclaredResourceController.writes_roots_bound accepted.prepared
       guardsReadOnly := guarded }
+
+theorem intent_exactCharge {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
+    (intent accepted).exactCharge = charge accepted := by
+  exact Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 theorem intent_event {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
     {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
@@ -146,5 +184,28 @@ theorem intent_package_guard_current {config : Config} {store : StoreIdentity} {
     apply List.mem_append_right
     simp [extraGuards, readOnly]
   · exact accepted.packageRead.physicalCurrent
+
+
+/-- **The completion custodian key is the platform record's on the guarded ground.** The
+physical report is checked under `accepted.custodian.key` (the type of `physical`); that key
+is the platform record's on `ground.view`, and the platform cell's root on that ground is one
+of the completion's read guards, so an install that rotates the key between preparation and
+commit makes the completion stale. Teeth: `CompletionCustodianKey.Read.stale` (no other key)
+and `CompletionCustodianKey.select_unavailable` (an absent cell refuses by name). -/
+theorem keyCurrent {config : Config} {store : StoreIdentity} {head : Head store} {ground : Ground config.deployment}
+    {ingress : ApplicationFailedStartRecoveryIngress.Ingress}
+    (accepted : ApplicationFailedStartRecoveryAdmission.Candidate config head ground ingress) :
+    PlatformCellDomain.recordOn config.deployment ground.view = some accepted.custodian.record ∧
+      accepted.custodian.record.completionCustodianKey = some accepted.custodian.key ∧
+      accepted.custodian.guard ∈ (intent accepted).readGuards ∧
+      accepted.custodian.guard.cellId = PlatformCellDomain.cellIdOf config.deployment ∧
+      accepted.custodian.guard.expectedRoot =
+        ground.view.model.roots (PlatformCellDomain.cellIdOf config.deployment) := by
+  refine ⟨accepted.custodian.current.1, accepted.custodian.current.2, ?_, rfl, rfl⟩
+  change accepted.custodian.guard ∈
+    DeclaredResourceController.readGuards accepted.prepared ++ extraGuards accepted
+  exact List.mem_append_right _ (List.mem_cons.mpr (Or.inl rfl))
+
+#assert_axioms keyCurrent
 
 end Minidregg.Kernel.ApplicationFailedStartRecoveryCore

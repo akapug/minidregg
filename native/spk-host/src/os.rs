@@ -2,6 +2,7 @@
 //! resident/worker switch only mapped namespace identities and drop every cap.
 //! Host-root volume operations are called by the installed one-shot helper.
 //! `fixture-os` remains disposable modeled receiving, never a release route.
+use crate::io_context::IoContext;
 
 pub(crate) use minidregg_compatible_upgrade_custody::root_owner;
 
@@ -10,23 +11,46 @@ pub(crate) use crate::fixture_os::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
     pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
-    executes_as_app,
 };
 #[cfg(not(feature = "fixture-os"))]
 pub(crate) use real::{
     app_owner, cgroup_events, child_assume_app_identity, drop_to_identity,
     holds_exactly_identity,
     pid_cgroup, runtime_units, self_cgroup, systemctl, var_filesystem,
-    executes_as_app,
 };
 
 #[cfg(not(feature = "fixture-os"))]
 mod real {
-    /// Whether a file (owner, group, mode) is executable by the app identity the
-    /// spawn switches to: its owner, group or other execute bit.
-    pub(crate) fn executes_as_app(owner: u32, group: u32, mode: u32, app_uid: u32, app_gid: u32) -> bool {
-        crate::spawn_gate::execute_mode_permits(owner, group, mode, app_uid, app_gid)
+    #[repr(C)]
+    struct CapHeader {
+        version: u32,
+        pid: libc::c_int,
     }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CapData {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+
+    /// Async-signal-safe: clear the effective, permitted and inheritable sets
+    /// (called in the forked gate child after the UID switch).
+    fn clear_capabilities() -> bool {
+        const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+        let header = CapHeader {
+            version: LINUX_CAPABILITY_VERSION_3,
+            pid: 0,
+        };
+        let data = [CapData {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        }; 2];
+        unsafe { libc::syscall(libc::SYS_capset, &header as *const CapHeader, data.as_ptr()) == 0 }
+    }
+
     use std::io;
     use std::os::fd::RawFd;
     use std::path::{Path, PathBuf};
@@ -90,7 +114,8 @@ mod real {
     }
 
     fn capability_sets_zero() -> io::Result<bool> {
-        let status = std::fs::read_to_string("/proc/thread-self/status")?;
+        use crate::io_context::IoContext;
+        let status = std::fs::read_to_string("/proc/thread-self/status").ctx("read", &"/proc/thread-self/status")?;
         for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
             let value = status
                 .lines()
@@ -140,7 +165,7 @@ mod real {
             || unsafe { libc::setresgid(gid, gid, gid) } != 0
             || unsafe { libc::setresuid(uid, uid, uid) } != 0
             || unsafe { libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) } != 0
-            || !crate::setid_bound::clear_capabilities()
+            || !clear_capabilities()
             || unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0
         {
             return Err(io::Error::last_os_error());
@@ -166,7 +191,7 @@ mod real {
             // between two non-root UIDs; clear all of them so bubblewrap starts
             // with none.
             if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0
-                || !crate::setid_bound::clear_capabilities()
+                || !clear_capabilities()
             {
                 return false;
             }

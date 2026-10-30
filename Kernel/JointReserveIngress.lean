@@ -3,10 +3,30 @@ Raw bytes reconstruct a claim only. The receiver repeats the actual selected
 ordinary call, every purpose-specific signature/law, and source control method
 at precisely this source prefix. It never imports an old AcceptedInvocation.
 -/
-import Kernel.JointReceiverAdmission
-import Kernel.NativeHostContext
-import Compiler.PrivateSuccessorCustodyCodec
-import Kernel.NativeHostServed
+module
+
+public import Kernel.JointReceiverAdmission
+public import Kernel.NativeHostContext
+public import Compiler.PrivateSuccessorCustodyCodec
+public import Kernel.NativeHostServed
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.JointReserveIngress
 open Minidregg.Theory
 open Minidregg.Compiler
@@ -26,15 +46,13 @@ def frame : List UInt8 := "DREGG/JOINT/SOURCE-RESERVE/v1".toUTF8.toList
 
 def decodeSource (bytes : List UInt8) : Option ReserveSource := do
   if bytes.take frame.length != frame then none else
-  let source ← reserveSourceStream.toLawful.decode (bytes.drop frame.length)
-  if reserveSourceBytes source != bytes then none else some source
+  reserveSourceStream.toLawful.decode (bytes.drop frame.length)
 
 /-- Structural plan reconstruction checks exact byte syntax, distinct source
 participants and the already required final signer/nullifier. It does not claim
 that an arbitrary submitter invented a complete hidden evaluator footprint. -/
 def decodePlan (bytes : List UInt8) : Option (Plan Descriptor) := do
   let candidate ← (candidateStream descriptorStream).toLawful.decode bytes
-  if (candidateStream descriptorStream).encode candidate != bytes then none else
   if distinct : candidate.required.Nodup then
     let index ← candidate.participants.findIdx? (fun p => p.domain == candidate.lastSigner)
     if bound : index < candidate.participants.length then

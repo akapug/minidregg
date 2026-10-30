@@ -3,10 +3,15 @@ named by its identity. Loading does not parse or type the artifact's typed core:
 a receiver re-runs the front end on the artifact's package and requires the core
 to be that replay's rendering (`ObjectiveBendPublication.Replayed`), then types the
 replayed term. Consumers retain the actual current read and its CAS dependency. -/
-import Compiler.ObjectiveBendSourceArtifact
-import Kernel.ContentResource
-import Kernel.ResourceObservationAdmission
-import Theory.AssertAxioms
+module
+
+public import Compiler.ObjectiveBendSourceArtifact
+public import Kernel.ContentResource
+public import Kernel.ResourceObservationAdmission
+public import Theory.AssertAxioms
+
+@[expose] public section
+
 namespace Minidregg.Kernel.ObjectiveBendArtifactSource
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -24,6 +29,13 @@ structure Loaded (store : ContentResource.ContentStore) (id : AtomId) (maxBytes 
   artifact : ObjectiveBendSourceArtifact.Artifact
   decoded : ObjectiveBendSourceArtifact.decode record.payload = some artifact
   identityExact : ObjectiveBendSourceArtifact.identity artifact = id.digest
+theorem Loaded.sound {store : ContentResource.ContentStore} {id : AtomId} {maxBytes : Nat}
+    (loaded : Loaded store id maxBytes) :
+    Hyperdocument.lookup store .atoms id = some loaded.record ∧ loaded.record.tombstonedAt.isNone = true ∧
+      loaded.record.kind = .inlineObject ObjectiveBendSourceArtifact.schema ∧
+      ObjectiveBendSourceArtifact.decode loaded.record.payload = some loaded.artifact ∧
+      ObjectiveBendSourceArtifact.identity loaded.artifact = id.digest :=
+  ⟨loaded.recordExact, loaded.live, loaded.schemaExact, loaded.decoded, loaded.identityExact⟩
 
 def lookup (store : ContentResource.ContentStore) (id : AtomId) (maxBytes : Nat) :
     Option (Loaded store id maxBytes) := do
@@ -58,7 +70,7 @@ structure Current {F : Type} [Field F] [DecidableEq F]
     (capability : CapabilityId) (contextBytes : List UInt8)
     (prepared : ResourceObservationAdmission.Prepared context profile wanted marker capability contextBytes)
     (envelope : List UInt8) (store : ContentResource.ContentStore) (id : AtomId) (maxBytes : Nat) where
-  private mk ::
+  mk ::
   read : ResourceObservationAdmission.Checked prepared envelope
   fullScope : ResourceObservationAdmission.readerFields context kind capability = none
   payload : CellState.Materialized (CanonicalCellRegistry.materializer .content)

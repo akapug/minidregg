@@ -10,9 +10,28 @@ event from verified history, read-guard this resource's current page, and check
 the current participant/app/session capabilities and laws at one image.
 Participant-owned enrollment is only a requested role, never the ceiling.
 -/
-import Kernel.ApplicationPermissionSchema
-import Kernel.ApplicationDispatchManifest
-import Kernel.ContentResource
+module
+
+public import Kernel.ApplicationPermissionSchema
+public import Kernel.ApplicationDispatchManifest
+public import Kernel.ContentResource
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.ApplicationDispatchAuthority
 open Minidregg.Compiler
@@ -124,17 +143,7 @@ def ticketStream : StreamCodec Ticket :=
 private def ticketFrame : List UInt8 :=
   "DREGG/APPLICATION/SHARE-TICKET/v3".toUTF8.toList
 
-private def rawTicketCodec : LawfulCodec Ticket where
-  encode ticket := ticketFrame ++ ticketStream.encode ticket
-  decode bytes := if bytes.take ticketFrame.length = ticketFrame then
-    ticketStream.toLawful.decode (bytes.drop ticketFrame.length) else none
-  decode_encode := by
-    intro ticket
-    have decoded := ticketStream.toLawful.decode_encode ticket
-    change ticketStream.toLawful.decode (ticketStream.encode ticket) = some ticket at decoded
-    simp [decoded]
-
-def ticketCodec : LawfulCodec Ticket := ResourceBirthCodec.strictCodec rawTicketCodec
+def ticketCodec : LawfulCodec Ticket := (StreamCodec.framed ticketFrame ticketStream).toLawful
 
 theorem ticket_decode_encode (ticket : Ticket) :
     ticketCodec.decode (ticketCodec.encode ticket) = some ticket :=

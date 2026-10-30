@@ -3,8 +3,28 @@ its actual separate device catalog. This is semantic image verification, never
 query authority. Catalog bytes/rows may be exported only through separately
 admitted signed observation of that catalog. No guessed registry lookup exists:
 its identifier is committed inside every roster entry. -/
-import Kernel.ResourceObservationAdmission
-import Compiler.ObjectAudienceRoster
+module
+
+public import Kernel.ResourceObservationAdmission
+public import Compiler.ObjectAudienceRoster
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
+
 namespace Minidregg.Kernel.AudienceRosterBinding
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -45,6 +65,14 @@ structure Checked (context : Context deployment) (state : State) (roster : Roste
   catalogExact : catalogPayload context source = some payload
   entriesExact : payload.2 = (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries
   snapshotExact : state.deviceSnapshot = (context.view.model.roots ⟨source⟩).value
+theorem Checked.sound {context : Context deployment} {state : State} {roster : Roster}
+    (checked : Checked context state roster) :
+    ObjectAudienceRoster.Bound state roster roster.entries ∧
+    catalogPayload context checked.source = some checked.payload ∧
+    checked.payload.2 =
+      (StreamCodec.list ObjectAudienceRoster.entryStream).encode roster.entries ∧
+    state.deviceSnapshot = (context.view.model.roots ⟨checked.source⟩).value :=
+  ⟨checked.bound, checked.catalogExact, checked.entriesExact, checked.snapshotExact⟩
 
 def Checked.deviceRoot {context : Context deployment} {state : State} {roster : Roster}
     (checked : Checked context state roster) : Nat :=
@@ -83,6 +111,15 @@ structure CheckedBytes (context : Context deployment) (state : State) (bytes : L
   roster : Roster
   decoded : ObjectAudienceRoster.decode bytes = some roster
   checked : Checked context state roster
+theorem CheckedBytes.sound {context : Context deployment} {state : State} {bytes : List UInt8}
+    (checked : CheckedBytes context state bytes) :
+    ObjectAudienceRoster.decode bytes = some checked.roster ∧
+    ObjectAudienceRoster.Bound state checked.roster checked.roster.entries ∧
+    catalogPayload context checked.checked.source = some checked.checked.payload ∧
+    checked.checked.payload.2 =
+      (StreamCodec.list ObjectAudienceRoster.entryStream).encode checked.roster.entries :=
+  ⟨checked.decoded, checked.checked.bound, checked.checked.catalogExact,
+    checked.checked.entriesExact⟩
 
 def checkBytes (context : Context deployment) (state : State) (bytes : List UInt8) :
     Option (CheckedBytes context state bytes) := do

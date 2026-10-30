@@ -25,7 +25,7 @@ bo=$base/.lake/build/lib/lean/${M//.//}.olean
 before=$(sha256sum "$bo" | cut -d' ' -f1)
 "$here/clone-warm" "$base" "$S/src" >/dev/null || exit 1
 cd "$S/src"
-[ -n "$D" ] || D=$(grep -rlE "^import +$M\$" --include=*.lean Kernel Host Compiler Theory Pred Effects 2>/dev/null | head -1 | sed 's|\.lean$||; s|/|.|g')
+[ -n "$D" ] || D=$(grep -rlE "^((public|meta|private) +)*import +$M\$" --include=*.lean Kernel Host Compiler Theory Pred Effects 2>/dev/null | head -1 | sed 's|\.lean$||; s|/|.|g')
 [ -n "$D" ] || pipeline_die "no importer of $M found; set SELFTEST_IMPORTER"
 fails=0; ok() { echo "ok   $*"; }; bad() { echo "FAIL $*"; fails=$((fails+1)); }
 cp -p "$mf" "$mf.t" && mv -f "$mf.t" "$mf"      # never write a shared inode in place

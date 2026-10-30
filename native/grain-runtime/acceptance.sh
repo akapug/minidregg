@@ -7,18 +7,14 @@ if [ "$#" -ne 2 ]; then
   exit 2
 fi
 
-# A hosted bootstrap may supply the exact task namespace, provider capacity,
-# tariff, and genesis policy as one operator-owned profile.  This mode stops
-# before the historical 700x end-to-end journey below.
-PROFILE=${BIRTH_BOOTSTRAP_PROFILE:-}
 # ACCEPTANCE_TASK_BASE moves the four task IDs to BASE+1..BASE+4 so a
 # bootstrap-only Store can run beside a live controller unit for 7001.
 TASK_BASE=${ACCEPTANCE_TASK_BASE:-7000}
 case $TASK_BASE in
   7000) ;;
   [1-9][0-9][0-9]0|[1-9][0-9][0-9][0-9]0)
-    [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ -z "$PROFILE" ] || {
-      echo 'ACCEPTANCE_TASK_BASE requires BOOTSTRAP_ONLY=1 and no profile' >&2; exit 2;
+    [ "${BOOTSTRAP_ONLY:-0}" = 1 ] || {
+      echo 'ACCEPTANCE_TASK_BASE requires BOOTSTRAP_ONLY=1' >&2; exit 2;
     } ;;
   *) echo 'ACCEPTANCE_TASK_BASE must be a multiple of ten from 1000 to 99990' >&2; exit 2 ;;
 esac
@@ -27,50 +23,6 @@ TOOL_TASK=$((TASK_BASE + 2))
 PUBLICATION_TARGET=$((TASK_BASE + 3))
 PROVIDER_TASK=$((TASK_BASE + 4))
 PROVIDER_BUDGET=50
-if [ -n "$PROFILE" ]; then
-  [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] || {
-    echo 'profiled bootstrap requires BOOTSTRAP_ONLY=1 PROVIDER_BOOTSTRAP=1' >&2
-    exit 2
-  }
-  [ -f "$PROFILE" ] || { echo 'bootstrap profile is absent' >&2; exit 2; }
-  jq -e '
-    type == "object" and
-    (((keys - ["miniWrapper"]) | sort) == ["controllerTask","factoryPredicate","operator","providerBudget",
-                       "providerTask","publicationTarget","runtimeTemplate","toolTask"]) and
-    (.miniWrapper == null or
-      (.miniWrapper | type == "string" and test("^[A-Za-z0-9_-][A-Za-z0-9._-]*$") and . != "..")) and
-    ([.controllerTask,.toolTask,.publicationTarget,.providerTask] |
-      all(type == "string" and test("^[1-9][0-9]{0,8}$")) and (unique | length) == 4) and
-    (.providerBudget | type == "string" and test("^[1-9][0-9]{0,8}$")) and
-    (.providerBudget | tonumber >= 67) and
-    (.factoryPredicate | type == "object") and
-    (.operator | type == "object" and
-      ((keys | sort) == ["continuityProviderResourceId","grainBirthTariff","providerMetering"])) and
-    (.operator.providerMetering.providerResourceId | tostring) == .providerTask and
-    (.operator.continuityProviderResourceId | tostring) == .providerTask and
-    (.operator.grainBirthTariff.base | type == "number" and . >= 0 and . == floor) and
-    (.operator.grainBirthTariff.perBirth | type == "number" and . >= 0 and . == floor) and
-    (.runtimeTemplate | type == "string" and startswith("/"))
-  ' "$PROFILE" >/dev/null || { echo 'bootstrap profile is invalid' >&2; exit 2; }
-  CONTROLLER_TASK=$(jq -er .controllerTask "$PROFILE")
-  TOOL_TASK=$(jq -er .toolTask "$PROFILE")
-  PUBLICATION_TARGET=$(jq -er .publicationTarget "$PROFILE")
-  PROVIDER_TASK=$(jq -er .providerTask "$PROFILE")
-  PROVIDER_BUDGET=$(jq -er .providerBudget "$PROFILE")
-  [ -f "$(jq -er .runtimeTemplate "$PROFILE")" ] || {
-    echo 'runtime template is absent' >&2; exit 2;
-  }
-  jq -e --slurpfile p "$PROFILE" '
-    .task == $p[0].controllerTask and
-    .toolTask.task == $p[0].toolTask and
-    .providerTask.task == $p[0].providerTask and
-    (.toolTask.reserve | type == "string" and test("^[1-9][0-9]*$") and tonumber <= 50) and
-    (.providerTask.reserve | type == "string" and test("^[1-9][0-9]*$") and tonumber <= ($p[0].providerBudget | tonumber)) and
-    (.stateDir | type == "string" and test("^/.+/runtime-state$"))
-  ' "$(jq -er .runtimeTemplate "$PROFILE")" >/dev/null || {
-    echo 'runtime template task IDs or reserve disagree with bootstrap profile' >&2; exit 2;
-  }
-fi
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
@@ -101,11 +53,6 @@ if [ -e "$EVIDENCE" ]; then
 fi
 mkdir -m 700 "$EVIDENCE"
 EVIDENCE=$(CDPATH='' cd -- "$EVIDENCE" && pwd)
-if [ -n "$PROFILE" ]; then
-  cp "$PROFILE" "$EVIDENCE/bootstrap-profile.json"
-  chmod 600 "$EVIDENCE/bootstrap-profile.json"
-  PROFILE="$EVIDENCE/bootstrap-profile.json"
-fi
 SERVICE_PID=
 GRAIN_SERVICE_PID=
 RUNTIME_PID=
@@ -183,80 +130,47 @@ CONTROLLER_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/controller.pub" | tr -d ' \n')
 TOOL_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/tool.pub" | tr -d ' \n')
 test "$CONTROLLER_PUBLIC" != "$TOOL_PUBLIC"
 
-cat >"$EVIDENCE/operator.json" <<EOF
-{"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
- "storageRoot":"$EVIDENCE/store","signatureBinary":"$SIGNATURE_BINARY"}
-EOF
-if [ -n "$PROFILE" ]; then
-  jq --slurpfile profile "$PROFILE" '. + $profile[0].operator' \
-    "$EVIDENCE/operator.json" >"$EVIDENCE/operator-profiled.json"
-  mv "$EVIDENCE/operator-profiled.json" "$EVIDENCE/operator.json"
-fi
-# OPERATOR_PROVIDER_PINS (a JSON file, non-profiled provider bootstraps only)
+# OPERATOR_PROVIDER_PINS (a JSON file, provider bootstraps only)
 # adds the Host's provider pins before genesis, so the provider purse is born
 # under the per-route tariff it names (HERMES-TARIFF): exactly
-# {continuityProviderResourceId, providerMetering}, both naming the provider task.
+# {providerServices: [one entry naming the provider task]} (continuity and
+# metering share the one service list).
 if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
-  [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] && [ -z "$PROFILE" ] || {
-    echo 'OPERATOR_PROVIDER_PINS requires PROVIDER_BOOTSTRAP=1 and no profile' >&2; exit 2;
+  [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] || {
+    echo 'OPERATOR_PROVIDER_PINS requires PROVIDER_BOOTSTRAP=1' >&2; exit 2;
   }
   jq -e --arg p "$PROVIDER_TASK" 'type == "object" and
-    ((keys | sort) == ["continuityProviderResourceId","providerMetering"]) and
-    (.providerMetering.providerResourceId | tostring) == $p and
-    (.continuityProviderResourceId | tostring) == $p' "$OPERATOR_PROVIDER_PINS" >/dev/null ||
+    (keys == ["providerServices"]) and
+    (.providerServices | type == "array" and length == 1) and
+    (.providerServices[0].providerResourceId | tostring) == $p' "$OPERATOR_PROVIDER_PINS" >/dev/null ||
     { echo 'OPERATOR_PROVIDER_PINS is invalid' >&2; exit 2; }
-  jq --slurpfile pins "$OPERATOR_PROVIDER_PINS" '. + $pins[0]' \
-    "$EVIDENCE/operator.json" >"$EVIDENCE/operator-pinned.json"
-  mv "$EVIDENCE/operator-pinned.json" "$EVIDENCE/operator.json"
 fi
-"$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
-SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
-cat >"$EVIDENCE/genesis.json" <<EOF
-{"domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[
-  {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-    "publicKey":"$CONTROLLER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"100",
-   "accountPredicate":{"type":"all","predicates":[]}},
-  {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-    "publicKey":"$TOOL_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
-   "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
-   "factoryObserveCapabilityId":"55","initialBalance":"100",
-   "accountPredicate":{"type":"all","predicates":[]}}],
- "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
- "tailBound":"256",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
-if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
-  jq --arg public "$PROVIDER_PUBLIC" '.enrollments += [{
-    key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
-      publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
-    accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
-    factoryObserveCapabilityId:"57",initialBalance:"100",
-    accountPredicate:{type:"all",predicates:[]}}]' \
-    "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-provider.json"
-  mv "$EVIDENCE/genesis-provider.json" "$EVIDENCE/genesis.json"
+# The genesis through the one template (native/resource-client/scenario-genesis.sh): only what this
+# world differs by. The controller is the sponsor; the tool (and, for a provider bootstrap, the
+# provider) are further enrollments; OPERATOR_PROVIDER_PINS pins its provider service. The world has no
+# grain platform.
+jq -n --arg tool "$TOOL_PUBLIC" --arg provider "${PROVIDER_PUBLIC:-}" --arg withProvider "${PROVIDER_BOOTSTRAP:-0}" '
+  [{subject: 8, keyId: 8008, publicKey: $tool, accountId: 8, spendCapabilityId: 42,
+    controlCapabilityId: 52, factoryObserveCapabilityId: 55, initialBalance: 100}]
+  + (if $withProvider == "1" then
+      [{subject: 9, keyId: 9009, publicKey: $provider, accountId: 9, spendCapabilityId: 43,
+        controlCapabilityId: 56, factoryObserveCapabilityId: 57, initialBalance: 100}] else [] end)' \
+  >"$EVIDENCE/enrollments.json"
+# The clock subject keeps its frame role but not the example's capability numbers 71-74: this
+# scenario's birth installs 71/72 (the controller task's owner and control capabilities) and later
+# delegates 73 (the parent witness), and a birth whose grants reuse an installed capability is refused
+# at prepare (ResourceBirthController `authorityBatch`).
+overlay='.sponsor.initialBalance = 100
+  | .clock += {tickCapabilityId: 4071, spendCapabilityId: 4072, controlCapabilityId: 4073,
+               factoryObserveCapabilityId: 4074}'
+overlay="del(.grainPlatform) | $overlay"
+if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
+  overlay="$overlay | .providerServices = $(jq -c .providerServices "$OPERATOR_PROVIDER_PINS")"
 fi
-if [ -n "$PROFILE" ]; then
-  jq --slurpfile profile "$PROFILE" '.factoryPredicate = $profile[0].factoryPredicate' \
-    "$EVIDENCE/genesis.json" >"$EVIDENCE/genesis-profiled.json"
-  mv "$EVIDENCE/genesis-profiled.json" "$EVIDENCE/genesis.json"
-fi
-sh "$GENESIS_PARAMS_SH" fill-source "$EVIDENCE/genesis.json"   # the genesis clock, chosen at genesis time
+HOST=$HOST STORE=$STORE_BINARY VERIFIER=$SIGNATURE_BINARY MINI=$MINI GENESIS_PARAMS_SH=$GENESIS_PARAMS_SH \
+  sh "$REPO/native/resource-client/scenario-genesis.sh" "$EVIDENCE" "$CONTROLLER_PUBLIC" "$overlay" \
+  "$EVIDENCE/enrollments.json"
+SEMANTICS=$(decimal "$EVIDENCE/profile.json" semantics)
 "$MINI" bootstrap --host "$HOST" --config "$EVIDENCE/operator.json" \
   --source "$EVIDENCE/genesis.json" --dir "$EVIDENCE/deployment" >"$EVIDENCE/bootstrap.stdout"
 CONFIG="$EVIDENCE/deployment/pinned-config.json"
@@ -289,7 +203,7 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
     "ownerCapability":"81","controlCapability":"82","budget":"50"},
    {"kind":"object","storage":"declared","target":"$PUBLICATION_TARGET","owner":"7",
     "ownerCapability":"91","controlCapability":"92",
-    "predicate":{"type":"all","predicates":[]}}],
+    "predicate":{"type":"all","predicates":[]},"fields":["0"]}],
   "sourceCapabilities":["41"],"funding":[],"feePayer":"7"},
  "grants":[{"kind":"object","target":"10","capability":"54"},
    {"kind":"account","target":"7","capability":"41"}]}
@@ -302,13 +216,6 @@ if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
         owner:"9",ownerCapability:"101",controlCapability:"102",budget:$providerBudget}]' \
     "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-provider-intent.json"
   mv "$EVIDENCE/birth-provider-intent.json" "$EVIDENCE/birth-intent.json"
-fi
-if [ -n "$PROFILE" ]; then
-  jq --slurpfile profile "$PROFILE" \
-    '.birth.grainBirthTariff = ($profile[0].operator.grainBirthTariff |
-      with_entries(.value |= tostring))' \
-    "$EVIDENCE/birth-intent.json" >"$EVIDENCE/birth-profiled-intent.json"
-  mv "$EVIDENCE/birth-profiled-intent.json" "$EVIDENCE/birth-intent.json"
 fi
 "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/birth-intent.json" --intent-kind birth-intent \
@@ -481,40 +388,6 @@ query_task delegated-read 8 "$PUBLICATION_TARGET" 94 "$EVIDENCE/tool.key" 31022
 test "$(jq -er '.cell.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
 
 if [ "${BOOTSTRAP_ONLY:-0}" = 1 ]; then
-  if [ -n "$PROFILE" ]; then
-    template=$(jq -er .runtimeTemplate "$PROFILE")
-    template_root=$(jq -er '.stateDir | sub("/runtime-state$"; "")' "$template")
-    case "$template_root" in
-      /*) [ "$template_root" != / ] || { echo 'runtime template root is empty' >&2; exit 2; } ;;
-      *) echo 'runtime template root is not absolute' >&2; exit 2 ;;
-    esac
-    mini_wrapper=$(jq -r '.miniWrapper // empty' "$PROFILE")
-    derived_mini=$MINI
-    if [ -n "$mini_wrapper" ]; then derived_mini=$EVIDENCE/$mini_wrapper; fi
-    jq -e --arg old "$template_root" --arg new "$EVIDENCE" \
-      --arg host "$HOST" --arg mini "$derived_mini" --arg newTask "$CONTROLLER_TASK" \
-      --arg newTool "$TOOL_TASK" --arg newProvider "$PROVIDER_TASK" \
-      --slurpfile genesis "$EVIDENCE/genesis.json" '
-      def replace_root:
-        if type == "string" and (. == $old or startswith($old + "/")) then
-          $new + .[($old | length):]
-        else . end;
-      walk(replace_root) |
-      .mini = $mini |
-      .host = $host |
-      .toolTask.allowedApplicationFamilies |= map(.profile.genesis = $genesis[0]) |
-      .toolTask.allowedSessionFamilies |= map(.profile.genesis = $genesis[0]) |
-      select(.task == $newTask and .toolTask.task == $newTool and
-        .providerTask.task == $newProvider)
-    ' "$template" \
-      >"$EVIDENCE/runtime-config.json" || {
-        echo 'derived runtime config does not match bootstrap tasks' >&2
-        exit 2
-      }
-    test -s "$EVIDENCE/runtime-config.json" || {
-      echo 'derived runtime config is empty' >&2; exit 2;
-    }
-  fi
   printf 'signed grain bootstrap ready: %s\n' "$EVIDENCE"
   exit 0
 fi
@@ -536,10 +409,30 @@ case $(uname -s) in
     ACP_RELEASE="$EVIDENCE/acp-prompt-release"
     ;;
   Linux)
-    HERMES_PROGRAM=$(absolute_executable "$REPO/deploy/grain-host/bwrap")
+    # The worker launcher as hermes-journey and jpay6 make it: the source bwrap launcher
+    # materialized for the box's physical bwrap, with the candidate's own launch gate beside it
+    # (the launcher refuses without one; the runtime then refuses "configured grain launcher
+    # lacks launch-gate v1 protocol"). LAUNCH_GATE defaults to the gate shipped beside GRAIN
+    # (a candidate's bin/launch-gate; journey-runner exports it the same way).
+    LAUNCH_GATE=${LAUNCH_GATE:-"$(dirname "$GRAIN")/launch-gate"}
+    [ -x "$LAUNCH_GATE" ] || { echo "not executable: LAUNCH_GATE=$LAUNCH_GATE" >&2; exit 2; }
+    BWRAP=$(sh "$REPO/deploy/grain-host/resolve-bwrap") || exit 2
+    mkdir -m 700 "$EVIDENCE/launcher"
+    python3 "$REPO/deploy/grain-host/materialize-bwrap.py" --physical-bwrap "$BWRAP" \
+      --physical-sha256 "$(sha256sum "$BWRAP" | cut -d' ' -f1)" --output "$EVIDENCE/launcher/bwrap" \
+      >"$EVIDENCE/launcher.json"
+    install -m 0700 "$LAUNCH_GATE" "$EVIDENCE/launcher/launch-gate"
+    HERMES_PROGRAM="$EVIDENCE/launcher/bwrap"
     CONTROLLER_UNIT=mini-grain-controller@7001.service
     CONTROLLER_MARKER="mini-grain-acceptance:$EVIDENCE"
     mkdir -m 700 "$EVIDENCE/worker-work" "$EVIDENCE/worker-runtime"
+    # The worker's Hermes profile (/workspace/.hermes in the sandbox). Hermes takes its MCP tool-call
+    # timeout only from this file (the ACP adapter drops session-supplied ones), and the runtime
+    # refuses to reserve a scoped prompt without one of at least the worker wall minus 60 s
+    # (provider_profile::require_worker_mcp_timeout), as hermes-journey writes it.
+    mkdir -m 700 "$EVIDENCE/worker-work/.hermes"
+    printf 'timeouts:\n  mcp:\n    tool_call: 600\n' >"$EVIDENCE/worker-work/.hermes/config.yaml"
+    chmod 600 "$EVIDENCE/worker-work/.hermes/config.yaml"
     cp "$GRAIN" "$EVIDENCE/worker-runtime/grain-runtime"
     cp "$HERE/fixture/hermes-acp" "$EVIDENCE/worker-runtime/hermes-acp"
     cp "$HERE/fixture/sleep-fixed" "$EVIDENCE/worker-runtime/sleep-fixed"
@@ -600,8 +493,14 @@ if [ -n "$CONTROLLER_UNIT" ]; then
       echo "controller unit is already in use: $CONTROLLER_UNIT ($current_state)" >&2
       exit 1 ;;
   esac
+  # An unregistered test controller selects its managers explicitly: the user manager for the
+  # controller and its workers, under its exact canonical unit (native/grain-runtime/SYSTEMD-MANAGERS.md;
+  # without them the runtime refuses "managed proof requires root registration or explicit user
+  # fixture selection").
   systemd-run --user --wait --pipe --collect --unit="${CONTROLLER_UNIT%.service}" \
     --description="$CONTROLLER_MARKER" \
+    --setenv=MINI_GRAIN_CONTROLLER_MANAGER=user --setenv=MINI_GRAIN_WORKER_MANAGER=user \
+    --setenv="MINI_GRAIN_CONTROLLER_UNIT=$CONTROLLER_UNIT" \
     --property=KillMode=control-group --property=RuntimeMaxSec=1800s \
     "$GRAIN" serve "$EVIDENCE/runtime-config.json" \
     >"$EVIDENCE/grain-service.stdout" 2>"$EVIDENCE/grain-service.stderr" &
@@ -718,9 +617,6 @@ if [ -n "$HOLD_UNIT" ]; then
       exit 1 ;;
   esac
 fi
-query_task after-hard 7 7001 71 "$EVIDENCE/controller.key" 30006
-jq -e '.cell.grain.generation == "2" and .cell.grain.status == "5" and
-  .cell.grain.reserved == "3"' "$EVIDENCE/after-hard/view.json" >/dev/null
 if "$MINI" retry --attempt "$EVIDENCE/stale-tool-input-attempt" --socket "$SOCKET" \
     --mode submit >"$EVIDENCE/stale-tool-input-retry.stdout" \
     2>"$EVIDENCE/stale-tool-input-retry.stderr"; then
@@ -729,23 +625,28 @@ if "$MINI" retry --attempt "$EVIDENCE/stale-tool-input-attempt" --socket "$SOCKE
 fi
 jq -e '.type == "refused"' "$EVIDENCE/stale-tool-input-attempt/retry-0001.json" >/dev/null
 
-# Recovery is operator-directed through the separate private admin socket.
-# The operator audited the stopped local process group. The runtime checks
-# the signed reserved amount, settles the configured zero charge, records that
-# audit and an explicit external-effect acknowledgement, then reattaches.
-"$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile parent audited' \
-  >"$EVIDENCE/reconcile-parent.stdout" 2>"$EVIDENCE/reconcile-parent.stderr"
+# Recovery after the breaker: the worker is physically stopped and its only external channel was
+# the Mini broker, so the runtime settles what it can prove by itself (88a0682c8,
+# `automatic_reconcile` after a lost hard connection). It settles the parent's held allowance at the
+# configured zero charge on its own managed law (not an operator audit) and derives the
+# external-effect acknowledgement. The owner can simply reattach. Nothing is left for the operator:
+# an operator-directed reconcile afterwards finds no held allowance and settles nothing twice.
 wait_for_journal '.parentHold == null and
-  (.reconciliationLog | any(.authority == "parent" and .stage == "signed-settlement-confirmed"))'
+  (.reconciliationLog | any(.authority == "parent" and .action == "settle-held-allowance" and
+    .originProof == "own-managed-law" and .originAudited == false)) and
+  (.reconciliationLog | any(.authority == "parent" and .stage == "signed-settlement-confirmed")) and
+  (.unresolvedExternal | length) == 0 and
+  (.reconciliationLog | any(.action == "derive-no-unaccounted-external-effects" and .automatic == true))'
 query_task reconciled-parent 7 7001 71 "$EVIDENCE/controller.key" 30010
 jq -e '.cell.grain.generation == "2" and .cell.grain.status == "0" and
   .cell.grain.remaining == "99" and .cell.grain.reserved == "0"' \
   "$EVIDENCE/reconciled-parent/view.json" >/dev/null
-"$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile effects' \
-  >"$EVIDENCE/reconcile-effects.stdout" 2>"$EVIDENCE/reconcile-effects.stderr"
-wait_for_journal '(.unresolvedExternal | length) == 0 and
-  (.reconciliationLog | any(.action == "acknowledge-external-effects" and
-    .externalEffectsAcknowledged == true))'
+if "$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile parent audited' \
+    >"$EVIDENCE/reconcile-parent.stdout" 2>"$EVIDENCE/reconcile-parent.stderr"; then
+  echo "operator reconcile settled a hold the runtime had already settled" >&2
+  exit 1
+fi
+grep -q 'no durable held allowance for this authority' "$EVIDENCE/reconcile-parent.stderr"
 
 mkfifo "$EVIDENCE/recovered-input.fifo"
 "$GRAIN" connect "$CONTROL_SOCKET" <"$EVIDENCE/recovered-input.fifo" \

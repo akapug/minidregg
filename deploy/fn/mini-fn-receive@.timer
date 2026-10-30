@@ -1,0 +1,11 @@
+[Unit]
+Description=Mini fn consumer (fn-r route) for exchange %i, every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

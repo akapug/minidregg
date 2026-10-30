@@ -1,9 +1,9 @@
 /-
-# Kernel.SealedMarket — the sealed-bid market law (SEALED-MARKET; PRIVACY §3.4, MUD §2.7/§2.8)
+# Kernel.SealedMarket — the sealed-bid market law (SEALED-MARKET; docs/MUD.md §2.8)
 
 One declared cell is one market: a founder sells `supply` units at one uniform price to at most
 four sealed bids. This module is the law's **source**. The shell template
-`deploy/shell/templates/market/sealed/law.market` is the Host's own rendering of `law`
+`native/resource-client/templates/market/sealed/law.market` is the Host's own rendering of `law`
 (`LawLeaf.renderClause`, the text a refusal prints) with the parameters as placeholders, written by
 `scripts/SealedMarketTemplate.lean`; the client binds the placeholders and parses it
 (`native/resource-client/src/market.rs`), and `law show` prints an installed law back from the same
@@ -254,7 +254,12 @@ theorem market_reveal_binds {p' : Params} {o' n' : State} {k : Nat} (hk : k < sl
     (same : n.get (fA (bid k).commit) = n'.get (fA (bid k).commit)) :
     (n.get (fA (bid k).price) = n'.get (fA (bid k).price) ∧
       n.get (fA (bid k).qty) = n'.get (fA (bid k).qty) ∧
-      n.get (fA (bid k).blinder) = n'.get (fA (bid k).blinder)) ∨ Collision deployed := by
+      n.get (fA (bid k).blinder) = n'.get (fA (bid k).blinder)) ∨
+      Theory.HashBytes.CollisionAmong deployed (fun x => ∃ op,
+        (Minidregg.Pred.hashEqOpening n [fA (bid k).price, fA (bid k).qty] (fA (bid k).blinder)
+            (fA (bid k).commit) = some op ∨
+          Minidregg.Pred.hashEqOpening n' [fA (bid k).price, fA (bid k).qty] (fA (bid k).blinder)
+            (fA (bid k).commit) = some op) ∧ x = op.preimage) := by
   have e := moved_opening_opens h hw hs hk moved
   have e' := moved_opening_opens h' hw' hs' hk moved'
   rcases Minidregg.Pred.hashEq_reveal_binds_each e e' same with each | hcol

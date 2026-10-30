@@ -29,7 +29,7 @@ Legacy room-key doc lines are read-only (`private::legacy_content`: structure an
 ciphertext); fresh private document text goes through protected-document audiences.
 
 **Room keys.** Each epoch's key is drawn fresh by the founder's client (never derived). The node holds wraps only,
-in the room's `keys` cell (law `deploy/shell/templates/room/private/law.keys.json`, theorems
+in the room's `keys` cell (law `native/resource-client/templates/room/private/law.keys.json`, theorems
 `Kernel/PrivateRoomKeys.lean`): a WRAP of epoch `e` for member `m` at generation `g` is atom `(e+1)·2^96 + g·2^64 + m`,
 payload = recipient key id (32) ‖ wrap v3 (1192 bytes, below) ‖ keys grant ‖ the epoch certificate (192 bytes) ‖ a
 delivery signature (108 bytes). Every

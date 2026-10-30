@@ -137,7 +137,7 @@ fn check_intended_selectors(approval: &Value, plan: &Value) -> Result<()> {
 
 pub(super) fn expect_reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] => Err(format!(
+        [mini_sdk::host_operations::RESPONSE_HOST_OUTCOME, ..] => Err(format!(
             "share issue Host refused op{operation}; frame retained"
         )),
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
@@ -280,7 +280,7 @@ fn retained_outcome_bytes(directory: &Path, stem: &str) -> Result<Option<PathBuf
     }
     let frame = bounded(&frame_path, transport::HOST_MAX_FRAME)?;
     let operation = if stem == "submit" { 28 } else { 29 };
-    if frame.first() == Some(&255) && !binary.exists() {
+    if frame.first().is_some_and(|b| crate::is_outcome_frame(*b)) && !binary.exists() {
         return Ok(None);
     }
     if frame.first() != Some(&operation) || frame.len() < 2 {
@@ -384,13 +384,13 @@ pub(super) fn submit(directory: &Path, socket: Option<&Path>) -> Result<()> {
         &state.host,
         &state.socket,
         &state.config,
-        28,
+        mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_SUBMIT,
         &state.ingress,
     )
     .map_err(|e| format!("share issue submit uncertain; exact ingress retained: {e}"))?;
     create_private(&directory.join("submit.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let outcome = outcome_at(&directory, "submit", &frame, 28, &state)?;
+    let outcome = outcome_at(&directory, "submit", &frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_SUBMIT, &state)?;
     confirmed(&outcome)?;
     historical_anchor(&directory, &state, 0)?;
     print_json(&outcome)
@@ -432,12 +432,12 @@ pub(super) fn lookup(directory: &Path, socket: Option<&Path>) -> Result<()> {
         &state.host,
         &state.socket,
         &state.config,
-        29,
+        mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_LOOKUP,
         &state.ingress,
     )?;
     create_private(&directory.join(format!("{stem}.frame")), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let outcome = outcome_at(&directory, &stem, &frame, 29, &state)?;
+    let outcome = outcome_at(&directory, &stem, &frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_LOOKUP, &state)?;
     confirmed(&outcome)?;
     historical_anchor(&directory, &state, index + 1)?;
     print_json(&outcome)
@@ -505,11 +505,11 @@ pub(super) fn prepare(
     check_inputs()?;
     check_approval(&approval, &request, &inspected_request)?;
 
-    let frame = session_invoke(&host, &operator_socket, &config, 32, &request)?;
+    let frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN, &request)?;
     check_inputs()?;
     create_private(&directory.join("plan.frame"), &frame)?;
     sync_directory_ancestors(&directory)?;
-    let plan = expect_reply(&frame, 32)?;
+    let plan = expect_reply(&frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_PLAN)?;
     let plan_path = directory.join("plan.bin");
     create_private(&plan_path, plan)?;
     let inspected_plan = source_inspect(
@@ -568,10 +568,10 @@ pub(super) fn prepare(
     assembly.extend_from_slice(&(plan.len() as u32).to_le_bytes());
     assembly.extend_from_slice(plan);
     assembly.extend_from_slice(&signatures_bytes);
-    let assembled_frame = session_invoke(&host, &operator_socket, &config, 33, &assembly)?;
+    let assembled_frame = session_invoke(&host, &operator_socket, &config, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_ASSEMBLE, &assembly)?;
     check_inputs()?;
     create_private(&directory.join("assembly.frame"), &assembled_frame)?;
-    let ingress = expect_reply(&assembled_frame, 33)?;
+    let ingress = expect_reply(&assembled_frame, mini_sdk::host_operations::APPLICATION_SHARE_ISSUE_ASSEMBLE)?;
     create_private(&directory.join("ingress.bin"), ingress)?;
     let pin = json!({"format":FORMAT,"host":utf8_path(&host)?,
         "hostSha256":initial_host_sha,"config":utf8_path(&config)?,

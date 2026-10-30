@@ -29,7 +29,6 @@ for executable in "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY"; do
 done
 [ ! -e "$ROOT" ] && [ ! -L "$ROOT" ] || fail "root already exists"
 command -v jq >/dev/null 2>&1 || fail "jq required"
-command -v rg >/dev/null 2>&1 || fail "rg required"
 
 mkdir -m 700 "$ROOT" "$ROOT/custody" "$ROOT/source-stage"
 "$MINI" keygen --secret "$ROOT/custody/completion.seed" \
@@ -38,14 +37,87 @@ SPK_COMPLETION_PUBLIC=$(od -An -tx1 -v "$ROOT/custody/completion.pub" | tr -d ' 
 [ "${#SPK_COMPLETION_PUBLIC}" = 64 ] || fail "completion public key length"
 export SPK_COMPLETION_PUBLIC
 
-# One management identity (subject 8, key 8008: the workroom tool key) for
-# every application this host manages. No application is named here.
-# shellcheck disable=SC2016 # Preserve the provisioner's literal variables.
-sed 's|"storageRoot":"$EVIDENCE/store","signatureBinary"|"storageRoot":"$EVIDENCE/store","completionCustodianKey":"$SPK_COMPLETION_PUBLIC","lifecycleManagement":{"managementSubject":8,"managementKeyId":8008},"signatureBinary"|' \
-  "$REPO/scripts/workroom/provision.sh" >"$ROOT/source-stage/provision-grain.sh"
-[ "$(rg -c 'lifecycleManagement' "$ROOT/source-stage/provision-grain.sh")" = 2 ] ||
-  fail "provisioner shape changed; review the lifecycle overlay"
+# Preserve caller-selected operator fields, but refuse conflicting custody or
+# management identities: this Store must use the key generated above and tool 8.
+if [ -n "${WORKROOM_OPERATOR_POLICY-}" ]; then
+  case "$WORKROOM_OPERATOR_POLICY" in /*) ;; *) fail "operator policy must be absolute" ;; esac
+  [ -f "$WORKROOM_OPERATOR_POLICY" ] || fail "operator policy absent"
+  cp "$WORKROOM_OPERATOR_POLICY" "$ROOT/source-stage/operator-policy-input.json"
+else
+  printf '{}\n' >"$ROOT/source-stage/operator-policy-input.json"
+fi
+jq -se 'length == 1 and (.[0] | type == "object")' \
+  "$ROOT/source-stage/operator-policy-input.json" >/dev/null ||
+  fail "operator policy must contain one JSON object"
+jq -n --arg key "$SPK_COMPLETION_PUBLIC" '
+  {completionCustodianKey:$key,
+   lifecycleManagement:{managementSubject:8,managementKeyId:8008}}' \
+  >"$ROOT/source-stage/operator-policy-required.json"
+cp "$REPO/scripts/workroom/provision.sh" "$ROOT/source-stage/provision-grain.sh"
 chmod 700 "$ROOT/source-stage/provision-grain.sh"
+
+# Explicit fresh-genesis agent allocation. Fixed workroom phases consume only
+# allocation data; they never import a retained Store or key.
+# An absent variable preserves the historical workroom-only provision path.
+PROVISION_GRAIN="$ROOT/source-stage/provision-grain.sh"
+# Normalize the provisioner's name and the older SPK caller name once, so
+# enrollment and lifetime authoring cannot consume different allocations.
+if [ -n "${WORKROOM_AGENT_ALLOCATION-}" ]; then
+  if [ "${SPK_AGENT_ALLOCATION+x}" = x ] && [ "$SPK_AGENT_ALLOCATION" != "$WORKROOM_AGENT_ALLOCATION" ]; then
+    fail "conflicting agent allocation paths"
+  fi
+  SPK_AGENT_ALLOCATION=$WORKROOM_AGENT_ALLOCATION
+fi
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  case "$SPK_AGENT_ALLOCATION" in /*) ;; *) fail "agent allocation must be an absolute file" ;; esac
+  [ -f "$SPK_AGENT_ALLOCATION" ] && [ ! -L "$SPK_AGENT_ALLOCATION" ] || fail "agent allocation absent or linked"
+  cp "$SPK_AGENT_ALLOCATION" "$ROOT/source-stage/agent-allocation.json"
+  chmod 600 "$ROOT/source-stage/agent-allocation.json"
+  SPK_AGENT_ALLOCATION="$ROOT/source-stage/agent-allocation.json"
+  WORKROOM_AGENT_ALLOCATION="$SPK_AGENT_ALLOCATION"
+  export SPK_AGENT_ALLOCATION WORKROOM_AGENT_ALLOCATION
+  sh "$HERE/check-agent-allocation.sh" "$WORKROOM_AGENT_ALLOCATION"
+  # Stable authoring selectors are pinned before genesis. Historical event22
+  # and event27 indices are deliberately absent: later native authoring still
+  # verifies those exact admitted receipts and current authority.
+  SPK_AGENT_TARGETS=$(jq -ce '
+    def exactnat: if type == "string" and test("^[1-9][0-9]{0,14}$")
+      then tonumber else error("agent selector exceeds exact integer range") end;
+    . as $allocation | [.agents[] | . as $agent | .plannedCaps as $caps |
+      {legacy:{ticketResource:(.ticket|exactnat),
+        packageManifest:($allocation.packageManifest|exactnat),
+        snapshotManifest:($allocation.snapshotManifest|exactnat),
+        sessionObserve:($caps.sessionOwner|exactnat),
+        manifestObserve:($caps.controllerManifestObserve|exactnat),
+        enrollmentObserve:($caps.descriptorOwner|exactnat),
+        parentTask:(.controller.task|exactnat),
+        parentCapability:($caps.parentOwner|exactnat),parentObserve:($caps.parentOwner|exactnat),
+        purseTask:(.dispatch.task|exactnat),purseCapability:($caps.dispatchOwner|exactnat),
+        purseObserve:($caps.dispatchOwner|exactnat),payerSubject:(.dispatch.subject|exactnat),
+        reserveAmount:1,maximumCharge:1},
+       grantResource:(.persistentGrant|exactnat),grantObserveCapability:($caps.grantObserve|exactnat)}]
+  ' "$SPK_AGENT_ALLOCATION") || fail "explicit lifetime authoring targets invalid"
+  export SPK_AGENT_TARGETS
+  jq --argjson targets "$SPK_AGENT_TARGETS" '. + {agentLifetimeDispatchTargets:$targets}' \
+    "$ROOT/source-stage/operator-policy-required.json" \
+    >"$ROOT/source-stage/operator-policy-required-agents.json"
+  mv "$ROOT/source-stage/operator-policy-required-agents.json" \
+    "$ROOT/source-stage/operator-policy-required.json"
+fi
+
+# A caller may repeat the required values, but cannot silently replace them.
+# Other operator fields survive the merge and the final pinned-config check.
+jq --slurpfile required "$ROOT/source-stage/operator-policy-required.json" '
+  . as $supplied | $required[0] as $required |
+  if all($required | to_entries[];
+    . as $entry | ($supplied | has($entry.key) | not) or
+      $supplied[$entry.key] == $entry.value)
+  then $supplied + $required
+  else error("operator policy conflicts with grain-host custody or authoring targets") end
+' "$ROOT/source-stage/operator-policy-input.json" \
+  >"$ROOT/source-stage/operator-policy.json" || fail "conflicting operator policy"
+WORKROOM_OPERATOR_POLICY="$ROOT/source-stage/operator-policy.json"
+export WORKROOM_OPERATOR_POLICY
 
 # native-positive-base.sh runs APP_SOURCE from inside its private stage; this
 # one only provisions the member workroom and births nothing.
@@ -62,12 +134,23 @@ EOF
 chmod 700 "$ROOT/source-stage/workroom-only.sh"
 
 sha256sum "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
-  "$REPO/scripts/workroom/provision.sh" "$REPO/scripts/grain-birth/native-share-member.sh" \
+  "$REPO/scripts/workroom/provision.sh" "$REPO/scripts/workroom/agent-enrollment.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/scenario-genesis.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/genesis.sh" \
+  "$GENESIS_PARAMS_TREE/native/resource-client/genesis-params.example.json" \
+  "$REPO/scripts/grain-birth/native-share-member.sh" \
   "$REPO/scripts/application-share-issue/native-positive-base.sh" \
   "$ROOT/source-stage/provision-grain.sh" "$ROOT/source-stage/workroom-only.sh" \
+  "$ROOT/source-stage/operator-policy-input.json" \
+  "$ROOT/source-stage/operator-policy-required.json" "$WORKROOM_OPERATOR_POLICY" \
   >"$ROOT/source-stage/input-sha256.txt"
+if [ "${SPK_AGENT_ALLOCATION+x}" = x ]; then
+  sha256sum "$HERE/check-agent-allocation.sh" \
+    "$REPO/scripts/workroom/agent-enrollment.sh" "$WORKROOM_AGENT_ALLOCATION" \
+    >>"$ROOT/source-stage/input-sha256.txt"
+fi
 
-PROVISION_SOURCE="$ROOT/source-stage/provision-grain.sh" \
+PROVISION_SOURCE="$PROVISION_GRAIN" \
 MEMBER_SOURCE="$REPO/scripts/grain-birth/native-share-member.sh" \
 APP_SOURCE="$ROOT/source-stage/workroom-only.sh" \
 MINI="$MINI" STORE_BINARY="$STORE_BINARY" SIGNATURE_BINARY="$SIGNATURE_BINARY" \
@@ -81,5 +164,9 @@ jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
   (has("completionManagement") or has("residentBeginManagement") or
    has("residentClaimManagement") | not)' "$CONFIG" >/dev/null ||
   fail "pinned config lacks the host lifecycle identity"
+jq -e --slurpfile policy "$WORKROOM_OPERATOR_POLICY" '
+  . as $config | all($policy[0] | to_entries[];
+    . as $entry | $config[$entry.key] == $entry.value)
+' "$CONFIG" >/dev/null || fail "pinned config differs from requested operator policy"
 sha256sum -c "$ROOT/source-stage/input-sha256.txt" >"$ROOT/source-stage/input-recheck.txt"
 echo "grain store ready at $ROOT/base/workroom (no application born)"

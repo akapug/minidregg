@@ -74,8 +74,6 @@ import Kernel.ObjectLaw  -- the enforced `law` fragment of a package: its meanin
 import Kernel.OutboxDelivery  -- stable terminal/outbox identity, receiver replay, and authenticated acknowledgements without invented transport liveness
 import Kernel.ProviderExecutionLease  -- prepaid provider work, irreversible start, terminal settlement, retries, races, and separately authorized refunds
 import Kernel.CanonicalEscrowMarket  -- authorized deposit/fill/cancel/expire/refund orders conserve resources, settle fees atomically, and reject replay or fill/close races
-import Kernel.PrivateEscrowSettlement  -- sealed computation and separately authorized declassification stage exact escrow release, terminal, and outbox effects
-import Kernel.QuotaGcSettlement  -- root-bound reachability, lease expiry, quotas, and guarded atomic compaction make deletion an admitted settlement rather than a host guess
 import Kernel.ReceivingLawFixture  -- LAWS-RECEIVER: the Receiver judges every written cell's law; the Bypass tooth and every refusal arm
 import Kernel.Receipt    -- the receipt word Q: uproj faithfulness + the frame as a receipt fact (OB-3's kernel side)
 import Kernel.Verbs   -- create + gwrite: the remaining conservation-algebra verbs, conservation (honest side-conditions) + frames + the receipt bridge
@@ -87,7 +85,8 @@ import Kernel.FinalityLiveness  -- liveness as ONE carrier: PostGSTProgress bund
 import Kernel.NativeHost
 import Kernel.NativeHostServed -- KN2 2b-1: a validated served state (no history): validateServed, OpenedServed
 import Kernel.NativeHostLight -- KN2 2b-1: the validated light opening a session serves ported operations from
-import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (thin_display_is_commit), lying Hosts refused by name
+import Kernel.NativeThinConsent  -- thin consent: what a member signs without replaying is what commits (opened_display_is_commit), lying Hosts refused by name
+import Kernel.ContentCommutingAppend  -- appends to one document commute: a commuting content command is computed at the cell it meets (statements; the ruling of 2026-10-28)
 import Kernel.NativeHostSession
 import Kernel.NativeReserveContinuity
 import Kernel.NativeHostGenesis
@@ -109,45 +108,48 @@ import Kernel.ContentResourceForestInstances  -- both poles of View.Forest (hypo
 import Kernel.ContentMarks
 import Kernel.ContentRunEdit
 import Kernel.AgentGrain
-import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
 import Kernel.CapabilityRenounce  -- K-RENOUNCE: a holder revokes a capability it holds (signature first, then Theory.Renounce.gateAt)
 import Kernel.ResourceTransactionAudit
-import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
+import Kernel.World  -- docs/DATAMODEL.md §3.3, §5 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
-import Kernel.TurnCensus  -- T1/T3b: every live admission constructor (37) is a Turn shape accepted by World.admit, its negation refused by name; every_admission_is_turn, theList_empty (ROM births included); step_conserves for Book postings
+import Kernel.TurnCensus  -- T1/T3b: each admission constructor's census shape (48) is accepted by World.admit at w0, its negation refused by name; census_shapes_admitted_at_w0, theList_empty (ROM births included); step_conserves for Book postings
 import Compiler.TurnCensusCoverage  -- BRAID-PROOF: fails the build unless TurnCensus.Ctor and NativeAdmission name the same constructors
 import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost derived from step); ImplementationRefinement re-indexed by Turn/World, trace_represents_fold (crash recovery = fold of a sublist); model refines, torn install refuted
 import Kernel.TurnOfIntent  -- T3: Turn.ofIntent = the diff of each written cell against the held cell (a G-NORM fixed point; ofIntent_minimal: footprint = the addresses that differ); ofIntent_step; legPatch_valid_iff (refused exactly when no guarded patch reaches the image)
 import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decoder + one StoreCodec.Wire per registered kind); bridge_decode_total_on_registry, deployed_cells_iff
 import Kernel.DeployedHistory  -- Deployed written-value byte accounting and complete turn digest preimage
+import Kernel.DeployedTurnCodec  -- FD-1 R4a: decodeTurn, the inverse of encodeTurn (decodeTurn_encodeTurn)
+import Kernel.DeployedTurnCompact  -- FD-1 R4b/FD-2: the persisted Turn: digest guards, new values only (decodeTurnAt_encodeTurnAt)
+import Kernel.WorldSystemCodec  -- checkpoint = World v1: the system cell sub-codec, all six namespaces
+import Kernel.TurnLog  -- FD-1 R4a: deployed genesis World of a Seed; the Turn-log follower IS World.fold
+import Kernel.SnapRepresents  -- FD-1 4a: the snapshot-level Represents and the executor lemmas (moved from HostRefinesWorldCore)
+import Kernel.DeployedRepresentsCheck  -- FD-1 4a: an open decides that its snapshot represents its folded World (representsCheck_sound)
+import Kernel.DeployedCharge  -- FD-1 charge switch: every receiver's storage lane is storageCharge (legs + born images + retained event); charge_eq, mismatch
+import Kernel.TurnGen  -- HP-6 SIM: seeded generator of intents (honest and invalid) and presented turns over a small deployed World
 import Kernel.ObjectiveAdmissible -- Exact receiver intent certificates consumed by the durable writer
 import Kernel.ObjectiveRefinesWorld -- Exact payload bridge and receiver-essential OB invariants in reached Worlds
 import Kernel.ObjectiveTurnTotality  -- Constructed seedless-create/stateless-member absence poles
-import Kernel.ObjectiveTurnTotalityStorage  -- exact full-image receiver charge = World value writes + classified framing
+import Kernel.ObjectiveTurnTotalityStorage  -- the receiver storage lane IS the World storage; full images = value writes + classified framing (no longer charged)
 import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
-import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
+import Kernel.DurableCheckpoint -- docs/DATAMODEL.md §5 C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.DurableView -- KN2: executing against a per-request view; declared-key families
-import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
+import Kernel.WorldRoot  -- docs/DATAMODEL.md §3.2/§3.4, §5 C1: world root = AuthTrie compressed trie over (slot -> slot root), last value per key; RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE node hash WORLD-ROOT/v2 (256-bit hashed index), deployedRoot_binds premise-free up to a cSHAKE collision, cSHAKE History; honest/tampered poles
 import Kernel.DocumentHistory  -- K-DOC-HISTORY: doc diff = DocumentHistory.diff over the two doc show line lists (added_iff, removed_iff, changed_iff)
-import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
+import Kernel.PresenceIndex  -- docs/PLACE.md §2.5 K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
 import Kernel.LinkIndex  -- K-DOC-INDEX: links and backlinks as an exact fold of the accepted log (ofRecords_exact, backlinks_sound, backlinks_complete, backlinks_covered)
-import Kernel.WorldRootCache -- C2: the world root cached, one path per write; cache = spec root (insertWrite_root, deployedOf_root), stale cache refuted
+import Kernel.WorldRootCache -- C2: the world root kept (RootCache = AuthTrie.Cache): one walk per write, RootsExact a Prop, no injectivity flag or fallback rebuild; cache = spec root, honest openings verify, stale cache refuted
 import Kernel.ApplicationGrainLaws
-import Kernel.ApplicationLifecycleBeginCheck
-import Kernel.ApplicationLifecycleClaimPolicyCheck
-import Kernel.ApplicationLifecycleClaimReceiver
-import Kernel.ApplicationLifecycleClaimVerified
 import Kernel.ApplicationShareIssueHistorical
 import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
-import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
+import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (docs/PLACE.md §2.3/§4.4, K-STREAM)
 import Kernel.PrivateRoomKeys  -- private room wrapping law
-import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps (AUTHORED, NOT COMPILED)
+import Kernel.PrivateRoomWrapGrant  -- J-PRIV-1: a member grant reads only its own wraps
 import Kernel.StreamWrite  -- stream head and immutable entry writes
-import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
+import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (docs/CHANNELS.md §2.4, CH-EPOCH)
 import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)
 import Kernel.DomainEpochExport  -- the relay byte entry points: tick root, seal, opening, topic (CH-RELAY-1)
 import Kernel.DomainEpochLaw  -- the kernel side of the epoch record: ChannelLaw, admitAppend, ChannelStoreLaw (split from DomainEpoch, CH-CLIENT-1)
@@ -162,6 +164,7 @@ import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every p
 import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 and the blinding ratchet the field-3 reader's opened entries are unchanged by a write to field 4, the root moves, and every sealed leaf moves (narrowed_view_hides_field_four)
 
 import Kernel.LawHistory  -- shared accepted histories and checked-leg policy bridge
+import Kernel.StoryLaw  -- the table-to-law generator of a sealed story (a Host receiver may import it)
 
 import Kernel.WorldKindChecks -- descriptor/instance preparation refusals for shipped world methods
 
@@ -180,3 +183,4 @@ import Kernel.Contracts.Snapshot
 import Kernel.Contracts.Futures
 import Kernel.Contracts.Intents
 import Kernel.Contracts.Refinements
+import Kernel.SubjectRate

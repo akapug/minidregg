@@ -5,8 +5,27 @@ every article. Native Host authors the spec from the exact retained poll and
 projection; Mini admission separately checks the configured gateway signature,
 current gateway law, accepted owner release, and unified consumer frontier.
 -/
-import Kernel.FnConsumerFrontierCore
-import Kernel.FnSelectiveReleaseIngress
+module
+
+public import Kernel.FnConsumerFrontierCore
+public import Kernel.FnSelectiveReleaseIngress
+
+-- Bodies this file reduces or derives through, not exposed by their modules (module system).
+import all Init.Data.Repr
+import all Init.Data.ToString.Basic
+import all Init.Data.ToString.Extra
+import all Init.Data.Array.Basic
+import all Init.Data.ByteArray.Basic
+import all Init.Data.String.Decode
+import all Init.Data.String.Defs
+import all Init.Control.Except
+import all Init.Data.List.Basic
+import all Init.Data.Nat.Bitwise.Basic
+import all Init.Data.String.Bootstrap
+import all Init.Data.Format.Basic
+import all Init.Data.List.Scan.Basic
+
+@[expose] public section
 
 namespace Minidregg.Kernel.FnSelectedPollCoverage
 
@@ -59,9 +78,8 @@ def evidenceStream : StreamCodec Evidence :=
     (by intro e; cases e; rfl)
 
 def evidenceCodec : LawfulCodec Evidence :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-COVERAGE/v2".toUTF8.toList
-      evidenceStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-COVERAGE/v2".toUTF8.toList
+      evidenceStream
 
 def maxEvidenceBytes : Nat := 8192
 
@@ -112,9 +130,8 @@ def specStream : StreamCodec Spec :=
     (by intro spec; cases spec; rfl)
 
 def specCodec : LawfulCodec Spec :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-SPEC/v2".toUTF8.toList
-      specStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-SPEC/v2".toUTF8.toList
+      specStream
 
 structure Ingress where
   spec : Spec
@@ -134,9 +151,8 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-INGRESS/v2".toUTF8.toList
-      ingressStream)
+  NativeHostCodec.framed "DREGG/FN/SELECTED-POLL-INGRESS/v2".toUTF8.toList
+      ingressStream
 
 def transactionId (spec : Spec) : Digest :=
   (Sp800185Cshake256.hash
