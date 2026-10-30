@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "wekan",
   "interfaceVersion": 1,
-  "appId": "m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h",
-  "packageId": "2a2c05041cb4285da884d114e4820298",
-  "appVersion": "12.65~2026-10-25",
+  "appId": "wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0",
+  "packageId": "8c2f7c710744bdc97012a21f37cebcd1",
+  "appVersion": "12.68~2026-10-29",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -873,7 +873,7 @@
     "userIdField": "userId"
   },
   "sources": [
-    "https://github.com/wekan/wekan/blob/43c86065488315e28a26b55ffa876796ce5176b1/packages/wekan-accounts-sandstorm/server.js",
-    "https://github.com/wekan/wekan/blob/43c86065488315e28a26b55ffa876796ce5176b1/server/publications/boards.js"
+    "https://github.com/wekan/wekan/blob/v12.68/packages/wekan-accounts-sandstorm/server.js",
+    "https://github.com/wekan/wekan/blob/v12.68/server/publications/boards.js"
   ]
 }

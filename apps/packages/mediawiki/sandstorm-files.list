@@ -1,0 +1,7 @@
+sandstorm-http-bridge
+sandstorm-http-bridge-config
+sandstorm-manifest
+bin
+sbin
+lib
+lib64
