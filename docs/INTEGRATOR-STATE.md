@@ -31,71 +31,68 @@ gate; hot-path sends it, wire it into the gate).
   /tank/dregg-build/rows-0ce31391/pw/node_modules (browsers ~/.cache/ms-playwright). Infra also offers `ssh composed-box`
   (a container on dregg-forge) for composed if hbox root setup gets crowded; not used yet.
 
-## Main and candidates (2026-10-30, after ember's flight)
+## Main and candidates (2026-10-30 ~01:40 EDT)
 
-Main 8fd079de2 (gated: tour 73/73, composed connector red, flatness absent from harness). Staging
-(`integration/staging`) 3b7d6c9b2 = main + hot-path codex 0b38d35a0 (persistent receipt index, flat-cell preimage
-proof, flatness-gate.sh; merge 7f6666525) + the export TLS fix 69251145d + spk-fresh c668c5e2f (MediaWiki, Mercurial,
-Wekan, Scrumblr, Swagger Editor; merge 247a22c6a) + 15-pin fixture 3b7d6c9b2.
+Main = staging = a1a44519d: main + hot-path codex 0b38d35a0 + export TLS 69251145d/6b1c05490 + spk-host export status
+6570674fa + spk-fresh to 98b1f8aca (Forgejo, reveal.js, MediaWiki, Mercurial, Wekan, Scrumblr, Swagger Editor, Sudoku,
+Blockstack, Kiwix) + 18-pin fixture 91a307e70 + infra's connector sheet seed 552a316e7 (harness only).
 
 | candidate | verdict |
 |---|---|
-| 8cb74aba5 | tour 70/73 (rate-limit reds, fixed by demo-path 1200/min), composed connector red |
-| c4264f9cb | tour 73/73; composed rooms/churn/documents/apps/store-restart PASS, connector red; flatness absent |
-| ebaeb14c7 | export diagnostic build (curl exit + http status) |
-| 8fd079de2 | MAIN. tour 73/73; connector red diagnosed: curl exit 35 / NoKxGroupsInCommon (kept world taken down 00:39) |
-| 7f6666525 | BUILDING since 00:23 (deep: hot-path StoreCodec, 796-module closure, SEATS=4 MEM=40G; pid integ/build.pid) |
+| 8fd079de2 | tour 73/73; connector red (curl exit 35: hbox OpenSSL 3.3.1 vs the PQ-only entrance) |
+| a9d4ec9ba | tour 73/73; composed rooms/churn/documents/apps/store-restart PASS, connector red (http=503: sheet jd3 never written); flatness GET PASS, submit FAIL (submit wall 4.97x, propose CPU 9.27x vs 2x) |
+| 91a307e70 | READY 01:34 (= main minus the harness-only seed). gate10 running with HARNESS=a1a44519d (integ/gate-91a307e7, pid gate-91a.pid, ports 23140/23143, KEEP_WORLD=1) |
 
-Next build: staging tip 3b7d6c9b2 (Rust-only over 7f6666525), then gate10 (`EDGE_REV=69c17a3 JWORLD_MANAGEMENT=sponsor
-bash gate10.sh SHA`, unique PORT/JWORLD_ROUTE_FRONT_PORT; gate10.sh is mode 644). The hot-path batch brings
-scripts/perf/flatness-gate.sh, so flatness runs for the first time; codex measured GET PASS (1.54x CPU) and submit
-FAIL (9.59x CPU against a 2x bound), so expect flatness-submit red (law 17; hot-path owns the remaining submit
-costs: cold-start snapshots, persistent whole-cell writes, see docs/HOT-PATH-STATE.md).
+gate10: `HARNESS=<sha> EDGE_REV=69c17a3 JWORLD_MANAGEMENT=sponsor KEEP_WORLD=1 PORT=.. JWORLD_ROUTE_FRONT_PORT=.. bash gate10.sh SHA`
+(mode 644). Take a kept world down with the candidate's scripts/spk-platform/world-down.sh RUN/inputs, then
+dregg-infra-69c17a3/edge/mini/journey/jworld-scratch.sh down RUN/w (as hbox, XDG_RUNTIME_DIR and DBUS set); log DOWN.
+Infra also offers the forge `composed` container: on hbox `/home/hbox/lanes/infra/composed-sync CAND_DIR [EDGE]`, then
+`ssh composed-box 'JWORLD_MANAGEMENT=sponsor /ci/composed-gate SRC8 CAND12 [TAG]'` (about 6 min; `resume` reruns a kept world).
 
-## The connector red, and its fix
+## The connector red: two causes, both fixed
 
-spk-browser-proxy serves TLS 1.3 with X25519MLKEM768 only (db8abb598). The app-document export shelled out to
-/usr/bin/curl, so it could only reach the entrance where the machine's OpenSSL is at least 3.5. hbox has 3.3.1; the
-demo container on forge has 3.5.7. 69251145d moves the fetch onto rustls/aws-lc-rs in the client (hybrid group first,
-same bounds; resource-client's rustls feature ring -> aws_lc_rs, lock unchanged). Mac filtered: app_document 15/15,
-worker:: 14/14. Kimi review running (scratchpad integ2/kimi-export.md).
+1. spk-browser-proxy is TLS 1.3 + X25519MLKEM768 only; the export shelled out to /usr/bin/curl (OpenSSL < 3.5 has no
+   hybrid group). 69251145d/6b1c05490: the export runs on rustls/aws-lc-rs in the client (Kimi-reviewed; overflow,
+   deadline and framing fixes taken).
+2. Sheet jd3 was never written, so EtherCalc answered 404 and the entrance 503. Infra's 552a316e7 seeds it
+   (connector:sheet step). Infra is chasing the journey's publish step next ("publish answered without a JSON result").
 
 ## Market packages for the demo box
 
-dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/out/{local.json,adopt.tsv}: 15 packages (Datasette, Davros,
-DokuWiki, EtherCalc, Etherpad, Forgejo, HedgeDoc, Hledger, MediaWiki, Mercurial, ntfy, reveal.js, Scrumblr, Swagger
-Editor, Wekan); files under ../apps/<app>/out/<app>.spk. Regenerate by adding apps/<app>/out/<app>.spk and rerunning
+dregg-forge:/var/lib/spk-fresh/qualified-2026-10-29/out/{local.json,adopt.tsv}: 18 packages; files under
+../apps/<app>/out/<app>.spk; earlier outs kept as out.prev-N (session-made, removable). Regenerate: link or copy the
+package into apps/<app>/out/<app>.spk (spk-fresh's forge copies live under /srv/spk-build/<app>/out/), move out aside,
 `python3 -I repo/deploy/market/fresh-index.py --apps $Q/apps --recipes $Q/repo/apps/packages --spk-tool
-/var/lib/spk-fresh/tools/spk --out $Q/out` (move the old out aside), then copy local.json to
-native/resource-client/tests/fixtures/fresh-local-index-2026-10-29.json and run apps::tests.
-FEATURED still on upstream ids: WBO rhtntjye (wbo.json names upstream), r8y55acm, zxent02j, uws252ya (no declarations).
-SPK-fresh (a58fcf100f4438710) continues: Kiwix, Navidrome, Sudoku, Blockstack, Firefly.
+/var/lib/spk-fresh/tools/spk --out $Q/out`, copy local.json to native/resource-client/tests/fixtures/
+fresh-local-index-2026-10-29.json, run `cargo test --bin mini -- apps::tests` (24). FEATURED still upstream: WBO
+rhtntjye (wbo.json names upstream), r8y55acm, zxent02j, uws252ya. SPK-fresh (a58fcf100f4438710): Navidrome, Firefly next.
 
 ## In flight
 
-- Codex apps-agents (cx-aa) still running (worktree /Users/ember/dev/minidregg-lanes/apps-agents; land via its
-  target/*-commit.sh when it finishes). Demo-path and hot-path codex batches are landed.
-- Infra (add189844d158e3a7) has c4264f9cb as the last READY handed over; send it the next green-or-best candidate.
+- Codex apps-agents (cx-aa) still running (worktree /Users/ember/dev/minidregg-lanes/apps-agents; land via
+  target/*-commit.sh when it finishes).
+- Infra (add189844d158e3a7) has a9d4ec9ba; send it the 91a307e70 verdict.
 
 ## Reds
 
-- Composed connector: fixed by 69251145d, unproven until the next gate (residents and restart run after it).
-- Flatness submit (law 17), as above.
-- Umbrellas: Fixtures.NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles (re-records), Effects.Revival
-  EngineProofs:45 materialize_logical.
-- OwnTracks package username normalization; Hummingbird native conversation qualification (demo-path).
-- apps_front connector unit test fails only inside the apps:: group on the Mac (known).
+- Flatness submit (law 17): submit wall 4.97x, propose CPU 9.27x over 1000 ops (bound 2x); GET PASS. The hot-path
+  codex batch is landed; its HOT-PATH-STATE.md names the remaining costs (cold-start snapshots, persistent whole-cell
+  writes). No lane is on it now; a hot-path successor starts from docs/HOT-PATH-STATE.md.
+- Composed: connector until the seed and publish fixes prove out; residents and restart follow it.
+- Umbrellas: Fixtures.NativeAcceptedFixture, NativeDocWriteFixture, BirthPlanPoles, Effects.Revival.EngineProofs.
+- OwnTracks username normalization; Hummingbird native conversation qualification.
+- Distinct-management birth signing (composed in distinct mode dies at "no-grant: prepare"): integrator-owned harness.
 
 ## Not landed / held
 
-cx-oracle dd80466a1 and codex/oracle-v7-qualification b32f15604 (conflict with main; wait for the oracle7 batch);
-statement-fixes (WIP); qualify-doc-contention (WIP).
+cx-oracle dd80466a1 and codex/oracle-v7-qualification b32f15604 (conflict; wait for oracle7); statement-fixes (WIP);
+qualify-doc-contention (WIP).
 
 ## Next steps
 
-1. 7f6666525 host green -> build 3b7d6c9b2 -> move main -> gate10 -> hand infra the candidate with the verdict.
-2. If connector passes, read residents/restart; if flatness-submit is the only red, say so to infra and ember.
-3. Land cx-aa; keep the fixture current with spk-fresh's shas.
+1. Read the 91a307e70 verdict; hand infra the candidate with it; down the kept world when infra is done.
+2. Merge infra's publish fix when it lands; regate composed (composed-box resume is fastest).
+3. Land cx-aa; keep the fixture current with spk-fresh.
 
 ## Hygiene done 2026-10-29
 
