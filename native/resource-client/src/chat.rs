@@ -2452,7 +2452,14 @@ fn chat_join(session: &Session, name: &str, invitation: &str) -> Result<(), Done
         if !same_room {
             return Err(usage(format!("{name} already names another room in this workspace")));
         }
-        if !crate::credit::adopt_window_from(&session.workspace, &ws, name, &session.home.join("requests")).map_err(error)? {
+        // A member invited natively (the invitation's capability is the one NAME already presents) holds the room
+        // already: joining is then only the roster and stream below, not a window to adopt.
+        let presents_invitation = reference(session, name).ok()
+            .and_then(|r| r.get("operationCapability").cloned())
+            .is_some_and(|held| value.get("capability") == Some(&held));
+        if !presents_invitation
+            && !crate::credit::adopt_window_from(&session.workspace, &ws, name, &session.home.join("requests")).map_err(error)?
+        {
             return Err(usage(format!("{name}: no member window addressed to you in HOME/requests to adopt")));
         }
     } else {
