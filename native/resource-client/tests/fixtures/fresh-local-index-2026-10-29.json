@@ -115,6 +115,28 @@
    "webLink": "https://etherpad.org/"
   },
   {
+   "appId": "3g05nj7mpryyd3a0erndy30my7fsr72s3xghnhewkqw7km08g34h",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "developerTools"
+   ],
+   "class": "M",
+   "codeLink": "https://codeberg.org/forgejo/forgejo",
+   "isOpenSource": true,
+   "name": "Forgejo",
+   "packageBuiltAt": "2026-10-29T17:16:56Z",
+   "packageId": "73c84a947fdd0c3ac1a55bce49016e77",
+   "sha256": "73c84a947fdd0c3ac1a55bce49016e7789425cb23a54a1edeab0a99397790c1a",
+   "shortDescription": "Federated Git forge and API",
+   "upstreamAuthor": "Forgejo contributors",
+   "upstreamVersion": "17.0.1",
+   "version": "17.0.1",
+   "versionNumber": 1,
+   "webLink": "https://forgejo.org/"
+  },
+  {
    "appId": "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
    "author": {
     "name": "Mini"
@@ -158,6 +180,29 @@
    "version": "1.52.4",
    "versionNumber": 15204,
    "webLink": "https://hledger.org"
+  },
+  {
+   "appId": "vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "productivity",
+    "webPublishing"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/hakimel/reveal.js",
+   "isOpenSource": true,
+   "name": "reveal.js markdown decks",
+   "packageBuiltAt": "2026-10-29T16:51:07Z",
+   "packageId": "667f3752d4a28a084a26eb09ac55e9ea",
+   "sha256": "667f3752d4a28a084a26eb09ac55e9eaa4dc703a029bab9e390bede2cea18adc",
+   "shortDescription": "Markdown slide decks",
+   "upstreamAuthor": "Hakim El Hattab",
+   "upstreamVersion": "6.0.2",
+   "version": "6.0.2",
+   "versionNumber": 1,
+   "webLink": "https://revealjs.com"
   },
   {
    "appId": "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",

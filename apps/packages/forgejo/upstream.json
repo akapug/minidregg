@@ -1,0 +1,20 @@
+{
+  "version": "17.0.1",
+  "tag": "v17.0.1",
+  "publishedAt": "2026-10-26T18:39:32Z",
+  "releaseUrl": "https://codeberg.org/forgejo/forgejo/releases/tag/v17.0.1",
+  "binary": {
+    "url": "https://codeberg.org/forgejo/forgejo/releases/download/v17.0.1/forgejo-17.0.1-linux-amd64",
+    "sha256": "51a8cdf4a1252e79f4b3855d7a7891af6c6635105420768c460e2f0690385d6f"
+  },
+  "source": {
+    "url": "https://codeberg.org/forgejo/forgejo/releases/download/v17.0.1/forgejo-src-17.0.1.tar.gz",
+    "sha256": "d6b32ac77e71af0737f30613d985a0dc335b694b8b989d609a0cc88972f2fd4d"
+  },
+  "sandstormToolVersion": 308,
+  "debianGitVersion": "2.47.3",
+  "legacyPackagingReference": {
+    "url": "https://github.com/cem/gogs-sandstorm",
+    "commit": "1974e4570d90321f615c698878c3d2803a00f355"
+  }
+}
