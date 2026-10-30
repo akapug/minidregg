@@ -1,0 +1,32 @@
+{
+  "title": "Etherpad",
+  "ip": "0.0.0.0",
+  "port": 9001,
+  "dbType": "rustydb",
+  "dbSettings": {
+    "filename": "var/rusty.db"
+  },
+  "defaultPadText": "",
+  "soffice": null,
+  "requireAuthentication": false,
+  "requireAuthorization": false,
+  "users": {},
+  "authenticationMethod": "sso",
+  "showSettingsInAdminPage": false,
+  "cookie": {
+    "sameSite": "lax",
+    "keyRotationInterval": 86400000,
+    "sessionLifetime": 864000000,
+    "sessionCleanup": true,
+    "sessionRefreshInterval": 86400000
+  },
+  "ipLogging": "anonymous",
+  "importMaxFileSize": 8388608,
+  "updates": {
+    "tier": "off"
+  },
+  "padRetention": {
+    "enabled": false
+  },
+  "loglevel": "WARN"
+}

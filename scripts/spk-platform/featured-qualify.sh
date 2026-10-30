@@ -94,6 +94,13 @@ while read -r letter name pkg class page kind role; do
   result=$("write_$name" 2>&1 | tail -1)
   row "$name: one write beneath the HTML by a resident's script" "$([ "${result%% *}" = 1 ] && echo 1 || echo 0)" "${result#* }"
   [[ ${result%% *} == 1 ]] || bash "$here/collect-app-output.sh" "$env_file" "$out/evidence-$letter" "$letter" || :
+  # Every app trusts the identity the platform forwards, so every app proves the platform drops a forged one
+  # (market-writes/forged-identity.sh). A non-refusal is unsafe authentication, never a glitch.
+  if [[ ${result%% *} == 1 ]]; then
+    forged=$(forged_identity_refused "$page" 2>&1 | tail -1)
+    if [[ $forged == "forged identity headers refused ("* ]]; then fok=1; else fok=0; fi
+    row "$name: forged Sandstorm identity headers are refused" "$fok" "$forged"
+  fi
   [[ ${QUALIFY_STOP:-} != 1 ]] || env BIN="$BIN" sh "$repo/scripts/spk-platform/grain-journey.sh" phase "$RUN" "stop-$letter" \
     >>"$out/$letter-world.out" 2>>"$out/$letter-world.err" || row "$name: stopped after its write" 0 "$(tail -1 "$out/$letter-world.err" | cut -c1-120)"
 done <<<"$apps"

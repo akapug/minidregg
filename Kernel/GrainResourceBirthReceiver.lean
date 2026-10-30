@@ -104,11 +104,27 @@ def intent {F : Type} [Field F] [DecidableEq F]
   readGuards := accepted.readGuards
   nullifiers := (source.replayMarkers deployment.domain profile.semantics tariff).map
     (CredentialAuthorityReplay.nullifier deployment.domain)
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain ingress
   subject := some source.birth.creator
   postRootsBound := GrainResourceBirthTransaction.writes_roots_bound birth grain
   guardsReadOnly := accepted.readGuards_readonly
+
+/-- The retained finite charge is exactly the specified charge, lane by lane. -/
+theorem intent_exactCharge {F : Type} [Field F] [DecidableEq F]
+    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
+    {pins : ResourceBirth.FactoryPins} {durable : Durable}
+    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
+      deployment pins durable profile.semantics tariff source}
+    {grain : GrainResourceBirthTransaction.PreparedTargets deployment
+      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
+      profile.semantics ambient (source.grainCommand tariff)}
+    {ingress : GrainResourceBirthPolicyController.DecodedIngress}
+    (accepted : GrainResourceBirthAdmission.Accepted profile deployment pins durable
+      ambient tariff source birth grain ingress) :
+    (intent accepted).exactCharge = charge accepted :=
+  Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed grain births are named**: every write of the intent that creates
 its cell is named by the admitted factory step (`Accepted.births_named`). -/

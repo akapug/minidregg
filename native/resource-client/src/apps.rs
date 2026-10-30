@@ -290,7 +290,7 @@ pub(crate) fn resolve<'a>(entries: &'a [Entry], selector: &str) -> Result<&'a En
 /// capabilities. Ordering alone makes no claim about an installed attachment.
 /// App IDs determine curated order only; typed capabilities come from declarations.
 pub(crate) const FEATURED: &[&str] = &[
-    "h37dm17aa89yrd8zuqpdn36p6zntumtv08fjpu8a8zrte7q1cn60",
+    "ksyn7qa4szjwa14v89r7znxwrpjs0dez5q2u8s810d0awnuswmfh",
     "umpy9re0saa7vtckd6mnprv6mc5vjgr0qh5qucs4na3qjrxrrzch",
     "a0wt1wk03g737k60grvphm2rxy9yjnkev8g4jjj9zgu9mm3ggay0",
     "g9vdgqnn4dnj6r7tyaw9duydgmgskxzq9564fxceekqhvcds33zh",
@@ -298,18 +298,18 @@ pub(crate) const FEATURED: &[&str] = &[
     "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",
     "f3c9rjszvmqgvnhan8c6m5cpwkqmwu6t6de0qxa8vnx0rqreafqh",
     "rhtntjye2n7p71vrcq0ae4f6n9nr139fdk4n884tw55k40vy4uph",
-    "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
+    "3g05nj7mpryyd3a0erndy30my7fsr72s3xghnhewkqw7km08g34h",
     "894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80",
-    "7qvcjh7gk0rzdx1s3c8gufd288sesf6vvdt297756xcv4q8xxvhh",
-    "m86q05rdvj14yvn78ghaxynqz7u2svw6rnttptxx49g1785cdv1h",
-    "61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h",
-    "w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0",
-    "1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh",
-    "5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h",
-    "wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0",
-    "r8y55acmnwm0r8a2k3jp8m74pdf2xg7v2v5pxc07mcsqpq0ag3zh",
-    "zxent02jw0z9ckkagz1uscdxesaf1f1wgzdunx2wrcj0jt9uf9rh",
-    "p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70",
+    "vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h",
+    "wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0",
+    "1mvdqjv5z596dtyg5fh0p9573x32u5anrfze9rs6wpxthhyejk50",
+    "1124qk4mm5zvx294gwn9w23gn2pt96mds6pqkxpn9sxr8w2uwr70",
+    "xm16d84ksseg44ef58z7n2aw7qt1n6psk0cewzr0e0arfjk5r4fh",
+    "7xx4myv7aafdqtm4rh4fj3ju1eck9dfqnnjca3y6513gradphzv0",
+    "cvs53nmnfn463htz3yyyr8zunufczacrdg31n14j61n7g4dpeadh",
+    "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
+    "reh7pa3e7jt8ryvjgje97ke5rkyztfg70grru8dewevmunj6ugn0",
+    "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",
     "uws252ya9mep4t77tevn85333xzsgrpgth8q4y1rhknn1hammw70",
 ];
 
@@ -1693,21 +1693,25 @@ mod tests {
     }
 
     #[test]
-    fn apps_search_preserves_featured_order_and_derives_typed_tools() {
-        let entries = fixture();
+    fn apps_search_shows_the_featured_set_first_with_its_typed_tools() {
+        let entries = demo_index();
         let all = search(&entries, "", None);
         assert_eq!(all.len(), entries.len());
         let names: Vec<&str> = all.iter().take(FEATURED.len()).map(|e| e.name.as_str()).collect();
         assert_eq!(names[0], "Etherpad");
-        assert_eq!(names.len(), 21, "every featured appId is in the recorded index: {names:?}");
+        assert_eq!(names.len(), FEATURED.len(), "search shows the whole featured set first: {names:?}");
         assert!(all[FEATURED.len()..].iter().all(|e| featured(&e.app_id).is_none()));
         let pad = entry_json(all[0], &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
         assert_eq!(pad["featured"]["rank"], 1);
-        assert_eq!(pad["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
-        assert_eq!(pad["upstreamVersion"], "");
+        assert_eq!(pad["packageBuiltAt"], "2026-10-29T10:27:05Z", "a fresh package reports its recorded build time");
+        assert_eq!(pad["upstreamVersion"], "3.3.12-1");
         assert!(pad["featured"].get("agentHook").is_none());
-        assert_eq!(pad["typedInterface"]["status"], "native-attachment-required");
+        assert_eq!(pad["typedInterface"]["status"], "native-attachment-required", "the pinned package is the declared one");
         assert!(pad["typedInterface"]["tools"].as_array().unwrap().iter().any(|tool| tool["operation"] == "document.replace"));
+        let old = all.iter().find(|e| e.pinned.is_none()).unwrap();
+        let old = entry_json(old, &Verdict { state: "unverified".into(), reason: None, raw_bytes: None, signed_app_id: None, running: 0 });
+        assert_eq!(old["packageBuiltAt"], "", "the store createdAt is never promoted to a build time");
+        assert_eq!(old["upstreamVersion"], "");
     }
 
     #[test]
@@ -1736,6 +1740,55 @@ mod tests {
         assert_eq!(mismatch["status"], "package-mismatch");
         assert_eq!(mismatch["schemaAvailable"], false);
         assert!(mismatch.get("tools").is_none());
+    }
+
+    const FRESH: &[u8] = include_bytes!("../tests/fixtures/fresh-local-index-2026-10-29.json");
+
+    /// The index the demo box serves: the upstream index with the operator's pinned entries for the
+    /// packages we build ourselves merged in (deploy/market/fresh-index.py writes them; the fixture is
+    /// its output for the packages built so far).
+    fn demo_index() -> Vec<Entry> {
+        merge_local(fixture(), parse_index(FRESH).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn apps_every_featured_app_id_resolves_to_an_installable_package() {
+        // Installable: the entry exists in the merged index AND its bytes have a source, either the
+        // upstream store's package URL (an unpinned entry) or an operator pin that names the whole
+        // SHA-256 (which must begin with the packageId, the package's identity); a pin with no URL is
+        // adopted from a box-local file (deploy/market/fresh-adopt). A featured appId that no index lists cannot be searched or installed.
+        let entries = demo_index();
+        let mut unresolved = Vec::new();
+        for app_id in FEATURED {
+            match entries.iter().find(|e| e.app_id == *app_id) {
+                None => unresolved.push(format!("{app_id}: in neither the upstream index nor the operator pins")),
+                Some(e) => match &e.pinned {
+                    None => {}
+                    Some(pin) if !pin.sha256.starts_with(&e.package_id) => {
+                        unresolved.push(format!("{app_id}: pin {} does not begin with packageId {}", pin.sha256, e.package_id))
+                    }
+                    Some(_) => {}
+                },
+            }
+        }
+        assert!(unresolved.is_empty(), "featured appIds that cannot be installed:\n{}", unresolved.join("\n"));
+    }
+
+    #[test]
+    fn apps_fresh_pins_are_listed_searched_and_resolved_beside_the_upstream_index() {
+        let entries = demo_index();
+        let fresh = parse_index(FRESH).unwrap();
+        assert!(!fresh.is_empty());
+        for pinned in &fresh {
+            let found = resolve(&entries, &pinned.package_id).unwrap();
+            assert_eq!(found.app_id, pinned.app_id);
+            let pin = found.pinned.as_ref().expect("a fresh package is operator-pinned");
+            assert!(pin.sha256.starts_with(&pinned.package_id), "the pin is the package's own SHA-256");
+            assert!(pin.package_url.is_none(), "adopt mode: the demo box has no egress to the build host");
+            assert!(!found.package_built_at.is_empty(), "{}: a fresh package reports its real build time", found.name);
+            assert!(search(&entries, &found.name, None).iter().any(|e| e.package_id == pinned.package_id), "{} is searchable", found.name);
+        }
+        assert_eq!(entries.len(), 98 + fresh.len());
     }
 
     #[test]

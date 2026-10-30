@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "swagger-editor",
   "interfaceVersion": 1,
-  "appId": "1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh",
-  "packageId": "c6dbeddce8a6269990e832675cf8753d",
-  "appVersion": "2.10.4",
+  "appId": "xm16d84ksseg44ef58z7n2aw7qt1n6psk0cewzr0e0arfjk5r4fh",
+  "packageId": "c8ae9b8ea081ad5b31701cd6b11292cc",
+  "appVersion": "5.10.0-2",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 1048576,
@@ -113,8 +113,8 @@
     "kind": "member-session"
   },
   "sources": [
-    "https://github.com/pgrm/swagger-editor-sandstorm/blob/master/.sandstorm/service-config/nginx.conf",
-    "scripts/spk-platform/market-writes/b3.sh"
+    "https://github.com/swagger-api/swagger-editor/releases/tag/v5.10.0",
+    "package:c8ae9b8ea081ad5b31701cd6b11292cc/opt/app/static-server.js"
   ],
   "$defs": {}
 }

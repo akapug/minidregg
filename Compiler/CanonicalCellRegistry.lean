@@ -690,10 +690,115 @@ def ContentLaw (store : Store Hyperdocument.layout) : Prop :=
     documentAt store left = none ∨ documentAt store right = none ∨
       documentAt store left = documentAt store right
 
+/-- All present values in one computed list agree. Absent values carry no
+constraint; the first present value is the candidate for the single `all` pass. -/
+private def allPresentEqual {α : Type} [DecidableEq α] (values : List (Option α)) : Bool :=
+  match values.filterMap id with
+  | [] => true
+  | first :: rest => rest.all fun value => decide (value = first)
+
+private theorem allPresentEqual_iff {α : Type} [DecidableEq α] (values : List (Option α)) :
+    allPresentEqual values = true ↔
+      ∀ left ∈ values, ∀ right ∈ values,
+        left = none ∨ right = none ∨ left = right := by
+  have original_of_present : ∀ {value : α}, value ∈ values.filterMap id → some value ∈ values := by
+    intro value member
+    obtain ⟨entry, entryMember, selected⟩ := List.mem_filterMap.mp member
+    cases entry with
+    | none => simp at selected
+    | some actual =>
+      simp only [id_eq, Option.some.injEq] at selected
+      subst actual
+      exact entryMember
+  unfold allPresentEqual
+  cases present : values.filterMap id with
+  | nil =>
+    simp only [true_iff]
+    intro left leftMember right _
+    cases left with
+    | none => exact Or.inl rfl
+    | some left =>
+      cases right with
+      | none => exact Or.inr (Or.inl rfl)
+      | some right =>
+        have member : left ∈ values.filterMap id :=
+          List.mem_filterMap.mpr ⟨some left, leftMember, rfl⟩
+        rw [present] at member
+        simp at member
+  | cons first rest =>
+    constructor
+    · intro checked left leftMember right rightMember
+      have equal_first : ∀ {value : α}, value ∈ first :: rest → value = first := by
+        intro value member
+        rcases List.mem_cons.mp member with rfl | member
+        · rfl
+        · exact of_decide_eq_true (List.all_eq_true.mp checked value member)
+      have present_of_original : ∀ {value : α}, some value ∈ values → value ∈ first :: rest := by
+        intro value member
+        rw [← present]
+        exact List.mem_filterMap.mpr ⟨some value, member, rfl⟩
+      cases left with
+      | none => exact Or.inl rfl
+      | some left =>
+        cases right with
+        | none => exact Or.inr (Or.inl rfl)
+        | some right =>
+          exact Or.inr (Or.inr (congrArg some ((equal_first (present_of_original leftMember)).trans
+            (equal_first (present_of_original rightMember)).symm)))
+    · intro law
+      apply List.all_eq_true.mpr
+      intro value member
+      apply decide_eq_true
+      have firstPresent : first ∈ values.filterMap id := by
+        rw [present]
+        exact List.mem_cons_self
+      have valuePresent : value ∈ values.filterMap id := by
+        rw [present]
+        exact List.mem_cons_of_mem _ member
+      rcases law (some first) (original_of_present firstPresent)
+          (some value) (original_of_present valuePresent) with absent | absent | same
+      · cases absent
+      · cases absent
+      · exact (Option.some.inj same).symm
+
+/-- The same linear check on a multiset, using its computable list representative.
+The result does not depend on which representative the quotient exposes. -/
+private def allPresentEqualMultiset {α : Type} [DecidableEq α] (values : Multiset (Option α)) : Bool :=
+  Quot.liftOn values allPresentEqual fun left right perm => by
+    have same : allPresentEqual left = true ↔ allPresentEqual right = true := by
+      rw [allPresentEqual_iff, allPresentEqual_iff]
+      constructor
+      · intro law l leftMember r rightMember
+        exact law l (perm.mem_iff.mpr leftMember) r (perm.mem_iff.mpr rightMember)
+      · intro law l leftMember r rightMember
+        exact law l (perm.mem_iff.mp leftMember) r (perm.mem_iff.mp rightMember)
+    cases leftResult : allPresentEqual left <;> cases rightResult : allPresentEqual right <;> simp_all
+
+private theorem allPresentEqualMultiset_iff {α : Type} [DecidableEq α]
+    (values : Multiset (Option α)) :
+    allPresentEqualMultiset values = true ↔
+      ∀ left ∈ values, ∀ right ∈ values,
+        left = none ∨ right = none ∨ left = right := by
+  induction values using Quot.inductionOn with
+  | _ values => exact allPresentEqual_iff values
+
 instance contentLawDecidable (store : Store Hyperdocument.layout) :
     Decidable (ContentLaw store) := by
+  apply decidable_of_iff
+    (allPresentEqualMultiset (store.support.val.map (documentAt store)) = true)
+  symm
   unfold ContentLaw
-  infer_instance
+  rw [allPresentEqualMultiset_iff]
+  constructor
+  · intro law left leftMember right rightMember
+    obtain ⟨leftAddress, leftSupport, rfl⟩ := Multiset.mem_map.mp leftMember
+    obtain ⟨rightAddress, rightSupport, rfl⟩ := Multiset.mem_map.mp rightMember
+    exact law leftAddress (by simpa using leftSupport) rightAddress (by simpa using rightSupport)
+  · intro checked left leftSupport right rightSupport
+    exact checked (documentAt store left)
+      (Multiset.mem_map.mpr ⟨left, by simpa using leftSupport, rfl⟩)
+      (documentAt store right)
+      (Multiset.mem_map.mpr ⟨right, by simpa using rightSupport, rfl⟩)
 
 /-! ### Hyperdocument event history: this domain's well-formed, addressed events -/
 
@@ -730,8 +835,36 @@ def EventHistoryLaw (deployment : Deployment)
 instance eventHistoryLawDecidable (deployment : Deployment)
     (store : Store Kernel.HyperdocumentEventLog.Sparse.layout) :
     Decidable (EventHistoryLaw deployment store) := by
+  apply decidable_of_iff
+    ((∀ address ∈ store.support, EventValid deployment address.2 (store address)) ∧
+      allPresentEqualMultiset (store.support.val.map fun address =>
+        (store address).map VersionEventRecord.document) = true)
+  symm
   unfold EventHistoryLaw
-  infer_instance
+  constructor
+  · rintro ⟨valid, same⟩
+    refine ⟨valid, ?_⟩
+    rw [allPresentEqualMultiset_iff]
+    intro left leftMember right rightMember
+    obtain ⟨leftAddress, leftSupport, rfl⟩ := Multiset.mem_map.mp leftMember
+    obtain ⟨rightAddress, rightSupport, rfl⟩ := Multiset.mem_map.mp rightMember
+    exact Or.inr (Or.inr (same leftAddress (by simpa using leftSupport)
+      rightAddress (by simpa using rightSupport)))
+  · rintro ⟨valid, checked⟩
+    refine ⟨valid, ?_⟩
+    rw [allPresentEqualMultiset_iff] at checked
+    intro left leftSupport right rightSupport
+    have compared := checked
+      ((store left).map VersionEventRecord.document)
+      (Multiset.mem_map.mpr ⟨left, by simpa using leftSupport, rfl⟩)
+      ((store right).map VersionEventRecord.document)
+      (Multiset.mem_map.mpr ⟨right, by simpa using rightSupport, rfl⟩)
+    cases leftValue : store left with
+    | none => exact ((DFinsupp.mem_support_toFun _ _).mp leftSupport leftValue).elim
+    | some leftRecord =>
+      cases rightValue : store right with
+      | none => exact ((DFinsupp.mem_support_toFun _ _).mp rightSupport rightValue).elim
+      | some rightRecord => simpa [leftValue, rightValue] using compared
 
 /-- **The domain restoration (S3 decision 1).**  An event record naming any
 other history domain cannot sit in this deployment's event log. -/

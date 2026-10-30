@@ -255,10 +255,13 @@ fn protected_auth(
             .add(cert)
             .map_err(|e| format!("invalid pinned certificate: {e}"))?;
     }
-    let signatures = WebPkiServerVerifier::builder(Arc::new(roots))
+    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let signatures = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
         .build()
         .map_err(|e| format!("cannot create fn TLS signature verifier: {e}"))?;
-    let tls_config = ClientConfig::builder()
+    let tls_config = ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| format!("cannot create fn TLS config: {e}"))?
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(ExactPinnedVerifier {
             expected_der,

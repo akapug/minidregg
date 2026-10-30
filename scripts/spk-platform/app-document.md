@@ -45,7 +45,7 @@ Create a private capture binding with these exact fields:
 
 Every numeric field above uses its actual canonical decimal source selector.
 `ca` may be null for a publicly trusted certificate. HTTPS certificates are
-verified; credentials are supplied to curl through stdin rather than argv.
+verified; credentials stay in the client's memory (its own TLS, the hybrid group first) and never reach argv.
 The app/package/task and destination are read under the connector's own current
 authority before capture. Receipt selectors must match the binding and exact
 response body. The receipt establishes native admitted-request provenance and

@@ -1,24 +1,30 @@
-# Batch 6 (forms and tools): write recipes. The run that produced the rows (w2, store 93d1a37db7768c6b,
-# frozen tree 25290d1d): SandForms and Badgepack lifecycle PASS; OwnTracks and Hummingbird refused at
-# install by the bridge (named in their functions). No recipe below was exercised live (the no-probing
-# rule landed first); each says where it comes from.
+# Batch 6 (forms and tools). Package contracts are recorded beside each recipe.
+# The 2026-10-29 OwnTracks run reached the recorder; its named readback failure
+# is a package identity-normalization defect, described below. Hummingbird uses
+# the shared native conversation interpreter, not a standalone HTTP recipe.
 
 # SandForms (Meteor 1.2.1, DDP): source from the package's own source maps (/prompts/prompts.js:
 # Meteor.methods 'Prompts.create'(text, required) inserts a prompt, publication "prompts" is public).
 # The page body (get-j) is an empty Meteor shell, so the write is a DDP method over the owner route.
 
 
-# OwnTracks (mnutt/owntracks-recorder, ot-recorder --http-port, per the package's start script):
-# the Recorder's HTTP mode takes a location JSON on POST /pub with the user and device as the
-# X-Limit-U / X-Limit-D headers (OwnTracks Recorder docs); /api/0/last is the read-API the package's
-# own map page calls (strings in the package). Install is currently refused: "bridge apiPath must
-# start and end with '/'" (row k), so the write waits on that.
+# OwnTracks 7191aab6 (ot-recorder 0.6.9) overrides u/d and user/device with
+# X-Sandstorm-Username. It sanitizes that name for storage but not lookup:
+# "Grain%20owner" writes last/grain-20owner/... and the same-session GET misses it.
+# A 200 [] POST is the friends response, not a write receipt. Require this exact
+# timestamp in readback; an earlier location cannot qualify a new write.
 write_OwnTracks() {
-  local tst; tst=$(date +%s)
-  local post; post=$(req POST "/pub?u=featured&d=resident" -H 'Content-Type: application/json' -H 'X-Limit-U: featured' -H 'X-Limit-D: resident' \
+  local tst post got; tst=$(date +%s)
+  post=$(req POST "/pub?u=featured&d=resident" -H 'Content-Type: application/json' \
     --data "{\"_type\":\"location\",\"lat\":52.5200,\"lon\":13.4050,\"tst\":$tst,\"tid\":\"fr\",\"acc\":10}")
-  local got; got=$(req GET '/api/0/last?user=featured&device=resident')
-  [[ $post =~ ^20 && $got == 200 ]] && grep -q '52.52' "$body" && echo "1 POST /pub $post; GET /api/0/last $got"
+  cp "$body" "$body.post"
+  got=$(req GET '/api/0/last?user=featured&device=resident')
+  if [[ $post =~ ^20 && $got == 200 ]] &&
+      jq -e --argjson tst "$tst" 'any(.[]; .tst == $tst and .lat == 52.52 and .lon == 13.405)' "$body" >/dev/null 2>&1; then
+    echo "1 POST /pub $post; GET /api/0/last $got; exact location timestamp $tst"
+  else
+    echo "0 owntracks-readback-absent: POST /pub $post; GET /api/0/last $got; timestamp $tst absent; retained $body.post and $body (package username normalization must agree at write and lookup)"
+  fi
 }
 
 # Badgepack: the page's own script (get-l in the run) calls fetch(`/api/badges`, POST multipart with

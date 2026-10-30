@@ -1,0 +1,24 @@
+{
+  "upstream": {
+    "project": "MediaWiki",
+    "version": "1.46.2",
+    "archive": "https://releases.wikimedia.org/mediawiki/1.46/mediawiki-1.46.2.tar.gz",
+    "sha256": "8f7f937f8bbc1acd4cef1c5362a95f248dcd242020f2588798eb2f73ac2e69ba",
+    "archiveTimestampUtc": "2026-10-02T23:41:00Z"
+  },
+  "adapterBase": {
+    "repository": "https://github.com/zenhack/mediawiki-sandstorm",
+    "commit": "e15a742e99ffb75b7e46ce680a0120d42bbb03e6"
+  },
+  "runtime": {
+    "distribution": "Debian 13 (trixie)",
+    "architecture": "x86_64",
+    "php": "8.4",
+    "database": "MediaWiki SQLite"
+  },
+  "sandstorm": {
+    "bundle": 308,
+    "bundleSha256": "f1317754765b11f260a757724b28e92d5318d8b277f970c99662c01bd9291879",
+    "releaseKeyFingerprint": "160D2D577518B58D94C9800B63F227499DA8CCBD"
+  }
+}

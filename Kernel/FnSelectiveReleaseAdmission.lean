@@ -290,7 +290,8 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
           (DeclaredResourceController.operationMarker config.deployment.domain
             config.profile.semantics (FnSelectiveReleaseIngress.command ingress)),
         FnSelectiveReleaseIngress.releaseNullifier ingress.packet.release]
-    exactCharge := charge opened.durable.snapshot ingress writes guards
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+      (charge opened.durable.snapshot ingress writes guards)).toCharge
     event := FnSelectiveReleaseIngress.event ingress
     subject := some (FnSelectiveReleaseIngress.command ingress).subject
     postRootsBound := DeclaredResourceController.writes_roots_bound operation

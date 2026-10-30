@@ -24,6 +24,9 @@ SIGNATURE_BINARY=${SIGNATURE_BINARY:-"$REPO/native/credential-signature-verifier
 WORKROOM_PARENT_TASK=${WORKROOM_PARENT_TASK-7101}
 WORKROOM_TOOL_TASK=${WORKROOM_TOOL_TASK-7102}
 WORKROOM_SPONSOR_BALANCE=${WORKROOM_SPONSOR_BALANCE-100}
+# A finite genesis allocation, independent of account money and task budgets.
+WORKROOM_METER_ALLOWANCE=${WORKROOM_METER_ALLOWANCE-}
+case "$WORKROOM_METER_ALLOWANCE" in 0?*|*[!0-9]*) echo 'WORKROOM_METER_ALLOWANCE must be canonical decimal' >&2; exit 2;; esac
 WORKROOM_TOOL_BALANCE=${WORKROOM_TOOL_BALANCE-100}
 WORKROOM_PARENT_BUDGET=${WORKROOM_PARENT_BUDGET-100}
 WORKROOM_TOOL_BUDGET=${WORKROOM_TOOL_BUDGET-50}
@@ -183,12 +186,16 @@ fi
 # Clock capability IDs avoid the workroom's existing owner/control IDs.
 jq -n --argjson sponsor "$WORKROOM_SPONSOR_BALANCE" \
   --argjson byteTariff "$WORKROOM_TARIFF_PER_INITIAL_PAYLOAD_BYTE" \
+  --arg meter "$WORKROOM_METER_ALLOWANCE" \
+  --slurpfile template "$GENESIS_PARAMS_TREE/native/resource-client/genesis-params.example.json" \
   --slurpfile policy "$EVIDENCE/operator-policy.json" \
   --slurpfile predicate "$EVIDENCE/factory-predicate.json" '
   {sponsor:{initialBalance:$sponsor},tariffPerInitialPayloadByte:$byteTariff,
    clock:{spendCapabilityId:4071,controlCapabilityId:4072,
      factoryObserveCapabilityId:4073,tickCapabilityId:4074},
-   clockControlCapability:4093,operatorPolicy:$policy[0],factoryPredicate:$predicate[0]}' \
+   clockControlCapability:4093,operatorPolicy:$policy[0],factoryPredicate:$predicate[0]}
+   | if $meter != "" then .meterAllowance =
+       ($template[0].meterAllowance | with_entries(.value = ($meter | tonumber))) else . end' \
   >"$EVIDENCE/scenario-overrides.json"
 if [ -n "$WORKROOM_PAY_OBSERVER" ]; then
   "$MINI" keygen --secret "$EVIDENCE/pay-observer.key" --public "$EVIDENCE/pay-observer.pub" --no-prerotation >"$EVIDENCE/pay-observer-public.txt"

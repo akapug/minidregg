@@ -28,6 +28,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 installer=$repo/deploy/spk-host/install-user-world
 rc=0
+# Stop the exact world's certifier before its Store services and keys go away.
+certifier=mini-spk-certify-$STORE.service
+if [[ -f $units/$certifier ]]; then
+  systemctl --user stop "$certifier" || rc=1
+  rm -f "$units/$certifier"
+fi
 if [[ -f $CONFIG ]]; then
   BIN="$BIN" GRAINS_ROOT="$GRAINS_ROOT" BROKER_SOCKET="$BROKER_SOCKET" "$here/grain-journey.sh" stop-services "$RUN" >>"$run/cleanup-services.log" 2>&1 || rc=1
 fi

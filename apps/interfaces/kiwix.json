@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "kiwix",
   "interfaceVersion": 1,
-  "appId": "5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h",
-  "packageId": "eace6915b227131cf0ed2b1a0db2e86b",
-  "appVersion": "0.1.0",
+  "appId": "7xx4myv7aafdqtm4rh4fj3ju1eck9dfqnnjca3y6513gradphzv0",
+  "packageId": "5378e1b9979bc76d4b492115aa52c6e0",
+  "appVersion": "3.8.2-2",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 1048576,
@@ -178,8 +178,8 @@
     "kind": "member-session"
   },
   "sources": [
-    "package:eace6915b227131cf0ed2b1a0db2e86b/zim_uploader/uploader/app.py",
-    "https://github.com/orblivion/KiwixSandstorm/blob/master/package/zim_uploader/uploader/app.py",
+    "package:5378e1b9979bc76d4b492115aa52c6e0/opt/app/adapter.py",
+    "https://github.com/kiwix/kiwix-tools/releases/tag/3.8.2",
     "scripts/spk-platform/market-writes/b5-mkzim.py"
   ],
   "$defs": {}

@@ -642,27 +642,6 @@ abbrev indexLayout (capacity : Nat) : Store.Layout.{0, 0, 0} where
   Value := IndexSpace.Value
   discipline := fun _ => .ram
 
-def finStream (capacity : Nat) : StreamCodec (Fin capacity) where
-  encode slot := StreamCodec.nat.encode slot.val
-  decodePrefix bytes := do
-    let (value, suffix) ← StreamCodec.nat.decodePrefix bytes
-    if bound : value < capacity then some (⟨value, bound⟩, suffix) else none
-  decodePrefix_encode := by
-    intro slot suffix
-    simp [StreamCodec.nat.decodePrefix_encode, slot.isLt]
-  encode_decodePrefix := by
-    intro bytes slot suffix decoded
-    cases ok : StreamCodec.nat.decodePrefix bytes with
-    | none => simp [ok] at decoded
-    | some pair =>
-      obtain ⟨wire, rest⟩ := pair
-      by_cases bound : wire < capacity
-      · simp only [ok, bind, Option.bind, dif_pos bound, Option.some.injEq,
-          Prod.mk.injEq] at decoded
-        obtain ⟨rfl, rfl⟩ := decoded
-        exact StreamCodec.nat.encode_decodePrefix _ _ _ ok
-      · simp [ok, bound] at decoded
-
 def checkpointStream : StreamCodec CausalCheckpoint :=
   StreamCodec.xmap
     (StreamCodec.product digestStream
@@ -720,8 +699,8 @@ def indexKeyStream (capacity : Nat) :
     (space : IndexSpace) → StreamCodec (IndexSpace.Key capacity space)
   | .checkpoints => StreamCodec.bool
   | .cursor => unitStream
-  | .source => finStream capacity
-  | .derived => finStream capacity
+  | .source => StreamCodec.fin capacity
+  | .derived => StreamCodec.fin capacity
 
 def indexValueStream : (space : IndexSpace) → StreamCodec (IndexSpace.Value space)
   | .checkpoints => checkpointStream

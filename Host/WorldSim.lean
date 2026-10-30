@@ -248,7 +248,7 @@ def genHere {α : Type} (m : GenM α) : SimM α := do
 def reopen (plant : Plant) (h : Host) : Except String Host := do
   let records ← h.records.toList.mapM fun b =>
     (DurableCheckpointCodec.recordFrame.decode b).elim (.error "a persisted record does not decode") .ok
-  let snap ← (Image.restore RB ⟨h.seed, records⟩).elim (.error "Image.restore refused the records") .ok
+  let snap ← (Image.restore RB (Image.ofAccepted h.seed records)).elim (.error "Image.restore refused the records") .ok
   let g ← (genesisOfSeed h.seed).mapError fun e => s!"genesis {reprStr e}"
   let log := if plant = .reopenDropsLast then h.log.pop else h.log
   let (w, turns) ← (followFrom g 0 log.toList).mapError fun e => s!"reopen fold {reprStr e}"

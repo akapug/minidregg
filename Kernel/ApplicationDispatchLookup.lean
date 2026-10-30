@@ -40,7 +40,7 @@ def lookupVerified {config : Config} {target : Durable}
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | .error .nativeHistoryUnavailable
   let expectedEvent := ApplicationDispatchAdmissionIngress.event ingress
   let expectedNullifier := ApplicationDispatchAdmissionIngress.nullifier ingress

@@ -39,11 +39,16 @@ signature. Hence the law's claim-checked, verify-charged shape.
 - **The name:** `Compiler.RefusalReason.rateLimited`, tag 16, name `rate-limited`. Adding the tag
   retired the v6 outcome frame (`NativeHostCodec.v6_outcome_refused`); the current frame is
   `NativeProtocolFrames.outcomeFrame`. Moving the StoreEpoch is a re-genesis.
-- **Defaults:** `SubjectRate.hostDefault` is 300 signed requests per subject per 60 s. It applies
+- **Defaults:** `SubjectRate.hostDefault` is 1200 signed requests per subject per 60 s. It applies
   when the Host config carries no `requestRate`. The operator's own subject and the sponsor's are
   exempt by verified subject. They are named in the Host config
-  `"requestRate": {"limit": 300, "windowMs": 60000, "exempt": [OPERATOR, SPONSOR]}`, which the
+  `"requestRate": {"limit": 1200, "windowMs": 60000, "exempt": [OPERATOR, SPONSOR]}`, which the
   deployment writes (infra). Absent, no subject is exempt.
+  The provisional 300/min exhausted the composed JWF story move and bulk grant
+  setup (2026-10-29); the browser workload needs headroom for several signed
+  reads per action. The 1200/min default retains a bounded per-subject policy.
+  Existing explicit operator policies remain pinned and require an intentional
+  configuration update; changing the default does not override them.
 
 ## 4. The Host integration
 

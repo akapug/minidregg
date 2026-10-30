@@ -142,11 +142,16 @@ def intent (accepted : Accepted profile config pins durable height ingress) :
   nullifiers := ResourceBirthReceiver.birthNullifier config.deployment.domain
       accepted.birth.descriptor.authorityNullifier ::
     [issueNullifier config.deployment.domain ingress accepted.birth.descriptor]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event config.deployment.domain ingress
   subject := some accepted.birth.descriptor.creator
   postRootsBound := composite_roots_bound accepted
   guardsReadOnly := compositeGuards_readonly accepted
+
+/-- The retained finite charge is exactly the specified charge, lane by lane. -/
+theorem intent_exactCharge (accepted : Accepted profile config pins durable height ingress) :
+    (intent accepted).exactCharge = charge accepted :=
+  Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- **The committed births are named**: every write of the intent that creates
 its cell -- the initialized content cell included -- is named by the step the

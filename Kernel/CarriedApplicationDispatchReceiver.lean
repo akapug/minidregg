@@ -176,8 +176,9 @@ theorem Committed.receipt_admitted_suffix {config : Config} {anchor : Opened con
         committed.verified.opened committed.verified.receipts := by
   have exact := committed.receiptExact
   unfold NativeHostReplay.SuffixVerified.receiptAt at exact
+  rw [DurableReceiverIO.Loaded.height_eq anchor.durable] at exact
   by_cases within : anchor.durable.image.accepted.length ≤ committed.old.opened.durable.height
-  · rw [if_pos within] at exact
+  · rw [if_pos within, PersistentHistory.get?_eq] at exact
     exact ⟨within, exact, committed.verified.accepted_suffix⟩
   · rw [if_neg within] at exact
     cases exact
@@ -276,7 +277,7 @@ private def receiveAdmitted {config : Config} {anchor : Opened config} {target :
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ => return .uncertain "dispatch lacks exact post-CAS readback"
-      | .rejected _ => return .rejected "durable dispatch refused"
+      | .rejected reason => return .rejected s!"durable dispatch refused: {repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail

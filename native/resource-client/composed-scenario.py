@@ -107,6 +107,7 @@ ADAPTERS = {"apps": SPK / "same-store-app.py", "connector": SPK / "app-document-
             "protected": SCRIPTS / "protected-document-same-store.py",
             "ordinary": SCRIPTS / "docuverse-same-store.py",
             "connectorJourney": SPK / "app-document-journey.py",
+            "connectorSheet": SPK / "connector-sheet-seed.py",
             "worldInputs": SPK / "same-store-inputs.py",
             "connectorAuthority": SPK / "connector-authority.py",
             "resident": HERE.parent.parent / "testing/journeys/same-world-resident.py"}
@@ -929,6 +930,10 @@ class Scenario:
                 provision_input = value["input"]
             self.adapter("connector", [sys.executable, str(ADAPTERS[phase]), provision_input], reentrant=True)
             if "app" in value:
+                # The connector's route can only export a sheet that exists: the owner delegate writes it first.
+                self.adapter("connector:sheet", [sys.executable, str(ADAPTERS["connectorSheet"]),
+                                                 str(Path(app_input["root"]) / "fixture.json"),
+                                                 read(provision_input)["sheet"]], reentrant=True)
                 provisioned = str(Path(read(provision_input)["root"]) / "result.json")
                 journey_input = self.derived_input("journey", app, provisioned)
             else:

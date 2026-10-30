@@ -298,16 +298,16 @@ def prepare (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest)
 /-- The constructor is module-private. There is no positive-result decoder,
 test receipt constructor, arbitrary verifier callback or pure mint function. The
 verdict is the configured verifier's, and the receipt keeps that config
-(`verifier`): the pinned native process, or -- only in a Lean fixture that evaluates
-a real admission -- a recorded run of that process
+(`verifier`): the linked native kernel, or -- only in a Lean fixture that evaluates
+a real admission -- a recorded run of that verifier
 (`CredentialSignatureIO.Transcript`), which `scripts/check-native-transcripts.sh`
-re-submits to it.  **Layer 2**: the verdict is the oracle's, a runtime fact; `private
+re-submits to the pinned binary.  **Layer 2**: the verdict is the oracle's, a runtime fact; `private
 mk` stops names but not `by constructor`, so the guarantee that only `verifyNative`
 and `ofReceiverClaim` mint a receipt is `TokenCensus` (no foreign mint, a planted
 forgery detected). -/
 structure CheckedSignature (snapshot : Snapshot) where
   private mk ::
-  /-- The oracle that answered the signature check: the pinned process, or (only
+  /-- The oracle that answered the signature check: the linked native kernel, or (only
   in a pure evaluation) a recorded run of it (`CredentialSignatureIO.Oracle`). -/
   source : CredentialSignatureIO.Source
   request : SomeRequest
@@ -352,22 +352,22 @@ BEFORE its `prepare` runs (`Theory.Receiving.Receiver.admitVia`); `prepare`
 receives the accepted claims as `Theory.Receiving.Vouchers` of the Receiver's
 verifier.  `receiverVerifier` is that verifier over a `CredentialSignatureIO.Oracle`
 -- the same closed family of oracles `verifyNative` takes, so at `IO` the
-verdict is the pinned process's (`Oracle.io_process`).  `ReceiverSignature` and
+verdict is the linked native kernel's (`Oracle.io_native`).  `ReceiverSignature` and
 `CheckedSignature.ofReceiverClaim` turn a voucher into a value a gate can hold;
 neither can be built without one. -/
 
 open Minidregg.Theory.Receiving (SigQuery Vouchers Verifier)
 
-/-- **The oracle ran and answered.**  The live half of `Verifier.Answered`: the pinned native process
+/-- **The oracle ran and answered.**  The live half of `Verifier.Answered`: the linked native kernel
 answered `answer` on exactly `query`.  The constructor is private and its ONLY construction site is the
 live branch of `receiverVerifier` below, right after `CredentialSignatureIO.verify`/`verifySshsig`
 returned `.ok answer`; `TokenCensus` pins that no constant elsewhere mints one.  This is the one
-remaining layer-2 trust of the receiving pipeline: the process told the truth. -/
+remaining layer-2 trust of the receiving pipeline: the kernel returned the verdict. -/
 structure Ran (config : CredentialSignatureIO.NativeConfig) (query : SigQuery) (answer : Bool) :
     Prop where
   private mk ::
 
-/-- What it means for an oracle to have answered `answer` on `query`: for the live process, `Ran`; for a
+/-- What it means for an oracle to have answered `answer` on `query`: for the live kernel, `Ran`; for a
 recorded run, the Ed25519 transcript verdict. -/
 def oracleAnswered : {m : Type → Type} → CredentialSignatureIO.Oracle m → SigQuery → Bool → Prop
   | _, .live config, query, answer => Ran config query answer
@@ -408,7 +408,7 @@ def receiverVerifier : {m : Type → Type} → CredentialSignatureIO.Oracle m �
 
 /-- **Live teeth, over the type**: a voucher set of the live verifier holds a query only with its `Ran`
 witness.  Since `Ran`'s constructor is private to this module and used once, a `Vouchers (receiverVerifier
-(.live config))` holding a query the process never answered `true` on is not a term of the type. -/
+(.live config))` holding a query the kernel never answered `true` on is not a term of the type. -/
 theorem live_voucher_has_ran {config : CredentialSignatureIO.NativeConfig}
     (vouchers : Vouchers (receiverVerifier (.live config))) {query : SigQuery}
     (member : query ∈ vouchers.verified) : Ran config query true :=
@@ -600,7 +600,7 @@ theorem checked_frame_exact (snapshot : Snapshot) (receipt : CheckedSignature sn
   exact congrArg CredentialSignedEnvelopeController.headerCodec.encode receipt.prepared.headerExact
 
 /-- Explicit IO-to-verifier refinement obligation for ACTUAL execution,
-including the pinned executable and exact process/filesystem byte transport.
+including the linked native kernel and its exact ByteArray ABI transport.
 `Returned` denotes that physical execution relation; a structurally available
 receipt alone is not its proof. No relation or instance is asserted here.
 The existing controller separately requires cryptographic refinement and

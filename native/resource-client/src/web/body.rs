@@ -678,6 +678,12 @@ fn operations(site: &Site) -> String {
     if !site.names().iter().any(|n| n == "operations") {
         return "<section class=\"ops\"><h2>Operations room</h2><p class=note>The box's operations room (<code>operations</code>, posted into by the box's own member <code>mini-s-box</code>) is not yet shared with the public reader: nothing to show by that name.</p></section>\n".to_owned();
     }
+    // The reference alone is not the room: this session reads it once it holds the room record
+    // (`chat join operations INVITATION`). Without one the shell's refusal ("this session has no room
+    // operations") is not news worth a red outcome on the front page and the tour: say what is missing.
+    if site.shell.as_ref().is_some_and(|shell| !shell.home.join("chat").join("rooms").join("operations.json").is_file()) {
+        return "<section class=\"ops\"><h2>Operations room</h2><p class=note>The box's operations room (<code>operations</code>) is shared with this workspace, but this session has not joined it: <code>chat join operations INVITATION</code> brings its signed turns here.</p></section>\n".to_owned();
+    }
     match verb(site, &["tail -n 20 --in operations".to_owned()]) {
         Some(ending) if ending.code == 0 => format!(
             "<section class=\"ops chat\" data-live=\"30000\" data-live-path=\"/activity\"><p class=\"eyebrow\">From the operations room</p><h2>Life in this world</h2><p class=note>Ships, drills, checkpoints and backups, as signed turns of <code>mini-s-box</code>.</p><pre class=\"turns\">{}</pre><p><a href=\"/room/operations\">the room</a></p></section>\n",

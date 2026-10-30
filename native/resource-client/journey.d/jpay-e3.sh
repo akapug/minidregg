@@ -18,7 +18,7 @@
 #
 # Checked: the enrollment's subject, account, funding, book index, lease and ssh
 # row; the renewal; the consumed nullifier; every journal reason with the Book
-# unchanged; a verifier failure refused (not journaled); the new subject reading
+# unchanged; a broken legacy verifier path ignored by the linked kernel; the new subject reading
 # its own account (admitted) and another friend's (refused); the observer's
 # factory policy install and factory observation refused by the confined factory law
 # (the install never reaches the install receiver: its plan must first observe the
@@ -372,7 +372,8 @@ led3 = ledger()
 row("the journal mints nothing", "well and every payer unchanged by the 7 journaled payments",
     f"well {led2['well']}->{led3['well']}", led3["well"] == led2["well"] and led3["payers"] == led2["payers"])
 
-# A verifier that cannot answer `verify-sshsig`: the payment is REFUSED, not journaled.
+# The legacy verifier path is not a live dependency: even a broken helper is
+# ignored, and the linked native kernel accepts a valid payment.
 broken = path("verifier-broken.sh")
 with open(broken, "w") as out:
     out.write(f"#!/bin/sh\nif [ \"$1\" = verify-sshsig ]; then echo 'verifier offline' >&2; exit 70; fi\n"
@@ -387,9 +388,10 @@ before = enrolment_view(host)
 carol, _, carol_memo = make_memo("carol")
 r, _ = enrol(host, record(PRICE, carol_memo))
 after = enrolment_view(host)
-row("verifier unavailable for the ssh-sig", "refused (verifier), nothing journaled or enrolled",
-    f"{show(r)} journal {len(before.get('journal', []))}->{len(after.get('journal', []))}",
-    refused(r, "verifier") and after.get("journal") == before.get("journal") and after["entries"] == before["entries"])
+row("a broken legacy verifier path is not consulted", "confirmed by the linked kernel, enrolment added",
+    f"{show(r)} entries {len(before.get('entries', []))}->{len(after.get('entries', []))}",
+    r.get("type") == "confirmed" and after.get("journal") == before.get("journal")
+    and len(after["entries"]) == len(before["entries"]) + 1)
 host.stop()
 
 # ---------------------------------------------------------------- the observer is confined

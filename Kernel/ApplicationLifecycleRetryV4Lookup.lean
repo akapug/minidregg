@@ -35,7 +35,7 @@ private def select {config : Config} {target : Durable}
     | .ok none
   let some record := verified.opened.durable.image.accepted[index]?
     | .error .nativeHistoryUnavailable
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | .error .nativeHistoryUnavailable
   if record.event == event && nullifiers.all record.nullifiers.contains &&
       receipt.transactionId == transactionId &&

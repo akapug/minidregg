@@ -164,55 +164,6 @@ def unitStream : StreamCodec Unit where
   encodeInto out _ := out
   encodeInto_spec out _ := (List.append_nil _).symm
 
-/-- The cursor of a decoder that reads one tag octet and nothing after it (a
-namespace tag): the list decoder runs on that one octet. -/
-def tagCursor {α : Type} (decode : List UInt8 → Option (α × List UInt8)) (bytes : ByteArray)
-    (start : Nat) : Option (α × Nat) :=
-  if inside : start < bytes.size then
-    match decode [bytes[start]] with
-    | some (value, _) => some (value, start + 1)
-    | none => none
-  else none
-
-theorem tagCursor_spec {α : Type} (decode : List UInt8 → Option (α × List UInt8))
-    (empty : decode [] = none)
-    (oneOctet : ∀ tag rest, decode (tag :: rest) = (decode [tag]).map fun result => (result.1, rest))
-    (bytes : ByteArray) (start : Nat) (fits : start ≤ bytes.size) :
-    tagCursor decode bytes start = cursorOfPrefix decode bytes start := by
-  unfold tagCursor cursorOfPrefix
-  by_cases inside : start < bytes.size
-  · rw [dif_pos inside, StreamCodec.octets_drop bytes inside,
-      oneOctet bytes[start] (bytes.data.toList.drop (start + 1))]
-    cases decode [bytes[start]] with
-    | none => rfl
-    | some pair =>
-        simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq, true_and]
-        rw [List.length_drop, StreamCodec.octets_length]
-        omega
-  · rw [dif_neg inside, StreamCodec.octets_drop_end bytes (by omega), empty]
-    rfl
-
-/-- A one-octet tag codec, decoding natively on the cursor. -/
-def withTagCursor {α : Type} (codec : StreamCodec α) (empty : codec.decodePrefix [] = none)
-    (oneOctet : ∀ tag rest, codec.decodePrefix (tag :: rest) =
-      (codec.decodePrefix [tag]).map fun result => (result.1, rest)) : StreamCodec α :=
-  { codec with
-    decodeAt := tagCursor codec.decodePrefix
-    decodeAt_spec := tagCursor_spec codec.decodePrefix empty oneOctet
-    cursorNative := true }
-
-set_option hygiene false in
-/-- Discharges `withTagCursor`'s `oneOctet` for a decoder that matches one literal
-tag octet per arm (`| 3 :: suffix => some (.c, suffix)`) and refuses the rest:
-each arm's answer does not depend on what follows the tag. -/
-macro "one_octet_tag" : tactic => `(tactic| (
-  intro tag rest
-  dsimp only
-  split
-  all_goals first
-    | (rename_i same; injection same with tagSame restSame; subst tagSame; subst restSame; rfl)
-    | (split <;> rename_i same <;> simp at same <;> simp_all)))
-
 section Wire
 
 variable {L : Layout.{0, 0, 0}} (W : Wire L)
@@ -890,6 +841,24 @@ def rootOfLeavesWritten (leafList : List (List UInt8)) : Digest :=
 
 def rootPreimage (store : Store L) : List UInt8 :=
   frame W ++ (leaves W store).flatten
+
+/-- The current root hashes a flat sequence, not a Merkle path: exactly one
+32-byte leaf per entry, even for an unblinded store. This is a cost statement
+about the deployed preimage, not an impossibility claim about other commitments. -/
+theorem rootPreimage_length (store : Store L) :
+    (rootPreimage W store).length = 44 + 32 * (entries W store).length := by
+  have leaves_length (es : List (Entry L)) :
+      (es.map fun e => (opening W store e).leaf).flatten.length = 32 * es.length := by
+    induction es with
+    | nil => simp
+    | cons e es ih =>
+        simp only [List.map_cons, List.flatten_cons, List.length_append,
+          Opening.leaf_length, ih, List.length_cons]
+        omega
+  rw [rootPreimage, List.length_append, frame_length]
+  exact congrArg (44 + ·) (leaves_length (entries W store))
+
+#assert_axioms rootPreimage_length
 
 /-- **The cell root.** -/
 def saltedRoot (store : Store L) : Digest :=

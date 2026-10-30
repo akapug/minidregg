@@ -80,9 +80,12 @@ structure Policy where
   limit_pos : 0 < limit
   window_pos : 0 < windowMs
 
-/-- The Host's default (coordinator's ruling, 2026-10-27; ASSUMED until `jtour` counts signed
-frames per verb): 300 signed requests per subject per 60 s, 5 a second sustained. -/
-def hostDefault : Policy := ⟨300, 60000, by decide, by decide⟩
+/-- The Host's default: 1200 signed requests per subject per 60 s (20/s).
+The composed JWF browser journey exhausted the provisional 300/min in the story
+move and document-grant setup (2026-10-29). A browser action uses multiple signed
+reads; this bounded headroom admits that composed workload without exempting its
+member or changing the rate law. Operators may still pin a different policy. -/
+def hostDefault : Policy := ⟨1200, 60000, by decide, by decide⟩
 
 /-- A configured rate; a zero limit or a zero window refuses the configuration. -/
 def Policy.make (limit windowMs : Nat) : Except String Policy :=

@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "gogs",
   "interfaceVersion": 1,
-  "appId": "d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh",
-  "packageId": "aede44cf19129337aae68b6993324574",
-  "appVersion": "0.11.34-fix1",
+  "appId": "3g05nj7mpryyd3a0erndy30my7fsr72s3xghnhewkqw7km08g34h",
+  "packageId": "73c84a947fdd0c3ac1a55bce49016e77",
+  "appVersion": "17.0.1",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -101,7 +101,7 @@
   },
   "operations": {
     "user.read": {
-      "description": "Read the member identity used by this Gogs session.",
+      "description": "Read the member identity used by this Forgejo session.",
       "input": {
         "type": "object",
         "properties": {},
@@ -781,8 +781,8 @@
     "refusal": "app-auth-required"
   },
   "sources": [
-    "https://github.com/gogs/gogs/blob/v0.11.34/routes/api/v1/api.go",
-    "https://github.com/cem/gogs-sandstorm",
-    "https://github.com/gogs/gogs/blob/v0.11.34/routes/api/v1/repo/issue.go"
+    "https://codeberg.org/forgejo/forgejo/src/tag/v17.0.1/routers/api/v1/api.go",
+    "https://codeberg.org/forgejo/forgejo/src/tag/v17.0.1/routers/api/v1/repo/issue.go",
+    "https://codeberg.org/forgejo/forgejo/src/tag/v17.0.1/services/auth/method/reverseproxy.go"
   ]
 }
