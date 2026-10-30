@@ -117,8 +117,10 @@ trap cleanup_smoke EXIT
 mkdir -p "$ROOTFS/dev" "$ROOTFS/proc"
 chown -R 65534:65534 "$ROOTFS/var"
 # /dev is a few mknod'd nodes inside the rootfs; the host's /dev is never bind-mounted.
-mknod -m 666 "$ROOTFS/dev/null" c 1 3; mknod -m 666 "$ROOTFS/dev/zero" c 1 5; mknod -m 666 "$ROOTFS/dev/full" c 1 7
-mknod -m 666 "$ROOTFS/dev/random" c 1 8; mknod -m 666 "$ROOTFS/dev/urandom" c 1 9
+for node in null:1:3 zero:1:5 full:1:7 random:1:8 urandom:1:9; do
+  IFS=: read -r n maj min <<<"$node"
+  [[ -c $ROOTFS/dev/$n ]] || mknod -m 666 "$ROOTFS/dev/$n" c "$maj" "$min"
+done
 mount -t proc proc "$ROOTFS/proc"
 mount --make-rslave "$ROOTFS/proc"
 SMOKE_MOUNTS=1
