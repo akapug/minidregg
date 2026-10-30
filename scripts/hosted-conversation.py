@@ -86,7 +86,91 @@ pub fn parse(body: &[u8]) -> Result<Value, &'static str> {
     Ok(value)
 }
 '''
-    return {'Effects/Revival/HostedConversation.lean':lean, 'native/hosted-conversation.rs':rust}
+    lifecycle = """/- Generated declaration: protocol/hosted-conversation.json owns these rows. -/
+module
+public import Effects.Revival.HostedLifecycle
+public import Effects.Revival.HostedConversation
+@[expose] public section
+namespace Minidregg.Effects.Revival.HostedConversationEngine
+open HostedLifecycle
+def rules : List Rule := [
+"""
+    lifecycle += ",\n".join("  ⟨"+json.dumps(r['name'])+", "+", ".join(str(r[k]) for k in ('code','initial','pending','settled'))+", "+str(r['isolated']).lower()+"⟩" for r in d['transitions'])+ "]\n"
+    lifecycle += """def declaration := HostedLifecycle.spec rules
+def receivingHandler := HostedLifecycle.handler rules
+def receivingRegistry := HostedLifecycle.registry rules
+def receive := HostedLifecycle.receive rules
+end Minidregg.Effects.Revival.HostedConversationEngine
+"""
+    rust += "\npub const HOSTED_LIVE_STATE:usize="+str(d['states']['live'])+";\n"
+    rows = ",\n".join("    Rule { name:"+json.dumps(r['name'])+", code:"+str(r['code'])+", initial:"+str(r['initial'])+", pending:"+str(r['pending'])+", settled:"+str(r['settled'])+", isolated:"+str(r['isolated']).lower()+" }" for r in d['transitions'])
+    rust += """
+// EffectSpec/Handler backend for HostedLifecycle. Physical IO consumes its emission;
+// receipt acknowledgment is a separate transition, never an implicit retry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Operation { pub phase:usize, pub command:usize, pub id:Vec<u8>, pub binding:Vec<u8>, pub preimage:Vec<u8> }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Receipt { pub id:Vec<u8>, pub bytes:Vec<u8> }
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct State { pub status:usize, pub ended:bool, pub binding:Vec<u8>, pub pending:Option<Operation>, pub emitted:Option<Operation>, pub receipt:Option<Receipt>, pub spent:Vec<Vec<u8>> }
+pub struct Context { pub current:bool, pub retained:bool, pub budget:bool, pub acknowledged:bool, pub ended:bool, pub response:Vec<u8> }
+pub struct Rule { pub name:&'static str,pub code:usize,pub initial:usize,pub pending:usize,pub settled:usize,pub isolated:bool }
+pub const RULES:&[Rule]=&[
+"""+rows+"""
+];
+#[derive(Clone, Debug)]
+pub enum Primitive { End, Claim{expected:usize,pending:usize,operation:Operation}, Emit(Operation), Settle{expected:usize,settled:usize,operation:Operation,receipt:Vec<u8>} }
+pub fn command(name:&str)->Result<usize,&'static str> { RULES.iter().find(|r|r.name==name).map(|r|r.code).ok_or("unknown") }
+pub fn command_name(code:usize)->Result<&'static str,&'static str> { RULES.iter().find(|r|r.code==code).map(|r|r.name).ok_or("unknown") }
+pub fn lower(state:&State,ctx:&Context,op:&Operation)->Result<Vec<Primitive>,&'static str> {
+    let rule=RULES.iter().find(|r|r.code==op.command).ok_or("unknown")?;
+    if op.phase==0 {
+        if !ctx.current {return Err("currentAuthority");}
+        if !ctx.retained {return Err("exactPreimage");}
+        if !ctx.budget {return Err("budget");}
+        if state.status!=rule.initial || state.ended || state.pending.is_some() {return Err("channelState");}
+        if rule.isolated && state.binding!=op.binding {return Err("bindingIsolation");}
+        if state.spent.contains(&op.id) {return Err("noReplay");}
+        Ok(vec![Primitive::Claim{expected:rule.initial,pending:rule.pending,operation:op.clone()},Primitive::Emit(op.clone())])
+    } else if op.phase==1 {
+        if !ctx.acknowledged {return Err("uncertainCompletion");}
+        let mut original=op.clone();original.phase=0;
+        if state.status!=rule.pending || state.pending.as_ref()!=Some(&original) {return Err("originalIntent");}
+        Ok(vec![Primitive::Settle{expected:rule.pending,settled:rule.settled,operation:op.clone(),receipt:ctx.response.clone()}])
+    } else if op.phase==2 {
+        if !ctx.ended {return Err("channelState");}
+        Ok(vec![Primitive::End])
+    } else {Err("unknown")}
+}
+pub fn replay(state:&State,primitives:&[Primitive])->Result<State,&'static str> {
+    let mut state=state.clone();
+    for primitive in primitives {
+        match primitive {
+            Primitive::End=>{state.status=2;state.ended=true;state.emitted=None;}
+            Primitive::Claim{expected,pending,operation}=>{
+                if state.status!=*expected || state.ended || state.pending.is_some() || state.spent.contains(&operation.id) {return Err("guardFailed");}
+                state.status=*pending;state.binding=operation.binding.clone();state.pending=Some(operation.clone());
+                state.emitted=None;state.spent.insert(0,operation.id.clone());
+            }
+            Primitive::Emit(operation)=>{
+                if state.pending.as_ref()!=Some(operation) {return Err("guardFailed");}
+                state.emitted=Some(operation.clone());
+            }
+            Primitive::Settle{expected,settled,operation,receipt}=>{
+                let mut original=operation.clone();original.phase=0;
+                if state.status!=*expected || state.pending.as_ref()!=Some(&original) {return Err("guardFailed");}
+                state.status=if state.ended {2} else {*settled};state.pending=None;state.receipt=Some(Receipt{id:operation.id.clone(),bytes:receipt.clone()});
+            }
+        }
+    }
+    Ok(state)
+}
+pub fn socket_live(state:&State)->bool {state.status==HOSTED_LIVE_STATE && !state.ended && state.pending.is_none()}
+pub fn derive(state:&State,ctx:&Context,op:&Operation)->Result<State,&'static str> {
+    replay(state,&lower(state,ctx,op)?)
+}
+"""
+    return {'Effects/Revival/HostedConversation.lean':lean, 'Effects/Revival/HostedConversationEngine.lean':lifecycle, 'native/hosted-conversation.rs':rust}
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['generate','check']); a=p.parse_args()

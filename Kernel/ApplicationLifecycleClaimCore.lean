@@ -119,7 +119,7 @@ def intentFromCurrent {config : NativeHost.Config} {ground : Ground config.deplo
         [packageGuard ingress.source current.packageRead.selected.observed.before]
       nullifiers := ordinary.nullifiers ++
         [stableNullifier config.deployment.domain config.profile.semantics ingress.source]
-      exactCharge := fun dimension => match dimension with
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
         | .incidences => ordinary.exactCharge .incidences + 2
         | .turnBytes => wireBytes
         | .witnessBytes => wireBytes
@@ -127,7 +127,7 @@ def intentFromCurrent {config : NativeHost.Config} {ground : Ground config.deplo
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 2
         | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes
             wireEvent
-        | other => ordinary.exactCharge other
+        | other => ordinary.exactCharge other)).toCharge
       event := wireEvent
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound

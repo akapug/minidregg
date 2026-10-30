@@ -60,7 +60,7 @@ def exportPackage (config : Config) (signedCall : List UInt8)
   let records ← match gathered with
     | .error detail => return .error detail
     | .ok (records, _) => pure records
-  let image : DurableReceiver.Image := ⟨reader.seed, records⟩
+  let image : DurableReceiver.Image := DurableReceiver.Image.ofAccepted reader.seed records
   return encodeCheckedWith limits ⟨config.deployment.domain, config.profile.semantics,
     config.expectedSeed, signedCall, receipt, DurableReceiverCodec.encode image⟩
 

@@ -40,6 +40,32 @@ def need(name):
     return str(Path(value).resolve(strict=True))
 
 class Journey:
+    # Hooks a derived journey (j14-apps.py) replaces; the Oracle journey uses these defaults.
+    MODEL='mini-hermes-protocol-fixture'
+
+    def start_provider(self,port):
+        """The provider table rows and the process behind them (default: the loopback fixture)."""
+        write(self.table,{'type':'mini-provider-table-v2','providers':[{'name':'friendkey','kind':'openai-compatible',
+            'endpoint':f'http://127.0.0.1:{port}/v1/chat/completions','models':[self.MODEL],'credential':'user'}]})
+        self.provider_process=self.spawn('provider',[self.provider,f'127.0.0.1:{port}',self.root/'provider.log','--room-librarian'])
+        deadline=time.monotonic()+30
+        while f'http://127.0.0.1:{port}/v1' not in self.provider_process.journey_stdout.read_text():
+            if self.provider_process.poll() is not None or time.monotonic()>=deadline:raise RuntimeError('selected provider did not bind its loopback port')
+            time.sleep(.1)
+
+    def gateway_config(self,port,base):
+        return {'providers':str(base/'worker/runtime-root/providers.json'),'credentialBroker':str(base/'worker/runtime-root/keys-client.json'),
+            'gatewayBind':f'127.0.0.1:{available_port()}','model':self.MODEL,'provider':'friendkey',
+            'onBehalfOf':{'subject':self.subjects['alice'],'publicKey':(self.homes/'alice/keys/mini.key.pub').read_bytes().hex()},
+            'reserve':'30000','maxInputTokens':131072,'maxOutputTokens':64,'maxRequestBytes':1048576,'maxResponseBytes':8388608,
+            'timeoutSeconds':600,'localFixtureHostNetwork':False}
+
+    def set_provider_keys(self,keyclient):
+        secret=self.root/'provider-key.secret';secret.write_text('j14-fixture-key\n');secret.chmod(0o600)
+        self.run('provider-key',[self.mini,'key','--action','set','--dir',self.workspaces/'alice','--provider','friendkey','--secret',secret,'--broker',keyclient]);secret.unlink()
+        self.run('provider-key-grant',[self.mini,'key','--action','grant','--dir',self.workspaces/'alice','--provider','friendkey',
+            '--runner',self.subjects['hprov'],'--per-call','64','--per-day','200','--until','1000000000','--broker',keyclient])
+
     def __init__(self):
         os.umask(0o077)
         self.root=Path(os.environ['JOURNEY_STEP_DIR'])/'oracle'
@@ -513,7 +539,7 @@ class Journey:
 
     def world(self):
         tariff=self.root/'provider-services.json';write(tariff,[{'providerResourceId':int(self.task('provider')),'tariff':{
-            'version':'1','model':'mini-hermes-protocol-fixture','routes':{'user':{'perOp':'5'},
+            'version':'1','model':self.MODEL,'routes':{'user':{'perOp':'5'},
             'pool':{'perOp':'7','inputMicroPerMillion':'100000','outputMicroPerMillion':'200000'},
             'homelab':{'perOp':'3','inputMicroPerMillion':'0','outputMicroPerMillion':'0'}}}}])
         w=self.root/'world';sock=self.private_operator_socket('operator.sock');self.c['initialOperatorSocket']=str(sock)
@@ -709,14 +735,8 @@ class Journey:
                     candidateManifest=self.candidate_manifest,candidateManifestSha256=sha(self.candidate_manifest),
                     runtimeOverlay={'path':self.runtime,'sha256':sha(self.runtime)})
         (runtime/'pins.json').write_text(json.dumps(pins,indent=2)+'\n')
-        table=runtime/'providers.json';port=int(os.environ['J14_PROVIDER_PORT']) if 'J14_PROVIDER_PORT' in os.environ else available_port()
-        write(table,{'type':'mini-provider-table-v2','providers':[{'name':'friendkey','kind':'openai-compatible',
-            'endpoint':f'http://127.0.0.1:{port}/v1/chat/completions','models':['mini-hermes-protocol-fixture'],'credential':'user'}]})
-        self.provider_process=self.spawn('provider',[self.provider,f'127.0.0.1:{port}',self.root/'provider.log','--room-librarian'])
-        deadline=time.monotonic()+30
-        while f'http://127.0.0.1:{port}/v1' not in self.provider_process.journey_stdout.read_text():
-            if self.provider_process.poll() is not None or time.monotonic()>=deadline:raise RuntimeError('selected provider did not bind its loopback port')
-            time.sleep(.1)
+        self.table=runtime/'providers.json';port=int(os.environ['J14_PROVIDER_PORT']) if 'J14_PROVIDER_PORT' in os.environ else available_port()
+        self.start_provider(port)
         self.keyroot=self.sockets/'provider';self.keyroot.mkdir(mode=0o711);self.keyroot.chmod(0o711)
         keysocket=self.keyroot/'keys.sock';keyclient=runtime/'keys-client.json'
         write(keyclient,{'type':'mini-keys-client-v1','socket':str(keysocket),'uid':os.getuid()})
@@ -745,11 +765,7 @@ class Journey:
                 'workspace':str(home/'worker-work'),'network':'none','wallTimeSeconds':1800,'reserve':'3','charge':'1'},
             'toolCharges':{'reserve':'5','charge':'1'},
             'provider':{'key':role('hprov'),'task':self.task('provider'),'observeCapability':'9870015','controlCapability':'9870016','budget':'50000',
-                'gateway':{'providers':str(base/'worker/runtime-root/providers.json'),'credentialBroker':str(base/'worker/runtime-root/keys-client.json'),
-                    'gatewayBind':f'127.0.0.1:{available_port()}','model':'mini-hermes-protocol-fixture','provider':'friendkey',
-                    'onBehalfOf':{'subject':self.subjects['alice'],'publicKey':(self.homes/'alice/keys/mini.key.pub').read_bytes().hex()},
-                    'reserve':'30000','maxInputTokens':131072,'maxOutputTokens':64,'maxRequestBytes':1048576,'maxResponseBytes':8388608,
-                    'timeoutSeconds':600,'localFixtureHostNetwork':False}},
+                'gateway':self.gateway_config(port,base)},
             'dispatch':{'key':role('hdisp'),'task':self.task('dispatch'),'observeCapability':'9870017','controlCapability':'9870018','budget':'20000',
                 'transport':{'reserve':'1','charge':'1','socketPath':self.layout['reverseSocket'],'hostUid':os.getuid(),
                     'operatorSocket':str(home/'operator/mini.sock'),'operatorPeerUid':0,
@@ -809,10 +825,7 @@ class Journey:
         self.controller_config()
         self.spawn('keys',[self.bins/'mini-keys','serve','--config',brokerconfig]);self.wait_socket(keysocket)
         self.run('provider-socket-acl',['setfacl','-m',f"u:{self.layout['controllerUid']}:rw-",keysocket])
-        secret=self.root/'provider-key.secret';secret.write_text('j14-fixture-key\n');secret.chmod(0o600)
-        self.run('provider-key',[self.mini,'key','--action','set','--dir',self.workspaces/'alice','--provider','friendkey','--secret',secret,'--broker',keyclient]);secret.unlink()
-        self.run('provider-key-grant',[self.mini,'key','--action','grant','--dir',self.workspaces/'alice','--provider','friendkey',
-            '--runner',self.subjects['hprov'],'--per-call','64','--per-day','200','--until','1000000000','--broker',keyclient])
+        self.set_provider_keys(keyclient)
 
     def controller_config(self):
         exported=self.fixed('controller-config-export');self.c['controllerConfig']=str(exported)

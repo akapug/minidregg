@@ -45,7 +45,8 @@ FOLD rows marked ✓ are executed in this document's commit series; the Lean axi
 | `lake build` umbrella / `build-native-host.sh` | the tree elaborates; the Host links | the build itself | **KEEP** (it is the work) |
 | `host-operations` registry check | request bytes ↔ Host receivers ↔ routes | seconds | **KEEP** |
 | `import-boundary` (`check-import-boundary.sh`) | `Theory/`, `Selvage/` candidate-independent | seconds | **KEEP** |
-| wire-byte controls: `fn-wire` (pinned BLAKE3 grammar), codec identity (`codec-shapes-regen.py`; 4 `codec!` bumps Oct 16–17), `prover-glue`, `drift`, `native-transcripts`, `zkml-suite-artifact`, `kernel-transport` | persisted bytes and emitted twins never move silently | a re-emit commit only when a persisted identity really changes | **KEEP**: that commit is the honest cost of a wire change |
+| wire-byte controls: `fn-wire` (pinned BLAKE3 grammar), `prover-glue`, `drift`, `native-transcripts`, `zkml-suite-artifact`, `kernel-transport` | persisted bytes and emitted twins never move silently | a re-emit commit only when a persisted identity really changes | **KEEP**: that commit is the honest cost of a wire change |
+| persisted-codec definition census, shape pins and regeneration | attempted wire-change detection, but rejected byte-identical implementation refactors | full Host closure plus regeneration | **DELETE** (ember, 2026-10-28); replacement is tracked in `NO-PINS-2026-10-28.md` |
 | Assurance axiom pins (`#guard_msgs … #print axioms`, 4,257) | a proof's axiom footprint is where it is stated | re-pin only when a footprint moves | **KEEP**: cheap and honest |
 | `proof-hygiene`, `build-closure`, `exports` (3-row allowlist), `shell-paths` (4-row allowlist), `unit-tests` floors, `cold-start`, `axiom-census`, `world-sim`, `rust-tests` (filtered rows), `spk-shell`, `deploy-scripts`, `objective-frontend`/`world-cohorts`/`objective-examples`, `canonical-policy-portal`, `tower-controller`, `audit-corrupted-leaf`, `website`, `fixture-authority` (git-only) | each a named, cheap, end-to-end property | seconds to minutes, no ledger churn | **KEEP** |
 | `objective-c`, `objective-cgen`, `transparency` | the C machine agrees with `runBounded` | minutes; need bun | **KEEP until R10**: they retire with `runtime.c` |
@@ -100,8 +101,7 @@ regeneration, no decisions ledger, no census of the research tree, no accepted-r
   - **The closure** builds only on main, continuously (§4); a lane never waits on it.
   - **When a converted file will not elaborate**: `scripts/module-hidden-bodies.sh FILE` names the imported
     definitions FILE reaches without bodies (an unexposed definition arrives as an axiom), as the `import all`
-    lines to add to `scripts/lean-modularize.py` (RULES or PER_FILE); then rerun the converter. A file that
-    must see every body (the persisted-codec census) stays a non-module, with its importers, in `KEEP`.
+    lines to add to `scripts/lean-modularize.py` (RULES or PER_FILE); then rerun the converter.
 - **Linux checks run where Linux is**: `ssh dregg-build`, a worktree under `/build/lanes/<lane>`,
   `cargo nextest run -p <crate> -E '...'`, `scripts/pipeline/lane-check <file>`, every build under `swarm-build`.
   There is no more "owed to hbox": a lane that cannot run something on the Mac runs it there

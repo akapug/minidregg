@@ -21,6 +21,21 @@ export PATH=$HOME/.elan/bin:$HOME/.cargo/bin:$PATH
 # no .olean in .lake/build and `lake env lean`, lane-check and lean-ask break. A tree without it gets a
 # private, empty cache (Lake READS its cache by default, so the directory moves too).
 pipeline_lib_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# swarm-build runs every build in a systemd --user scope. Under `runuser -u lanes` (or any shell without a
+# login session) XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS are unset, the scope cannot start, and
+# swarm-build exits 1 having compiled NOTHING: a "check" that checked nothing (2026-10-28). Set both from the
+# user's runtime directory; pipeline_user_bus refuses loudly when the user bus is still unreachable.
+if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then export XDG_RUNTIME_DIR=/run/user/$(id -u); fi
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ]; then
+  export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
+fi
+pipeline_user_bus() {
+  command -v swarm-build >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl --user show-environment >/dev/null 2>&1 && return 0
+  printf '%s: swarm-build cannot reach the systemd user bus (XDG_RUNTIME_DIR=%s DBUS_SESSION_BUS_ADDRESS=%s): it would exit 1 and build nothing. Log in as the user (ssh user@host), or enable lingering (loginctl enable-linger %s).\n' \
+    "${PIPELINE_PROG:-pipeline}" "${XDG_RUNTIME_DIR:-unset}" "${DBUS_SESSION_BUS_ADDRESS:-unset}" "$(id -un)" >&2
+  exit 3
+}
 pipeline_tree_root=$(git -C "$pipeline_lib_dir" rev-parse --show-toplevel 2>/dev/null || true)
 if [ "${LAKE_ARTIFACT_CACHE:-}" = true ] && [ -n "$pipeline_tree_root" ] &&
    ! grep -qE '^restoreAllArtifacts *= *true' "$pipeline_tree_root/lakefile.toml" 2>/dev/null; then

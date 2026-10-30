@@ -248,10 +248,10 @@ private def prepareForIssue (config : Config) (opened : Opened config)
   if ApplicationDispatchAdmission.selectedMeaning unsigned spec actualApp manifest
       enrollment currentTicket != some requested then
     throw "current app, ticket, enrollment or permission meaning differs"
-  if !ApplicationDispatchAdmission.linkedCurrentPolicies config.deployment config.profile
-      ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
+  if let some clause := ApplicationDispatchAdmission.firstFailedLinkageClause config.deployment
+      config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       opened.ground unsigned spec selection prepared then
-    throw "current app/session/ticket policy linkage refused"
+    throw s!"current app/session/ticket policy linkage refused: {clause}"
   if !ApplicationDispatchAdmission.issuerLineageCurrentFromSourceBytes config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
       opened.ground unsigned spec selection originalSourceBytes prepared then

@@ -293,7 +293,8 @@ def payload (laws : Laws Durable) {env : F.Env} {durable : Durable} (ingress : F
     (prepared : F.Prepared env durable (F.command ingress)) : Payload where
   writes := F.writes prepared
   readGuards := readGuards laws prepared
-  exactCharge := F.charge laws env durable ingress prepared
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize
+    (F.charge laws env durable ingress prepared)).toCharge
   subject := F.subject ingress
   spent := F.spent prepared
   postRootsBound := F.writes_bound prepared

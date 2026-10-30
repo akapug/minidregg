@@ -28,7 +28,7 @@ def preparedState (before : State) (plan : Plan) : State :=
 
 structure Prepared {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
-    (ambient : Ambient) (durable : Durable) where
+    (ambient : Ambient) (ground : Ground deployment) (durable : Durable) where
   private mk ::
   pin : PortableHomeTransferFrame.Pin
   before : State
@@ -58,7 +58,7 @@ structure Prepared {F : Type} [Field F] [DecidableEq F]
 
 variable {F : Type} [Field F] [DecidableEq F]
   {deployment : Deployment} {profile : CanonicalRuntimeProfile.Profile F}
-  {ambient : Ambient} {ground : Ground deployment} {ownerCommand renterCommand : Command}
+  {ambient : Ambient} {ground : Ground deployment} {durable : Durable} {ownerCommand renterCommand : Command}
   {ownerPrepared : PreparedInvocation deployment profile ambient ground ownerCommand}
   {renterPrepared : PreparedInvocation deployment profile ambient ground renterCommand}
   {ownerSigned renterSigned : SignedCommand}
@@ -70,7 +70,7 @@ def prepare (pin : PortableHomeTransferFrame.Pin) (plan : Plan)
     (ownerShape : PhysicalShape ownerPrepared) (renterShape : PhysicalShape renterPrepared)
     (owner : AcceptedInvocation ownerPrepared ownerSigned)
     (renter : AcceptedInvocation renterPrepared renterSigned) :
-    Option (Prepared deployment profile ambient durable) := do
+    Option (Prepared deployment profile ambient ground durable) := do
   match beforeExact : PortableHomeTransferFrame.readState pin (ground.view.canonicalBytes pin.cell) with
   | none => none
   | some before =>

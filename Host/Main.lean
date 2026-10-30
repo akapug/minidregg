@@ -923,7 +923,8 @@ def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit 
     if (Minidregg.Compiler.Evaluator.resolveName name).isSome then .ok ()
     else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
-def Settings.config (settings : Settings) : NativeHost.Config where
+def Settings.config (settings : Settings) : NativeHost.Config :=
+  NativeHost.Config.ofInputs {
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   disabledEvaluators := settings.disabledEvaluatorIds
@@ -946,7 +947,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     CompletionCustodianKeySettings.bytes
   nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
   jointConsensus := settings.jointConsensus.map JointConsensusSettings.context
-  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation
+  invocationBindings := ObjectiveInvocationSettings.bindings settings.objectiveInvocation }
 
 /-- Authoring allowlists do not alter the verifier's configuration or the
 meaning of already admitted history. -/
@@ -1451,7 +1452,8 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
       | .error refusal => throw (IO.userError refusal.message)
       | .ok read =>
         let kept := read.verified.root
-        let spec := NativeHost.worldRoot config ⟨durable.image.seed, log.take (i + 1)⟩
+        let spec := NativeHost.worldRoot config
+          (DurableReceiver.Image.ofAccepted durable.image.seed (log.take (i + 1)))
         checked := checked + 1
         if kept != spec then
           differ := differ + 1
@@ -3165,25 +3167,12 @@ partial def serveCodec (config : NativeHost.Config)
     writeSessionFrame output answer.1 answer.2
   serveCodec config providerRoutes input output
 
-/-- Execute from one private copy throughout this stdio process. The copy is
-the pinned launch artifact; the originally configured pathname may later be
-replaced or have a symlink target swapped without changing the session's
-historical verifier. The OS must protect this private directory from writes
-by other actors for the lifetime of the process. -/
+/-- Run one stdio process with the linked native signature verifier. The
+historical wrapper name and configured artifact path remain for deploy/carry
+pins; live verification copies and launches no executable. -/
 def withPinnedSignature {α : Type} (config : NativeHost.Config)
     (body : NativeHost.Config → IO α) : IO α :=
-  IO.FS.withTempDir fun directory => do
-    let pinned := directory / "credential-verifier"
-    let bytes ← IO.FS.readBinFile config.signature.binary
-    IO.FS.writeBinFile pinned bytes
-    let permission ← IO.Process.output
-      { cmd := "/bin/chmod", args := #["0500", pinned.toString] }
-    unless permission.exitCode == 0 do
-      throw (IO.userError "cannot make pinned credential verifier executable")
-    -- A launch failure is detected before the first semantic replay. The
-    -- verifier's usage exit here is expected; it has no arguments yet.
-    discard <| IO.Process.output { cmd := pinned.toString, args := #[] }
-    body { config with signature := ⟨pinned⟩ }
+  body config
 
 partial def readOperatorSnapshot (input : IO.FS.Handle) (limit : Nat)
     (acc : ByteArray := ByteArray.empty) : IO ByteArray := do
@@ -7255,7 +7244,7 @@ def runToolSession (settings : Settings) (command : String) (kind : Option Strin
         pure (Except.ok code)
       catch error => pure (Except.error (toString error))
     match outcome with
-    | .error message => return 1 :: (message.take 4096).toUTF8.toList
+    | .error message => return 1 :: (message.take 4096).toString.toUTF8.toList
     | .ok 0 =>
         let output ← readBytes outPath.toString
         if output.length + 2 > FnEvidenceCodec.maxHostFrameBytes then return [2]

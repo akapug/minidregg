@@ -276,3 +276,21 @@ sudo -u mini-s-NAME mini apps search slides                                     
 
 The journey row is `native/resource-client/journey.d/japps.sh` (`--dry` anywhere, `--box` on a
 Linux box with the candidate's `bin/`).
+
+## Our own packages (the featured apps we build)
+
+The packages built on dregg-forge (docs/SPK-FRESH-2026-10-29.md) are not in the Sandstorm index. The demo
+serves them through the operator-pinned index, in adopt mode (the demo box has no egress to forge):
+
+1. On forge, after a build: `python3 -I deploy/market/fresh-index.py --apps /var/lib/spk-fresh/apps --recipes
+   apps/packages --spk-tool /var/lib/spk-fresh/tools/spk --adopt-root /srv/spk-fresh/apps --out
+   /var/lib/spk-fresh/index` writes `local.json` (every entry pinned by its whole SHA-256, with the real
+   `packageBuiltAt` and `upstreamVersion`) and `adopt.tsv`. The packageId is checked against the bytes.
+2. On the box, as root from ship.sh: `deploy/market/fresh-adopt` installs `local.json` as
+   `/var/lib/mini-market/local.json`, runs `mini-market-fetch refresh` (merged with the upstream index), and
+   adopts each package by pinned SHA-256 from `/srv/spk-fresh/apps/...` (a read-only bind).
+3. `mini apps search/show/install` then list and install them like any package; install verifies by
+   packageId. `cargo nextest ... test(apps_every_featured_app_id_resolves_to_an_installable_package)` fails
+   by name for every FEATURED appId that neither index lists: regenerate
+   `native/resource-client/tests/fixtures/fresh-local-index-2026-10-29.json` (the generator's local.json)
+   when a package is added.

@@ -42,6 +42,7 @@ mod dispatch_custody;
 #[cfg(test)]
 mod dispatch_runtime_tests;
 mod gitweb_worker;
+mod typed_applications;
 mod grain_source;
 mod grain_create;
 mod homelab;
@@ -172,6 +173,10 @@ struct ToolTask {
     /// Protocol discovery profiles over existing lifetime API routes; never grants.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     application_services: Vec<oracle_tools::ServiceProfile>,
+    /// Typed, package-pinned tools over existing lifetime routes (docs/APP-INTERFACE-2026-10-28.md).
+    /// An attachment names a route and a declaration; it is discovery and encoding, never a grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    typed_applications: Vec<typed_applications::TypedApplicationAttachment>,
     /// Only an explicitly certified Mini Host with the agent event21 route
     /// may enable the forward API tool. The SPK host still obtains and checks
     /// a fresh event21 permit for each request.
@@ -3441,6 +3446,8 @@ fn validate_with_workspace(c: &Config, prospective_workspace: Option<&[u8]>) -> 
         }
         oracle_tools::validate_profiles(&t.application_services,
             &t.allowed_application_lifetime_routes.iter().map(|route| route.name.clone()).collect::<Vec<_>>())?;
+        typed_applications::validate(&t.typed_applications,
+            &t.allowed_application_lifetime_routes.iter().map(|route| route.name.clone()).collect::<Vec<_>>())?;
         let mut peer_targets = vec![c.task.as_str(), t.task.as_str()];
         let mut peer_capabilities = vec![
             c.capability.as_str(),
@@ -3733,6 +3740,8 @@ struct Runtime {
     prompt_sandbox: Vec<&'static str>,
     /// Whether the running resident prompt's room grants the oracle.
     prompt_oracle: bool,
+    /// The room's `hermes/tools` apps bit for this prompt (typed application tools).
+    prompt_apps: bool,
     /// The prompt allocated by the current `hermes_session`, and the decision
     /// reached at its boundary; written as one typed record when it ends.
     prompt_decision: Option<(u64, Option<prompt_outcome::Outcome>)>,
@@ -4423,8 +4432,8 @@ impl Runtime {
                     "sessionObserveCapability":route.dispatch_selectors.session_observe,
                     "manifestObserveCapability":route.dispatch_selectors.manifest_observe,
                     "enrollmentObserveCapability":route.dispatch_selectors.enrollment_observe,
-                    "http":application_api_tools::routed_reserve_http(
-                        &retained, &route.signed_api_path)?,
+                    "http":application_api_tools::routed_reserve_http_for(
+                        &retained, &route.hosted_route()?)?,
                 },
                 // Native application command is authored as the session participant;
                 // the payer's delegated parent witness belongs to ordinary task IO.
@@ -5069,7 +5078,7 @@ impl Runtime {
         }
         application_api_tools::verify_routed_reserve_http(
             &retained_forward,
-            &route.signed_api_path,
+            &application_api_tools::HostedRoute::Api { signed_prefix: route.signed_api_path.clone() },
             &request_view,
         )?;
         let context = plan_view
@@ -6855,6 +6864,7 @@ impl Runtime {
             prompt_provider_refusals: Vec::new(),
             prompt_sandbox: Vec::new(),
             prompt_oracle: false,
+            prompt_apps: false,
             prompt_decision: None,
             foreground_operation: None,
             foreground_api_budget: None,
@@ -8480,6 +8490,16 @@ impl Runtime {
     /// A restricted room resident reaches applications only through the Oracle tools, and only
     /// in a room that grants the oracle; refused by name before any dispatch.
     fn restricted_application_call(&self, name: &str) -> Result<()> {
+        if typed_applications::is_raw_tool(name) {
+            let configured = self.config.tool_task.as_ref().is_some_and(|tool| !tool.typed_applications.is_empty());
+            if !configured {
+                return Err("refused: typed-apps-not-configured: no typed application is attached to this resident".into());
+            }
+            if self.room_tools_restricted() && !self.prompt_apps {
+                return Err("refused: typed-apps-not-granted: this room's founder has not granted apps (hermes/tools bit 16)".into());
+            }
+            return Ok(());
+        }
         if !self.room_tools_restricted() { return Ok(()); }
         if !oracle_tools::is_tool(name) {
             return Err("this resident accepts only room tools".into());
@@ -8496,6 +8516,9 @@ impl Runtime {
         if oracle_tools::is_tool(name) {
             let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
             oracle_tools::http_arguments(name, arguments, &tool.application_services)
+        } else if typed_applications::is_raw_tool(name) {
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            typed_applications::raw_arguments(&tool.typed_applications, arguments)
         } else if matches!(name, "mini_application_api" | "__mini_gitweb_http_raw") {
             Ok(arguments.clone())
         } else {
@@ -14641,6 +14664,9 @@ impl Runtime {
         if !self.resident_oracle_applications().is_empty() {
             names.extend(["mcp__mini_grain__mini_oracle_discover".to_owned(), "mcp__mini_grain__mini_oracle_call".to_owned()]);
         }
+        if let Some(tool) = self.config.tool_task.as_ref() {
+            names.extend(typed_applications::tool_names(&tool.typed_applications));
+        }
         names
     }
     fn room_tools_restricted(&self) -> bool {
@@ -14653,8 +14679,12 @@ impl Runtime {
             // The room catalogue, plus the operator's Oracle tools when a lifetime route serves
             // them: offered to every prompt, called only where the room grants the oracle.
             let oracle = self.resident_oracle_applications();
+            let typed = match self.config.tool_task.as_ref() {
+                Some(tool) => typed_applications::catalog(&tool.typed_applications, &tool.allowed_application_lifetime_routes)?,
+                None => Vec::new(),
+            };
             return Ok(mcp::ToolCatalog { room_tools: true, api_applications: oracle.clone(),
-                oracle_applications: oracle, ..Default::default() });
+                oracle_applications: oracle, typed_applications: typed, ..Default::default() });
         }
         let Some(tool) = self.config.tool_task.as_ref() else {
             return Ok(mcp::ToolCatalog::default());
@@ -14745,6 +14775,7 @@ impl Runtime {
             oracle_applications: if tool.lifetime_api_host_sha256.is_some() {
                 oracle_tools::applications(&tool.application_services)
             } else { Vec::new() },
+            typed_applications: typed_applications::catalog(&tool.typed_applications, &tool.allowed_application_lifetime_routes)?,
             resource_workspace: tool.resource_workspace.is_some(),
             room_tools: tool.room.is_some(),
             resource_workspace_create: if let Some(root) = &tool.resource_workspace {
@@ -15148,6 +15179,8 @@ impl Runtime {
         // The oracle is granted per room (hermes/tools bit 8), read like the sandbox grant.
         self.prompt_oracle = invocation.resident_identity().is_some()
             && sandbox_tools::oracle_granted(invocation.prompt());
+        self.prompt_apps = invocation.resident_identity().is_some()
+            && sandbox_tools::apps_granted(invocation.prompt());
         if let Some(unit) = &unit {
             Self::prove_launcher_gate(&spec.program)?;
             systemd_manager::verify_launcher(&self.config.task, &spec.program)?;
@@ -15671,11 +15704,14 @@ impl Runtime {
                             request.name.as_str(),
                             "mini_application_api" | "__mini_gitweb_http_raw"
                                 | "mini_oracle_discover" | "mini_oracle_call"
+                                | typed_applications::RAW_TOOL
                         ) =>
                     {
                         if application_api_call.is_some() {
-                            let _ = request.reply.send(json!({"isError":true,
-                                "text":"application API call already in progress"}));
+                            let busy = if typed_applications::is_raw_tool(&request.name) {
+                                "refused: typed-dispatch-busy: application API call already in progress"
+                            } else { "application API call already in progress" };
+                            let _ = request.reply.send(json!({"isError":true,"text":busy}));
                         } else if let Err(refusal) = self.restricted_application_call(&request.name) {
                             let _ = request.reply.send(json!({"isError":true,"text":refusal}));
                         } else {
@@ -15684,10 +15720,14 @@ impl Runtime {
                                     &arguments,
                                     request.reply.clone(),
                                     Some(request.prompt_epoch),
-                                    request.name == "__mini_gitweb_http_raw",
+                                    request.name == "__mini_gitweb_http_raw" || typed_applications::is_raw_tool(&request.name),
                                 )) {
                                 Ok(active) => application_api_call = Some(active),
                                 Err(error) => {
+                                    // Nothing was sent: a typed worker reads this spelling as a clean refusal.
+                                    let error = if typed_applications::is_raw_tool(&request.name) && !error.starts_with("refused: ") {
+                                        format!("refused: typed-dispatch-not-begun: {error}")
+                                    } else { error };
                                     let _ =
                                         request.reply.send(json!({"isError":true,"text":error}));
                                 }
@@ -19836,6 +19876,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
                 allowed_application_api_routes: vec![],
                 allowed_application_lifetime_routes: vec![],
                 application_services: vec![],
+                typed_applications: vec![],
                 agent_api_host_sha256: None,
                 lifetime_api_host_sha256: None,
                 current_birth_host_sha256: None,

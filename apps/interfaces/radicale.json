@@ -15,7 +15,7 @@
   "$defs": {},
   "operations": {
     "calendar.create": {
-      "description": "Initialize a calendar under the package owner principal; an existing calendar is not refused. Principal is derived by package nginx from signed owner permission, never supplied by the agent.",
+      "description": "Initialize a VCALENDAR collection using packaged extended MKCOL under the signed owner principal. Existing collections are not refused. No timezone property is supported.",
       "input": {
         "type": "object",
         "properties": {
@@ -44,7 +44,7 @@
       "write": true,
       "binding": {
         "protocol": "http",
-        "method": "MKCALENDAR",
+        "method": "MKCOL",
         "path": [
           "radicale/owner/",
           {
@@ -60,7 +60,7 @@
         "headers": {
           "content-type": "application/xml; charset=utf-8"
         },
-        "text": "<?xml version=\"1.0\"?><c:mkcalendar xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:set><d:prop><c:supported-calendar-component-set><c:comp name=\"VEVENT\"/></c:supported-calendar-component-set></d:prop></d:set></c:mkcalendar>"
+        "text": "<?xml version=\"1.0\"?><d:mkcol xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:set><d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><c:supported-calendar-component-set><c:comp name=\"VEVENT\"/></c:supported-calendar-component-set></d:prop></d:set></d:mkcol>"
       }
     },
     "event.create": {

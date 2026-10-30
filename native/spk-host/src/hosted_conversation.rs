@@ -24,10 +24,44 @@ fn invalid(s: &'static str) -> io::Error {
 pub(crate) struct Custody {
     pub directory: PathBuf,
     pub api_prefix: Option<String>,
+    operation: Vec<u8>,
+    retained: Vec<u8>,
+    admission: Vec<u8>,
+    receipt: Value,
+}
+impl Custody {
+    pub(crate) fn admitted(
+        directory: PathBuf,
+        api_prefix: Option<String>,
+        operation: &str,
+        body: &[u8],
+        permit: &crate::agent_api_lifetime_dispatch_native_v3::FreshLifetimePermitV3,
+    ) -> io::Result<Self> {
+        crate::dispatch_native::write_new(&directory, "hosted-admitted-descriptor.bin", body)?;
+        Ok(Self {
+            directory,
+            api_prefix,
+            operation: operation.as_bytes().to_vec(),
+            retained: body.to_vec(),
+            admission: permit.frame().to_vec(),
+            receipt: serde_json::to_value(permit.receipt())?,
+        })
+    }
+    #[cfg(test)]
+    fn fixture(directory: PathBuf, operation: &str, body: &[u8]) -> Self {
+        crate::dispatch_native::write_new(&directory, "hosted-admitted-descriptor.bin", body)
+            .unwrap();
+        Self {
+            directory,
+            api_prefix: None,
+            operation: operation.as_bytes().to_vec(),
+            retained: body.to_vec(),
+            admission: vec![1],
+            receipt: Value::Null,
+        }
+    }
 }
 struct Channel {
-    binding: SessionBinding,
-    endpoint: String,
     protocol: String,
     expires: Instant,
     socket: WebSocketSession,
@@ -41,18 +75,14 @@ struct Channel {
 #[derive(Default)]
 pub(crate) struct Pool {
     channels: HashMap<String, Option<Channel>>,
+    lifecycle: HashMap<String, vocabulary::State>,
 }
-fn same_binding(a: &SessionBinding, b: &SessionBinding) -> bool {
-    a.app == b.app
-        && a.process_generation == b.process_generation
-        && a.session_resource == b.session_resource
-        && a.session_generation == b.session_generation
-        && a.subject == b.subject
-        && a.kind == b.kind
-        && a.projection_fingerprint == b.projection_fingerprint
-        && a.params.identity_id == b.params.identity_id
-        && a.params.base_path == b.params.base_path
-        && a.params.permissions == b.params.permissions
+fn binding_bytes(binding: &SessionBinding, endpoint: &str) -> io::Result<Vec<u8>> {
+    serde_json::to_vec(&json!({"app":binding.app,"appGeneration":binding.process_generation,
+        "session":binding.session_resource,"sessionGeneration":binding.session_generation,"subject":binding.subject,
+        "kind":if binding.kind==crate::rpc_adapter::SessionKind::Web {"web"} else {"api"},
+        "projection":binding.projection_fingerprint,"principal":binding.params.identity_id,
+        "origin":binding.params.base_path,"permissions":binding.params.permissions,"endpoint":endpoint})).map_err(io::Error::other)
 }
 fn number(v: &Value, k: &str) -> usize {
     v[k].as_u64().unwrap() as usize
@@ -93,13 +123,23 @@ impl Channel {
                 return Err(invalid("DDP method id already sent on this connection"));
             }
         }
-        self.max_frames -= 1;
-        self.max_bytes -= text.len();
         let bytes = frame(text)?;
+        if bytes.len() > self.max_bytes {
+            return Err(invalid("hosted wire byte budget exhausted"));
+        }
+        self.max_frames -= 1;
+        self.max_bytes -= bytes.len();
         crate::dispatch_native::write_new(&custody.directory, "hosted-frame.bin", &bytes)?;
         Ok(bytes)
     }
-    async fn next_text(&mut self, deadline: Instant, limit: usize) -> io::Result<String> {
+    async fn next_text(
+        &mut self,
+        deadline: Instant,
+        limit: usize,
+        frame_limit: usize,
+    ) -> io::Result<String> {
+        let mut frames = 0;
+        let mut consumed = 0;
         loop {
             if self.buffered.len() >= 2 {
                 let first = self.buffered[0];
@@ -137,6 +177,17 @@ impl Channel {
                         return Err(invalid("hosted frame byte budget exceeded"));
                     }
                     if self.buffered.len() >= offset + size {
+                        if self.max_frames == 0
+                            || frames >= frame_limit
+                            || offset + size > self.max_bytes
+                            || consumed + offset + size > limit
+                        {
+                            return Err(invalid("hosted wire frame or byte budget exhausted"));
+                        }
+                        frames += 1;
+                        self.max_frames -= 1;
+                        self.max_bytes -= offset + size;
+                        consumed += offset + size;
                         let payload = self.buffered[offset..offset + size].to_vec();
                         self.buffered.drain(..offset + size);
                         match first & 0x0f {
@@ -145,7 +196,13 @@ impl Channel {
                                 self.fragmenting = true;
                             }
                             0 if self.fragmenting => self.fragment.extend(payload),
-                            10 => continue,
+                            10 if first & 0x80 != 0 && size <= 125 => continue,
+                            // RFC6455 control ping is an explicit closed-codec limit.
+                            // DDP/EngineIO pings are text and returned to the SDK;
+                            // no automatic unadmitted pong is sent.
+                            9 => return Err(invalid(
+                                "hosted RFC6455 ping control requires admitted control-frame codec",
+                            )),
                             8 => return Err(invalid("hosted channel closed by app")),
                             _ => return Err(invalid("hosted protocol requires text frames")),
                         }
@@ -194,6 +251,96 @@ fn response(value: Value) -> io::Result<WebResponse> {
     })
 }
 impl Pool {
+    fn terminate(&mut self, id: &str) {
+        if let Some(state) = self.lifecycle.get(id) {
+            let op = vocabulary::Operation {
+                phase: 2,
+                command: 0,
+                id: vec![],
+                binding: vec![],
+                preimage: vec![],
+            };
+            let ctx = vocabulary::Context {
+                current: false,
+                retained: false,
+                budget: false,
+                acknowledged: false,
+                ended: true,
+                response: vec![],
+            };
+            if let Ok(state) = vocabulary::derive(state, &ctx, &op) {
+                self.lifecycle.insert(id.to_owned(), state);
+            }
+        }
+        self.channels.insert(id.to_owned(), None);
+    }
+    fn purge_expired(&mut self) {
+        let ids: Vec<_> = self
+            .channels
+            .iter()
+            .filter_map(|(id, c)| {
+                c.as_ref()
+                    .filter(|c| Instant::now() >= c.expires)
+                    .map(|_| id.clone())
+            })
+            .collect();
+        for id in ids {
+            self.terminate(&id);
+        }
+    }
+    /// The existing RPC actor waits on the nearest custody expiry as well as
+    /// its command queue. Idle channels therefore release capabilities without
+    /// requiring another application request; terminal IDs remain retained.
+    pub(crate) async fn receive_command<T>(
+        &mut self,
+        receiver: &mut tokio::sync::mpsc::Receiver<T>,
+    ) -> Option<T> {
+        loop {
+            self.purge_expired();
+            let next = self
+                .channels
+                .values()
+                .filter_map(|c| c.as_ref().map(|c| c.expires))
+                .min();
+            match next {
+                None => return receiver.recv().await,
+                Some(deadline) => tokio::select! {
+                    biased;
+                    _=tokio::time::sleep_until(tokio::time::Instant::from_std(deadline))=>{},
+                    command=receiver.recv()=>return command,
+                },
+            }
+        }
+    }
+
+    fn acknowledge(
+        &mut self,
+        id: &str,
+        operation: &vocabulary::Operation,
+        custody: &Custody,
+        result: &Value,
+    ) -> io::Result<()> {
+        let bytes =
+            serde_json::to_vec(&json!({"nativeReceipt":custody.receipt,"response":result}))?;
+        crate::dispatch_native::write_new(&custody.directory, "hosted-receipt.json", &bytes)?;
+        let mut op = operation.clone();
+        op.phase = 1;
+        let ctx = vocabulary::Context {
+            current: false,
+            retained: true,
+            budget: true,
+            acknowledged: true,
+            ended: false,
+            response: bytes,
+        };
+        let state = self
+            .lifecycle
+            .get(id)
+            .ok_or_else(|| invalid("hosted pending lifecycle absent"))?;
+        let settled = vocabulary::derive(state, &ctx, &op).map_err(invalid)?;
+        self.lifecycle.insert(id.to_owned(), settled);
+        Ok(())
+    }
     pub(crate) async fn execute(
         &mut self,
         session: &minidregg_spk_rpc::web_session_capnp::web_session::Client,
@@ -202,23 +349,55 @@ impl Pool {
         custody: &Custody,
         deadline: Instant,
     ) -> io::Result<WebResponse> {
-        let d = descriptor(
-            &request
-                .body
-                .as_ref()
-                .ok_or_else(|| invalid("hosted descriptor body absent"))?
-                .bytes,
-        )
-        .map_err(invalid)?;
-        let op = string(&d, "op");
-        let id = string(&d, "channel").to_owned();
-        if op == "open" {
-            if self.channels.values().filter(|c| c.is_some()).count() >= vocabulary::MAX_CHANNELS
-                || self.channels.len() >= vocabulary::MAX_CHANNEL_IDS
-                || self.channels.contains_key(&id)
-            {
-                return Err(invalid("hosted channel cap or reused id"));
+        let body = &request
+            .body
+            .as_ref()
+            .ok_or_else(|| invalid("hosted descriptor body absent"))?
+            .bytes;
+        let parsed = descriptor(body).map_err(invalid)?;
+        self.purge_expired();
+        let id = string(&parsed, "channel").to_owned();
+        let command = vocabulary::command(string(&parsed, "op")).map_err(invalid)?;
+        let operation = vocabulary::Operation {
+            phase: 0,
+            command,
+            id: custody.operation.clone(),
+            binding: binding_bytes(binding, &request.path_and_query)?,
+            preimage: body.clone(),
+        };
+        let is_open = string(&parsed, "op") == "open";
+        let budget = if is_open {
+            self.channels.values().filter(|c| c.is_some()).count() < vocabulary::MAX_CHANNELS
+                && self.lifecycle.len() < vocabulary::MAX_CHANNEL_IDS
+        } else {
+            self.channels.get(&id).is_some_and(|c| c.is_some())
+        };
+        let ctx = vocabulary::Context {
+            current: !custody.admission.is_empty(),
+            retained: custody.retained == *body,
+            budget,
+            acknowledged: false,
+            ended: false,
+            response: vec![],
+        };
+        let state = self.lifecycle.get(&id).cloned().unwrap_or_default();
+        let pending = match vocabulary::derive(&state, &ctx, &operation) {
+            Ok(state) => state,
+            Err(reason) => {
+                if reason == "bindingIsolation" {
+                    self.terminate(&id);
+                }
+                return Err(invalid(reason));
             }
+        };
+        let emitted = pending
+            .emitted
+            .clone()
+            .ok_or_else(|| invalid("derived hosted emission absent"))?;
+        self.lifecycle.insert(id.clone(), pending);
+        let d = descriptor(&emitted.preimage).map_err(invalid)?;
+        let op = vocabulary::command_name(emitted.command).map_err(invalid)?;
+        if op == "open" {
             self.channels.insert(id.clone(), None);
             let left = Duration::from_millis(number(&d, "deadlineMs") as u64)
                 .min(deadline.saturating_duration_since(Instant::now()));
@@ -233,11 +412,11 @@ impl Pool {
             )
             .await
             .map_err(io::Error::other)?;
+            let result = json!({"version":1,"channel":id,"op":op,"frames":[]});
+            self.acknowledge(&id, &operation, custody, &result)?;
             self.channels.insert(
                 id.clone(),
                 Some(Channel {
-                    binding: binding.clone(),
-                    endpoint: request.path_and_query.clone(),
                     protocol: string(&d, "protocol").to_owned(),
                     expires: Instant::now()
                         + Duration::from_millis(vocabulary::CHANNEL_LIFETIME_MS),
@@ -250,7 +429,7 @@ impl Pool {
                     max_bytes: number(&d, "maxBytes"),
                 }),
             );
-            return response(json!({"version":1,"channel":id,"op":op,"frames":[]}));
+            return response(result);
         }
         // Taking the channel makes every interrupted/uncertain command terminal.
         // No failed send, timeout or reconnect implicitly restores its socket.
@@ -265,11 +444,6 @@ impl Pool {
             return Err(invalid("hosted channel lifetime exhausted"));
         }
         let deadline = deadline.min(channel.expires);
-        if !same_binding(&channel.binding, binding) || channel.endpoint != request.path_and_query {
-            return Err(invalid(
-                "hosted channel subject generation projection or endpoint changed",
-            ));
-        }
         let mut result = json!({"version":1,"channel":id,"op":op,"frames":[]});
         match op {
             "send" => {
@@ -287,14 +461,12 @@ impl Pool {
                 if count == 0 || limit == 0 {
                     return Err(invalid("hosted cumulative channel budget exhausted"));
                 }
-                let text = match channel.next_text(deadline, limit).await {
+                let text = match channel.next_text(deadline, limit, count).await {
                     Ok(text) => Some(text),
                     Err(error) if error.kind() == io::ErrorKind::TimedOut => None,
                     Err(error) => return Err(error),
                 };
                 if let Some(text) = text {
-                    channel.max_frames -= 1;
-                    channel.max_bytes -= text.len();
                     result["frames"] = json!([text]);
                 }
                 // Early return: typed SDK correlation can issue a separately
@@ -336,11 +508,14 @@ impl Pool {
                 result["httpStatus"] = json!(status);
                 result["httpBodyHex"] = json!(crate::canonical::hex(&raw[boundary + 4..]));
             }
-            "close" => return response(result),
+            "close" => {}
             _ => return Err(invalid("hosted operation absent from vocabulary")),
         }
-        let response = response(result)?;
-        self.channels.insert(id, Some(channel));
+        let response = response(result.clone())?;
+        self.acknowledge(&id, &operation, custody, &result)?;
+        if self.lifecycle.get(&id).is_some_and(vocabulary::socket_live) {
+            self.channels.insert(id, Some(channel));
+        }
         Ok(response)
     }
 }
@@ -375,6 +550,39 @@ mod tests {
             Err(capnp::Error::failed("intentional lost send reply".into()))
         }
     }
+    struct RegisterStream(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl minidregg_spk_rpc::web_session_capnp::web_session::web_socket_stream::Server
+        for RegisterStream
+    {
+        async fn send_bytes(
+            self: capnp::capability::Rc<Self>,
+            _:minidregg_spk_rpc::web_session_capnp::web_session::web_socket_stream::SendBytesParams,
+        ) -> capnp::Result<()> {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+    struct LoginSession(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl minidregg_spk_rpc::grain_capnp::ui_session::Server for LoginSession {}
+    impl minidregg_spk_rpc::web_session_capnp::web_session::Server for LoginSession {
+        async fn post(
+            self: capnp::capability::Rc<Self>,
+            params: minidregg_spk_rpc::web_session_capnp::web_session::PostParams,
+            mut results: minidregg_spk_rpc::web_session_capnp::web_session::PostResults,
+        ) -> capnp::Result<()> {
+            assert!(self.0.load(std::sync::atomic::Ordering::SeqCst));
+            let params = params.get()?;
+            assert_eq!(params.get_path()?.to_str()?, ".sandstorm-login");
+            assert_eq!(params.get_content()?.get_content()?, b"token");
+            let mut content = results.get().init_content();
+            content.set_status_code(
+                minidregg_spk_rpc::web_session_capnp::web_session::response::SuccessCode::Ok,
+            );
+            content.set_mime_type("text/plain");
+            content.init_body().set_bytes(b"ok");
+            Ok(())
+        }
+    }
     fn binding() -> SessionBinding {
         SessionBinding {
             app: 1,
@@ -398,14 +606,12 @@ mod tests {
         }
     }
     fn channel(
-        binding: SessionBinding,
+        _binding: SessionBinding,
         counter: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) -> (Channel, tokio::sync::mpsc::Sender<Vec<u8>>) {
         let (tx, rx) = tokio::sync::mpsc::channel(16);
         (
             Channel {
-                binding,
-                endpoint: "websocket".into(),
                 protocol: "ddp-v1".into(),
                 expires: Instant::now() + Duration::from_secs(30),
                 socket: WebSocketSession {
@@ -445,23 +651,203 @@ mod tests {
         tokio::task::LocalSet::new().block_on(&runtime,async {
             let counter=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let binding=binding();let (channel,tx)=channel(binding.clone(),counter.clone());
-            let mut pool=Pool::default();pool.channels.insert("c".into(),Some(channel));
+            let mut pool=Pool::default();
+            pool.lifecycle.insert("c".into(),vocabulary::State {status:1,binding:binding_bytes(&binding,"websocket").unwrap(),..Default::default()});
+            pool.channels.insert("c".into(),Some(channel));
             let first=r#"{"msg":"updated","methods":["m"]}"#;
             let second=r#"{"msg":"result","id":"m","result":null}"#;
             let mut raw=vec![0x81,first.len() as u8];raw.extend(first.as_bytes());
             raw.extend([0x81,second.len() as u8]);raw.extend(second.as_bytes());
             tx.send(raw[..3].to_vec()).await.unwrap();tx.send(raw[3..].to_vec()).await.unwrap();
             let req=request(json!({"version":1,"op":"receive","channel":"c","condition":{"msg":"any"},"maxFrames":64,"maxBytes":65536,"deadlineMs":100}));
-            let custody=Custody {directory:PathBuf::new(),api_prefix:None};
+            let root=std::env::temp_dir().join(format!("cx-hosted-receive-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            std::fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
             let session=capnp_rpc::new_client(NoSession);
-            for expected in [first,second] {
+            for (index,expected) in [first,second].into_iter().enumerate() {
+                let directory=root.join(index.to_string());std::fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+                let custody=Custody::fixture(directory,&index.to_string(),&req.body.as_ref().unwrap().bytes);
                 let result=pool.execute(&session,&binding,&req,&custody,Instant::now()+Duration::from_secs(1)).await.unwrap();
                 let WebResult::Content {body,..}=result.result else {panic!("content expected")};
                 let body:Value=serde_json::from_slice(&body).unwrap();assert_eq!(body["frames"][0],expected);
+                assert!(pool.lifecycle["c"].receipt.is_some());
             }
+            let directory=root.join("changed");std::fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+            let custody=Custody::fixture(directory,"changed",&req.body.as_ref().unwrap().bytes);
             let mut changed=binding.clone();changed.session_generation="5".into();
             assert!(pool.execute(&session,&changed,&req,&custody,Instant::now()+Duration::from_secs(1)).await.is_err());
-            assert!(pool.channels["c"].is_none());assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst),0);
+            assert!(pool.channels["c"].is_none());assert!(pool.lifecycle["c"].ended);
+            assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst),0);
+            std::fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn hosted_derived_lifecycle_checks_authority_preimage_and_exact_receipt() {
+        let state = vocabulary::State::default();
+        let op = vocabulary::Operation {
+            phase: 0,
+            command: 0,
+            id: vec![1],
+            binding: vec![2],
+            preimage: vec![3],
+        };
+        let mut ctx = vocabulary::Context {
+            current: false,
+            retained: true,
+            budget: true,
+            acknowledged: false,
+            ended: false,
+            response: vec![],
+        };
+        assert_eq!(
+            vocabulary::derive(&state, &ctx, &op).unwrap_err(),
+            "currentAuthority"
+        );
+        ctx.current = true;
+        ctx.retained = false;
+        assert_eq!(
+            vocabulary::derive(&state, &ctx, &op).unwrap_err(),
+            "exactPreimage"
+        );
+        ctx.retained = true;
+        let pending = vocabulary::derive(&state, &ctx, &op).unwrap();
+        assert_eq!(pending.emitted.as_ref(), Some(&op));
+        assert!(pending.receipt.is_none());
+        assert!(vocabulary::derive(&pending, &ctx, &op).is_err());
+        let mut ack = op.clone();
+        ack.phase = 1;
+        assert_eq!(
+            vocabulary::derive(&pending, &ctx, &ack).unwrap_err(),
+            "uncertainCompletion"
+        );
+        ctx.acknowledged = true;
+        ctx.response = vec![4];
+        ack.preimage = vec![9];
+        assert_eq!(
+            vocabulary::derive(&pending, &ctx, &ack).unwrap_err(),
+            "originalIntent"
+        );
+        ack.preimage = op.preimage;
+        let settled = vocabulary::derive(&pending, &ctx, &ack).unwrap();
+        assert!(vocabulary::socket_live(&settled));
+        assert_eq!(settled.receipt.unwrap().bytes, vec![4]);
+    }
+    #[test]
+    fn hosted_rendezvous_preadmits_both_legs_and_posts_without_waiting_ddp_result() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime,async {
+            let registered=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let binding=binding();let (mut channel,_)=channel(binding.clone(),Default::default());
+            channel.socket.to_app=capnp_rpc::new_client(RegisterStream(registered.clone()));
+            let mut pool=Pool::default();pool.channels.insert("c".into(),Some(channel));
+            pool.lifecycle.insert("c".into(),vocabulary::State {status:1,binding:binding_bytes(&binding,"websocket").unwrap(),..Default::default()});
+            let req=request(json!({"version":1,"op":"rendezvous","channel":"c","text":"{\"msg\":\"method\",\"method\":\"loginWithSandstorm\",\"id\":\"login-1\",\"params\":[\"token\"]}",
+                "http":{"method":"POST","path":".sandstorm-login","query":"","headers":[{"name":"content-type","value":"application/x-sandstorm-login-token"}],"bodyHex":"746f6b656e"},"maxFrames":64,"maxBytes":65536,"deadlineMs":1000}));
+            let directory=std::env::temp_dir().join(format!("cx-hosted-login-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+            std::fs::DirBuilder::new().mode(0o700).create(&directory).unwrap();
+            let custody=Custody::fixture(directory.clone(),"login-1",&req.body.as_ref().unwrap().bytes);
+            let session=capnp_rpc::new_client(LoginSession(registered));
+            let response=pool.execute(&session,&binding,&req,&custody,Instant::now()+Duration::from_secs(1)).await.unwrap();
+            let WebResult::Content {body,..}=response.result else {panic!("content expected")};
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["httpStatus"],200);
+            for name in ["hosted-admitted-descriptor.bin","hosted-frame.bin","hosted-http.json","hosted-receipt.json"] {assert!(directory.join(name).is_file());}
+            std::fs::remove_dir_all(directory).unwrap();
+        });
+    }
+    #[test]
+    fn hosted_expiry_purges_socket_but_never_reuses_id() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let b = binding();
+            let (mut channel, _) = channel(b.clone(), Default::default());
+            channel.expires = Instant::now() - Duration::from_secs(1);
+            let mut pool = Pool::default();
+            pool.channels.insert("expired".into(), Some(channel));
+            pool.lifecycle.insert(
+                "expired".into(),
+                vocabulary::State {
+                    status: 1,
+                    binding: binding_bytes(&b, "websocket").unwrap(),
+                    ..Default::default()
+                },
+            );
+            pool.purge_expired();
+            assert!(pool.channels["expired"].is_none());
+            assert!(pool.lifecycle["expired"].ended);
+            let op = vocabulary::Operation {
+                phase: 0,
+                command: 0,
+                id: vec![1],
+                binding: vec![2],
+                preimage: vec![3],
+            };
+            let ctx = vocabulary::Context {
+                current: true,
+                retained: true,
+                budget: true,
+                acknowledged: false,
+                ended: false,
+                response: vec![],
+            };
+            assert!(vocabulary::derive(&pool.lifecycle["expired"], &ctx, &op).is_err());
+        });
+    }
+    #[test]
+    fn hosted_idle_actor_drops_expired_socket_without_a_request() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let b = binding();
+            let (mut channel, app_sender) = channel(b.clone(), Default::default());
+            channel.expires = Instant::now() + Duration::from_millis(20);
+            let mut pool = Pool::default();
+            pool.channels.insert("idle".into(), Some(channel));
+            pool.lifecycle.insert(
+                "idle".into(),
+                vocabulary::State {
+                    status: 1,
+                    binding: binding_bytes(&b, "websocket").unwrap(),
+                    ..Default::default()
+                },
+            );
+            let (_commands, mut queue) = tokio::sync::mpsc::channel::<()>(1);
+            // No command is sent. Dropping the app receiver is direct evidence
+            // that actor expiry released the physical socket capability.
+            tokio::select! {
+                _=pool.receive_command(&mut queue)=>panic!("queue unexpectedly ended"),
+                _=tokio::time::timeout(Duration::from_secs(1),app_sender.closed())=>{},
+            }
+            assert!(app_sender.is_closed());
+            assert!(pool.channels["idle"].is_none());
+            assert!(pool.lifecycle["idle"].ended);
+        });
+    }
+    #[test]
+    fn hosted_wire_fragments_and_pong_noise_consume_budget() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let (mut channel, tx) = channel(binding(), Default::default());
+            channel.max_frames = 2;
+            tx.send(vec![0x8a, 0, 0x8a, 0, 0x81, 2, b'{', b'}'])
+                .await
+                .unwrap();
+            assert!(channel
+                .next_text(Instant::now() + Duration::from_secs(1), 100, 64)
+                .await
+                .is_err());
+            assert_eq!(channel.max_frames, 0);
+            assert_eq!(channel.max_bytes, 65532);
         });
     }
     #[test]
@@ -475,6 +861,14 @@ mod tests {
             let binding = binding();
             let (channel, _tx) = channel(binding.clone(), counter.clone());
             let mut pool = Pool::default();
+            pool.lifecycle.insert(
+                "c".into(),
+                vocabulary::State {
+                    status: 1,
+                    binding: binding_bytes(&binding, "websocket").unwrap(),
+                    ..Default::default()
+                },
+            );
             pool.channels.insert("c".into(), Some(channel));
             let text = r#"{"msg":"method","method":"write","id":"m","params":[]}"#;
             let req = request(json!({"version":1,"op":"send","channel":"c","text":text}));
@@ -491,10 +885,11 @@ mod tests {
                 .create(&directory)
                 .unwrap();
             crate::dispatch_native::private_dir(&directory).unwrap();
-            let custody = Custody {
-                directory: directory.clone(),
-                api_prefix: None,
-            };
+            let custody = Custody::fixture(
+                directory.clone(),
+                "send-1",
+                &req.body.as_ref().unwrap().bytes,
+            );
             let session = capnp_rpc::new_client(NoSession);
             for _ in 0..2 {
                 assert!(pool

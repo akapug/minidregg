@@ -304,7 +304,7 @@ def intent (accepted : AcceptedAdoption deployment semantics durable ingress) :
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain semantics ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain semantics ingress
   -- Both signatures authorize only the first commitment; the current key stays current.
   subject := some ingress.command.subject

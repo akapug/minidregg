@@ -263,14 +263,14 @@ def intent {F : Type} [Field F] [DecidableEq F]
       readGuards := ordinary.readGuards ++ [packageGuard source packageBefore]
       nullifiers := ordinary.nullifiers ++
         [stableNullifier deployment.domain profile.semantics source]
-      exactCharge := fun dimension => match dimension with
+      exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (fun dimension => match dimension with
         | .incidences => ordinary.exactCharge .incidences + 1
         | .turnBytes => ingress.canonicalBytes.length
         | .witnessBytes => ingress.canonicalBytes.length
         | .proofWork => ordinary.exactCharge .proofWork + 1
         | .memoryTouches => ordinary.exactCharge .memoryTouches + 1
         | .storageBytes => DeployedCharge.storageCharge ground.view ordinary.writes (event ingress)
-        | other => ordinary.exactCharge other
+        | other => ordinary.exactCharge other)).toCharge
       event := event ingress
       subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound

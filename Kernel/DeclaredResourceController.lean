@@ -2360,7 +2360,7 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     readGuards := guards
     nullifiers := [invocationNullifier ground.authority.domain
       (operationMarker ground.authority.domain profile.semantics command)]
-    exactCharge := sourceChargeFrom prepared signed ws guards
+    exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (sourceChargeFrom prepared signed ws guards)).toCharge
     event := invocationEvent ground.authority.domain profile.semantics command signed
     subject := some command.subject
     postRootsBound := writes_roots_bound prepared
@@ -2382,7 +2382,9 @@ theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
           if command.targets[i].isRead then none else some (targetWrite prepared i)) ++ entryWrites prepared ++ computeWrites prepared :=
   by
     constructor
-    · show sourceChargeFrom prepared signed _ _ .storageBytes = _
+    · change (Minidregg.Theory.ResourceCost.Charge.materialize
+        (sourceChargeFrom prepared signed _ _)).toCharge .storageBytes = _
+      rw [Minidregg.Theory.ResourceCost.Charge.materialize_eq]
       unfold sourceChargeFrom
       cases command.objectiveClaim with
       | error _ => rfl
@@ -2396,7 +2398,7 @@ theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient ground command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge = accepted.sourceCharge := by
-  rfl
+  exact Minidregg.Theory.ResourceCost.Charge.materialize_eq _
 
 /-- Sharing the runtime write and guard values leaves the complete original
 receiver intent, including every write, charge, event and proof field, exact. -/
@@ -2414,7 +2416,8 @@ theorem AcceptedInvocation.dataIntent_original_exact [DecidableEq F]
         subject := some command.subject
         postRootsBound := writes_roots_bound prepared
         guardsReadOnly := accepted.readGuards_readonly shape } := by
-  rfl
+  simp only [AcceptedInvocation.dataIntent, Minidregg.Theory.ResourceCost.Charge.materialize_eq,
+    AcceptedInvocation.sourceCharge]
 
 /-- The keys an invocation consults beyond the state: its transaction id (replay
 detection) and its operation marker's replay nullifier (`PreparedInvocation.markerDeclared`).

@@ -80,5 +80,31 @@ PSOCK=$run/w/sock/participant/host.sock
 HELPER=$helper
 ENV
 chmod 600 "$run/WORLD.env"
+# Dispatches are durable turns, including GETs. Without the ordinary operator
+# certifier a standing world fills its 256-record tail and every app stops.
+mkdir -m 700 "$run/certifier"
+jq -n --arg host "$run/bin/minidregg-host" --arg socket "$run/w/sock/operator/host.sock" \
+  --arg config "$config" --arg key "$run/w/store/base/workroom/controller.key" \
+  --arg subject "$(jq -er .factoryControllerSubject "$run/w/store/base/workroom/genesis.json")" \
+  '{type:"minidregg-participant-workspace-v1",host:$host,socket:$socket,
+    config:$config,key:$key,subject:$subject}' >"$run/certifier/workspace.json"
+"$run/bin/mini" checkpoint --action view --workspace "$run/certifier" >"$run/certifier/initial-view.json"
+certifier=mini-spk-certify-$store.service
+cat >"$units/$certifier" <<UNIT
+[Unit]
+Description=Mini standing-world certifier $store
+[Service]
+Type=simple
+ExecStart=/bin/bash $here/world-certifier.sh $run
+Restart=on-failure
+RestartSec=2
+MemoryMax=512M
+StandardOutput=append:$run/certifier/operator.log
+StandardError=append:$run/certifier/operator.log
+UNIT
+systemctl --user daemon-reload
+systemctl --user start "$certifier"
+systemctl --user show "$certifier" -p MainPID --value >"$run/certifier/pid"
+
 printf 'WORLD UP store=%s grains=%s broker=%s profile=%s\n' "$store" "$root" "$socket" "$profile" | tee -a "$run/result.log"
 echo "$run/WORLD.env"

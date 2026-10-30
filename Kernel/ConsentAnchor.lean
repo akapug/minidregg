@@ -27,7 +27,6 @@ the signing key beside it. The chain is what makes it a commitment: equal
 chains are equal prefixes, up to a collision of the deployed hash.
 -/
 import Kernel.NativeHostReplay
-import Compiler.PersistedCodecTagCensus
 
 namespace Minidregg.Kernel.ConsentAnchor
 
@@ -322,7 +321,8 @@ def ownOfGenesis (durable : Durable)
     ⟨durable.image.accepted, rfl, durable.chainExact.symm, durable.snapshot, by
       have folded := durable.resumed
       rw [genesis.1, genesis.2, DurableCheckpoint.resume_genesis] at folded
-      exact folded, rfl⟩⟩
+      simpa only [DurableReceiver.Image.ofAccepted_accepted] using folded,
+      by rw [DurableReceiver.Image.ofAccepted_accepted]⟩⟩
 
 /-- **The held image of an anchored admission is genesis-based**: the suffix
 walk keeps its anchor's base (`AdmittedSuffix.base`), and the anchor's is the
@@ -383,21 +383,20 @@ def resume (config : Config) {store : DurableHistory.StoreIdentity}
     | .ok start =>
       if exact : Anchor.ofOpened start = anchor then
         have wraps := validateLoaded_durable validated
-        have seedExact : target.image.seed = start.durable.image.seed := by rw [wraps, imaged]
+        have seedExact : target.image.seed = start.durable.image.seed := by
+          rw [wraps, imaged, DurableReceiver.Image.ofAccepted_seed]
         have anchorWithin : start.durable.image.accepted.length ≤ target.image.accepted.length := by
-          rw [wraps, imaged]
-          show (target.image.accepted.take anchor.height).length ≤ _
-          rw [List.length_take]
+          rw [wraps, imaged, DurableReceiver.Image.accepted_ofAccepted, List.length_take]
           exact Nat.min_le_right _ _
         have prefixExact : target.image.accepted.take start.durable.image.accepted.length =
             start.durable.image.accepted := by
-          rw [wraps, imaged]
+          rw [wraps, imaged, DurableReceiver.Image.accepted_ofAccepted]
           exact take_length_take _ _
         have logStartExact : target.logStart = start.durable.logStart := by rw [wraps, started]
         have startGenesis : start.durable.baseHeight = 0 ∧
             start.durable.base = DurableCheckpoint.State.ofSeed start.durable.image.seed := by
           refine ⟨by rw [wraps]; exact zero, ?_⟩
-          rw [wraps, seeded, imaged]
+          rw [wraps, seeded, imaged, DurableReceiver.Image.ofAccepted_seed]
         -- Past states the suffix admission reads resume from this opening or the seed.
         let own := reader.ownOnly config.transport [ownOfGenesis start.durable startGenesis]
         match ← NativeHostReplay.verifySuffixFrom config start own target none seedExact anchorWithin

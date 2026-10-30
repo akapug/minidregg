@@ -410,13 +410,22 @@ fn fetch(dir: &Path, binding: &Value, capture: &str) -> Result<(Vec<u8>, Vec<u8>
             "Accept-Encoding: identity",
         ])
         .arg("--include")
+        // The HTTP status alone reaches stderr (never a header or the credential), so a failed
+        // export names the layer that refused it: TLS, connect, timeout, or the grain's status.
+        .args(["--write-out", "%{stderr}http=%{http_code}"])
         .args(["--config", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("export response pipe missing")?;
+    let stderr = child.stderr.take().ok_or("export status pipe missing")?;
+    let status_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.take(64).read_to_string(&mut text);
+        text
+    });
     let reader = std::thread::spawn(move || {
         let mut bytes = Zeroizing::new(Vec::new());
         stdout
@@ -438,24 +447,26 @@ fn fetch(dir: &Path, binding: &Value, capture: &str) -> Result<(Vec<u8>, Vec<u8>
         return Err("export transport could not receive its private configuration".into());
     }
     let started = Instant::now();
-    let result = loop {
+    let exit = loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status.success();
+            break status.code().map_or("signal".to_owned(), |code| code.to_string());
         }
         if started.elapsed() > Duration::from_secs(91) {
             let _ = child.kill();
             let _ = child.wait();
-            break false;
+            break "deadline".to_owned();
         }
         std::thread::sleep(Duration::from_millis(20));
     };
     let bytes = reader
         .join()
         .map_err(|_| "export response capture stopped")??;
-    if !result {
-        return Err(
-            "export did not complete; retain this exact operation as source-uncertain".into(),
-        );
+    let http = status_reader.join().unwrap_or_default();
+    let http: String = http.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '=').collect();
+    if exit != "0" {
+        return Err(format!(
+            "export did not complete (curl exit {exit}, {http}); retain this exact operation as source-uncertain"
+        ));
     }
     let end = bytes
         .windows(4)

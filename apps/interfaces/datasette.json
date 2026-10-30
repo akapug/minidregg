@@ -110,6 +110,10 @@
           "_shape": "array",
           "_size": "1000"
         }
+      },
+      "projection": {
+        "collection": "rows",
+        "where": {}
       }
     },
     "databases.list": {

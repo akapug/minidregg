@@ -827,8 +827,10 @@ dependencies = [
 name = "mini-kernels"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "serde",
  "serde_json",
+ "sha2",
  "sha3",
 ]
 
@@ -847,6 +849,7 @@ name = "minidregg-credential-signature-verifier"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "mini-kernels",
  "sha2",
 ]
 

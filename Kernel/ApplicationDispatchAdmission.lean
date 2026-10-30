@@ -593,16 +593,18 @@ theorem current_app_policy_excludes_v1 (package snapshot : Nat)
 
 /-- Current app/package source laws are matched exactly. The standard family
 binds share issuance to its management subject. The explicit managed family
-retains the member owner as issuer and derives the separate lifecycle manager
-from current law. Issuer delegation lineage is independently checked below;
-arbitrary app-revised laws are not treated as these source families. -/
-def linkedCurrentPolicies {F : Type} [Field F]
+names a member owner and a separate lifecycle manager in the app law; the
+ticket's issuer is either of them, and the other is derived from current law.
+Issuer delegation lineage is independently checked below; arbitrary
+app-revised laws are not treated as these source families. Each clause is
+named so a refusal can say which one failed. -/
+def linkedCurrentPolicyClauses {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (ground : Ground deployment)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (spec : Spec) (selection : Selection)
     (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
-      (command ingress.dispatch selection ingress.parent)) : Bool :=
+      (command ingress.dispatch selection ingress.parent)) : List (String × Bool) :=
   let auth := ground.authority.logical
   let directory := ground.directory
   let policyAt := fun target => do
@@ -626,16 +628,45 @@ def linkedCurrentPolicies {F : Type} [Field F]
   -- the participant manages its own session. Expecting the older no-manager
   -- law refused every dispatch for a currently born session.
   let sessionManagement := Minidregg.Pred.Pred.eq "request/subject" participant.value
-  decide (spec.issuer = ingress.appManagementSubject) &&
-  ((policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
-    policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management)) ||
+  [("issuer-is-app-management-subject", decide (spec.issuer = ingress.appManagementSubject)),
+   -- The ticket's issuer is either the app's sole management subject (the
+   -- unmanaged law), the member owner of a managed app (its manager derived
+   -- from the law), or the manager of a managed app (its owner derived from
+   -- the law). The app delegation lineage is checked separately.
+   ("app-and-package-law",
+    (policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
+      policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management)) ||
     ApplicationGrain.managedPoliciesMatchOwner app manifest ingress.appSnapshotManifest
-      ingress.appManagementSubject.value (policyAt app) (policyAt manifest)) &&
-  policyAt session == some (ApplicationGrainSession.policy descriptor kind
-    participant sessionManagement) &&
-  policyAt descriptor == some (ApplicationGrainSession.descriptorPolicy session kind
-    participant sessionManagement) &&
-  policyAt spec.ticket.resource == some (ticketPolicy spec.issuer)
+      ingress.appManagementSubject.value (policyAt app) (policyAt manifest) ||
+    ApplicationGrain.managedPoliciesMatch app manifest ingress.appSnapshotManifest
+      ingress.appManagementSubject.value (policyAt app) (policyAt manifest)),
+   ("session-law", policyAt session == some (ApplicationGrainSession.policy descriptor kind
+      participant sessionManagement)),
+   ("descriptor-law", policyAt descriptor == some (ApplicationGrainSession.descriptorPolicy session kind
+      participant sessionManagement)),
+   ("ticket-law", policyAt spec.ticket.resource == some (ticketPolicy spec.issuer))]
+
+/-- All named clauses hold. -/
+def linkedCurrentPolicies {F : Type} [Field F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (ground : Ground deployment)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (selection : Selection)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
+      (command ingress.dispatch selection ingress.parent)) : Bool :=
+  (linkedCurrentPolicyClauses deployment profile ambient ground ingress spec selection
+    prepared).all (·.2)
+
+/-- The first failing clause's name, for a refusal that names what it refused. -/
+def firstFailedLinkageClause {F : Type} [Field F]
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (ground : Ground deployment)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (spec : Spec) (selection : Selection)
+    (prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient ground
+      (command ingress.dispatch selection ingress.parent)) : Option String :=
+  ((linkedCurrentPolicyClauses deployment profile ambient ground ingress spec selection
+    prepared).find? (fun c => !c.2)).map (·.1)
 
 /-- Issuance authenticated the issuer once. At each dispatch, the same
 selected app-delegation capability must still be present with valid stored

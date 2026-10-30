@@ -1187,7 +1187,7 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
 through record `index` (at the head, the served root). -/
 def receiptRootSpec (config : Config) (durable : Durable) (index : Nat) : Digest :=
   if index + 1 = durable.height then durable.worldRoot
-  else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+  else worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))
 
 /-- The world root after accepted record `index`: at the head the served
 image's cached root; below it the root the record's log entry kept at append
@@ -1197,7 +1197,7 @@ def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
   if index + 1 = durable.height then durable.worldRoot
   else match durable.rootLog[index]? with
     | some (some root) => root
-    | _ => worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+    | _ => worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))
 
 /-- Every root the log keeps is its prefix's specification root. This is the
 trust the host places in its own past execution under its MAC key (docs/DATAMODEL.md
@@ -1206,7 +1206,7 @@ from MAC-verified tags and refuses a head root that differs from the replayed
 one; `extend` keeps the root it served (`RootLogHonest.extend`). -/
 def RootLogHonest (config : Config) (durable : Durable) : Prop :=
   ∀ index root, durable.rootLog[index]? = some (some root) →
-    root = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+    root = worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))
 
 /-- **Refinement**: over an honest root log, the kept root IS the specification root. -/
 theorem receiptRoot_eq_spec (config : Config) (durable : Durable)
@@ -1226,7 +1226,7 @@ serves differs from the specification there. -/
 theorem receiptRoot_ne_spec_of_wrong (config : Config) (durable : Durable) (index : Nat)
     (notHead : index + 1 ≠ durable.image.accepted.length) (root : Digest)
     (kept : durable.rootLog[index]? = some (some root))
-    (wrong : root ≠ worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩) :
+    (wrong : root ≠ worldRoot config (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1)))) :
     ¬ RootLogHonest config durable ∧
       receiptRoot config durable index ≠ receiptRootSpec config durable index := by
   refine ⟨fun honest => wrong (honest index root kept), ?_⟩
@@ -1263,8 +1263,9 @@ theorem RootLogHonest.extend (config : Config) {loaded : Durable}
   by_cases earlier : index < loaded.image.accepted.length
   · rw [DurableReceiverIO.Loaded.extend_rootLog_prefix loaded ready index earlier] at kept
     rw [honest index root kept, imageEq]
-    simp only [DurableReceiver.Image.append]
+    simp only [DurableReceiver.Image.accepted_append]
     rw [List.take_append_of_le_length (by omega)]
+    rfl
   · have sizeEq : (loaded.extend ready).rootLog.size = loaded.image.accepted.length + 1 := by
       rw [(loaded.extend ready).rootLogSize, imageEq]
       simp [DurableReceiver.Image.append]
@@ -1278,8 +1279,7 @@ theorem RootLogHonest.extend (config : Config) {loaded : Durable}
     rw [Array.back?_eq_getElem?, sizeEq, Nat.add_sub_cancel, kept] at back
     cases back
     rw [loadedRoot_eq_worldRoot config (loaded.extend ready) restored rooted, imageEq]
-    simp only [DurableReceiver.Image.append]
-    rw [List.take_of_length_le (by simp)]
+    rw [List.take_of_length_le (by simp), DurableReceiver.Image.ofAccepted_accepted]
 
 #assert_axioms receiptRoot_eq_spec
 #assert_axioms receiptRoot_ne_spec_of_wrong
@@ -1324,7 +1324,7 @@ theorem historicalReceipt_bound (config : Config) (durable : Durable)
         (fun record => record.transactionId == transactionId) = some index ∧
       receipt.worldRoot = receiptRoot config durable index ∧
       receipt.acceptedCount =
-        NativeHostCodec.height ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩ := by
+        NativeHostCodec.height (DurableReceiver.Image.ofAccepted durable.image.seed (durable.image.accepted.take (index + 1))) := by
   unfold historicalReceipt at sealed
   rcases hidx : durable.image.accepted.findIdx?
       (fun record => record.transactionId == transactionId) with _ | index

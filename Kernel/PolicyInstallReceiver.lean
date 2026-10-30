@@ -584,7 +584,7 @@ def intent (accepted : AcceptedInstall profile deployment ground federation heig
   writes := accepted.prepared.writes
   readGuards := accepted.readGuards
   nullifiers := [operationNullifier deployment.domain accepted.ingress]
-  exactCharge := charge accepted
+  exactCharge := (Minidregg.Theory.ResourceCost.Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain accepted.ingress
   subject := some accepted.ingress.ingress.subject
   postRootsBound := accepted.prepared.write_roots_bound
@@ -623,7 +623,7 @@ theorem intent_exact_source (accepted : AcceptedInstall profile deployment groun
         (PolicyInstallController.requestDigest profile ground.authority
           (context federation height ground.authority accepted.ingress)
           accepted.prepared.semantic.declaration).value] := by
-  refine ⟨rfl, rfl, rfl, ?_⟩
+  refine ⟨rfl, Minidregg.Theory.ResourceCost.Charge.materialize_eq _, rfl, ?_⟩
   change [CredentialAuthorityReplay.nullifier deployment.domain accepted.ingress.marker] = _
   rw [accepted.prepared.markerExact]
 
