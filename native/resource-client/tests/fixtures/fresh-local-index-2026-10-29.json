@@ -204,6 +204,28 @@
    "webLink": "https://hledger.org"
   },
   {
+   "appId": "7xx4myv7aafdqtm4rh4fj3ju1eck9dfqnnjca3y6513gradphzv0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "media"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/kiwix/kiwix-tools",
+   "isOpenSource": true,
+   "name": "Kiwix",
+   "packageBuiltAt": "2026-10-30T05:18:33Z",
+   "packageId": "5378e1b9979bc76d4b492115aa52c6e0",
+   "sha256": "5378e1b9979bc76d4b492115aa52c6e080189fe07e637fe7f2b97dc7e900b89a",
+   "shortDescription": "Offline Wikipedia and more",
+   "upstreamAuthor": "Kiwix contributors",
+   "upstreamVersion": "3.8.2-2",
+   "version": "3.8.2-2",
+   "versionNumber": 2,
+   "webLink": "https://kiwix.org"
+  },
+  {
    "appId": "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",
    "author": {
     "name": "Mini"
