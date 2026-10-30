@@ -36,7 +36,7 @@ def lookupVerified {config : Config} {target : Durable}
     | none
   let some record := verified.opened.durable.image.accepted[index]?
     | some (.error "enrollment original record unavailable")
-  let some receipt := verified.receipts[index]?
+  let some receipt := verified.receiptAt index
     | some (.error "enrollment original receipt unavailable")
   let event := ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress
   if record.event == event && receipt.transactionId == tx &&

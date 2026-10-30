@@ -1,6 +1,28 @@
 {
  "apps": [
   {
+   "appId": "reh7pa3e7jt8ryvjgje97ke5rkyztfg70grru8dewevmunj6ugn0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "games"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ocdtrekkie/3D-Blockstack-sandstorm",
+   "isOpenSource": true,
+   "name": "3D Blockstack",
+   "packageBuiltAt": "2026-10-30T04:38:11Z",
+   "packageId": "adb71c8edd499b6926d5a89e15adc865",
+   "sha256": "adb71c8edd499b6926d5a89e15adc8651ebd8fa9dcd0aeef6cb6ae143ede6dc7",
+   "shortDescription": "Stacking game",
+   "upstreamAuthor": "Jacob Weisz",
+   "upstreamVersion": "0.0.2-2",
+   "version": "0.0.2-2",
+   "versionNumber": 2,
+   "webLink": "https://github.com/ocdtrekkie/3D-Blockstack-sandstorm"
+  },
+  {
    "appId": "f3s5vv8g7xuay08e3x1g5zwuaycz0mt7170nmz3kf5e1g1q9ytr0",
    "author": {
     "name": "Mini"
@@ -182,6 +204,72 @@
    "webLink": "https://hledger.org"
   },
   {
+   "appId": "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "productivity"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/zenhack/mediawiki-sandstorm",
+   "isOpenSource": true,
+   "name": "MediaWiki",
+   "packageBuiltAt": "2026-10-29T17:49:39Z",
+   "packageId": "505d2458a4ce1b02e6ac01f7db4f88b8",
+   "sha256": "505d2458a4ce1b02e6ac01f7db4f88b8f242670130aab4ff2530617cb92d0bc9",
+   "shortDescription": "Wiki",
+   "upstreamAuthor": "MediaWiki Contributors",
+   "upstreamVersion": "1.46.2-3",
+   "version": "1.46.2-3",
+   "versionNumber": 3,
+   "webLink": "https://www.mediawiki.org"
+  },
+  {
+   "appId": "1mvdqjv5z596dtyg5fh0p9573x32u5anrfze9rs6wpxthhyejk50",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "developerTools"
+   ],
+   "class": "M",
+   "codeLink": "https://www.mercurial-scm.org/repo/hg",
+   "isOpenSource": true,
+   "name": "Mercurial",
+   "packageBuiltAt": "2026-10-29T17:22:41Z",
+   "packageId": "56a636adfcd3f6977de2fc2b82ee68d2",
+   "sha256": "56a636adfcd3f6977de2fc2b82ee68d2da48ec14a884cd86dc7d9bfdbb4fda6f",
+   "shortDescription": "Distributed source control with hgweb",
+   "upstreamAuthor": "Mercurial project",
+   "upstreamVersion": "7.2.4-2",
+   "version": "7.2.4-2",
+   "versionNumber": 2,
+   "webLink": "https://www.mercurial-scm.org/"
+  },
+  {
+   "appId": "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "games"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ocdtrekkie/perplexity-sudoku",
+   "isOpenSource": true,
+   "name": "Perplexity Sudoku",
+   "packageBuiltAt": "2026-10-30T04:33:13Z",
+   "packageId": "f03718ec2cfa35ea14eda2eb948c288c",
+   "sha256": "f03718ec2cfa35ea14eda2eb948c288c9eebff3400af6b1e4592006d6522736f",
+   "shortDescription": "Number puzzle",
+   "upstreamAuthor": "Jacob Weisz",
+   "upstreamVersion": "0.0.1-2",
+   "version": "0.0.1-2",
+   "versionNumber": 2,
+   "webLink": "https://github.com/ocdtrekkie/perplexity-sudoku"
+  },
+  {
    "appId": "vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h",
    "author": {
     "name": "Mini"
@@ -205,6 +293,29 @@
    "webLink": "https://revealjs.com"
   },
   {
+   "appId": "1124qk4mm5zvx294gwn9w23gn2pt96mds6pqkxpn9sxr8w2uwr70",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "productivity",
+    "office"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/aliasaria/scrumblr",
+   "isOpenSource": true,
+   "name": "Scrumblr",
+   "packageBuiltAt": "2026-10-29T16:57:08Z",
+   "packageId": "57fa8aab611f5e0ab656e73324d48879",
+   "sha256": "57fa8aab611f5e0ab656e73324d4887932a34dc3071942a26a12018afeb042f6",
+   "shortDescription": "Collaborative scrum board with sticky notes",
+   "upstreamAuthor": "Ali Asaria",
+   "upstreamVersion": "0.5-1",
+   "version": "0.5-1",
+   "versionNumber": 1,
+   "webLink": "https://scrumblr.ca/"
+  },
+  {
    "appId": "k2drffaa4xx1mq1gz6hh5cnw2kfqr6mkpvz51h54xkp4eawx6wn0",
    "author": {
     "name": "Mini"
@@ -225,6 +336,51 @@
    "version": "v2.34.0-sandstorm-20",
    "versionNumber": 20,
    "webLink": "https://ntfy.sh"
+  },
+  {
+   "appId": "xm16d84ksseg44ef58z7n2aw7qt1n6psk0cewzr0e0arfjk5r4fh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "developerTools"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/swagger-api/swagger-editor",
+   "isOpenSource": true,
+   "name": "Swagger Editor",
+   "packageBuiltAt": "2026-10-29T16:59:18Z",
+   "packageId": "c8ae9b8ea081ad5b31701cd6b11292cc",
+   "sha256": "c8ae9b8ea081ad5b31701cd6b11292ccff1bca883296695b97cee03d43b8e253",
+   "shortDescription": "Design and document APIs in OpenAPI",
+   "upstreamAuthor": "SmartBear Software and swagger-api contributors",
+   "upstreamVersion": "5.10.0-2",
+   "version": "5.10.0-2",
+   "versionNumber": 2,
+   "webLink": "https://editor.swagger.io/"
+  },
+  {
+   "appId": "wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "productivity",
+    "office"
+   ],
+   "class": "L",
+   "codeLink": "https://github.com/wekan/wekan",
+   "isOpenSource": true,
+   "name": "Wekan",
+   "packageBuiltAt": "2026-10-29T09:13:11Z",
+   "packageId": "8c2f7c710744bdc97012a21f37cebcd1",
+   "sha256": "8c2f7c710744bdc97012a21f37cebcd19447b2193d630067f207e72ceb23de18",
+   "shortDescription": "Kanban board",
+   "upstreamAuthor": "Wekan Team",
+   "upstreamVersion": "12.68~2026-10-29",
+   "version": "12.68~2026-10-29",
+   "versionNumber": 1268,
+   "webLink": "https://wekan.github.io"
   }
  ]
 }

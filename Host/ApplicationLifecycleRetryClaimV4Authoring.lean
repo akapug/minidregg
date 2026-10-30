@@ -123,7 +123,7 @@ def prepareVerified (config : Config) {target : Durable}
   unless DurableReceiverCodec.intentStream.encode retained ==
       DurableReceiverCodec.intentStream.encode prior.record do
     throw "original retry BEGIN record differs from verified history"
-  let some originalReceipt := verified.receipts[prior.index]?
+  let some originalReceipt := verified.receiptAt prior.index
     | throw "original retry BEGIN receipt absent from verified chronology"
   unless originalReceipt.transactionId == prior.record.transactionId &&
       originalReceipt.eventId == prior.record.event.eventId &&

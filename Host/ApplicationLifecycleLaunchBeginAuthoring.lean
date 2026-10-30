@@ -365,7 +365,7 @@ private def checkCreatedReference {config : Config} {target : Durable}
     (binding : ApplicationLifecycleLaunchBinding.Binding) : Except String Unit := do
   let some record := verified.opened.durable.image.accepted[prior.index]?
     | throw "completed-create record absent from verified history"
-  let some receipt := verified.receipts[prior.index]?
+  let some receipt := verified.receiptAt prior.index
     | throw "completed-create original receipt absent from verified history"
   unless DurableReceiverCodec.intentStream.encode record ==
       DurableReceiverCodec.intentStream.encode prior.record do

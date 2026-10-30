@@ -15,10 +15,7 @@ use chacha20poly1305::{
     aead::{Aead, Payload},
     ChaCha20Poly1305, KeyInit, Nonce,
 };
-use std::{
-    process::{Command, Stdio},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const FRAME: &[u8] = b"MINI/APP-DOCUMENT-CUSTODY/v1";
@@ -348,131 +345,262 @@ fn checked_receipt(headers: &[u8], body: &[u8], binding: &Value, capture: &str) 
     Ok(receipt)
 }
 
-/// Exactly one bounded HTTPS fetch. Credential/config reaches curl on stdin,
-/// never argv. The export passes through memory into encrypted custody.
-fn fetch(dir: &Path, binding: &Value, capture: &str) -> Result<(Vec<u8>, Vec<u8>)> {
+/// Exactly one bounded HTTPS fetch, over the client's own TLS (rustls on aws-lc-rs), so the export
+/// speaks the hybrid key exchange the browser entrance requires (`spk-browser-proxy` accepts
+/// X25519MLKEM768 only) whatever OpenSSL the member's machine carries. Bounds: 10 s connect, 90 s
+/// whole exchange, HTTP/1.1 GET, no redirect followed, headers within 64 KiB, body within
+/// MAX_EXPORT. A status of 400 or more is a refusal. The credential never reaches argv or a file;
+/// the export passes through memory into encrypted custody.
+fn fetch(_dir: &Path, binding: &Value, capture: &str) -> Result<(Vec<u8>, Vec<u8>)> {
     let relative = if binding["apiPath"] == "/_/" {
         format!("{}/csv", member(binding, "sheet")?)
     } else {
         format!("_/{}/csv", member(binding, "sheet")?)
     };
     let url = format!("{}{relative}", member(binding, "endpoint")?);
-    let quote = |s: &str| -> Result<String> {
-        if s.bytes()
-            .any(|b| b.is_ascii_control() || b == b'"' || b == b'\\')
+    let target = ExportTarget::parse(&url)?;
+    let credential = if binding["credentialKind"] == "cookie" {
+        format!("Cookie: __Host-mini_spk_session={}", member(binding, "token")?)
+    } else {
+        format!("Authorization: Bearer {}", member(binding, "token")?)
+    };
+    for value in [credential.as_str(), capture] {
+        if value.bytes().any(|b| b.is_ascii_control()) {
+            return Err("unsafe export request header value".into());
+        }
+    }
+    let ca = if binding["ca"].is_null() { None } else { Some(member(binding, "ca")?) };
+    let request = Zeroizing::new(format!(
+        "GET {} HTTP/1.1\r\nHost: {}\r\n{credential}\r\nX-Mini-Export-Capture: {capture}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+        target.path, target.authority
+    ));
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let raw = export_exchange(&target, ca, request.as_bytes(), deadline)
+        .map_err(|why| format!("export did not complete ({why}); retain this exact operation as source-uncertain"))?;
+    let (head, body) = split_export_response(&raw)?;
+    Ok((head, body))
+}
+
+struct ExportTarget {
+    host: String,
+    port: u16,
+    authority: String,
+    path: String,
+}
+
+impl ExportTarget {
+    fn parse(url: &str) -> Result<Self> {
+        let rest = url.strip_prefix("https://").ok_or("export endpoint must be https")?;
+        let (authority, path) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, "/"),
+        };
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => (host, port.parse::<u16>().map_err(|_| "export endpoint port is malformed")?),
+            None => (authority, 443),
+        };
+        if host.is_empty()
+            || !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+            || !path.bytes().all(|b| b.is_ascii_graphic())
         {
-            Err("unsafe curl configuration value".into())
-        } else {
-            Ok(format!("\"{s}\""))
+            return Err("export endpoint host or path is malformed".into());
         }
+        Ok(Self { host: host.to_ascii_lowercase(), port, authority: authority.to_owned(), path: path.to_owned() })
+    }
+
+    /// RFC 6761: a `localhost` name is loopback, never a resolver question (curl's rule too).
+    fn addresses(&self) -> std::result::Result<Vec<std::net::SocketAddr>, String> {
+        use std::net::ToSocketAddrs;
+        if self.host == "localhost" || self.host.ends_with(".localhost") {
+            return Ok(vec![std::net::SocketAddr::from(([127, 0, 0, 1], self.port))]);
+        }
+        (self.host.as_str(), self.port)
+            .to_socket_addrs()
+            .map(|a| a.collect())
+            .map_err(|e| format!("resolve: {e}"))
+    }
+}
+
+fn export_tls_config(ca: Option<&str>) -> std::result::Result<rustls::ClientConfig, String> {
+    use rustls::crypto::aws_lc_rs::{self as provider, kx_group};
+    let pem = match ca {
+        Some(path) => std::fs::read(path).map_err(|e| format!("read CA {path}: {e}"))?,
+        None => ["/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/cert.pem", "/etc/pki/tls/certs/ca-bundle.crt"]
+            .iter()
+            .find_map(|path| std::fs::read(path).ok())
+            .ok_or("no system CA bundle")?,
     };
-    let mut config = format!(
-        "url = {}\nheader = {}\nheader = {}\n",
-        quote(&url)?,
-        quote(&if binding["credentialKind"] == "cookie" {
-            format!(
-                "Cookie: __Host-mini_spk_session={}",
-                member(binding, "token")?
-            )
-        } else {
-            format!("Authorization: Bearer {}", member(binding, "token")?)
-        })?,
-        quote(&format!("X-Mini-Export-Capture: {capture}"))?
-    );
-    if !binding["ca"].is_null() {
-        config.push_str(&format!("cacert = {}\n", quote(member(binding, "ca")?)?));
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_pemfile::certs(&mut std::io::Cursor::new(pem)) {
+        let cert = cert.map_err(|e| format!("CA PEM: {e}"))?;
+        let _ = roots.add(cert);
     }
-    let mut child = Command::new("/usr/bin/curl")
-        .env_clear()
-        .current_dir(dir)
-        .args([
-            "--disable",
-            "--silent",
-            "--fail",
-            "--http1.1",
-            "--request",
-            "GET",
-            "--proto",
-            "=https",
-            "--max-redirs",
-            "0",
-            "--noproxy",
-            "*",
-            "--proxy",
-            "",
-            "--connect-timeout",
-            "10",
-            "--max-time",
-            "90",
-            "--max-filesize",
-            "131072",
-            "--header",
-            "Accept-Encoding: identity",
-        ])
-        .arg("--include")
-        // The HTTP status alone reaches stderr (never a header or the credential), so a failed
-        // export names the layer that refused it: TLS, connect, timeout, or the grain's status.
-        .args(["--write-out", "%{stderr}http=%{http_code}"])
-        .args(["--config", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let stdout = child.stdout.take().ok_or("export response pipe missing")?;
-    let stderr = child.stderr.take().ok_or("export status pipe missing")?;
-    let status_reader = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = stderr.take(64).read_to_string(&mut text);
-        text
-    });
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Zeroizing::new(Vec::new());
-        stdout
-            .take((MAX_EXPORT + 64 * 1024 + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        if bytes.len() > MAX_EXPORT + 64 * 1024 {
-            return Err("export response exceeds bound".to_owned());
-        }
-        Ok(bytes)
-    });
-    if child
-        .stdin
-        .take()
-        .is_none_or(|mut stdin| stdin.write_all(config.as_bytes()).is_err())
-    {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("export transport could not receive its private configuration".into());
+    if roots.is_empty() {
+        return Err("CA bundle holds no certificate".into());
     }
-    let started = Instant::now();
-    let exit = loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status.code().map_or("signal".to_owned(), |code| code.to_string());
-        }
-        if started.elapsed() > Duration::from_secs(91) {
-            let _ = child.kill();
-            let _ = child.wait();
-            break "deadline".to_owned();
-        }
-        std::thread::sleep(Duration::from_millis(20));
+    let mut crypto = provider::default_provider();
+    // The hybrid share first, so the entrance answers without a retry; classical groups after it
+    // for an ordinary public endpoint.
+    crypto.kx_groups = vec![kx_group::X25519MLKEM768, kx_group::X25519, kx_group::SECP256R1];
+    Ok(rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(crypto))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| format!("TLS config: {e}"))?
+        .with_root_certificates(roots)
+        .with_no_client_auth())
+}
+
+/// The response, read until its framing is complete (Content-Length met, the chunked terminator
+/// and trailer section seen) or, for a close-delimited body, to the server's close; within the
+/// bound and the deadline. Resolution, every connect, the handshake, the request and each read
+/// draw on the one deadline. A status of 400 or more ends the exchange as soon as the head is in.
+fn export_exchange(target: &ExportTarget, ca: Option<&str>, request: &[u8], deadline: Instant) -> std::result::Result<Vec<u8>, String> {
+    use std::io::{Read, Write};
+    let remaining = || deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()).ok_or_else(|| "deadline".to_owned());
+    let config = export_tls_config(ca)?;
+    let addresses = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let lookup = ExportTarget { host: target.host.clone(), port: target.port, authority: String::new(), path: String::new() };
+        std::thread::spawn(move || {
+            let _ = tx.send(lookup.addresses());
+        });
+        rx.recv_timeout(remaining()?.min(Duration::from_secs(10))).map_err(|_| "resolve: deadline".to_owned())??
     };
-    let bytes = reader
-        .join()
-        .map_err(|_| "export response capture stopped")??;
-    let http = status_reader.join().unwrap_or_default();
-    let http: String = http.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '=').collect();
-    if exit != "0" {
-        return Err(format!(
-            "export did not complete (curl exit {exit}, {http}); retain this exact operation as source-uncertain"
-        ));
+    let mut tcp = None;
+    let mut last = String::from("no address");
+    for addr in addresses {
+        match std::net::TcpStream::connect_timeout(&addr, remaining()?.min(Duration::from_secs(10))) {
+            Ok(stream) => {
+                tcp = Some(stream);
+                break;
+            }
+            Err(e) => last = format!("connect {addr}: {e}"),
+        }
     }
-    let end = bytes
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or("export response framing missing")?;
-    Ok((bytes[..end + 4].to_vec(), bytes[end + 4..].to_vec()))
+    let tcp = tcp.ok_or(last)?;
+    let name = rustls::pki_types::ServerName::try_from(target.host.clone()).map_err(|e| format!("server name: {e}"))?;
+    let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), name).map_err(|e| format!("TLS: {e}"))?;
+    let mut tls = rustls::StreamOwned::new(connection, tcp);
+    let arm = |sock: &std::net::TcpStream| -> std::result::Result<(), String> {
+        let left = remaining()?;
+        sock.set_read_timeout(Some(left)).and_then(|_| sock.set_write_timeout(Some(left))).map_err(|e| e.to_string())
+    };
+    while tls.conn.is_handshaking() {
+        arm(&tls.sock)?;
+        tls.conn.complete_io(&mut tls.sock).map_err(|e| format!("TLS/handshake: {e}"))?;
+    }
+    arm(&tls.sock)?;
+    tls.write_all(request).and_then(|_| tls.flush()).map_err(|e| format!("TLS/send: {e}"))?;
+    // Chunk framing can exceed the decoded body several times over; the decoded body is bounded
+    // again by split_export_response.
+    let bound = 64 * 1024 + 4 * MAX_EXPORT;
+    let mut raw = Zeroizing::new(Vec::new());
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        arm(&tls.sock)?;
+        match tls.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                raw.extend_from_slice(&chunk[..n]);
+                if raw.len() > bound {
+                    return Err("export response exceeds bound".into());
+                }
+                if let Some(code) = export_status(&raw) {
+                    if code >= 400 {
+                        return Err(format!("http={code}"));
+                    }
+                    if export_framed(&raw) && split_export_response(&raw).is_ok() {
+                        break;
+                    }
+                }
+            }
+            // A server that closes without close_notify: split_export_response checks the framing.
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(format!("TLS/receive: {e}")),
+        }
+    }
+    match export_status(&raw) {
+        Some(code) if code >= 400 => Err(format!("http={code}")),
+        Some(_) => Ok(std::mem::take(&mut *raw)),
+        None => Err("no complete HTTP head".into()),
+    }
+}
+
+/// The status once the whole head has arrived.
+fn export_status(raw: &[u8]) -> Option<u16> {
+    raw.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let line = raw.split(|b| *b == b'\r').next()?;
+    let line = std::str::from_utf8(line).ok()?;
+    let mut parts = line.splitn(3, ' ');
+    if parts.next()? != "HTTP/1.1" {
+        return None;
+    }
+    parts.next()?.parse().ok()
+}
+
+/// Whether the body is length- or chunk-delimited (else it runs to the close).
+fn export_framed(raw: &[u8]) -> bool {
+    let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else { return false };
+    let head = String::from_utf8_lossy(&raw[..end]).to_ascii_lowercase();
+    head.split("\r\n").skip(1).any(|l| l.starts_with("content-length:") || l.starts_with("transfer-encoding:"))
+}
+
+/// Head (through the blank line) and the body as delivered: chunked framing is decoded (the
+/// terminal chunk and its trailer section are required), a Content-Length must be met exactly,
+/// otherwise the body runs to the close. Head within 64 KiB, body within MAX_EXPORT.
+fn split_export_response(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+    let end = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("export response framing missing")?;
+    if end + 4 > 64 * 1024 {
+        return Err("export exceeds connector bounds".into());
+    }
+    let head = raw[..end + 4].to_vec();
+    let rest = &raw[end + 4..];
+    let text = std::str::from_utf8(&head).map_err(|_| "export headers are not text")?;
+    let field = |name: &str| {
+        text.split("\r\n").skip(1).filter_map(|l| l.split_once(':')).find(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_owned())
+    };
+    if let Some(coding) = field("transfer-encoding") {
+        // Accept-Encoding: identity was asked; chunked is the only transfer coding accepted.
+        if !coding.eq_ignore_ascii_case("chunked") {
+            return Err("export transfer coding is not chunked alone".into());
+        }
+        let mut body = Vec::new();
+        let mut at = 0usize;
+        loop {
+            let line_end = rest.get(at..).and_then(|r| r.windows(2).position(|w| w == b"\r\n")).ok_or("export chunk framing incomplete")? + at;
+            let size_text = std::str::from_utf8(&rest[at..line_end]).map_err(|_| "export chunk size is not text")?;
+            let size = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16).map_err(|_| "export chunk size is malformed")?;
+            at = line_end + 2;
+            if size == 0 {
+                // The trailer section: header lines up to an empty line.
+                let tail = rest.get(at..).ok_or("export chunk framing incomplete")?;
+                if tail.starts_with(b"\r\n") || tail.windows(4).any(|w| w == b"\r\n\r\n") {
+                    return Ok((head, body));
+                }
+                return Err("export chunk framing incomplete".into());
+            }
+            if size > MAX_EXPORT - body.len().min(MAX_EXPORT) {
+                return Err("export exceeds connector bounds".into());
+            }
+            let data_end = at.checked_add(size).ok_or("export chunk size overflows")?;
+            let crlf_end = data_end.checked_add(2).ok_or("export chunk size overflows")?;
+            if rest.len() < crlf_end || &rest[data_end..crlf_end] != b"\r\n" {
+                return Err("export chunk framing incomplete".into());
+            }
+            body.extend_from_slice(&rest[at..data_end]);
+            at = crlf_end;
+        }
+    }
+    if rest.len() > MAX_EXPORT {
+        return Err("export exceeds connector bounds".into());
+    }
+    if let Some(length) = field("content-length") {
+        let length: usize = length.parse().map_err(|_| "export Content-Length is malformed")?;
+        if rest.len() != length {
+            return Err("export body is shorter or longer than its Content-Length".into());
+        }
+    }
+    Ok((head, rest.to_vec()))
 }
 
 fn occupied_capture(
@@ -822,6 +950,87 @@ pub(crate) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ENTRANCE_CERT: &[u8] = include_bytes!("../../spk-host/tests/fixtures/browser-proxy-test.crt");
+    const ENTRANCE_KEY: &[u8] = include_bytes!("../../spk-host/tests/fixtures/browser-proxy-test.key");
+
+    /// A one-shot TLS server shaped like the browser entrance: TLS 1.3, X25519MLKEM768 only.
+    fn hybrid_only_entrance(reply: &'static [u8]) -> (u16, std::thread::JoinHandle<Vec<u8>>) {
+        use std::io::{Read, Write};
+        let certs: Vec<_> = rustls_pemfile::certs(&mut std::io::Cursor::new(ENTRANCE_CERT)).collect::<std::io::Result<_>>().unwrap();
+        let key = rustls_pemfile::private_key(&mut std::io::Cursor::new(ENTRANCE_KEY)).unwrap().unwrap();
+        let mut crypto = rustls::crypto::aws_lc_rs::default_provider();
+        crypto.kx_groups = vec![rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768];
+        let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(crypto))
+            .with_protocol_versions(&[&rustls::version::TLS13]).unwrap()
+            .with_no_client_auth().with_single_cert(certs, key).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (tcp, _) = listener.accept().unwrap();
+            let conn = rustls::ServerConnection::new(std::sync::Arc::new(config)).unwrap();
+            let mut tls = rustls::StreamOwned::new(conn, tcp);
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                tls.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            tls.write_all(reply).unwrap();
+            tls.conn.send_close_notify();
+            tls.flush().unwrap();
+            request
+        });
+        (port, server)
+    }
+
+    fn entrance_ca(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("mini-export-ca-{name}-{}.pem", std::process::id()));
+        fs::write(&path, ENTRANCE_CERT).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_export_speaks_the_hybrid_entrance_and_decodes_a_chunked_body() {
+        let (port, server) = hybrid_only_entrance(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nX-Mini-Export-Receipt: 00\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n");
+        let ca = entrance_ca("chunked");
+        let target = ExportTarget::parse(&format!("https://localhost:{port}/_/survey/csv")).unwrap();
+        let raw = export_exchange(&target, Some(ca.to_str().unwrap()), b"GET /_/survey/csv HTTP/1.1\r\nHost: localhost\r\nX-Mini-Export-Capture: c1\r\nConnection: close\r\n\r\n", Instant::now() + Duration::from_secs(20)).unwrap();
+        let (head, body) = split_export_response(&raw).unwrap();
+        assert!(head.starts_with(b"HTTP/1.1 200 ") && head.ends_with(b"\r\n\r\n"));
+        assert_eq!(body, b"abcde");
+        assert!(String::from_utf8(server.join().unwrap()).unwrap().contains("X-Mini-Export-Capture: c1\r\n"));
+        fs::remove_file(ca).unwrap();
+    }
+
+    #[test]
+    fn an_export_refused_by_status_names_it_and_a_short_body_is_incomplete() {
+        let (port, server) = hybrid_only_entrance(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+        let ca = entrance_ca("refused");
+        let target = ExportTarget::parse(&format!("https://localhost:{port}/x")).unwrap();
+        let refused = export_exchange(&target, Some(ca.to_str().unwrap()), b"GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n", Instant::now() + Duration::from_secs(20)).unwrap_err();
+        assert_eq!(refused, "http=403");
+        server.join().unwrap();
+        fs::remove_file(ca).unwrap();
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nabc").is_err());
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab").is_err());
+        assert_eq!(split_export_response(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc").unwrap().1, b"abc");
+        // A peer-chosen chunk size near usize::MAX is refused, never an overflow or a panic.
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nab\r\n0\r\n\r\n").is_err());
+        // The terminal chunk without its trailer section's blank line is incomplete.
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n").is_err());
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n").is_err());
+    }
+
+    #[test]
+    fn export_endpoints_are_https_and_localhost_names_are_loopback() {
+        assert!(ExportTarget::parse("http://app.example/").is_err());
+        assert!(ExportTarget::parse("https://user@app.example/").is_err());
+        let t = ExportTarget::parse("https://connector.jw22943.localhost:22943/_/jd3/csv").unwrap();
+        assert_eq!((t.host.as_str(), t.port, t.path.as_str()), ("connector.jw22943.localhost", 22943, "/_/jd3/csv"));
+        assert_eq!(t.addresses().unwrap(), vec![std::net::SocketAddr::from(([127, 0, 0, 1], 22943))]);
+        assert_eq!(ExportTarget::parse("https://app.example/").unwrap().port, 443);
+    }
     fn binding() -> Value {
         json!({"type":"mini-app-document-binding-v1","subject":"8","appReference":"sheet","packageReference":"package","packageManifest":"11","sessionKind":"api","credentialKind":"bearer","app":"7","generation":"3","session":"9","sessionGeneration":"2","ticket":"10","document":"paper","documentCapability":"11","taskReference":"job","task":"12","sheet":"survey","endpoint":"https://app.example/","apiPath":"/_/","token":"a".repeat(32),"ca":null})
     }
