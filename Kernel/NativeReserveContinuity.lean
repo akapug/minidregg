@@ -163,7 +163,7 @@ structure Continuity {config : Config} (session : NativeHostSession.Walked confi
     (anchor : NativeHostCodec.Receipt) (reserveCall : List UInt8)
     (providerCell : CellId) : Type where
   positive : 0 < anchor.acceptedCount
-  receiptExact : session.verified.receipts[anchor.acceptedCount - 1]? = some anchor
+  receiptExact : session.verified.receiptAt (anchor.acceptedCount - 1) = some anchor
   ingress : List UInt8
   reserveParsed : reserveIngress? config reserveCall = some ingress
   callExact :
@@ -195,7 +195,7 @@ def check {config : Config} (session : NativeHostSession.Walked config)
     (providerCell : CellId) : Except String (Continuity session anchor reserveCall providerCell) := do
   if positive : 0 < anchor.acceptedCount then
     if receiptExact :
-        session.verified.receipts[anchor.acceptedCount - 1]? = some anchor then
+        session.verified.receiptAt (anchor.acceptedCount - 1) = some anchor then
       match parsed : reserveIngress? config reserveCall with
       | none => .error "reserve call is not a canonical signed invocation"
       | some ingress =>
