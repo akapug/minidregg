@@ -310,7 +310,7 @@ pub(crate) const FEATURED: &[&str] = &[
     "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
     "reh7pa3e7jt8ryvjgje97ke5rkyztfg70grru8dewevmunj6ugn0",
     "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",
-    "uws252ya9mep4t77tevn85333xzsgrpgth8q4y1rhknn1hammw70",
+    "cd6fk64x5ndeem7ya2t3qfjkjsjjhts5y2eg54jpdy0g0whtwx40",
 ];
 
 pub(crate) fn featured(app_id: &str) -> Option<usize> {
