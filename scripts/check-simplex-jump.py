@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import tarfile
+import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "Kernel/GenericSimplex.lean"
@@ -100,10 +101,35 @@ def run(argv):
                           stderr=subprocess.STDOUT)
 
 
+def split_control():
+    """Compile the exact pinned decomposition in isolation from downstream proofs.
+
+    Copy declarations from the artifact, not a second hand-written proof. This
+    lets a compiled missing/wrong-jump mutant reach the named assertion even if
+    downstream history or witness modules would fail first.
+    """
+    source = (ROOT / "Kernel/GenericSimplexJumpSafety.lean").read_text()
+    start = source.index("def ordinaryOuter (")
+    end = source.index("\ntheorem ordinaryOuter_origin (", start)
+    control = ("import Kernel.GenericSimplex\nimport Theory.AssertAxioms\n"
+               "namespace Minidregg.Kernel.GenericSimplexJumpSafety\n"
+               "open Minidregg.Kernel.GenericSimplex\n" + source[start:end] +
+               "\n#assert_axioms progressOuter_split\n"
+               "end Minidregg.Kernel.GenericSimplexJumpSafety\n")
+    with tempfile.TemporaryDirectory(prefix="jump-split-", dir=os.environ["FAB_JOB_SCRATCH"]) as scratch:
+        path = Path(scratch) / "SplitControl.lean"
+        path.write_text(control)
+        return run(["lake", "env", "lean", str(path)])
+
+
 def mutate(_args):
     if not os.environ.get("FAB_ID"):
         raise ValueError("source mutation checks run only inside a Fabric job snapshot")
     original = SOURCE.read_text()
+    baseline = split_control()
+    if baseline.returncode:
+        raise ValueError("pinned split baseline failed\n" + baseline.stdout)
+    print(json.dumps({"check": "pinned-split-baseline", "lean_exit": 0}), flush=True)
     jump = "s := enterView c s (preparedAbove s + 1)"
     mutations = [
         ("max-to-min", "then max acc n else acc", "then min acc n else acc", "selection_control"),
@@ -128,6 +154,14 @@ def mutate(_args):
             # The pins name the failed theorem; unrelated compiler failures do not count.
             if checked.returncode == 0 or expected not in checked.stdout or "sorryAx" not in checked.stdout:
                 raise ValueError(f"{name}: intended control did not reject mutant\n{checked.stdout}")
+            if name in {"ordinary-only", "jump-to-j"}:
+                pinned = split_control()
+                assertion = "progressOuter_split depends on axioms outside the standard three: [sorryAx]"
+                if pinned.returncode == 0 or assertion not in pinned.stdout:
+                    raise ValueError(f"{name}: pinned split did not reject mutant\n{pinned.stdout}")
+                print(json.dumps({"mutation": name, "executable_compiled": True,
+                                  "control": "progressOuter_split", "lean_exit": pinned.returncode,
+                                  "rejected": True}, sort_keys=True), flush=True)
             print(json.dumps({"mutation": name, "executable_compiled": True,
                               "control": expected, "lean_exit": checked.returncode,
                               "rejected": True}, sort_keys=True), flush=True)
@@ -139,8 +173,12 @@ def mutate(_args):
     checked = run(["lake", "env", "lean", CONTROLS])
     if checked.returncode:
         raise ValueError("restored controls failed\n" + checked.stdout)
+    restored_split = split_control()
+    if restored_split.returncode:
+        raise ValueError("restored pinned split failed\n" + restored_split.stdout)
     print(json.dumps({"check": "restored-controls", "lean_exit": 0,
-                      "mutations_rejected": len(mutations)}, sort_keys=True), flush=True)
+                      "mutations_rejected": len(mutations), "pinned_split_mutants_rejected": 2},
+                     sort_keys=True), flush=True)
 
 
 def claims(_args):
@@ -148,9 +186,10 @@ def claims(_args):
     if checked.returncode:
         raise ValueError("qualification emitter failed\n" + checked.stdout)
     required = {"preparedAbove_spec", "enterView_safety", "enterView_other", "enterView_clock",
+                "progressOuter_split", "ordinaryOuter_origin",
                 "progressOuter_entry", "prepared_entry_safe", "progressOuter_jump_safety",
                 "reachable_step_safety", "jumpSchedule_admitted", "jumpBefore_reachable",
-                "jumpInput_allowed", "jump_nonvacuous", "nf_sizes_outside_legacy"}
+                "jumpInput_allowed", "jump_nonvacuous", "jump_guard_inhabited", "nf_sizes_outside_legacy"}
     seen = set()
     for line in checked.stdout.splitlines():
         if "QUALIFICATION_CLAIM " not in line:

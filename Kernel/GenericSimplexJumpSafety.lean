@@ -159,29 +159,64 @@ theorem enterView_clock (c : Config) (s : State) (target : Nat) :
   · exact propose_clock _
   · exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-/-- This is a decomposition of the executable definition, not a second outer
-transition. `before` is the actual state after the ordinary outer rules and
-immediately before the prepared-jump branch. -/
+/-- The ordinary outer rules of `progressOuter`, copied verbatim up to (and
+excluding) the prepared-jump branch. `progressOuter_split` binds this copy to
+the executable definition, so an edit to either side fails the build. -/
+def ordinaryOuter (c : Config) (s : State) : State := Id.run do
+  let mut s := s
+  let v := viewAt s s.current
+  if c.leader s.current == s.self && v.proposal.isNone && !v.disableRequested then
+    s := propose s
+  let v := viewAt s s.current
+  if !v.voted && !v.disableRequested then
+    if let some block := v.proposal then
+      if validBlock s block && isSafe s block then s := castVote s s.current block
+  let v := viewAt s s.current
+  if !v.prepared.isEmpty || v.disabled then
+    if !v.voted && !v.disableRequested then
+      if let some block := v.prepared.head? then s := castVote s s.current block
+    s := enterView c s (s.current + 1)
+  return s
+
+/-- The prepared-jump branch alone, applied to the post-ordinary state. -/
+def jumpStep (c : Config) (before : State) : State :=
+  if before.current < preparedAbove before then
+    enterView c before (preparedAbove before + 1) else before
+
+set_option maxHeartbeats 1000000 in
+/-- `progressOuter` IS the ordinary prefix followed by the jump branch. -/
+theorem progressOuter_split (c : Config) (s : State) :
+    progressOuter c s = jumpStep c (ordinaryOuter c s) := by
+  -- Split only the executable side; each branch's own hypotheses then
+  -- evaluate the (still folded) prefix copy to the same leaf.
+  simp only [progressOuter, Id.run, bind, pure]
+  repeat' split
+  all_goals simp [ordinaryOuter, jumpStep, Id.run, bind, pure, *]
+
+theorem ordinaryOuter_origin (c : Config) (s : State)
+    (old : GenericSimplexVoteOrigin.OriginInvariant s) :
+    GenericSimplexVoteOrigin.OriginInvariant (ordinaryOuter c s) := by
+  simp only [ordinaryOuter, Id.run, bind, pure]
+  repeat' first
+    | with_reducible apply GenericSimplexVoteOrigin.enterView_origin
+    | with_reducible apply GenericSimplexVoteOrigin.propose_origin
+    | (with_reducible apply GenericSimplexVoteOrigin.castVote_safe_origin
+       rotate_left
+       solve | simp_all)
+    | (with_reducible apply GenericSimplexVoteOrigin.castVote_prepared_origin
+       rotate_left
+       solve | apply List.mem_of_head?; assumption)
+    | assumption
+    | split
+
+/-- The decomposition is PINNED: `before` is the actual post-ordinary state
+`ordinaryOuter c s`, not an existential (an unpinned `∃ before` is satisfied by
+`before := progressOuter c s`, whose jump guard is always false). -/
 theorem progressOuter_entry (c : Config) (s : State)
     (old : GenericSimplexVoteOrigin.OriginInvariant s) :
-    ∃ before, GenericSimplexVoteOrigin.OriginInvariant before ∧
-      progressOuter c s =
-        if before.current < preparedAbove before then
-          enterView c before (preparedAbove before + 1) else before := by
-  simp only [progressOuter, Id.run, bind, pure]
-  repeat' first
-    | (refine ⟨_, ?_, rfl⟩
-       repeat' first
-         | with_reducible apply GenericSimplexVoteOrigin.enterView_origin
-         | with_reducible apply GenericSimplexVoteOrigin.propose_origin
-         | (with_reducible apply GenericSimplexVoteOrigin.castVote_safe_origin
-            rotate_left
-            solve | simp_all)
-         | (with_reducible apply GenericSimplexVoteOrigin.castVote_prepared_origin
-            rotate_left
-            solve | apply List.mem_of_head?; assumption)
-         | assumption)
-    | split
+    GenericSimplexVoteOrigin.OriginInvariant (ordinaryOuter c s) ∧
+      progressOuter c s = jumpStep c (ordinaryOuter c s) :=
+  ⟨ordinaryOuter_origin c s old, progressOuter_split c s⟩
 
 /-- Statement-first contract for the internal prepared entry. The frame is
 field-level, not full-state equality: a real leader may emit a proposal. -/
@@ -217,16 +252,11 @@ theorem prepared_entry_safe (c : Config) (s : State)
 /-- The internal theorem is wired to `progressOuter` itself, including the
 ordinary propose/vote/advance rules BEFORE the maximum-prepared lookup. -/
 theorem progressOuter_jump_safety (c : Config) (s : State)
-    (old : GenericSimplexVoteOrigin.OriginInvariant s) :
-    ∃ before, GenericSimplexVoteOrigin.OriginInvariant before ∧
-      progressOuter c s = (if before.current < preparedAbove before then
-        enterView c before (preparedAbove before + 1) else before) ∧
-      (before.current < preparedAbove before → PreparedEntrySafety c before (progressOuter c s)) := by
-  obtain ⟨before, origin, actual⟩ := progressOuter_entry c s old
-  refine ⟨before, origin, actual, ?_⟩
-  intro jump
-  rw [actual, if_pos jump]
-  exact prepared_entry_safe c before origin jump
+    (old : GenericSimplexVoteOrigin.OriginInvariant s)
+    (jump : (ordinaryOuter c s).current < preparedAbove (ordinaryOuter c s)) :
+    PreparedEntrySafety c (ordinaryOuter c s) (progressOuter c s) := by
+  rw [progressOuter_split, jumpStep, if_pos jump]
+  exact prepared_entry_safe c _ (ordinaryOuter_origin c s old) jump
 
 /-- Public reachability is post-pump. Quantifying a future prepared target at
 that boundary can be vacuous because the pump already consumed the jump.
@@ -316,6 +346,41 @@ theorem jump_nonvacuous :
     [[1], [2]] ∈ (viewAt (jumpAfter.localState 0) 2).prepared := by
   decide +kernel
 
+/-- The first real pump pass after the admitted final delivery: ingestion,
+clearing the pump flag, then the executable per-view fold, BEFORE progressOuter.
+This exposes the internal boundary rather than a post-pump public snapshot. -/
+def jumpPending : State :=
+  let s := {ingest poleConfig (jumpBefore.localState 0) ⟨3, 2, .vote, some [[1], [2]]⟩
+    with needsPoll := false}
+  (s.views.map View.number).eraseDups.foldl
+    (fun state number => progressView poleConfig state number) s
+
+/-- Both premises of the pinned general theorem are inhabited at the actual
+first pass of the authenticated 1 -> 3 witness, not chosen from its outcome. -/
+theorem jump_guard_inhabited :
+    GenericSimplexVoteOrigin.OriginInvariant jumpPending ∧
+    (ordinaryOuter poleConfig jumpPending).current = 1 ∧
+    preparedAbove (ordinaryOuter poleConfig jumpPending) = 2 ∧
+    (ordinaryOuter poleConfig jumpPending).current <
+      preparedAbove (ordinaryOuter poleConfig jumpPending) ∧
+    PreparedEntrySafety poleConfig (ordinaryOuter poleConfig jumpPending)
+      (progressOuter poleConfig jumpPending) := by
+  have origin : GenericSimplexVoteOrigin.OriginInvariant jumpPending := by
+    unfold jumpPending
+    apply GenericSimplexVoteOrigin.origin_fold
+    · intro state number old
+      exact GenericSimplexVoteOrigin.progressView_origin poleConfig state number old
+    · simpa only [GenericSimplexVoteOrigin.origin_record] using
+        GenericSimplexVoteOrigin.ingest_origin poleConfig (jumpBefore.localState 0)
+          ⟨3, 2, .vote, some [[1], [2]]⟩
+          (GenericSimplexGlobalVoteOrigin.reachable_origin jumpBefore_reachable 0)
+  have boundary : (ordinaryOuter poleConfig jumpPending).current = 1 ∧
+      preparedAbove (ordinaryOuter poleConfig jumpPending) = 2 := by decide +kernel
+  have guard : (ordinaryOuter poleConfig jumpPending).current <
+      preparedAbove (ordinaryOuter poleConfig jumpPending) := by omega
+  exact ⟨origin, boundary.1, boundary.2, guard,
+    progressOuter_jump_safety poleConfig jumpPending origin guard⟩
+
 /-- These non-3f+1 committee sizes are OUTSIDE the proved reachable safety
 chain, even though their n-f/2f+1 arithmetic is meaningful. -/
 theorem nf_sizes_outside_legacy (c : Config)
@@ -328,6 +393,8 @@ theorem nf_sizes_outside_legacy (c : Config)
 #assert_axioms enterView_safety
 #assert_axioms enterView_other
 #assert_axioms enterView_clock
+#assert_axioms progressOuter_split
+#assert_axioms ordinaryOuter_origin
 #assert_axioms progressOuter_entry
 #assert_axioms prepared_entry_safe
 #assert_axioms progressOuter_jump_safety
@@ -337,4 +404,5 @@ theorem nf_sizes_outside_legacy (c : Config)
 #assert_axioms jumpBefore_reachable
 #assert_axioms jumpInput_allowed
 #assert_axioms jump_nonvacuous
+#assert_axioms jump_guard_inhabited
 end Minidregg.Kernel.GenericSimplexJumpSafety

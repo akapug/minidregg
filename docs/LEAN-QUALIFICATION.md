@@ -29,8 +29,14 @@ environment. The emitter labels compiler trust and does not infer premise
 inhabitation or hostile witnesses from a name, an axiom scan, or a case count.
 
 `Kernel.GenericSimplexJumpSafety` proves maximum-prepared selection and the actual
-`enterView` frame/clock contract, and decomposes `progressOuter` at its internal
-jump boundary (after ordinary advancement). Its `reachable_step_safety` derives
+`enterView` frame/clock contract. `progressOuter_split` pins its internal jump
+boundary to `ordinaryOuter c s`, the executable ordinary prefix, and proves
+`progressOuter c s = jumpStep c (ordinaryOuter c s)`. The jump-safety guard is
+evaluated on that pinned pre-jump state, never an existentially chosen outcome.
+`jump_guard_inhabited` derives origin from the reachable admitted schedule and
+checks that the actual first delivery-pass prefix has current view 1 and maximum
+prepared view 2, then applies the general jump-safety theorem at that boundary.
+Its `reachable_step_safety` derives
 history/vote provenance and commit/delivery prefix compatibility from the actual
 `Reachable.next` transition. It does not assume `AuditRefinement`. The admitted
 `jumpSchedule` and `jump_nonvacuous` witness an honest laggard moving from view 1
@@ -52,8 +58,12 @@ scripts/check-simplex-jump.py claims` to verify the nonempty elaborated theorem
 statements and standard-only axiom footprints. `python3 -I
 scripts/check-simplex-jump.py mutate` compiles nine executable mutants, requires
 the named field-level control to fail with its axiom pin, restores the source,
-and checks the restored controls. Removing the jump is the must-fail-before
-control; min-selection, unprepared hints, wrong successor/deadline, invented
+and checks the restored controls. Missing-jump and jump-to-j mutants must also
+fail `progressOuter_split` itself: the checker compiles the artifact's exact
+prefix/jump/split declarations in isolation, with a passing baseline and restored
+control, so no downstream proof failure can masquerade as this regression check.
+Removing the jump is the must-fail-before control; min-selection, unprepared
+hints, wrong successor/deadline, invented
 disables, lost locks, duplicate votes and a reduced READY threshold are separate
 mutants. These commands are not to be run on the development hub.
 
