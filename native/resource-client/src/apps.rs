@@ -306,7 +306,7 @@ pub(crate) const FEATURED: &[&str] = &[
     "1124qk4mm5zvx294gwn9w23gn2pt96mds6pqkxpn9sxr8w2uwr70",
     "xm16d84ksseg44ef58z7n2aw7qt1n6psk0cewzr0e0arfjk5r4fh",
     "7xx4myv7aafdqtm4rh4fj3ju1eck9dfqnnjca3y6513gradphzv0",
-    "wfg1r0qra2ewyvns05r0rddqttt57qxurz3nz5z95rjnm63et7e0",
+    "cvs53nmnfn463htz3yyyr8zunufczacrdg31n14j61n7g4dpeadh",
     "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
     "reh7pa3e7jt8ryvjgje97ke5rkyztfg70grru8dewevmunj6ugn0",
     "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",

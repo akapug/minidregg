@@ -1,0 +1,252 @@
+{
+  "format": "mini-app-interface-v1",
+  "name": "firefly-iii",
+  "interfaceVersion": 1,
+  "appId": "cd6fk64x5ndeem7ya2t3qfjkjsjjhts5y2eg54jpdy0g0whtwx40",
+  "packageId": "e8736ff85465f96f0be83970708bdac8",
+  "appVersion": "6.7.9-1",
+  "status": "prototype-unqualified",
+  "limits": {
+    "bodyBytes": 16384,
+    "replyBytes": 1048576,
+    "snapshotDocuments": 1000,
+    "seconds": 120
+  },
+  "$defs": {},
+  "operations": {
+    "system.about": {
+      "description": "Read the Firefly III version for this member's account.",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "maxLength": 64
+              }
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/about"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "headers": {
+          "accept": "application/json"
+        }
+      }
+    },
+    "account.create": {
+      "description": "Create an asset account with an opening balance.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "attributes": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  "type": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "write": true,
+      "binding": {
+        "protocol": "http",
+        "method": "POST",
+        "path": [
+          "api/v1/accounts"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "headers": {
+          "accept": "application/json"
+        },
+        "json": {
+          "name": {
+            "arg": "name"
+          },
+          "type": "asset",
+          "account_role": "defaultAsset",
+          "currency_code": "USD",
+          "opening_balance": "10.00",
+          "opening_balance_date": "2026-01-01"
+        }
+      }
+    },
+    "account.list": {
+      "description": "List this member's accounts, one page at a time.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "attributes": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 1024
+                    },
+                    "type": {
+                      "type": "string",
+                      "maxLength": 64
+                    }
+                  }
+                }
+              },
+              "required": [
+                "id"
+              ]
+            }
+          }
+        },
+        "required": [
+          "data"
+        ]
+      },
+      "write": false,
+      "binding": {
+        "protocol": "http",
+        "method": "GET",
+        "path": [
+          "api/v1/accounts"
+        ],
+        "decode": "json",
+        "status": [
+          200
+        ],
+        "headers": {
+          "accept": "application/json"
+        },
+        "query": {
+          "page": {
+            "arg": "page"
+          }
+        }
+      }
+    }
+  },
+  "qualification": [
+    {
+      "id": "about",
+      "op": "system.about",
+      "args": {}
+    },
+    {
+      "id": "create",
+      "op": "account.create",
+      "args": {
+        "name": {
+          "context": "runId"
+        }
+      }
+    },
+    {
+      "id": "read",
+      "op": "account.list",
+      "args": {
+        "page": 1
+      },
+      "assert": [
+        {
+          "path": [
+            "data",
+            0,
+            "attributes",
+            "name"
+          ],
+          "equals": {
+            "context": "runId"
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "kind": "member-route",
+    "preflight": "system.about",
+    "refusal": "app-auth-required"
+  },
+  "sources": [
+    "https://github.com/firefly-iii/firefly-iii/releases/tag/v6.7.9",
+    "https://api-docs.firefly-iii.org/",
+    "package:e8736ff85465f96f0be83970708bdac8/opt/app/firefly/config/auth.php"
+  ]
+}
