@@ -157,6 +157,17 @@ for role in factory parent tool; do
   key=task; [[ $role != factory ]] || key=target
   authority=$(jq --arg role "$role" --arg key "$key" --slurpfile r "$ref" '.[$role] = {($key): $r[0].target, ownerCapability: $r[0].observeCapability, managementCapability: $r[0].operationCapability}' <<<"$authority")
 done
+# The factory capability a birth cites is the signer's own: the creator is the MANAGEMENT subject, and genesis enrolled
+# each subject with its own factory capability (factoryObserveCapabilityId). The sponsor's refs/factory.json names the
+# sponsor's, which in a distinct-management world (sponsor owns, tool manages) is not the creator's: the birth then
+# fails "no-grant ... (phase prepare)". Only managementCapability changes: the owner's births (the resident's) keep
+# the owner's own ownerCapability.
+sponsor_subject=$(jq -r .subject "$sponsor_ws/workspace.json")
+if [[ $management_subject != "$sponsor_subject" ]]; then
+  mgmt_factory=$(jq -r --arg ms "$management_subject" '[.enrollments[] | select((.key.subject | tostring) == $ms) | .factoryObserveCapabilityId][0] // empty' "$genesis")
+  [[ -n $mgmt_factory ]] || refuse "managementFactoryCapabilityRequired: genesis enrolls management subject $management_subject without a factory capability"
+  authority=$(jq --arg c "$mgmt_factory" '.factory.managementCapability = $c' <<<"$authority")
+fi
 # The owner custody: the world's operator owner when its inventory names one apart from management
 # (jworld-scratch JWORLD_MANAGEMENT=distinct: sponsor 7 owns, tool 8 manages); else the one operator
 # principal is both.

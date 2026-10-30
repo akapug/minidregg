@@ -282,6 +282,35 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(result["nextTool"]["arguments"]["application"], "oracle-bootstrap-app")
         self.assertEqual(M.read(self.contract["paths"]["controllerConfig"])["toolTask"]["registeredSharedApplications"], [{"name": "other-app"}])
 
+    def test_typed_attachment_keeps_selected_names_and_session_kind(self):
+        declaration=M.read(ROOT/'apps/interfaces/davros.json')
+        self.contract['names']={'application':'dav-app','family':'dav-session','route':'dav-agent-v1',
+                                'display':'Davros','handle':'dav-agent','serviceProtocol':None}
+        self.contract['typed']={'alias':'dav','declarationSource':str(ROOT/'apps/interfaces/davros.json'),
+                                'declarationSha256':M.hashlib.sha256(json.dumps(declaration,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+                                'packageId':declaration['packageId']}
+        self.contract['route']={'kind':'web','origin':'https://dav.example'}
+        self.rewrite(self.path,self.contract)
+        op=M.Attachment(self.path,'prepare-config')
+        def delegate(label,*args):
+            directory=op.calls/(label+'-attempt');directory.mkdir(mode=0o700)
+            M.write(directory/'outcome.json',self.confirmed)
+            return M.receipt(self.confirmed)
+        op.delegate_observe=delegate
+        result=M.read(op.prepare_config());config=M.read(op.controller_stage)
+        self.assertEqual(op.typed,self.contract['typed'])
+        self.assertEqual(config['toolTask']['allowedSessionFamilies'][0]['kind'],'web')
+        self.assertEqual(result['nextTool']['arguments']['application'],'dav-bootstrap-app')
+        self.assertIsNone(op.names['serviceProtocol'])
+
+    def test_typed_and_web_route_options_refuse_unknown_fields(self):
+        for key,value in [('typed',{'alias':'dav'}),('route',{'kind':'web','origin':'http://dav.example'}),
+                          ('route',{'kind':'api','origin':'https://dav.example'})]:
+            self.contract[key]=value;self.rewrite(self.path,self.contract)
+            with self.subTest(option=value),self.assertRaises(ValueError):
+                M.Attachment(self.path,'prepare-config')
+            del self.contract[key]
+
     def test_bootstrap_reference_keeps_native_application_suffix_and_bound(self):
         self.contract["names"] = {"application": "weather-app"}
         self.rewrite(self.path, self.contract)
@@ -352,6 +381,7 @@ class AttachmentTests(unittest.TestCase):
                 op.validate_layout(layout, config)
 
     def test_explicit_issuer_and_source_generation_drive_ticket(self):
+        self.contract['roleId']='1';self.rewrite(self.path,self.contract)
         op = M.Attachment(self.path, "issue-grant")
         source = self.file("session-result.json", {"type": "tool-complete", "isError": False, "result": {"isError": False,
             "text": json.dumps({"type": "confirmed-mini-application-birth-v1", "route": "session",
@@ -375,11 +405,23 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(request["payer"], "314")
         self.assertEqual(request["tool"], self.contract["issuer"]["tool"])
         self.assertEqual(request["parent"], self.contract["issuer"]["parent"])
+        self.assertEqual(request['spec']['ticket']['ceiling'],{
+            'basis':{'type':'role','id':'1'},'added':[],'removed':[],
+            'roleSchemaRoot':'41','roleVersion':'3'})
         participant = request["spec"]["ticket"]["participant"]
         self.assertEqual(participant["origin"]["generation"], "93")
         self.assertEqual(participant["origin"]["task"], self.a["controller"]["task"])
         self.assertEqual(participant["subject"], self.a["controller"]["subject"])
         self.assertFalse((op.calls / "grant-issue").exists())
+
+    def test_role_selection_defaults_to_zero_and_rejects_ambiguous_input(self):
+        for value in (1,'01','-1','allAccess','9'*79):
+            self.contract['roleId']=value;self.rewrite(self.path,self.contract)
+            with self.subTest(role=value),self.assertRaisesRegex(ValueError,'roleId'):
+                M.Attachment(self.path,'prepare-config')
+        del self.contract['roleId'];self.rewrite(self.path,self.contract)
+        op=M.Attachment(self.path,'prepare-config')
+        self.assertEqual(op.role_id,'0')
 
     def test_source_signer_epoch_is_selected_not_hardcoded(self):
         op = M.Attachment(self.path, "issue-grant")

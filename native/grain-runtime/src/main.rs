@@ -15726,6 +15726,7 @@ impl Runtime {
                                 Err(error) => {
                                     // Nothing was sent: a typed worker reads this spelling as a clean refusal.
                                     let error = if typed_applications::is_raw_tool(&request.name) && !error.starts_with("refused: ") {
+                                        eprintln!("typed application dispatch did not begin: {error}");
                                         format!("refused: typed-dispatch-not-begun: {error}")
                                     } else { error };
                                     let _ =

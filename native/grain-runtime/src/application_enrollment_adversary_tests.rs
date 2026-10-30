@@ -94,6 +94,38 @@ fn only_host_unit_may_change_on_existing_route() {
     // This pure selector check is not the required live native hello check.
 }
 
+fn typed_enrolled(old: &Config) -> Config {
+    let mut value = serde_json::to_value(enrolled(old)).unwrap();
+    value["toolTask"]["applicationServices"] = json!([]);
+    value["toolTask"]["typedApplications"] = json!([{
+        "alias":"dav", "declarationPath":"/fixture/dav.declaration.json",
+        "declarationSha256":"ab".repeat(32), "packageId":"package",
+        "routeName":"shared-app"
+    }]);
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn typed_attachment_addition_requires_exact_new_route_and_preserves_old_bindings() {
+    let old = old_config(); let new = typed_enrolled(&old);
+    let journal = Journal::fresh(json!({}));
+    assert!(serde_json::to_value(&old).unwrap()["toolTask"].get("typedApplications").is_none());
+    assert!(permitted(&old, &new, &journal, "application").is_ok());
+    let mut wrong = serde_json::to_value(&new).unwrap();
+    wrong["toolTask"]["typedApplications"][0]["routeName"] = json!("other-app");
+    assert!(permitted(&old, &serde_json::from_value(wrong).unwrap(), &journal, "application").is_err());
+    let mut refreshed = serde_json::to_value(&new).unwrap();
+    refreshed["toolTask"]["allowedApplicationLifetimeRoutes"][0]["hostUnit"] = json!("new.service");
+    assert!(permitted(&new, &serde_json::from_value(refreshed.clone()).unwrap(), &journal, "application").is_ok());
+    for field in ["alias", "declarationPath", "declarationSha256", "packageId", "routeName"] {
+        let mut changed = refreshed.clone();
+        changed["toolTask"]["typedApplications"][0][field] = json!("changed");
+        assert!(permitted(&new, &serde_json::from_value(changed).unwrap(), &journal, "application").is_err(), "{field}");
+    }
+    refreshed["toolTask"]["typedApplications"] = json!([]);
+    assert!(permitted(&new, &serde_json::from_value(refreshed).unwrap(), &journal, "application").is_err());
+}
+
 #[test]
 fn prompt_or_unresolved_history_cannot_be_declared_quiescent() {
     let mut journal = Journal::fresh(json!({}));

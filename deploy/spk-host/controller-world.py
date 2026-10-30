@@ -456,6 +456,19 @@ def consent_environment(r, base, pins):
 
 
 
+def consent_dependencies(config_bytes, operator):
+    """Snapshot the two configured executables; expose only those files through ProtectHome."""
+    config = strict_json(config_bytes)
+    result = {}
+    for role in ('signatureBinary', 'storageBinary'):
+        path = canonical(config.get(role))
+        owner = metadata(path).st_uid
+        require(owner in (0, operator), 'consent dependency owner refused')
+        data = read_file(path, owner, 256 * 1024 * 1024, executable=True)
+        result[role] = {'path': str(path), 'sha256': sha(data)}
+    return result
+
+
 def consent_storage(config_bytes, operator):
     config = strict_json(config_bytes)
     root = canonical(config.get('storageRoot'))
@@ -668,7 +681,7 @@ def no_processes(uid):
     require(not live, f'controller still has processes; preserve resources: {live}')
 
 
-def unit_bytes(r, base, upstream, consent=None):
+def unit_bytes(r, base, upstream, consent=None, public=None):
     home = Path(r['home'])
     stem = 'mini-spk-controller-proxy-' + r['store']
     common = ('\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectSystem=strict\nProtectHome=yes\n'
@@ -681,6 +694,11 @@ def unit_bytes(r, base, upstream, consent=None):
     if r.get('workerTask'):
         runtime = worker_runtime_access(runtime.encode(), r).decode()
         runtime += ''.join(f'Environment={key}={value}\n' for key, value in worker_environment(base, r).items())
+    if public is not None:
+        # The controller may connect to its public relay and provider broker.
+        # Bind their private socket directory, preserving each endpoint's UID/ACL.
+        runtime = runtime.replace('ProtectHome=yes\n', 'ProtectHome=tmpfs\n')
+        runtime += f'BindReadOnlyPaths={public.parent}\n'
     sock = (f'[Unit]\nDescription=Mini controller operator activation {r["store"]}\n[Socket]\n'
             f'ListenStream={home}/operator/mini.sock\n' +
             (f'ListenStream={home}/operator/mini.control\n' if r.get('workerTask') else '') +
@@ -689,7 +707,8 @@ def unit_bytes(r, base, upstream, consent=None):
     proxy = (f'[Unit]\nDescription=Mini fixed operator proxy {r["store"]}\nRequires={stem}.socket\n'
              f'[Service]\nUser={r["operatorUid"]}\nGroup={r["operatorGid"]}\n'
              f'ExecStart={base}/bin/mini serve-agent-operator-proxy --socket {home}/operator/mini.sock '
-             f'--upstream {upstream} --config {base}/proxy/config.json --controller-uid {r["uid"]}\n' + common)
+             f'--upstream {upstream} --config {base}/proxy/config.json --controller-uid {r["uid"]}\n'
+             f'BindReadOnlyPaths={upstream.parent}\n' + common.replace('ProtectHome=yes\n', 'ProtectHome=tmpfs\n'))
     values = [runtime, sock, proxy]
     if has_consent(r):
         require(consent is not None, 'consent service pins missing')
@@ -698,6 +717,10 @@ def unit_bytes(r, base, upstream, consent=None):
         runtime += ''.join(f'Environment={key}={value}\n' for key, value in environment.items())
         values[0] = runtime
         consent_stem = 'mini-spk-controller-consent-' + r['store']
+        # An empty home tmpfs permits explicit bind exceptions. ProtectHome=yes
+        # mounts inaccessible ancestors: ReadWritePaths cannot unhide the Store,
+        # and a verifier can be read through a file bind while exec still fails.
+        consent_common = common.replace('ProtectHome=yes\n', 'ProtectHome=tmpfs\n')
         values.append(f'[Unit]\nDescription=Mini controller consent activation {r["store"]}\n[Socket]\n'
                       f'ListenStream={home}/consent/peer.sock\nSocketUser={r["uid"]}\nSocketGroup={r["gid"]}\n'
                       f'SocketMode=0600\nDirectoryMode=0700\nRemoveOnStop=yes\nAccept=no\nService={consent_stem}.service\n')
@@ -708,7 +731,10 @@ def unit_bytes(r, base, upstream, consent=None):
                       f'--consent-sha256 {consent["providerSha256"]} --config-sha256 {consent["configSha256"]} '
                       f'--controller-uid {r["uid"]} --anchors {base}/consent/anchors\n'
                       f'Environment=HOME={base}/consent\nReadWritePaths={base}/consent/anchors'
-                      f' {consent["storage"]["writableParent"]}\n' + common)
+                      f' {consent["storage"]["writableParent"]}\n'
+                      f'BindPaths={consent["storage"]["writableParent"]}\n' +
+                      ''.join(f'BindReadOnlyPaths={base}/consent-dependencies/{role}:{pin["path"]}\n'
+                              for role, pin in consent.get('dependencies', {}).items()) + consent_common)
     require(len(values) == len(r['units']), 'controller service layout differs')
     return dict(zip(r['units'], (value.encode() for value in values)))
 
@@ -1183,8 +1209,9 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
     ancestry(public.parent, {0, op}); pm = metadata(public, op)
     require(stat.S_ISSOCK(pm.st_mode), 'public endpoint is not a socket')
     consent = {'providerSha256': sha(binaries[CONSENT_BIN]), 'configSha256': sha(data['host-config.json']),
-               'storage': consent_storage(data['host-config.json'], op)} if has_consent(r) else None
-    units = unit_bytes(r, base, upstream, consent)
+               'storage': consent_storage(data['host-config.json'], op),
+               'dependencies': consent_dependencies(data['host-config.json'], op)} if has_consent(r) else None
+    units = unit_bytes(r, base, upstream, consent, public)
     require(all(not (UNITS / n).exists() and not (UNITS / n).is_symlink() for n in units), 'controller unit already exists')
     require(all(manager_properties(n).get('LoadState') == 'not-found' for n in units),
             'controller unit name already loaded; replacement refused')
@@ -1218,6 +1245,12 @@ def stage(store, helper, bundle_arg, bins_arg, upstream_arg, public_arg, worker=
         make(base / 'consent', op, registry['operatorGid'])
         make(base / 'consent/anchors', op, registry['operatorGid'])
         put(base / 'consent/config.json', data['host-config.json'], op, registry['operatorGid'])
+        make(base / 'consent-dependencies', mode=0o755)
+        for role, pin in consent['dependencies'].items():
+            source = canonical(pin['path'])
+            payload = read_file(source, metadata(source).st_uid, 256 * 1024 * 1024, executable=True)
+            require(sha(payload) == pin['sha256'], 'consent dependency changed during staging')
+            put(base / 'consent-dependencies' / role, payload, mode=0o755)
     make(base / 'bin', mode=0o755); make(base / 'configs'); make(base / 'proxy', op, registry['operatorGid'])
     for n, value in data.items():
         put(home / n, value, r['uid'], r['gid'])
@@ -1305,6 +1338,11 @@ def checked_units(base, r, partial=False, consent_upgrade_hashes=(), runtime_upg
             require(sha(read_file(path, owner, 1048576, required_mode=0o600)) == pins['configSha256'],
                     'consent configuration bytes differ')
         metadata(base / 'consent/anchors', r['operatorUid'], 0o700)
+        for role, pin in pins.get('dependencies', {}).items():
+            require(role in ('signatureBinary', 'storageBinary'), 'unknown consent dependency')
+            require(sha(read_file(base / 'consent-dependencies' / role, 0, 256 * 1024 * 1024,
+                                  executable=True, required_mode=0o755)) == pin['sha256'],
+                    'consent dependency snapshot changed')
         if 'storage' in pins:
             require(consent_storage(read_file(base / 'consent/config.json', r['operatorUid'], 1048576,
                                              required_mode=0o600), r['operatorUid']) == pins['storage'],
@@ -1907,6 +1945,16 @@ def service(store, helper, action):
             **({'consent': consent_readiness(base, r, stage)} if action == 'start' and has_consent(r) else {})}
 
 
+def worker_attachment_limit(relative):
+    # Declarations are inert input to the native typed-tool validator. The
+    # installer admits only bounded files in this private attachment directory.
+    if re.fullmatch(r'state/shared-app-refs/[A-Za-z0-9_-]+\.declaration\.json', relative):
+        return 1024 * 1024
+    require(re.fullmatch(r'state/shared-app-refs/[A-Za-z0-9-]+\.bin|state/attachments/[A-Za-z0-9-]+/grant/(?:seal\.json|call\.bin|submit-marker\.json|receipt\.json)', relative),
+            'worker proof file refused')
+    return 12_102_760
+
+
 def config_update(store, helper, source_arg):
     _, base, r = load(store, helper)
     checked_units(base, r); worker_manager(base, r, 'stop'); no_processes(r['uid'])
@@ -1926,8 +1974,7 @@ def config_update(store, helper, source_arg):
             require(len(actual) <= (65 if worker else 1 + len(FINAL_FILES)), 'config bundle exceeds file bound')
         if worker:
             for relative in actual - {'controller.json'}:
-                require(re.fullmatch(r'state/shared-app-refs/[A-Za-z0-9-]+\.bin|state/attachments/[A-Za-z0-9-]+/grant/(?:seal\.json|call\.bin|submit-marker\.json|receipt\.json)', relative), 'worker proof file refused')
-                limits[relative] = 12_102_760
+                limits[relative] = worker_attachment_limit(relative)
         require('controller.json' in actual and actual <= {'controller.json'} | set(limits), 'config bundle files refused')
         data = read_file(source / 'controller.json', r['operatorUid'], 524288)
         proof = {n: read_file(source / n, r['operatorUid'], limits[n]) for n in actual - {'controller.json'}}
@@ -2133,11 +2180,19 @@ def controller_quiescence(store, helper):
         str(state / 'admin.sock'), str(state / 'resident')], timeout=1800)
 
 
-def export_state(store, helper):
+def export_state(store, helper, scope='all'):
+    require(scope in ('all', 'application'), 'controller evidence scope refused')
     _, base, r = load(store, helper)
     checked_units(base, r)
     root = worker_state(r); files = {}; total = 0; directories = 0
     for directory, dirs, entries in os.walk(root, followlinks=False):
+        if scope == 'application':
+            relative = Path(directory).relative_to(root)
+            dirs[:] = [name for name in dirs if relative == Path('.') and name == 'resident']
+            entries = [name for name in entries if
+                       (relative == Path('.') and (name == 'journal.json' or re.fullmatch(
+                           r'provider-[0-9]{16}\.controller-request|application-api-(?:reply-)?[0-9]{16}\.json', name)))
+                       or (relative == Path('resident') and name == 'resident.json')]
         directories += 1
         require(directories <= 1024 and len(Path(directory).relative_to(root).parts) <= 16, 'controller evidence directory bound exceeded')
         for name in dirs:
@@ -2150,7 +2205,8 @@ def export_state(store, helper):
             data = read_file(path, r['uid'], 8 * 1024 * 1024, allow_empty=True)
             total += len(data); require(total <= 32 * 1024 * 1024, 'controller evidence byte bound exceeded')
             files[str(path.relative_to(root))] = {'sha256': sha(data), 'base64': base64.b64encode(data).decode()}
-    return {'protocol': 'mini-spk-controller-evidence-v1', 'store': store, 'files': files}
+    return {'protocol': 'mini-spk-controller-evidence-v1', 'store': store, 'files': files,
+            **({'scope': scope} if scope != 'all' else {})}
 
 
 def reserve_export(store, helper, attempt_text):
@@ -2464,6 +2520,10 @@ def remove(store, helper):
             target = canonical(intent['path'])
             if listener is not None and str(target) == listener['socket']:
                 continue  # Original absent socket identity remains in the registration history.
+            # A stopped legacy public proxy unlinks its socket. There is then no
+            # object whose ACL needs restoring; never accept a replacement inode.
+            if str(target) == stage.get('publicSocket') and not target.exists() and not target.is_symlink():
+                continue
             m = metadata(target)
             require((m.st_dev, m.st_ino) == (intent['dev'], intent['ino']), 'public ACL object replaced; cleanup refused')
             after_path = path.with_suffix('.after.json')
@@ -2571,7 +2631,8 @@ def main(args):
         elif action == 'controller-reconcile-prompt' and len(extra) == 1:
             fcntl.flock(lock, fcntl.LOCK_UN)
             return reconcile_prompt(store,helper,extra[0])
-        elif action == 'controller-export' and not extra: result = export_state(store, helper)
+        elif action == 'controller-export' and extra in ([], ['application']):
+            result = export_state(store, helper, extra[0] if extra else 'all')
         elif action == 'controller-reserve-export' and len(extra) == 1: result = reserve_export(store, helper, extra[0])
         elif action == 'controller-service-logs' and not extra: result = service_logs(store, helper)
         elif action == 'controller-status' and not extra: result = controller_status(store, helper)

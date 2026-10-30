@@ -50,6 +50,59 @@ class ControllerWorldTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
         self.assertIn("compile(code, path, 'exec')", installer.read_text())
 
+    def test_home_transports_bind_only_selected_endpoint_directories(self):
+        r=self.worker_record();base=Path('/var/lib/mini/controller')
+        pins={'providerSha256':'12'*32,'configSha256':'34'*32,'storage':{'writableParent':'/home/operator/world'}}
+        public=Path('/home/operator/run/sockets/participant.sock')
+        upstream=public.parent/'private/operator.sock'
+        units=c.unit_bytes(r,base,upstream,pins,public)
+        runtime=units[r['units'][0]].decode();proxy=units[r['units'][2]].decode()
+        self.assertIn('ProtectHome=tmpfs\n',runtime)
+        self.assertIn(f'BindPaths=/run/user/{r["uid"]}\n',runtime)
+        self.assertIn(f'BindReadOnlyPaths={public.parent}\n',runtime)
+        self.assertIn('ProtectHome=tmpfs\n',proxy)
+        self.assertIn(f'BindReadOnlyPaths={upstream.parent}\n',proxy)
+        self.assertNotIn('BindPaths=/home/operator\n',runtime+proxy)
+
+    def test_worker_attachment_accepts_bounded_declarations_only_in_private_refs(self):
+        self.assertEqual(c.worker_attachment_limit('state/shared-app-refs/dav.declaration.json'),1024*1024)
+        self.assertEqual(c.worker_attachment_limit('state/shared-app-refs/agent-ticket.bin'),12_102_760)
+        for path in ('../dav.declaration.json','state/dav.declaration.json',
+                     'state/shared-app-refs/dav.json','state/shared-app-refs/../dav.declaration.json',
+                     'custody/dav.declaration.json'):
+            with self.subTest(path=path),self.assertRaisesRegex(ValueError,'worker proof file refused'):
+                c.worker_attachment_limit(path)
+
+    def test_consent_dependencies_bind_only_checked_executable_snapshots(self):
+        signature=self.file('verifier', b'verifier bytes', 0o755)
+        storage=self.file('store', b'store bytes', 0o755)
+        settings=c.encoded({'signatureBinary':str(signature),'storageBinary':str(storage)})
+        dependencies=c.consent_dependencies(settings,self.uid)
+        self.assertEqual(dependencies['signatureBinary'],{'path':str(signature),'sha256':c.sha(b'verifier bytes')})
+        r=self.consent_record();base=Path('/var/lib/mini/controller')
+        pins={'providerSha256':'12'*32,'configSha256':'34'*32,
+              'storage':{'writableParent':'/home/operator/world'},'dependencies':dependencies}
+        unit=c.unit_bytes(r,base,Path('/operator.sock'),pins)[r['units'][4]].decode()
+        self.assertIn('ProtectHome=tmpfs\n',unit)
+        self.assertIn('BindPaths=/home/operator/world\n',unit)
+        self.assertEqual([line for line in unit.splitlines() if line.startswith('BindReadOnlyPaths=')],
+                         [f'BindReadOnlyPaths={base}/consent-dependencies/{role}:{pin["path"]}'
+                          for role,pin in dependencies.items()])
+        self.assertNotIn('ReadOnlyPaths='+str(self.root),unit)
+        signature.chmod(0o777)
+        with self.assertRaisesRegex(ValueError,'source mode/size'):
+            c.consent_dependencies(settings,self.uid)
+
+    def test_consent_dependencies_refuse_symlink_and_nonexecutable(self):
+        source=self.file('dependency',b'bytes',0o600)
+        settings=c.encoded({'signatureBinary':str(source),'storageBinary':str(source)})
+        with self.assertRaisesRegex(ValueError,'nonexecutable'):
+            c.consent_dependencies(settings,self.uid)
+        source.chmod(0o755)
+        link=self.root/'link';link.symlink_to(source)
+        with self.assertRaisesRegex(ValueError,'symlink'):
+            c.consent_dependencies(c.encoded({'signatureBinary':str(link),'storageBinary':str(source)}),self.uid)
+
     def test_runtime_and_child_pin_short_consent_anchor_directory(self):
         for version in (1, 2):
             with self.subTest(version=version):
@@ -851,6 +904,22 @@ class ControllerWorldTests(unittest.TestCase):
             for _ in range(17):nested=nested/'d';nested.mkdir()
             with self.assertRaisesRegex(ValueError,'directory bound'):c.export_state('fixture','/unused')
 
+    def test_application_evidence_selects_bounded_receipts_without_workspace_history(self):
+        state=self.root/'state';state.mkdir(mode=0o700);r={'home':str(self.root),'uid':self.uid}
+        selected=['journal.json','provider-0000000000000001.controller-request',
+                  'application-api-0000000000000002.json','application-api-reply-0000000000000002.json',
+                  'resident/resident.json']
+        (state/'resident').mkdir();(state/'resource-workspace').mkdir()
+        for name in selected:(state/name).write_bytes(b'{}')
+        (state/'custody.key').write_bytes(b'private fixture')
+        for i in range(4097):(state/'resource-workspace'/str(i)).write_bytes(b'evidence')
+        with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
+            result=c.export_state('fixture','/unused','application')
+            self.assertEqual(set(result['files']),set(selected))
+            with self.assertRaisesRegex(ValueError,'scope refused'):c.export_state('fixture','/unused','../')
+            path=state/selected[1];path.unlink();path.symlink_to(state/'custody.key')
+            with self.assertRaises((ValueError,OSError)):c.export_state('fixture','/unused','application')
+
     def test_controller_export_directory_count_stays_bounded(self):
         state=self.root/'state';state.mkdir(mode=0o700);r={'home':str(self.root),'uid':self.uid}
         with patch.object(c,'load',return_value=(None,self.root,r)),patch.object(c,'checked_units'):
@@ -1113,6 +1182,28 @@ class ControllerWorldTests(unittest.TestCase):
             retained=json.loads(Path(result['receipt']).read_bytes())
             self.assertEqual(retained['publicListener']['socket'],str(public))
             self.assertEqual(retained['stage']['acl'],stage['acl'])
+
+    def test_legacy_remove_accepts_unlinked_socket_but_refuses_replacement(self):
+        for replaced in (False,True):
+            with self.subTest(replaced=replaced),self.public_listener_fixture(str(replaced)) as (base,r,stage,public,binary,after):
+                r['name']='mini-c-'+r['store']
+                history=self.root/('history'+str(replaced));history.mkdir(mode=0o700)
+                original_ancestry=c.ancestry
+                def ancestry(path,owners):return original_ancestry(path,owners|{self.uid})
+                if replaced:public.write_bytes(b'replacement must survive')
+                with patch.object(c,'HISTORY',history),patch.object(c,'service'), \
+                     patch.object(c,'preserve_consent_state',return_value={'retained':True}),patch.object(Path,'read_text',return_value=''), \
+                     patch.object(c,'ancestry',side_effect=ancestry),patch.object(c.grp,'getgrnam',side_effect=KeyError), \
+                     patch.object(c,'run') as run:
+                    if replaced:
+                        with self.assertRaisesRegex(ValueError,'public ACL object replaced'):
+                            c.remove(r['store'],'helper')
+                        self.assertEqual(public.read_bytes(),b'replacement must survive')
+                    else:
+                        c.remove(r['store'],'helper')
+                        restores=[call for call in run.call_args_list if '--restore=-' in call.args[0]]
+                        self.assertEqual(len(restores),1)
+                        self.assertFalse(base.exists())
 
     def test_storage_upgrade_retries_only_exact_old_new_publication_states(self):
         with self.storage_upgrade_fixture() as (base,r,units,old_stage,old_unit):
