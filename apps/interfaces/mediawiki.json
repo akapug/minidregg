@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "mediawiki",
   "interfaceVersion": 1,
-  "appId": "p04q48xd2kgkystkrda5n77kdns6u569wnactgh904tf7s3vev70",
-  "packageId": "16bcca05d59606b908681c07b202752a",
-  "appVersion": "1.37.4",
+  "appId": "vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch",
+  "packageId": "505d2458a4ce1b02e6ac01f7db4f88b8",
+  "appVersion": "1.46.2",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,

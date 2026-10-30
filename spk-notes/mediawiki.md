@@ -1,0 +1,21 @@
+# MediaWiki repackaging state
+
+- [x] **1. plan** (2026-10-29)
+  - Upstream: MediaWiki **1.46.2**, maintained; replaces Sandstorm's 1.37.4 (2022-08-12).
+  - Source: https://releases.wikimedia.org/mediawiki/1.46/mediawiki-1.46.2.tar.gz (official archive).
+  - Build approach: Sandstorm 308 `spk` toolchain with a plain build root on **dregg-forge** at `/srv/spk-build/mediawiki`; no `vagrant-spk` executable is available. The `demo` and `nano` containers were not touched.
+  - Manifest: declare the HTTP `web` interface and set `bridgeConfig.apiPath = "/"` so an `api` interface is generated alongside `web`.
+- [x] **2. fetch+build** (verified 2026-10-29)
+  - Host: **dregg-forge**, root, x86_64. Source archive `/srv/spk-build/mediawiki/downloads/mediawiki-1.46.2.tar.gz` (99,029,682 bytes); SHA-256 sidecar check passed.
+  - Upstream tree: `/srv/spk-build/mediawiki/work/upstream`; `MW_VERSION` is `1.46.2`, `vendor/autoload.php` is present, 37,754 files / 427,051,844 bytes.
+  - Adapted packaged app tree: `/srv/spk-build/mediawiki/package/rootfs/opt/app/mediawiki`; launcher `/srv/spk-build/mediawiki/package/rootfs/opt/app/launcher.sh`.
+  - Current build drops ImageMagick (raster thumbnails use GD), OS documentation/gettext catalogs, source maps, debug symbols, APT/dpkg, systemd and desktop X11 data. All MediaWiki interface languages remain. Repeatable recipes: `/srv/spk-build/mediawiki/recipe/build.sh` and `/srv/spk-build/mediawiki/recipe/prune.sh`.
+- [x] **3. pack+sign** (revised and verified 2026-10-29)
+  - Toolchain: `/srv/spk-build/etherpad/toolchain/sandstorm-308-unpack/sandstorm-308/bin/spk` (Sandstorm 308). Existing signing key reused; app ID unchanged.
+  - Current package: `/srv/spk-build/mediawiki/out/mediawiki.spk`, **93,348,000 bytes**, SHA-256 `deebfd4779cedb381e47cf3682b4080bc82d9d98791f39c3d18ff8e5fd318bd1`.
+  - **Package ID:** `deebfd4779cedb381e47cf3682b4080b`; **app ID:** `vhq5azzdxf68v536fh0je6ckz6wp56f82t3swt2ws3x91nwk19ch`; app version **3**, marketing version **1.46.2-3**. `spk verify --details` succeeded; direct smoke returned exact write/read-back.
+  - **Local archive check: 504 Cap'n Proto segments**, below the platform bound of 512. This was measured by decompressing the XZ payload after the 8-byte SPK prefix and summing segment counts across the message stream.
+  - Latest build log `/srv/spk-build/mediawiki/logs/build-os-prune.log`; PID file `/srv/spk-build/mediawiki/logs/build-os-prune.pid` (PID **1190936**, stopped). The prior no-ImageMagick build PID **1148725** is also stopped.
+  - Signing key: `/Users/ember/.dregg-secrets/spk-keys/mediawiki.key` (0600, 128 bytes), matching remote `/srv/spk-build/mediawiki/mediawiki.key` (0600); key contents were not printed or committed.
+- [ ] **4. qualify (2026-10-30 state)** — packages f16151f9 (533 segments) and 765ff73f (519, after dropping ImageMagick) were refused at install: platform bound is 512 Cap'n Proto segments. Rebuilt clean (rootfs rebuilt from debootstrap) with CodeEditor, MinervaNeue and upstream tests removed too: package `505d2458a4ce1b02e6ac01f7db4f88b8` (96,011,116 bytes, version 1.46.2-3, app version 3). Recipe in apps/packages/mediawiki (build.sh, prune.sh, LocalSettings.php). Qualification run `run-q9.sh` (world9, output `qualify-hbox-9`, pid file `logs/q9.pid`) on hbox `/tank/lanes/spk-fresh-mediawiki` with cache8 holding only this package; was running when hbox dropped off the network.
+- [ ] **5. land**

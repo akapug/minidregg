@@ -1,0 +1,21 @@
+{
+  "name": "SandstormAuth",
+  "version": "0.2",
+  "author": ["Ian Denhardt", "Jason Paryani", "minidregg"],
+  "url": "https://github.com/zenhack/mediawiki-sandstorm",
+  "description": "Provides integration with Sandstorm identity headers",
+  "license-name": "MIT",
+  "requires": {
+    "MediaWiki": ">= 1.46.0"
+  },
+  "SessionProviders": {
+    "SandstormSessionProvider": {
+      "class": "SandstormSessionProvider",
+      "args": []
+    }
+  },
+  "AutoloadClasses": {
+    "SandstormSessionProvider": "includes/SandstormSessionProvider.php"
+  },
+  "manifest_version": 2
+}
