@@ -244,7 +244,7 @@ theorem reachable_step_safety {c : Config} {faulty : Finset Nat}
     (∀ p, CausalInvariant (next.localState p)) ∧
     (∀ p, GenericSimplexVoteOrigin.OriginInvariant (next.localState p)) ∧
     (∀ p j b, p < c.parties → p ∉ faulty → b ∈ (viewAt (next.localState p) j).prepared →
-      ∃ q t time, q ∉ faulty ∧ t < time ∧ time < next.audit.length ∧
+      ∃ q t time, q < c.parties ∧ q ∉ faulty ∧ t < time ∧ time < next.audit.length ∧
         auditTrace next time = .prepare p j b ∧
         GenericSimplexVAInvariant.Sent (auditTrace next) t q j .vote (some b)) ∧
     (∀ p q v w a b, p < c.parties → q < c.parties → p ∉ faulty → q ∉ faulty →
@@ -258,7 +258,11 @@ theorem reachable_step_safety {c : Config} {faulty : Finset Nat}
     GenericSimplexGlobalCausal.reachable_causal next,
     GenericSimplexGlobalVoteOrigin.reachable_origin next, ?_, ?_, ?_⟩
   · intro p j b pm ph prepared
-    exact jump_target_has_honest_voter next size faultBound pm ph prepared
+    obtain ⟨q, t, time, honest, earlier, within, output, sent⟩ :=
+      jump_target_has_honest_voter next size faultBound pm ph prepared
+    have enrolled := (GenericSimplexGlobalCausal.honest_send_local next honest
+      (GenericSimplexGlobalCausal.trace_send_member sent)).1
+    exact ⟨q, t, time, enrolled, honest, earlier, within, output, sent⟩
   · intro p q v w a b pm qm ph qh left right
     exact actual_state_commits_compatible next size faultBound pm qm ph qh left right
   · intro p q a b pm qm ph qh left right

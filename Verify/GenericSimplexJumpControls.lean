@@ -41,10 +41,12 @@ theorem flags_control :
     (viewAt (progressOuter config state) 5).prepared = [[[1], [2]]] := by
   decide +kernel
 
+def readyBelowView : View :=
+  {number := 2, sentReadyRelay := [some []],
+   received := [⟨1, 2, .ready, some []⟩, ⟨2, 2, .ready, some []⟩]}
+
 def readyBelow : State :=
-  {self := 0, deadline := 1,
-   views := [{number := 2, sentReadyRelay := [some []],
-     received := [⟨1, 2, .ready, some []⟩, ⟨2, 2, .ready, some []⟩]}]}
+  {self := 0, deadline := 1, views := [readyBelowView]}
 
 /-- Counts enrolled signer identities, not messages; READY uses 2f+1, while
 VOTE/COMMIT use Q=n-f. These controls do not assert NF consensus safety. -/
