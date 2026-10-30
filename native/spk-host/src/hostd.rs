@@ -1047,59 +1047,75 @@ impl Journal {
         })
     }
 
+    // Every delivery shares this journal, including agent calls whose IDs
+    // come from controller custody. Establish the human allocator before any
+    // delivery evidence exists, so agent-first use cannot resemble counter loss.
+    // An absent counter beside historical evidence still refuses; it is never reset.
+    fn dispatch_counter_unlocked(&self) -> io::Result<u64> {
+        let path = self.directory.join("dispatch-next-id");
+        let next = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let meta = file.metadata()?;
+                if !meta.is_file()
+                    || meta.nlink() != 1
+                    || meta.uid() != unsafe { libc::geteuid() }
+                    || meta.permissions().mode() & 0o777 != 0o600
+                    || meta.len() > 21
+                {
+                    return Err(invalid("dispatch operation counter identity drift"));
+                }
+                let mut bytes = String::new();
+                file.read_to_string(&mut bytes)?;
+                let value = bytes
+                    .strip_suffix('\n')
+                    .ok_or_else(|| invalid("dispatch operation counter framing"))?;
+                if !canonical_decimal(value) {
+                    return Err(invalid("dispatch operation counter is noncanonical"));
+                }
+                value
+                    .parse::<u64>()
+                    .map_err(|_| invalid("dispatch operation counter overflow"))?
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // Losing an established counter must not rearm old IDs.
+                for entry in fs::read_dir(&self.directory).ctx("list", &self.directory)? {
+                    let name = entry?.file_name();
+                    let name = name.to_string_lossy();
+                    if name.starts_with("dispatch-op-")
+                        || name.starts_with("dispatch-id-")
+                        || name.starts_with("dispatch-permit-")
+                        || name == "dispatch-active.json"
+                    {
+                        return Err(invalid("dispatch operation counter missing after use"));
+                    }
+                }
+                let mut file = OpenOptions::new().write(true).create_new(true)
+                    .mode(0o600).custom_flags(libc::O_NOFOLLOW)
+                    .open(&path).ctx("create", &path)?;
+                file.write_all(b"1\n")?;
+                file.sync_all()?;
+                File::open(&self.directory).ctx("open", &self.directory)?.sync_all()?;
+                1
+            }
+            Err(error) => return Err(error),
+        };
+        if next == 0 {
+            return Err(invalid("dispatch operation counter is zero"));
+        }
+        Ok(next)
+    }
+
     /// Reserve a physical operation number before native authoring. The
     /// counter is advanced and fsynced under the app lock, so a crash may
     /// skip a number but can never reuse one after it was handed to a caller.
     pub(crate) fn allocate_dispatch_operation(&self) -> io::Result<String> {
         self.with_lock(|this| {
             let path = this.directory.join("dispatch-next-id");
-            let next = match OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NOFOLLOW)
-                .open(&path)
-            {
-                Ok(mut file) => {
-                    let meta = file.metadata()?;
-                    if !meta.is_file()
-                        || meta.nlink() != 1
-                        || meta.uid() != unsafe { libc::geteuid() }
-                        || meta.permissions().mode() & 0o777 != 0o600
-                        || meta.len() > 21
-                    {
-                        return Err(invalid("dispatch operation counter identity drift"));
-                    }
-                    let mut bytes = String::new();
-                    file.read_to_string(&mut bytes)?;
-                    let value = bytes
-                        .strip_suffix('\n')
-                        .ok_or_else(|| invalid("dispatch operation counter framing"))?;
-                    if !canonical_decimal(value) {
-                        return Err(invalid("dispatch operation counter is noncanonical"));
-                    }
-                    value
-                        .parse::<u64>()
-                        .map_err(|_| invalid("dispatch operation counter overflow"))?
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    // Losing an established counter must not rearm old IDs.
-                    for entry in fs::read_dir(&this.directory).ctx("list", &this.directory)? {
-                        let name = entry?.file_name();
-                        let name = name.to_string_lossy();
-                        if name.starts_with("dispatch-op-")
-                            || name.starts_with("dispatch-id-")
-                            || name.starts_with("dispatch-permit-")
-                            || name == "dispatch-active.json"
-                        {
-                            return Err(invalid("dispatch operation counter missing after use"));
-                        }
-                    }
-                    1
-                }
-                Err(error) => return Err(error),
-            };
-            if next == 0 {
-                return Err(invalid("dispatch operation counter is zero"));
-            }
+            let next = this.dispatch_counter_unlocked()?;
             let following = next
                 .checked_add(1)
                 .ok_or_else(|| invalid("dispatch operation counter exhausted"))?;
@@ -1360,8 +1376,11 @@ impl Journal {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
             }
-            // This marker is fsynced first. If any later file or record write
-            // fails, an operator must audit it before unrelated requests run.
+            // Establish the allocator before the first delivery marker, even
+            // when this operation ID came from external controller custody.
+            this.dispatch_counter_unlocked()?;
+            // If any later file or record write fails, the active marker must
+            // be audited before unrelated requests run.
             this.create_active_dispatch_unlocked(&identity)?;
             this.capture_dispatch_permit_unlocked(&identity, committed_permit)?;
             let tombstone = DispatchTombstone {
@@ -2088,6 +2107,51 @@ mod tests {
     }
 
     #[test]
+    fn external_dispatch_before_first_local_allocation_keeps_ids_and_fences() {
+        let (path, journal, _) = running_journal();
+        let mut agent = dispatch_identity('1');
+        agent.operation_id = "183".into();
+        journal.request_dispatch(agent.clone(), committed_permit()).unwrap();
+        journal.finish_dispatch(&agent, true).unwrap();
+        assert_eq!(fs::read_to_string(path.join("dispatch-next-id")).unwrap(), "1\n");
+        let mut human = dispatch_identity('2');
+        human.session_resource = "6209".into();
+        human.operation_id = journal.allocate_dispatch_operation().unwrap();
+        assert_eq!(human.operation_id, "1");
+        journal.request_dispatch(human.clone(), committed_permit()).unwrap();
+        journal.finish_dispatch(&human, true).unwrap();
+        assert!(journal.request_dispatch(agent, committed_permit()).is_err());
+        assert!(journal.request_dispatch(human, committed_permit()).is_err());
+        assert_eq!(journal.allocate_dispatch_operation().unwrap(), "2");
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn external_dispatch_counter_loss_refuses_both_routes_before_delivery() {
+        let (path, journal, _) = running_journal();
+        let agent = dispatch_identity('1');
+        journal.request_dispatch(agent.clone(), committed_permit()).unwrap();
+        journal.finish_dispatch(&agent, true).unwrap();
+        fs::remove_file(path.join("dispatch-next-id")).unwrap();
+        assert!(journal.allocate_dispatch_operation().is_err());
+        assert!(journal.request_dispatch(dispatch_identity('2'), committed_permit()).is_err());
+        assert!(!journal.active_dispatch_path().exists());
+        assert!(!path.join("dispatch-next-id").exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn incomplete_initial_dispatch_counter_never_arms_delivery() {
+        let (path, journal, _) = running_journal();
+        OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(path.join("dispatch-next-id")).unwrap();
+        assert!(journal.allocate_dispatch_operation().is_err());
+        assert!(journal.request_dispatch(dispatch_identity('1'), committed_permit()).is_err());
+        assert!(!journal.active_dispatch_path().exists());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
     fn dispatch_delivered_is_one_shot_and_next_distinct_request_can_run() {
         let (path, journal, _) = running_journal();
         let first = dispatch_identity('1');
@@ -2332,8 +2396,9 @@ mod tests {
     #[test]
     fn human_post_commit_failure_releases_slot_and_native_marker_with_fence() {
         let (path, journal, _) = running_journal();
-        let first = dispatch_identity('9');
-        let attempt = path.join("dispatch-op-1");
+        let mut first = dispatch_identity('9');
+        first.operation_id = journal.allocate_dispatch_operation().unwrap();
+        let attempt = path.join(format!("dispatch-op-{}", first.operation_id));
         std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
         let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal
@@ -2376,8 +2441,9 @@ mod tests {
     #[test]
     fn human_failure_without_matching_fence_keeps_every_marker() {
         let (path, journal, _) = running_journal();
-        let first = dispatch_identity('9');
-        let attempt = path.join("dispatch-op-1");
+        let mut first = dispatch_identity('9');
+        first.operation_id = journal.allocate_dispatch_operation().unwrap();
+        let attempt = path.join(format!("dispatch-op-{}", first.operation_id));
         std::fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
         let native = crate::dispatch_fence::arm(&attempt, b"native submit marker").unwrap();
         journal

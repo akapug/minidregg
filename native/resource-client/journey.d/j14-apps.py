@@ -58,6 +58,36 @@ class Apps(m.Journey):
         value['delegates']['human']=human
         return value
 
+    def room(self):
+        super().room()
+        # The founder's signed program is editable independently of the room
+        # grants. This resident serves app requests, not librarian maintenance.
+        program='''# Hosted application assistant
+
+Handle the addressed request in this assignment using the available Mini tools.
+The assignment includes the current signed room and program context. For a hosted
+application request, call the named application tools in the requested order.
+Report the actual result, including the exact refusal name when a tool refuses.
+Never retry an uncertain call. Do not change grants, provider, or your program.
+Use one final text response to answer the requesting member; Mini delivers it.
+Do not call mini_say or perform unrelated index, digest, or document maintenance.
+'''
+        path=self.homes/'alice/requests/apps-program.md';path.write_text(program)
+        self.shell('alice','doc show lab-hermes-librarian')
+        self.shell('alice','doc edit apps-program lab-hermes-librarian 1 @apps-program.md')
+        self.shell('alice','submit apps-program')
+        shown=self.shell('alice','doc show lab-hermes-librarian').read_text()
+        if program.rstrip('\n').replace('\n','␤') not in shown:
+            raise ValueError('the signed app-assistant program was not verified after publication')
+
+    def capture_failure(self):
+        if not self.controller:return
+        errors=[]
+        for verb in ('controller-service-logs','controller-export'):
+            try:self.fixed(verb)
+            except Exception as error:errors.append({'command':verb,'error':str(error)})
+        if errors:write(self.root/'failure-evidence-errors.json',errors)
+
     def cleanup(self):
         # Stop our controller and public listener before removing the world;
         # the shared driver then closes its remaining child processes.
@@ -128,6 +158,8 @@ class Apps(m.Journey):
         d=self.declaration
         self.c['expectedHost']='dav-j14.localhost'
         self.c['attachmentExtras']={
+            # Davros's signed schema: role 0 is viewer; role 1 grants view/edit.
+            'roleId':'1',
             'names':{'application':'dav-app','family':'dav-session','route':'dav-agent-v1','display':'Davros agent',
                      'handle':'dav-agent','serviceProtocol':None,'applicationFamily':'oracle'},
             'typed':{'alias':self.alias,'declarationSource':str(self.declaration_path),
@@ -189,8 +221,20 @@ class Apps(m.Journey):
                 if hashlib.sha256(payload).hexdigest()!=attempt[field+'Sha256']:raise ValueError('dispatch evidence digest differs')
                 documents.append(json.loads(payload))
             request,reply=documents
-            if reply.get('type')!='http-v3' or reply.get('status') not in (200,201,204):
+            if reply.get('protocol')!='mini-spk-agent-api-v3' or reply.get('type')!='http-v3' or reply.get('status') not in (200,201,204):
                 raise ValueError('Davros dispatch did not complete with a successful HTTP receipt')
+            if (str(attempt['operationId'])!=reply.get('operationId') or
+                request.get('operationId')!=reply.get('operationId') or
+                request.get('bindingSha256')!=reply.get('bindingSha256') or
+                any(not isinstance(reply.get(field),str) or len(reply[field])!=64 or
+                    any(c not in '0123456789abcdef' for c in reply[field])
+                    for field in ('bindingSha256','operationFingerprint','responseSha256')) or
+                any(attempt.get(field)!=reply.get(field) for field in ('bindingSha256','operationFingerprint')) or
+                attempt['lifetimeCommittedReceipt']!=reply.get('committedReceipt') or
+                attempt.get('lifetimeSettledResponseSha256')!=reply.get('responseSha256') or
+                attempt['lifetimeSettlement'].get('forwardOperationId')!=attempt['operationId'] or
+                attempt['lifetimeSettlement'].get('settlement',{}).get('operation')!='dispatch settle'):
+                raise ValueError('Davros admission, reply, and settlement do not join the same call')
             observed.add((request.get('method'),request.get('path')))
         if not {('PUT','dav/notes.txt'),('GET','dav/notes.txt')}<=observed:
             raise ValueError('receipts do not contain both the requested put and get: '+repr(observed))
@@ -238,6 +282,7 @@ def main():
             print('phase done',phase,flush=True)
     except Exception as error:
         write(j.root/'failure.json',{'phase':phase,'error':str(error),'passed':False,'lastCommand':j.counter})
+        j.capture_failure()
         raise
     finally:j.cleanup()
 

@@ -381,6 +381,7 @@ class AttachmentTests(unittest.TestCase):
                 op.validate_layout(layout, config)
 
     def test_explicit_issuer_and_source_generation_drive_ticket(self):
+        self.contract['roleId']='1';self.rewrite(self.path,self.contract)
         op = M.Attachment(self.path, "issue-grant")
         source = self.file("session-result.json", {"type": "tool-complete", "isError": False, "result": {"isError": False,
             "text": json.dumps({"type": "confirmed-mini-application-birth-v1", "route": "session",
@@ -404,11 +405,23 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(request["payer"], "314")
         self.assertEqual(request["tool"], self.contract["issuer"]["tool"])
         self.assertEqual(request["parent"], self.contract["issuer"]["parent"])
+        self.assertEqual(request['spec']['ticket']['ceiling'],{
+            'basis':{'type':'role','id':'1'},'added':[],'removed':[],
+            'roleSchemaRoot':'41','roleVersion':'3'})
         participant = request["spec"]["ticket"]["participant"]
         self.assertEqual(participant["origin"]["generation"], "93")
         self.assertEqual(participant["origin"]["task"], self.a["controller"]["task"])
         self.assertEqual(participant["subject"], self.a["controller"]["subject"])
         self.assertFalse((op.calls / "grant-issue").exists())
+
+    def test_role_selection_defaults_to_zero_and_rejects_ambiguous_input(self):
+        for value in (1,'01','-1','allAccess','9'*79):
+            self.contract['roleId']=value;self.rewrite(self.path,self.contract)
+            with self.subTest(role=value),self.assertRaisesRegex(ValueError,'roleId'):
+                M.Attachment(self.path,'prepare-config')
+        del self.contract['roleId'];self.rewrite(self.path,self.contract)
+        op=M.Attachment(self.path,'prepare-config')
+        self.assertEqual(op.role_id,'0')
 
     def test_source_signer_epoch_is_selected_not_hardcoded(self):
         op = M.Attachment(self.path, "issue-grant")

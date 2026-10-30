@@ -27,6 +27,38 @@ fn source_payload(frame: &[u8], opcode: u8) -> io::Result<&[u8]> {
     Ok(&frame[5..])
 }
 
+// Preserve the authoritative reply before projecting it. A planning refusal
+// does not settle the already-admitted reserve, so this is diagnostic only:
+// the caller still retains its uncertain hold for reconciliation.
+fn retained_source_payload(
+    operator: &PrivateOperator,
+    directory: &Path,
+    name: &str,
+    opcode: u8,
+    frame: &[u8],
+) -> io::Result<Vec<u8>> {
+    write_new(directory, &format!("{name}.frame"), frame)?;
+    match source_payload(frame, opcode) {
+        Ok(payload) => Ok(payload.to_vec()),
+        Err(error) => {
+            use crate::host_operations::{RESPONSE_HOST_OUTCOME, RESPONSE_NO_RECORD};
+            use crate::lifecycle_receipt_lookup::OUTCOME_TAG;
+            use crate::lifecycle_v3_native::framed_payload;
+            let outcome = framed_payload("lifetime planning outcome", frame, RESPONSE_NO_RECORD, OUTCOME_TAG)
+                .or_else(|_| framed_payload("lifetime planning outcome", frame, RESPONSE_HOST_OUTCOME, OUTCOME_TAG));
+            if let Ok(payload) = outcome {
+                let path = write_new(directory, &format!("{name}-outcome.bin"), payload)?;
+                let bytes = operator.tool("inspect", "outcome", &path,
+                    &directory.join(format!("{name}-outcome.json")))?;
+                let view: Value = serde_json::from_slice(&bytes)?;
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                    format!("lifetime paid op{opcode}: {}", crate::dispatch_fence::refusal_words(&view))));
+            }
+            Err(error)
+        }
+    }
+}
+
 fn pair(left: &[u8], right: &[u8]) -> io::Result<Vec<u8>> {
     let length = u32::try_from(left.len()).map_err(|_| refused("lifetime paid pair size"))?;
     let mut result = Vec::with_capacity(4 + left.len() + right.len());
@@ -141,7 +173,9 @@ pub(crate) fn assemble_once(input: PaidAssemblyInput<'_>) -> io::Result<Assemble
     {
         return Err(refused("lifetime paid request source projection drift"));
     }
-    let plan = source_payload(&operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN, &paid_request)?, crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN)?.to_vec();
+    let plan = retained_source_payload(operator, attempt_dir, "paid-plan-v3",
+        crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN,
+        &operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_PLAN, &paid_request)?)?;
     let plan_path = write_new(attempt_dir, "paid-plan-v3.bin", &plan)?;
     let inspection_bytes = operator.tool(
         "inspect",
@@ -177,7 +211,9 @@ pub(crate) fn assemble_once(input: PaidAssemblyInput<'_>) -> io::Result<Assemble
         &json!(payer.signatures),
     )?;
     let detached = pair(&app_binary, &pair(&grant, &payer_binary)?)?;
-    let ingress = source_payload(&operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE, &pair(&plan, &detached)?)?, crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE)?.to_vec();
+    let ingress = retained_source_payload(operator, attempt_dir, "paid-ingress-v3",
+        crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE,
+        &operator.invoke(crate::host_operations::AGENT_LIFETIME_DISPATCH_ASSEMBLE, &pair(&plan, &detached)?)?)?;
     write_new(attempt_dir, "paid-ingress-v3.bin", &ingress)?;
     write_new(
         attempt_dir,
