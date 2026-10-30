@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Swagger Editor</title>
+  <!-- Drawn stand-in: the upstream v5.10.0 tarball ships no SVG mark, only a
+       32px PNG favicon. Circular arrow in Swagger brand green (#85ea2d). -->
+  <rect width="64" height="64" rx="12" fill="#1b1b1b"/>
+  <path d="M41.9 22.1 A14 14 0 1 1 32 18" fill="none" stroke="#85ea2d"
+        stroke-width="6" stroke-linecap="round"/>
+  <path d="M29 10.5 L44.5 18 L29 25.5 Z" fill="#85ea2d"/>
+</svg>

@@ -113,3 +113,6 @@ Step 5 (land): no `apps/interfaces/swagger-editor.json` exists to re-pin
 app ID there. Commit `apps/packages/swagger-editor/**`, update the
 SPK-FRESH row (17), pull --rebase, push lane/spk-fresh, append the landing
 line to landings.md.
+
+## 4/5 qualify + land — DONE 2026-10-30
+Package 5.10.0-2 `c8ae9b8ea081ad5b31701cd6b11292cc` (sha256 c8ae9b8ea081ad5b31701cd6b11292ccff1bca883296695b97cee03d43b8e253, hbox cache /tank/lanes/spk-fresh-swagger/cache/). hbox qualification1 and qualification2: 2 PASS of 2 rows each, typed write/read-back; worlds torn down.
