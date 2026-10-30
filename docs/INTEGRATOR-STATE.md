@@ -41,7 +41,7 @@ reveal.js, MediaWiki, Mercurial, Wekan, Scrumblr, Swagger Editor, Sudoku, Blocks
 |---|---|
 | a9d4ec9ba | tour 73/73; composed all but connector PASS (sheet never seeded); flatness GET PASS, submit FAIL (4.97x wall, 9.27x CPU vs 2x) |
 | 91a307e70 | tour 73/73; connector past capture, red at publish (no 27c274052); its flatness ran to completion unattended |
-| 994e36d08 | THE CANDIDATE. tour 73/73; composed rooms/churn/documents/apps/connector/store-restart PASS on hbox AND on infra's forge composed container; residents refused by design in sponsor mode ("owner, resident, provider witness and every request author must be distinct principals"), restart blocked behind it. Flatness pending (gate-994e36d0) |
+| 994e36d08 | THE CANDIDATE. tour 73/73; composed rooms/churn/documents/apps/connector/store-restart PASS on hbox AND on infra's forge composed container; residents refused by design in sponsor mode ("owner, resident, provider witness and every request author must be distinct principals"), restart blocked behind it. Flatness GET PASS (CPU 1.63x, wall 1.95x vs 1.96x), submit FAIL (CPU 7.79x, wall 5.08x, propose CPU 9.04x vs 2x): reported, not blocking (root ruling 02:20; the ratchet preimage 44 + 32 x entries is a design decision for ember) |
 
 Not shipped: ember's rule is rehearse only on a fully green gate. Residents/restart need JWORLD_MANAGEMENT=distinct,
 which dies in apps at application-birth "no-grant ... (phase prepare)" (distinct births must be signed by owner 7 with 8
