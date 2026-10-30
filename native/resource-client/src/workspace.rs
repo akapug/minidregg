@@ -4706,16 +4706,13 @@ fn birth(
                 .and_then(|grant| grant.get("capability").cloned())
                 .ok_or("birth context lacks the fee payer's account grant")?;
             let mut capabilities = vec![payer_capability];
-            for capability in context["sourceCapabilities"]
-                .as_array()
-                .ok_or("birth context lacks source capabilities")?
-            {
-                // The payer's spend capability is usually the context's own source capability; a batch naming it
-                // twice is refused (resourceBatch), so each capability appears once.
-                if !capabilities.contains(capability) {
-                    capabilities.push(capability.clone());
-                }
-            }
+            capabilities.extend(
+                context["sourceCapabilities"]
+                    .as_array()
+                    .ok_or("birth context lacks source capabilities")?
+                    .iter()
+                    .cloned(),
+            );
             (
                 json!([{"source":payer,"destination":reservation.ids["target"],
                     "asset":member(&context["genesis"],"asset")?,"amount":amount}]),
