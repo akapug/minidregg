@@ -130,7 +130,7 @@
       }
     },
     "account.list": {
-      "description": "List this member's accounts, one page at a time.",
+      "description": "List this member's asset accounts, one page at a time.",
       "input": {
         "type": "object",
         "properties": {
@@ -198,7 +198,8 @@
         "query": {
           "page": {
             "arg": "page"
-          }
+          },
+          "type": "asset"
         }
       }
     }
