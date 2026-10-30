@@ -2453,7 +2453,17 @@ fn chat_join(session: &Session, name: &str, invitation: &str) -> Result<(), Done
             return Err(usage(format!("{name} already names another room in this workspace")));
         }
         if !crate::credit::adopt_window_from(&session.workspace, &ws, name, &session.home.join("requests")).map_err(error)? {
-            return Err(usage(format!("{name}: no member window addressed to you in HOME/requests to adopt")));
+            // No window to adopt. A member the room's own roster already names (invited natively, by the rooms
+            // phase or `room` verbs, and holding the room reference since) needs none: joining acknowledges that
+            // membership and takes its stream below. Anyone else still needs a window.
+            let held = reference(session, name).map_err(error)?;
+            let on_roster = signed_read(session, &ws, name, "roster", &held, "resource", &[])
+                .ok()
+                .and_then(|view| roster_of(&view).ok())
+                .is_some_and(|roster| roster.members.iter().any(|(s, _)| *s == me));
+            if !on_roster {
+                return Err(usage(format!("{name}: no member window addressed to you in HOME/requests to adopt")));
+            }
         }
     } else {
         import_from(session, name, &value)?;
