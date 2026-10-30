@@ -301,7 +301,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80", "a plain-text journal: PUT /add a transaction, GET /transactions and /accounts as JSON"),
     ("vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h", "the deck is deck.md: PUT /deck.md, GET it back"),
     ("wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0", "REST /api (boards, lists, cards) and DDP"),
-    ("61gh7gnns305cknp20v2ekvdex48g4d3rv6wghuzk6huzx5qmp7h", "hg over HTTP: POST /?cmd=unbundle pushes a changegroup; GET /raw-file/<rev>/<path> and /rev/<node> read it back"),
+    ("1mvdqjv5z596dtyg5fh0p9573x32u5anrfze9rs6wpxthhyejk50", "hg over HTTP: POST /<repo>?cmd=unbundle pushes a changegroup; GET /<repo>/raw-file/<rev>/<path> and /<repo>/rev/<node> read it back"),
     ("w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0", "sticky notes over socket.io: joinRoom then createCard; initializeMe answers initCards from the board's redis"),
     ("1d3umpx9ug1jv5stepvqfrucx3yr8n2a4gd7y5cud2vsq6mmj8uh", "the spec is one file: PUT /editor/spec, GET it back"),
     ("5uh349d0kky2zp5whrh2znahn27gwha876xze3864n0fu9e5220h", "POST /upload a ZIM (multipart file + contentRange), then GET /kiwix/A/<article> reads it"),
