@@ -270,6 +270,28 @@
    "webLink": "https://www.mercurial-scm.org/"
   },
   {
+   "appId": "cvs53nmnfn463htz3yyyr8zunufczacrdg31n14j61n7g4dpeadh",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "media"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/navidrome/navidrome",
+   "isOpenSource": true,
+   "name": "Navidrome",
+   "packageBuiltAt": "2026-10-30T05:15:11Z",
+   "packageId": "4038cbf69c22c3b81fd9a718770ee1b5",
+   "sha256": "4038cbf69c22c3b81fd9a718770ee1b519a690e038e7904ee0776aa9a688b0f9",
+   "shortDescription": "Personal music streaming server",
+   "upstreamAuthor": "Navidrome contributors",
+   "upstreamVersion": "0.64.2-1",
+   "version": "0.64.2-1",
+   "versionNumber": 2,
+   "webLink": "https://www.navidrome.org"
+  },
+  {
    "appId": "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
    "author": {
     "name": "Mini"
