@@ -24,7 +24,8 @@ The dated intake ledger records published source status. Aggregate targets added
 
 To emit the actual imported theorem statements and their axiom footprints, run
 `lake env lean scripts/report-simplex-qualification.lean` after building
-`SimplexQualification`. Each `QUALIFICATION_CLAIM` JSON row comes from the elaborated
+`SimplexQualification` and `Compiler.QualificationReport` (the emitter's separate
+import, not part of the qualification target's closure). Each `QUALIFICATION_CLAIM` JSON row comes from the elaborated
 environment. The emitter labels compiler trust and does not infer premise
 inhabitation or hostile witnesses from a name, an axiom scan, or a case count.
 
@@ -53,7 +54,7 @@ field-level selection/successor/deadline/lock/quorum controls for source mutatio
 checks; full-state finite equality is not the safety argument.
 
 On a Fabric snapshot, run `lake build SimplexQualification
-Verify.GenericSimplexJumpControls`, followed by `python3 -I
+Verify.GenericSimplexJumpControls Compiler.QualificationReport`, followed by `python3 -I
 scripts/check-simplex-jump.py claims` to verify the nonempty elaborated theorem
 statements and standard-only axiom footprints. `python3 -I
 scripts/check-simplex-jump.py mutate` compiles nine executable mutants, requires
