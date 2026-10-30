@@ -1,81 +1,96 @@
 #!/usr/bin/env python3
-"""Flatness gate (ember 10-29: "the system should NEVER GET SLOWER OVER TIME, except by at most a
-logarithmic factor"). Appends to one document on a fresh scratch world and compares the Host's CPU per
-submit (and the submit's wall time) early versus late:
+"""Law 17: fixed-size document appends at small and large accumulated state.
 
-  usage: flatness-bench.py --bin CANDIDATE_BIN_DIR --root NEW_DIR --src REPO_SRC [--n 1000] [--lo 10]
-
-The early window is the median over appends [lo/2, lo], the late window the median over the last lo
-appends. The gate passes when late <= early * max(1.5, log2(n) / log2(lo)): cost may grow by at most a
-log factor in the history length. Prints the per-append TSV, then one verdict line:
-  FLATNESS submit_cpu early=.. late=.. ratio=.. bound=.. PASS|FAIL  (and the same for submit_wall)
-Exit 0 on PASS, 1 on FAIL, 2 on a broken run. The same Host CPU reading as doc-submit-bench.py (every
-process under the world's `mini serve`). GET through an app route: scripts/perf/flatness-route.sh.
+Measures the whole mini-serve process tree (including reaped helpers), and end-to-end
+wall time. Both submit and propose gate. Certification uses the normal admitted
+checkpoint path so the default 1,000 operations do not hit the 256-record tail law.
+Exit 0 PASS, 1 FAIL, 2 broken/incomplete. Outputs samples.jsonl and result.json.
 """
-import argparse,json,math,os,pathlib,signal,statistics,subprocess,sys,time
-os.umask(0o077)
-ap=argparse.ArgumentParser()
-ap.add_argument('--bin',required=True);ap.add_argument('--root',required=True);ap.add_argument('--src',required=True)
-ap.add_argument('--n',type=int,default=1000);ap.add_argument('--lo',type=int,default=10)
-a=ap.parse_args()
-if a.n < 4*a.lo: raise SystemExit('--n must be at least 4x --lo')
-root=pathlib.Path(a.root).resolve();bin_=pathlib.Path(a.bin).resolve();src=pathlib.Path(a.src).resolve()
-host,mini,store,verifier=[bin_/n for n in ['minidregg-host','mini','minidregg-link-sqlite-store','minidregg-credential-signature-verifier']]
-if root.exists():raise SystemExit('root exists')
-root.mkdir(mode=0o700);T=root/'transcript';T.mkdir()
-TICK=os.sysconf('SC_CLK_TCK')
-os.environ.setdefault('CANDIDATE',str(bin_.parent))
-def sh(tag,*cmd):
-    r=subprocess.run([str(c) for c in cmd],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    if r.returncode:
-        (T/f'{tag}.err').write_bytes(r.stderr)
-        print(f'FLATNESS broken: {tag} rc={r.returncode}: {r.stderr.decode(errors="replace")[-800:]}',flush=True); sys.exit(2)
-    return r
-def tree(pid):
-    out=[pid]
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+from flatness import BrokenRun, Commands, ProcessCPU, certify, failure_prefix, finish, validate_sizes
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    for name in ('bin', 'root', 'src'):
+        ap.add_argument('--' + name, required=True, type=Path)
+    ap.add_argument('--n', type=int, default=1000)
+    ap.add_argument('--lo', type=int, default=10)
+    a = ap.parse_args()
+    validate_sizes(a.n, a.lo)
+    root, binary, src = a.root.resolve(), a.bin.resolve(), a.src.resolve()
+    root.mkdir(mode=0o700)  # An existing world's data is never reused or removed.
+    commands = Commands(root / 'transcript')
+    mini = binary / 'mini'
+    os.environ['CANDIDATE'] = str(binary.parent)
+    # This measures a fresh world, including genesis, rather than a template's prefix.
+    os.environ['NEWPARTICIPANT_TEMPLATE_DIR'] = ''
+    os.environ['MINI_CONSENT_ANCHOR_DIR'] = str(root / 'a')
+    os.environ['NEWPARTICIPANT_SPONSOR_BALANCE'] = '1000000000'
+    os.environ['NEWPARTICIPANT_OWNER_BUDGET'] = '1000000000'
+    os.environ['NEWPARTICIPANT_METER_ALLOWANCE'] = '1000000000000'
+    metrics = ('submit_cpu_ms', 'submit_wall_ms', 'propose_cpu_ms', 'propose_wall_ms')
+    w, rows, cpu = root / 'w', [], None
     try:
-        for k in pathlib.Path(f'/proc/{pid}/task/{pid}/children').read_text().split(): out+=tree(int(k))
-    except OSError: pass
-    return out
-def cpu(pid):
-    total=0
-    for p in tree(pid):
-        try:
-            f=pathlib.Path(f'/proc/{p}/stat').read_text().rsplit(')',1)[1].split(); total+=int(f[11])+int(f[12])
-        except OSError: pass
-    return total*1000//TICK
-w=root/'w';sock=w/'public'/'mini.sock';sponsor=w/'sponsor'
-sh('genesis','sh',src/'native/resource-client/newparticipant-acceptance.sh',host,mini,store,verifier,w,sock)
-pid=int((w/'public'/'server.pid').read_text())
-rows=[]
-try:
-    law={"type":"any","predicates":[{"type":"memberOf","slot":"request/verb","values":["1","3","4","5"]},
-        {"type":"all","predicates":[{"type":"eq","slot":"request/verb","value":"2"},
-            {"type":"le","slot":"content/payload-bytes/after","value":str(64*a.n+65536)}]}]}
-    (root/'draft-law.json').write_text(json.dumps(law))
-    sh('doc-new',mini,'workspace','--action','doc-new','--dir',sponsor,'--name','paper','--predicate',root/'draft-law.json')
-    print('append\tsubmit_wall_ms\tsubmit_cpu_ms\tpropose_wall_ms\tpropose_cpu_ms',flush=True)
-    for i in range(a.n):
-        label=f'a{i+1}'
-        req={'type':'minidregg-workspace-proposal-v1','action':'invoke',
-             'targets':[{'name':'paper','payload':{'type':'document','actions':[{'type':'append','text':f'paragraph {i} '+'x'*32}]}}]}
-        (root/f'{label}.json').write_text(json.dumps(req))
-        out=[]
-        for step,cmd in (('propose',[mini,'workspace','--action','propose','--dir',sponsor,'--request',root/f'{label}.json','--proposal-id',label]),
-                         ('submit',[mini,'workspace','--action','submit','--dir',sponsor,'--intent',sponsor/'proposals'/label/'intent.json','--attempt',sponsor/'attempts'/label])):
-            c=cpu(pid);t=time.time(); sh(f'{label}-{step}',*cmd); out.append((int((time.time()-t)*1000),cpu(pid)-c))
-        o=json.loads((sponsor/'attempts'/label/'outcome.json').read_text())
-        if o.get('type')!='confirmed' or o.get('confirmation')!='installed':
-            print(f'FLATNESS broken: {label} not installed: {o}',flush=True); sys.exit(2)
-        rows.append((out[1][0],out[1][1],out[0][0],out[0][1]))
-        print(f'{i+1}\t{out[1][0]}\t{out[1][1]}\t{out[0][0]}\t{out[0][1]}',flush=True)
-finally:
-    os.kill(pid,signal.SIGTERM)
-bound=max(1.5,math.log2(a.n)/math.log2(a.lo))
-ok=True
-for col,name in ((1,'submit_cpu'),(0,'submit_wall'),(3,'propose_cpu'),(2,'propose_wall')):
-    early=statistics.median(r[col] for r in rows[a.lo//2-1:a.lo]);late=statistics.median(r[col] for r in rows[-a.lo:])
-    ratio=late/max(early,1);verdict='PASS' if ratio<=bound else 'FAIL'
-    if name.startswith('submit') and verdict=='FAIL': ok=False
-    print(f'FLATNESS {name} early={early} late={late} ratio={ratio:.2f} bound={bound:.2f} {verdict}',flush=True)
-sys.exit(0 if ok else 1)
+        commands.run('genesis', 'sh', src / 'native/resource-client/newparticipant-acceptance.sh',
+                     binary / 'minidregg-host', mini, binary / 'minidregg-link-sqlite-store',
+                     binary / 'minidregg-credential-signature-verifier', w, w / 'public/mini.sock')
+        cpu = ProcessCPU(w / 'public/server.pid')
+        sponsor = w / 'sponsor'
+        control = str(json.loads((w / 'genesis.json').read_text())['factoryControllerCapability'])
+        law = {'type': 'any', 'predicates': [
+            {'type': 'memberOf', 'slot': 'request/verb', 'values': ['1', '3', '4', '5']},
+            {'type': 'all', 'predicates': [
+                {'type': 'eq', 'slot': 'request/verb', 'value': '2'},
+                {'type': 'le', 'slot': 'content/payload-bytes/after', 'value': str(128*a.n+65536)}]}]}
+        (root / 'law.json').write_text(json.dumps(law))
+        commands.run('doc-new', mini, 'workspace', '--action', 'doc-new', '--dir', sponsor,
+                     '--name', 'paper', '--predicate', root / 'law.json')
+        with (root / 'samples.jsonl').open('w') as samples:
+            for i in range(1, a.n + 1):
+                if i % 96 == 0:
+                    certify(commands, mini, sponsor, control, f'certify-{i}')
+                label = f'a{i}'
+                request = {'type': 'minidregg-workspace-proposal-v1', 'action': 'invoke', 'targets': [
+                    {'name': 'paper', 'payload': {'type': 'document', 'actions': [
+                        {'type': 'append', 'text': 'paragraph ' + 'x'*32}]}}]}
+                req_file = root / (label + '.json')
+                req_file.write_text(json.dumps(request))
+                row = {'operation': i}
+                for step, args in (
+                    ('propose', ['--request', req_file, '--proposal-id', label]),
+                    ('submit', ['--intent', sponsor / 'proposals' / label / 'intent.json',
+                                '--attempt', sponsor / 'attempts' / label])):
+                    _, wall, used = commands.measured(cpu, label + '-' + step, mini, 'workspace',
+                                                      '--action', step, '--dir', sponsor, *args)
+                    row[step + '_wall_ms'], row[step + '_cpu_ms'] = wall, used
+                outcome = json.loads((sponsor / 'attempts' / label / 'outcome.json').read_text())
+                if outcome.get('type') != 'confirmed' or outcome.get('confirmation') != 'installed':
+                    raise BrokenRun(f'{label}: append not installed')
+                row['history_size'] = int(outcome['acceptedCount'])
+                rows.append(row)
+                samples.write(json.dumps(row) + '\n'); samples.flush()
+                print(json.dumps(row), flush=True)
+                if failure_prefix(rows, a.n, a.lo, metrics):
+                    return finish(root, rows, len(rows), a.lo, metrics, requested_n=a.n)
+        return finish(root, rows, a.n, a.lo, metrics)
+    finally:
+        if cpu is not None:
+            cpu.stop()
+        elif (w / 'public/server.pid').exists():
+            ProcessCPU(w / 'public/server.pid').stop()
+        if (root / 'a').exists():
+            commands.run('stop-residents', 'bash', src / 'scripts/spk-platform/stop-residents.sh', root)
+
+
+if __name__ == '__main__':
+    os.umask(0o077)
+    try:
+        sys.exit(main())
+    except (BrokenRun, OSError, ValueError, KeyError) as e:
+        print(f'FLATNESS broken: {e}', file=sys.stderr)
+        sys.exit(2)
