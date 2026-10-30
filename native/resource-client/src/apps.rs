@@ -297,7 +297,7 @@ pub(crate) const FEATURED: &[(&str, &str)] = &[
     ("c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h", "POST /<topic> with a body publishes; GET /<topic>/json?poll=1 reads"),
     ("f3c9rjszvmqgvnhan8c6m5cpwkqmwu6t6de0qxa8vnx0rqreafqh", "flat-text pages: GET doku.php?id=<page>&do=export_raw, POST do=save"),
     ("j4jvn386t7un76qu6yyw1vwc5ke50t07e38r82kzy4qqg6qq7msh", "board mutations as JSON over socket.io (connect with board=<name>, broadcast a mutation, replay it on a fresh connection); GET /download/<board> reads the saved SVG"),
-    ("d9ygf47xrtnw12j92cyt6cu8ut75esx01u4q3kcrn8415w9qzzgh", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
+    ("3g05nj7mpryyd3a0erndy30my7fsr72s3xghnhewkqw7km08g34h", "REST /api/v1 (repos, issues); git smart-HTTP when the bridge streams bodies"),
     ("894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80", "a plain-text journal: PUT /add a transaction, GET /transactions and /accounts as JSON"),
     ("vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h", "the deck is deck.md: PUT /deck.md, GET it back"),
     ("wpe8yvzdpjsst9314ucecmpmyzju0830ujm815ew5mjuen173kg0", "REST /api (boards, lists, cards) and DDP"),
