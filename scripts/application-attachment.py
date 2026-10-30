@@ -19,6 +19,8 @@ Input protocol: mini-application-attachment-v1. All paths are absolute.
                   template, factory/payer selectors and grain tariff
   names (optional): application, family, route, display, handle, serviceProtocol (null: none),
          applicationFamily
+  roleId (optional): installed permission-schema role index as a decimal string (default "0").
+         Mini checks the selected role against the signed schema and issuer authority.
   route (optional): {"kind":"web","origin":"https://HOST"} binds a v4 web route for an app whose
          package declares no api interface; the session kind is then web, the pins carry the route
          and the agent-route registration names no signed API path.
@@ -146,6 +148,9 @@ class Attachment:
         self.profile, self.repo = Path(paths["profile"]), Path(paths["repo"])
         self.root = Path(paths["outputDir"])
         self.application, self.issuer = c["application"], c["issuer"]
+        self.role_id = c.get("roleId", "0")
+        if not isinstance(self.role_id, str) or not re.fullmatch(r"0|[1-9][0-9]{0,77}", self.role_id):
+            raise ValueError("roleId must be a canonical decimal string")
         self.signers = c["signers"]
         for field in ("birthSource", "birthAttempt", "bootstrapTicketRequest", "bootstrapTicketAttempt", "packageDirectory"):
             self.absolute(self.application[field])
@@ -535,7 +540,7 @@ class Attachment:
         schema = read(package_dir / "schema-inspection.json")
         interface = next(i for i in read(package_dir / "descriptor-inspection.json")["interfaces"] if i["kind"] == self.session_kind)
         launch_root = read(package_dir.parent / "launch-inspection.json")["root"]
-        ceiling = {"basis": {"type": "role", "id": "0"}, "added": [], "removed": [],
+        ceiling = {"basis": {"type": "role", "id": self.role_id}, "added": [], "removed": [],
                    "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]}
         request = {"spec": {"ticket": {"resource": a["ticket"],
             "scope": {"app": app["app"], "packageVersion": package_version, "packageRoot": launch_root,

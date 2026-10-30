@@ -46,7 +46,9 @@ while read -r unit; do
   journalctl --user --no-pager -u "$unit" >>"$run/residents-$STORE.log" || rc=1
   systemctl --user stop "$unit" || rc=1
 done < <(systemctl --user list-units --all --plain --no-legend "mini-spk-s$STORE-a*.service" "mini-spk-supervisor@$STORE-*.service" "mini-spk-supervisor-s$STORE@*.service" | awk '{print $1}')
-if systemctl --user is-active "mini-spk-broker@$STORE.service" >/dev/null; then systemctl --user stop "mini-spk-broker@$STORE.service" || rc=1; fi
+if [[ $(systemctl --user show "mini-spk-broker@$STORE.service" -p LoadState --value) == loaded ]]; then
+  systemctl --user stop "mini-spk-broker@$STORE.service" || rc=1
+fi
 journalctl --user --no-pager -u "mini-spk-broker@$STORE.service" >"$run/broker-$STORE.log" || rc=1
 for request in "$GRAINS_ROOT/broker"/volume-*.json; do
   [[ -f $request ]] || continue
@@ -55,10 +57,14 @@ for request in "$GRAINS_ROOT/broker"/volume-*.json; do
     sudo -n -- "$HELPER" "$payload" >>"$run/volume-helper.log" 2>&1 || rc=1
   done
 done
+if [[ -d $GRAINS_ROOT/controller ]]; then
+  sudo -n -- "$installer" controller-remove "$STORE" "$HELPER" >>"$run/controller-cleanup.log" 2>&1 || rc=1
+fi
 if [[ -f /etc/mini-spk-volumes/$STORE.json ]]; then sudo -n -- "$installer" remove "$STORE" "$HELPER" >>"$run/root-cleanup.log" 2>&1 || rc=1; fi
 rm -f "$units/mini-spk-broker@$STORE.service"
 while read -r unit; do [[ -z $unit ]] || rm -f "$units/$unit"; done < <(find "$units" -maxdepth 1 -type f \( -name "*s$STORE*" -o -name "mini-spk-supervisor@$STORE-*.service" \) -printf '%f\n')
 systemctl --user daemon-reload
-[[ ! -e /etc/sudoers.d/mini-spk-$STORE && ! -e /etc/mini-spk-volumes/$STORE.json && ! -e $HELPER ]] || rc=1
+# The installer retains a shared helper while another registered world uses it.
+[[ ! -e /etc/sudoers.d/mini-spk-$STORE && ! -e /etc/mini-spk-volumes/$STORE.json && ! -e $GRAINS_ROOT ]] || rc=1
 printf 'WORLD DOWN store=%s removal_assertions=%s\n' "$STORE" "$rc" | tee -a "$run/result.log"
 exit $rc

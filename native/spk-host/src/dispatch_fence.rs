@@ -366,7 +366,7 @@ pub(crate) fn refused_before_submit(
 }
 
 /// `type reason` plus the UTF-8 of Lean's hex `detail`, clipped.
-fn refusal_words(view: &Value) -> String {
+pub(crate) fn refusal_words(view: &Value) -> String {
     let mut words = outcome_words(view);
     if let Some(detail) = view.get("detail").and_then(Value::as_str) {
         let bytes: Vec<u8> = (0..detail.len() / 2)

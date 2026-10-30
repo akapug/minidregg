@@ -394,10 +394,16 @@ def preparePaidVerified (config : Config) {target : Durable}
         (some fixed.fixed.purseObserve)] }
   let payer ← NativeHost.prepareLoaded config verified.opened
     (.invoke (DeclaredResourceController.commandCodec.encode command))
-  let some selection := ApplicationDispatchAdmission.selectCommand unsigned
-    | throw "lifetime paid app selector missing"
+  -- The source plan is still unsigned: selectCommand reads an assembled
+  -- signed command and therefore cannot select from this empty placeholder.
+  -- Use the same current-image coordinates as prepareForIssue above.
+  let selection : ApplicationDispatchCommand.Selection :=
+    ⟨sessionCell.payload.root, fixed.fixed.base.base.sessionObserveCapability⟩
   let appCommand := ApplicationDispatchCommand.command unsigned.dispatch selection
     unsigned.parent
+  if app.invocation.finalizedDraft !=
+      .invoke (DeclaredResourceController.commandCodec.encode appCommand) then
+    throw "lifetime paid app command differs from source plan"
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config verified.opened.durable⟩
     verified.opened.ground appCommand
