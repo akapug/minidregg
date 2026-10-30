@@ -33,7 +33,7 @@ gate; hot-path sends it, wire it into the gate).
 
 ## Main and candidates (2026-10-30 ~03:05 EDT)
 
-Main = staging = aa5a80b2a (= 41590f420 + infra 5f18b9f50 + its revert): everything below plus lane/apps-agents 06e6c30eb (native paid planner Lean, controller-world,
+Main = staging = 21a117df3 (= 41590f420 binaries + harness: infra df0ea4252 room-operations, 21a117df3 root hand-offs; 5f18b9f50 reverted): everything below plus lane/apps-agents 06e6c30eb (native paid planner Lean, controller-world,
 grain-runtime, spk-host, j14-apps green on hbox run 25), infra's residents fixes e365dd7e6 (current-height births,
 owner keeps its factory capability) and c3d17f136 (chat join for a member the roster already names), Firefly III, and
 the 20-pin fixture.
@@ -45,8 +45,11 @@ the 20-pin fixture.
 | 41590f420 | THE CANDIDATE. gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents stops at summon: the Hermes account birth refused PreparationReject.resourceBatch (batch admission, ResourceBirthController.lean:789); restart blocked |
 | 5f18b9f50 | infra's dedup of source capabilities: RED (kernel pairs capabilities 1:1 with operations, NativeHost.lean:353; scratch world could not provision). Reverted on main as aa5a80b2a |
 
-Infra (add189844d158e3a7) runs distinct composed on the forge container against 41590f420 until residents and restart
-pass, and sends fix shas. When those pass, the green candidate goes to infra for `demo-mini.sh ship` (rehearsal 3).
+Composed authority is infra's forge composed container (hbox has no root: residents needs a root custody chain, a key
+broker, a certifier). On it, distinct composed on 41590f420 reaches residents phase `cut` (balance read of the Hermes
+account that the tool workspace never imported); infra (add189844d158e3a7) is doing that import, then sends candidate +
+HARNESS rev. Members are funded 10000 in dregg-infra jworld-scratch.sh (the summon's resourceBatch refusal was the 1000
+default). hbox gate12 covers tour, j14-apps and flatness. When those pass, the green candidate goes to infra for `demo-mini.sh ship` (rehearsal 3).
 flatness-submit is reported, not blocking (root ruling; the ratchet preimage is ember's decision).
 
 Gate scripts: gate12.sh = gate10 + j14-apps row (inputs staged once: integ/j14-hroot, rebound per candidate by
