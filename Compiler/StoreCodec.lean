@@ -842,6 +842,24 @@ def rootOfLeavesWritten (leafList : List (List UInt8)) : Digest :=
 def rootPreimage (store : Store L) : List UInt8 :=
   frame W ++ (leaves W store).flatten
 
+/-- The current root hashes a flat sequence, not a Merkle path: exactly one
+32-byte leaf per entry, even for an unblinded store. This is a cost statement
+about the deployed preimage, not an impossibility claim about other commitments. -/
+theorem rootPreimage_length (store : Store L) :
+    (rootPreimage W store).length = 44 + 32 * (entries W store).length := by
+  have leaves_length (es : List (Entry L)) :
+      (es.map fun e => (opening W store e).leaf).flatten.length = 32 * es.length := by
+    induction es with
+    | nil => simp
+    | cons e es ih =>
+        simp only [List.map_cons, List.flatten_cons, List.length_append,
+          Opening.leaf_length, ih, List.length_cons]
+        omega
+  rw [rootPreimage, List.length_append, frame_length]
+  exact congrArg (44 + ·) (leaves_length (entries W store))
+
+#assert_axioms rootPreimage_length
+
 /-- **The cell root.** -/
 def saltedRoot (store : Store L) : Digest :=
   rootOfLeaves W (leaves W store)
