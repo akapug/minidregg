@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "hledger",
   "interfaceVersion": 1,
-  "appId": "8x12h6p0x0nrzk73hfq6zh2jxtgyzzcty7qsatkg7jfg2mzw5n90",
-  "packageId": "23321185cf7dd1ae7a74e5b7deb6caba",
-  "appVersion": "1.31",
+  "appId": "894fztp7d6e4u8fgw2qtm8jv904jw6w19frfqgc0pwytj0q10s80",
+  "packageId": "7c0c42cbc414380ded0f0f5c1e743e06",
+  "appVersion": "1.52.4",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 1048576,
@@ -51,7 +51,13 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "aprice": {
+                          "acost": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "acostbasis": {
                             "type": [
                               "object",
                               "null"
@@ -82,9 +88,6 @@
                               "decimalMantissa"
                             ],
                             "additionalProperties": false
-                          },
-                          "aismultiplier": {
-                            "type": "boolean"
                           },
                           "astyle": {
                             "type": "object",
@@ -137,10 +140,10 @@
                           }
                         },
                         "required": [
-                          "aprice",
+                          "acost",
+                          "acostbasis",
                           "acommodity",
                           "aquantity",
-                          "aismultiplier",
                           "astyle"
                         ],
                         "additionalProperties": false
@@ -383,7 +386,13 @@
                     "items": {
                       "type": "object",
                       "properties": {
-                        "aprice": {
+                        "acost": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "acostbasis": {
                           "type": [
                             "object",
                             "null"
@@ -414,9 +423,6 @@
                             "decimalMantissa"
                           ],
                           "additionalProperties": false
-                        },
-                        "aismultiplier": {
-                          "type": "boolean"
                         },
                         "astyle": {
                           "type": "object",
@@ -469,10 +475,10 @@
                         }
                       },
                       "required": [
-                        "aprice",
+                        "acost",
+                        "acostbasis",
                         "acommodity",
                         "aquantity",
-                        "aismultiplier",
                         "astyle"
                       ],
                       "additionalProperties": false
@@ -732,14 +738,14 @@
               "pstatus": "Unmarked",
               "pamount": [
                 {
-                  "aprice": null,
+                  "acost": null,
+                  "acostbasis": null,
                   "acommodity": "$",
                   "aquantity": {
                     "floatingPoint": 3,
                     "decimalPlaces": 2,
                     "decimalMantissa": 300
                   },
-                  "aismultiplier": false,
                   "astyle": {
                     "ascommodityside": "L",
                     "asdigitgroups": null,
@@ -764,14 +770,14 @@
               "pstatus": "Unmarked",
               "pamount": [
                 {
-                  "aprice": null,
+                  "acost": null,
+                  "acostbasis": null,
                   "acommodity": "$",
                   "aquantity": {
                     "floatingPoint": -3,
                     "decimalPlaces": 2,
                     "decimalMantissa": -300
                   },
-                  "aismultiplier": false,
                   "astyle": {
                     "ascommodityside": "L",
                     "asdigitgroups": null,
@@ -836,9 +842,10 @@
     "kind": "member-session"
   },
   "sources": [
-    "https://github.com/simonmichael/hledger/blob/1.31/hledger-web/Hledger/Web/Handler/AddR.hs",
-    "https://github.com/simonmichael/hledger/blob/1.31/hledger-web/Hledger/Web/Handler/MiscR.hs",
-    "https://github.com/simonmichael/hledger/blob/1.31/hledger-lib/Hledger/Data/Json.hs",
+    "https://github.com/hledgerorg/hledger/blob/1.52.4/hledger-web/Hledger/Web/Handler/AddR.hs",
+    "https://github.com/hledgerorg/hledger/blob/1.52.4/hledger-web/Hledger/Web/Handler/MiscR.hs",
+    "https://github.com/hledgerorg/hledger/blob/1.52.4/hledger-lib/Hledger/Data/Json.hs",
+    "apps/packages/hledger/sandstorm-pkgdef.capnp",
     "scripts/spk-platform/featured-qualify.sh"
   ],
   "$defs": {}

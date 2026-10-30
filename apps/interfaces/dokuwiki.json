@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "dokuwiki",
   "interfaceVersion": 1,
-  "appId": "nx3dqcmz2sjjz939vkg4847vvxrzqsatqfjrt3ea50z3jac5kv7h",
-  "packageId": "dda6d7e22e8e2566bdc804d8e3f9165f",
-  "appVersion": "2020-07-29~2020-08-31",
+  "appId": "f3c9rjszvmqgvnhan8c6m5cpwkqmwu6t6de0qxa8vnx0rqreafqh",
+  "packageId": "f6af420324fd459439330089819c9c27",
+  "appVersion": "2026-07-14c",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -61,7 +61,7 @@
   },
   "sources": [
     "https://github.com/johnbintz/dokuwiki-sandstorm",
-    "package:dda6d7e22e8e2566bdc804d8e3f9165f/opt/app/dokuwiki/conf.orig/dokuwiki.php",
-    "package:dda6d7e22e8e2566bdc804d8e3f9165f/opt/app/local.protected.php"
+    "package:f6af420324fd459439330089819c9c27/opt/app/dokuwiki/conf.orig/dokuwiki.php",
+    "package:f6af420324fd459439330089819c9c27/opt/app/local.protected.php"
   ]
 }

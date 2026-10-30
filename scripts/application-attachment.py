@@ -17,7 +17,14 @@ Input protocol: mini-application-attachment-v1. All paths are absolute.
   signers: [{keyId, keyEpoch, algorithm, keyPath, publicKeyPath}]
   sessionProfile: native allowedSessionFamilies profile, including genesis,
                   template, factory/payer selectors and grain tariff
-  names (optional): application, family, route, display, handle, serviceProtocol
+  names (optional): application, family, route, display, handle, serviceProtocol (null: none),
+         applicationFamily
+  route (optional): {"kind":"web","origin":"https://HOST"} binds a v4 web route for an app whose
+         package declares no api interface; the session kind is then web, the pins carry the route
+         and the agent-route registration names no signed API path.
+  typed (optional): {"alias","declarationSource","declarationSha256","packageId"} adds a typed
+         application attachment (toolTask.typedApplications) for this route instead of a service profile;
+         the declaration file is carried in the controller bundle (state/shared-app-refs).
 For a private controller home, paths.controllerHostConfigExport may select the
 root installer's controller-host-config-export snapshot instead of directly
 reading the controller's private Host metadata file.
@@ -149,8 +156,17 @@ class Attachment:
             for field in ("keyPath", "publicKeyPath"):
                 self.absolute(signer[field])
         self.names = {"application": "oracle-app", "family": "oracle-session", "route": "oracle-agent-v1",
-                      "display": "Oracle agent", "handle": "oracle-agent", "serviceProtocol": "oracle-operations-v1"}
+                      "display": "Oracle agent", "handle": "oracle-agent", "serviceProtocol": "oracle-operations-v1",
+                      "applicationFamily": "oracle"}
         self.names.update(c.get("names", {}))
+        self.web_route = c.get("route")
+        if self.web_route is not None and (set(self.web_route) != {"kind", "origin"} or self.web_route["kind"] != "web"
+                or not str(self.web_route["origin"]).startswith("https://")):
+            raise ValueError("route must be {kind: web, origin: https://HOST}")
+        self.session_kind = "web" if self.web_route else "api"
+        self.typed = c.get("typed")
+        if self.typed is not None and set(self.typed) != {"alias", "declarationSource", "declarationSha256", "packageId"}:
+            raise ValueError("typed attachment fields differ")
         # Names enter private artifact paths as well as native route selectors.
         for field in ("application", "family", "route", "handle"):
             name = self.names[field]
@@ -337,7 +353,7 @@ class Attachment:
         birth_name, ticket_name = prefix + "-birth.bin", prefix + "-bootstrap.bin"
         write(refs / birth_name, (birth / "call.bin").read_bytes())
         write(refs / ticket_name, (issue / "ingress.bin").read_bytes())
-        shared = {"name": self.bootstrap_name, "applicationFamily": "oracle",
+        shared = {"name": self.bootstrap_name, "applicationFamily": self.names["applicationFamily"],
                   "appTarget": app["app"], "manifestTarget": app["packageManifest"], "snapshotTarget": app["snapshotManifest"],
                   "ticketTarget": ticket["resource"], "appObserveCapability": caps["appObserve"],
                   "manifestObserveCapability": caps["manifestObserve"], "snapshotObserveCapability": caps["snapshotObserve"],
@@ -346,7 +362,7 @@ class Attachment:
                             "callSha256": sha(birth / "call.bin")},
                   "issue": {**read(issue / "receipt-anchor.json")["receipt"], "kind": "grainBackedEvent22",
                             "ingress": str(home / "state/shared-app-refs" / ticket_name), "ingressSha256": sha(issue / "ingress.bin")}}
-        family = {"name": self.names["family"], "applicationFamily": "oracle", "kind": "api",
+        family = {"name": self.names["family"], "applicationFamily": self.names["applicationFamily"], "kind": self.session_kind,
                   "participantSubject": a["controller"]["subject"], "profile": c["sessionProfile"],
                   "namespace": {"session": a["session"], "descriptor": a["descriptor"],
                        **{k + "Capability": caps[k] for k in ("sessionOwner", "sessionControl", "descriptorOwner", "descriptorControl")}},
@@ -517,7 +533,7 @@ class Attachment:
         package_version = next(e["value"] for e in entries if e["key"]["field"] == "2")
         package_dir = Path(self.application["packageDirectory"])
         schema = read(package_dir / "schema-inspection.json")
-        interface = next(i for i in read(package_dir / "descriptor-inspection.json")["interfaces"] if i["kind"] == "api")
+        interface = next(i for i in read(package_dir / "descriptor-inspection.json")["interfaces"] if i["kind"] == self.session_kind)
         launch_root = read(package_dir.parent / "launch-inspection.json")["root"]
         ceiling = {"basis": {"type": "role", "id": "0"}, "added": [], "removed": [],
                    "roleSchemaRoot": schema["root"], "roleVersion": schema["version"]}
@@ -525,7 +541,7 @@ class Attachment:
             "scope": {"app": app["app"], "packageVersion": package_version, "packageRoot": launch_root,
                       "interfaceId": interface["id"], "interfaceVersion": interface["version"],
                       "interfaceRoot": interface["root"], "schemaRoot": schema["root"], "schemaVersion": schema["version"]},
-            "participant": {"session": a["session"], "descriptorResource": a["descriptor"], "kind": "api",
+            "participant": {"session": a["session"], "descriptorResource": a["descriptor"], "kind": self.session_kind,
                             "subject": a["controller"]["subject"], "origin": {"type": "agent", "task": a["controller"]["task"], "generation": generation},
                             "sessionCapability": caps["sessionOwner"], "appObserveCapability": caps["controllerAppObserve"],
                             "ticketObserveCapability": caps["ticketObserve"]},
@@ -627,7 +643,8 @@ class Attachment:
         for signer in payer:
             del signer["seedPath"]
         pins = {"controllerRouteName": self.names["application"], "socketPath": layout["listenerSocket"],
-                "hostUid": os.getuid(), "hostUnit": None, "signedApiPath": "/",
+                "hostUid": os.getuid(), "hostUnit": None,
+                **({"route": self.web_route} if self.web_route else {"signedApiPath": "/"}),
                 "packageManifest": self.allocation["packageManifest"], "snapshotManifest": self.allocation["snapshotManifest"],
                 "sessionObserveCapability": caps["sessionOwner"], "manifestObserveCapability": caps["controllerManifestObserve"],
                 "enrollmentObserveCapability": caps["descriptorOwner"], "parentCapability": caps["parentOwner"],
@@ -641,7 +658,8 @@ class Attachment:
         self.call("render-custody", ["sh", repo / "scripts/spk-platform/prepare-lifetime-route.sh", *self.inspection_args(), "--custody-only",
             self.host, self.config, grant, lookups[-1], pins_file, route_dir, sha(self.host),
             self.allocation_path, a["route"]])
-        request = {"protocol": "mini-spk-grain-agent-route-v1", "name": self.names["route"], "signedApiPath": "/",
+        request = {"protocol": "mini-spk-grain-agent-route-v1", "name": self.names["route"],
+            "signedApiPath": "" if self.web_route else "/",
             "socket": layout["listenerSocket"], "controllerUid": layout["controllerUid"],
             "custody": str(route_dir / "resident-custody-v3.json"), "reverseSocket": layout["reverseSocket"],
             "routeName": self.names["application"], "displayName": self.names["display"], "preferredHandle": self.names["handle"],
@@ -754,7 +772,16 @@ class Attachment:
         route = read(routes / "controller-route-v3.json")
         route["grantAttemptDir"] = str(home / grant_relative)
         append_named(config["toolTask"], "allowedApplicationLifetimeRoutes", route)
-        append_named(config["toolTask"], "applicationServices", {"application": self.names["application"], "protocol": self.names["serviceProtocol"]}, "application")
+        if self.names["serviceProtocol"] is not None:
+            append_named(config["toolTask"], "applicationServices", {"application": self.names["application"], "protocol": self.names["serviceProtocol"]}, "application")
+        if self.typed is not None:
+            declaration = Path(self.typed["declarationSource"]).read_bytes()
+            relative = Path("state/shared-app-refs") / (self.typed["alias"] + ".declaration.json")
+            write(bundle / relative, declaration)
+            append_named(config["toolTask"], "typedApplications", {
+                "alias": self.typed["alias"], "declarationPath": str(home / relative),
+                "declarationSha256": self.typed["declarationSha256"], "packageId": self.typed["packageId"],
+                "routeName": self.names["application"]}, "alias")
         config["toolTask"]["lifetimeApiHostSha256"] = sha(self.host)
         self.validate_layout(layout, config)
         check_current("current-start-before-publication")

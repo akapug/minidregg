@@ -1,0 +1,7 @@
+base   sandstorm
+author Mini DokuWiki packagers
+email  noreply@localhost
+date   2026-10-29
+name   Sandstorm authentication
+desc   Authenticates the identity and permissions supplied by sandstorm-http-bridge
+url    https://github.com/johnbintz/dokuwiki-sandstorm
