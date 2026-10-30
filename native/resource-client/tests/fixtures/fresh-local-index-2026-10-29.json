@@ -137,6 +137,28 @@
    "webLink": "https://etherpad.org/"
   },
   {
+   "appId": "cd6fk64x5ndeem7ya2t3qfjkjsjjhts5y2eg54jpdy0g0whtwx40",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "office"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/firefly-iii/firefly-iii",
+   "isOpenSource": true,
+   "name": "Firefly III",
+   "packageBuiltAt": "2026-10-30T05:32:39Z",
+   "packageId": "e8736ff85465f96f0be83970708bdac8",
+   "sha256": "e8736ff85465f96f0be83970708bdac8ecb22c17a89bae7db0b96b597f42b5a6",
+   "shortDescription": "Personal finance manager",
+   "upstreamAuthor": "James Cole",
+   "upstreamVersion": "6.7.9-1",
+   "version": "6.7.9-1",
+   "versionNumber": 2,
+   "webLink": "https://www.firefly-iii.org"
+  },
+  {
    "appId": "3g05nj7mpryyd3a0erndy30my7fsr72s3xghnhewkqw7km08g34h",
    "author": {
     "name": "Mini"
