@@ -14,6 +14,7 @@ trusted history. Profile/clock changes require an explicit future migration.
 -/
 module
 
+public import Kernel.PersistentHistory
 public import Kernel.NativeHostContext
 public import Kernel.NativeHostServed
 public import Kernel.ObjectiveBendAuthenticatedInputs
@@ -3621,9 +3622,9 @@ structure Verified (config : Config) (target : Durable) where
   origin : Opened config
   opened : Opened config
   exactImage : opened.durable.image = target.image
-  receipts : List NativeHostCodec.Receipt
-  countExact : receipts.length = target.image.accepted.length
-  admitted : AdmittedReplay config origin target.image.accepted opened receipts
+  receiptHistory : PersistentHistory NativeHostCodec.Receipt
+  countExact : receiptHistory.size = target.image.accepted.length
+  admitted : AdmittedReplay config origin target.image.accepted opened receiptHistory.toList
   issues : List (PriorIssue config)
   reserves : List (PriorDispatchReserve config)
   begins : List (PriorBegin config)
@@ -3639,6 +3640,21 @@ structure Verified (config : Config) (target : Durable) where
   retry : RetryHistory config
   store : DurableHistory.StoreIdentity
   reader : DurableHistoryReader.Reader rootBytes store
+
+/-- The original chronological list, retained as the proof/export interface. -/
+def Verified.receipts {config : Config} {target : Durable}
+    (verified : Verified config target) : List NativeHostCodec.Receipt :=
+  verified.receiptHistory.toList
+
+/-- Operational receipt selection follows one persistent tree path. -/
+def Verified.receiptAt {config : Config} {target : Durable}
+    (verified : Verified config target) (index : Nat) : Option NativeHostCodec.Receipt :=
+  verified.receiptHistory.get? index
+
+theorem Verified.receiptAt_eq {config : Config} {target : Durable}
+    (verified : Verified config target) (index : Nat) :
+    verified.receiptAt index = verified.receipts[index]? :=
+  verified.receiptHistory.get?_eq index
 
 /-- Per-scope current frontier minted by this exact admitted-history walk.
 Ambiguous historical v1 progress refuses new ordered progress for that scope. -/
@@ -3932,7 +3948,7 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
     congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable readback.validated)
   have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
     simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append,
-      old.countExact, ← old.image_exact]
+      Verified.receipts, PersistentHistory.length_toList, old.countExact, ← old.image_exact]
   have admitted : AdmittedReplay config old.origin target.image.accepted
       readback.after (old.receipts ++ [receipt]) := by
     rw [show target.image.accepted = old.opened.durable.image.accepted ++ [record] by
@@ -3966,8 +3982,10 @@ def extendExact {config : Config} {store : DurableHistory.StoreIdentity}
     | .ok next => next
     | .error _ => { old.frontier with fault := true }
   let releases := selectedReleaseAfter config readback.after old.releases record receipt
-  exact ⟨old.origin, readback.after, exactImage, old.receipts ++ [receipt], countExact,
-    admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
+  exact ⟨old.origin, readback.after, exactImage, old.receiptHistory.push receipt,
+    by simpa only [List.length_append, List.length_singleton, Verified.receipts,
+      PersistentHistory.length_toList, PersistentHistory.size_push] using countExact,
+    by simpa only [PersistentHistory.toList_push] using admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
     beginsV3, claimsV3, createdV3, runningV3, grants, retry, _, reader⟩
 
 /-- Exact readback keeps the original accepted-prefix receipt, even when a
@@ -3979,7 +3997,7 @@ theorem extendExact_receipts {config : Config} {store : DurableHistory.StoreIden
       [⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
         (exactCandidate old readback.derived readback.ready readback.tag).worldRoot⟩] := by
-  rfl
+  exact PersistentHistory.toList_push old.receiptHistory _
 
 /-- The physically read-back entry is exactly this admitted intent's record. -/
 theorem extendExact_physicalRecord {config : Config} {oldTarget : Durable}
@@ -4112,8 +4130,9 @@ def verifyLoaded (config : Config) {store : DurableHistory.StoreIdentity}
           genesisWalk_image (initialValue.property.symm.trans initialLoaded)
             (validateLoaded_durable (openedValue.property.symm.trans openedValidated)) walked.trace
         if countExact : walked.receipts.length = target.height then
-          return .ok ⟨opened, walked.final, exactImage, walked.receipts,
-            countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
+          return .ok ⟨opened, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
+            by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact,
+            by simpa only [PersistentHistory.toList_ofList] using walked.trace, walked.issues, walked.reserves, walked.begins,
             walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
             walked.beginsV3, walked.claimsV3, walked.createdV3,
             walked.runningV3, walked.grants, walked.retry, _, reader⟩
@@ -4193,12 +4212,19 @@ def verifyLoadedSelected (config : Config) {store : DurableHistory.StoreIdentity
           | some selected =>
             if indexExact : selected.priorRecords.length = index then
               let verified : Verified config target :=
-                ⟨opened, walked.final, exactImage, walked.receipts,
-                  countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
+                ⟨opened, walked.final, exactImage, PersistentHistory.ofList walked.receipts,
+                  by simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact,
+                  by simpa only [PersistentHistory.toList_ofList] using walked.trace, walked.issues, walked.reserves, walked.begins,
                   walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
                   walked.beginsV3, walked.claimsV3, walked.createdV3,
                   walked.runningV3, walked.grants, walked.retry, _, reader⟩
-              return .ok ⟨verified, selected, indexExact⟩
+              let selection : {s : SelectedStep config verified.origin verified.opened
+                  target.image.accepted verified.receipts // s.priorRecords.length = index} := by
+                change {s : SelectedStep config opened walked.final target.image.accepted
+                  (PersistentHistory.ofList walked.receipts).toList // s.priorRecords.length = index}
+                rw [PersistentHistory.toList_ofList]
+                exact ⟨selected, indexExact⟩
+              return .ok ⟨verified, selection.val, selection.property⟩
             else return .error ⟨index, "selected native checkpoint index mismatch"⟩
         else return .error ⟨target.height, "verified history count mismatch"⟩
 
@@ -4236,13 +4262,19 @@ def extendVerifiedAppended (config : Config) {store : DurableHistory.StoreIdenti
   | .ok walked =>
     have exactImage : walked.final.durable.image = target.image :=
       appendedWalk_image old.exactImage seedExact acceptedExact walked.trace
-    let receipts := old.receipts ++ walked.receipts
-    if countExact : receipts.length = target.height then
+    let receipts := old.receiptHistory.append walked.receipts
+    have receiptList : receipts.toList = old.receipts ++ walked.receipts :=
+      PersistentHistory.toList_append _ _
+    if countExact : oldTarget.height + walked.receipts.length = target.height then
+      have receiptCount : receipts.size = target.image.accepted.length := by
+        rw [← PersistentHistory.length_toList, receiptList, List.length_append,
+          Verified.receipts, PersistentHistory.length_toList, old.countExact]
+        exact countExact
       have admitted : AdmittedReplay config old.origin target.image.accepted
-          walked.final receipts := by
-        rw [acceptedExact]
+          walked.final receipts.toList := by
+        rw [receiptList, acceptedExact]
         exact old.admitted.append walked.trace
-      return .ok ⟨old.origin, walked.final, exactImage, receipts, countExact,
+      return .ok ⟨old.origin, walked.final, exactImage, receipts, receiptCount,
         admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
         walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
         walked.createdV3, walked.runningV3, walked.grants, walked.retry, _, reader⟩
@@ -4648,11 +4680,11 @@ structure SuffixVerified (config : Config) (anchor : Opened config) (target : Du
     anchor.durable.image.accepted
   logStartExact : target.logStart = anchor.durable.logStart
   openedLogStartExact : opened.durable.logStart = target.logStart
-  receipts : List NativeHostCodec.Receipt
-  countExact : receipts.length =
+  receiptHistory : PersistentHistory NativeHostCodec.Receipt
+  countExact : receiptHistory.size =
     (target.image.accepted.drop anchor.durable.image.accepted.length).length
   admitted : AdmittedSuffix config anchor
-    (target.image.accepted.drop anchor.durable.image.accepted.length) opened receipts
+    (target.image.accepted.drop anchor.durable.image.accepted.length) opened receiptHistory.toList
   issues : List (PriorIssue config)
   reserves : List (PriorDispatchReserve config)
   begins : List (PriorBegin config)
@@ -4669,6 +4701,10 @@ structure SuffixVerified (config : Config) (anchor : Opened config) (target : Du
   store : DurableHistory.StoreIdentity
   reader : DurableHistoryReader.Reader rootBytes store
 
+def SuffixVerified.receipts {config : Config} {anchor : Opened config} {target : Durable}
+    (verified : SuffixVerified config anchor target) : List NativeHostCodec.Receipt :=
+  verified.receiptHistory.toList
+
 /-- Global accepted-record index in, original target-segment receipt out.
 The anchor and all earlier records must be selected through their own segment.
 In particular this never recomputes an old receipt under target semantics. -/
@@ -4676,7 +4712,7 @@ def SuffixVerified.receiptAt {config : Config} {anchor : Opened config} {target 
     (verified : SuffixVerified config anchor target) (index : Nat) :
     Option NativeHostCodec.Receipt :=
   if anchor.durable.height ≤ index then
-    verified.receipts[index - anchor.durable.height]?
+    verified.receiptHistory.get? (index - anchor.durable.height)
   else none
 
 theorem SuffixVerified.receiptAt_before_anchor {config : Config}
@@ -4750,9 +4786,10 @@ def verifySuffixFrom (config : Config) (anchor : Opened config) {store : Durable
             prefixExact := prefixExact
             logStartExact := logStartExact
             openedLogStartExact := openedLogStartExact
-            receipts := walked.receipts
-            countExact := countExact
-            admitted := walked.trace
+            receiptHistory := PersistentHistory.ofList walked.receipts
+            countExact := by
+              simpa only [← PersistentHistory.length_toList, PersistentHistory.toList_ofList] using countExact
+            admitted := by simpa only [PersistentHistory.toList_ofList] using walked.trace
             issues := walked.context.issues
             reserves := walked.context.reserves
             begins := walked.context.begins
@@ -4841,9 +4878,16 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
     have exactImage : walked.final.durable.image = target.image :=
       appendedSuffixWalk_image old.exactImage sameSeed acceptedExact walked.trace
     if openedLogStartExact : walked.final.durable.logStart = target.logStart then
-      let receipts := old.receipts ++ walked.receipts
-      if countExact : receipts.length =
-          (target.image.accepted.drop anchor.durable.height).length then
+      let receipts := old.receiptHistory.append walked.receipts
+      have receiptList : receipts.toList = old.receipts ++ walked.receipts :=
+        PersistentHistory.toList_append _ _
+      if countExact : oldTarget.height - anchor.durable.height + walked.receipts.length =
+          target.height - anchor.durable.height then
+        have receiptCount : receipts.size =
+            (target.image.accepted.drop anchor.durable.image.accepted.length).length := by
+          rw [← PersistentHistory.length_toList, receiptList, List.length_append,
+            SuffixVerified.receipts, PersistentHistory.length_toList, old.countExact]
+          simpa only [List.length_drop, DurableReceiverIO.Loaded.height_eq] using countExact
         have anchorPrefix : target.image.accepted.take anchor.durable.image.accepted.length =
             anchor.durable.image.accepted := by
           rw [acceptedExact, List.take_append_of_le_length old.anchorWithin]
@@ -4853,8 +4897,8 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
           rw [acceptedExact, List.drop_append_of_le_length old.anchorWithin]
         have admitted : AdmittedSuffix config anchor
             (target.image.accepted.drop anchor.durable.image.accepted.length)
-            walked.final receipts := by
-          rw [suffixExact]
+            walked.final receipts.toList := by
+          rw [receiptList, suffixExact]
           exact old.admitted.append walked.trace
         return .ok
           { origin := old.origin
@@ -4865,8 +4909,8 @@ def extendSuffixAppended (config : Config) {store : DurableHistory.StoreIdentity
             prefixExact := anchorPrefix
             logStartExact := sameLogStart.trans old.logStartExact
             openedLogStartExact := openedLogStartExact
-            receipts := receipts
-            countExact := countExact
+            receiptHistory := receipts
+            countExact := receiptCount
             admitted := admitted
             issues := walked.context.issues
             reserves := walked.context.reserves

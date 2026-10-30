@@ -178,7 +178,7 @@ theorem Committed.receipt_admitted_suffix {config : Config} {anchor : Opened con
   unfold NativeHostReplay.SuffixVerified.receiptAt at exact
   rw [DurableReceiverIO.Loaded.height_eq anchor.durable] at exact
   by_cases within : anchor.durable.image.accepted.length ≤ committed.old.opened.durable.height
-  · rw [if_pos within] at exact
+  · rw [if_pos within, PersistentHistory.get?_eq] at exact
     exact ⟨within, exact, committed.verified.accepted_suffix⟩
   · rw [if_neg within] at exact
     cases exact
