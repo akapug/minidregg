@@ -53,7 +53,7 @@ mixed-version compatibility. `Verify.GenericSimplexJumpControls` contains finite
 field-level selection/successor/deadline/lock/quorum controls for source mutation
 checks; full-state finite equality is not the safety argument.
 
-On a Fabric snapshot, run `lake build SimplexQualification
+On a Fabric snapshot, run `scripts/build-mini-kernels.sh`, then `lake build SimplexQualification
 Verify.GenericSimplexJumpControls Compiler.QualificationReport`, followed by `python3 -I
 scripts/check-simplex-jump.py claims` to verify the nonempty elaborated theorem
 statements and standard-only axiom footprints. `python3 -I
