@@ -919,6 +919,9 @@ fn finish_result(op: &str, result: &Value) -> Result<()> {
 pub(crate) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> {
     let op = os_string(args.required("op")?, "connector operation")?;
     let id = os_string(args.required("id")?, "connector identity")?;
+    // The nested proposal/submit calls print their own native outcome; this command's one stdout document is the
+    // operation result below (a caller parses exactly one JSON object).
+    let quiet = super::app_lifecycle::QuietReplies(crate::QUIET_WORKER.swap(true, std::sync::atomic::Ordering::Relaxed));
     let result = match op.as_str() {
         "capture" => {
             let binding = bounded_json(&path(args.required("binding")?))?;
@@ -944,6 +947,7 @@ pub(crate) fn run(root: &Path, workspace: &Value, mut args: Args) -> Result<()> 
         }
         _ => return Err("connector op is capture, publish, status, recover or rebase".into()),
     };
+    drop(quiet);
     finish_result(&op, &result)
 }
 
