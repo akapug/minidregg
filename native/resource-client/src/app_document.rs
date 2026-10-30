@@ -449,14 +449,26 @@ fn export_tls_config(ca: Option<&str>) -> std::result::Result<rustls::ClientConf
         .with_no_client_auth())
 }
 
-/// The whole response, read to the server's close, within the bound and the deadline.
+/// The response, read until its framing is complete (Content-Length met, the chunked terminator
+/// and trailer section seen) or, for a close-delimited body, to the server's close; within the
+/// bound and the deadline. Resolution, every connect, the handshake, the request and each read
+/// draw on the one deadline. A status of 400 or more ends the exchange as soon as the head is in.
 fn export_exchange(target: &ExportTarget, ca: Option<&str>, request: &[u8], deadline: Instant) -> std::result::Result<Vec<u8>, String> {
     use std::io::{Read, Write};
+    let remaining = || deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()).ok_or_else(|| "deadline".to_owned());
     let config = export_tls_config(ca)?;
+    let addresses = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let lookup = ExportTarget { host: target.host.clone(), port: target.port, authority: String::new(), path: String::new() };
+        std::thread::spawn(move || {
+            let _ = tx.send(lookup.addresses());
+        });
+        rx.recv_timeout(remaining()?.min(Duration::from_secs(10))).map_err(|_| "resolve: deadline".to_owned())??
+    };
     let mut tcp = None;
     let mut last = String::from("no address");
-    for addr in target.addresses()? {
-        match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(10)) {
+    for addr in addresses {
+        match std::net::TcpStream::connect_timeout(&addr, remaining()?.min(Duration::from_secs(10))) {
             Ok(stream) => {
                 tcp = Some(stream);
                 break;
@@ -468,16 +480,23 @@ fn export_exchange(target: &ExportTarget, ca: Option<&str>, request: &[u8], dead
     let name = rustls::pki_types::ServerName::try_from(target.host.clone()).map_err(|e| format!("server name: {e}"))?;
     let connection = rustls::ClientConnection::new(std::sync::Arc::new(config), name).map_err(|e| format!("TLS: {e}"))?;
     let mut tls = rustls::StreamOwned::new(connection, tcp);
-    let remaining = |deadline: Instant| deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()).ok_or_else(|| "deadline".to_owned());
-    let left = remaining(deadline)?;
-    tls.sock.set_write_timeout(Some(left)).map_err(|e| e.to_string())?;
-    tls.sock.set_read_timeout(Some(left)).map_err(|e| e.to_string())?;
+    let arm = |sock: &std::net::TcpStream| -> std::result::Result<(), String> {
+        let left = remaining()?;
+        sock.set_read_timeout(Some(left)).and_then(|_| sock.set_write_timeout(Some(left))).map_err(|e| e.to_string())
+    };
+    while tls.conn.is_handshaking() {
+        arm(&tls.sock)?;
+        tls.conn.complete_io(&mut tls.sock).map_err(|e| format!("TLS/handshake: {e}"))?;
+    }
+    arm(&tls.sock)?;
     tls.write_all(request).and_then(|_| tls.flush()).map_err(|e| format!("TLS/send: {e}"))?;
-    let bound = MAX_EXPORT + 64 * 1024 + 16 * 1024;
+    // Chunk framing can exceed the decoded body several times over; the decoded body is bounded
+    // again by split_export_response.
+    let bound = 64 * 1024 + 4 * MAX_EXPORT;
     let mut raw = Zeroizing::new(Vec::new());
     let mut chunk = [0u8; 16 * 1024];
     loop {
-        tls.sock.set_read_timeout(Some(remaining(deadline)?)).map_err(|e| e.to_string())?;
+        arm(&tls.sock)?;
         match tls.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
@@ -485,52 +504,95 @@ fn export_exchange(target: &ExportTarget, ca: Option<&str>, request: &[u8], dead
                 if raw.len() > bound {
                     return Err("export response exceeds bound".into());
                 }
+                if let Some(code) = export_status(&raw) {
+                    if code >= 400 {
+                        return Err(format!("http={code}"));
+                    }
+                    if export_framed(&raw) && split_export_response(&raw).is_ok() {
+                        break;
+                    }
+                }
             }
-            // A server that closes without close_notify after a fully framed message is accepted
-            // below (split_export_response checks the framing); anything else is incomplete.
+            // A server that closes without close_notify: split_export_response checks the framing.
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(format!("TLS/receive: {e}")),
         }
     }
-    let status = raw.get(9..12).and_then(|s| std::str::from_utf8(s).ok()).and_then(|s| s.parse::<u16>().ok());
-    match status {
+    match export_status(&raw) {
         Some(code) if code >= 400 => Err(format!("http={code}")),
         Some(_) => Ok(std::mem::take(&mut *raw)),
-        None => Err("no HTTP status".into()),
+        None => Err("no complete HTTP head".into()),
     }
 }
 
-/// Head (through the blank line) and the body as delivered: chunked framing is decoded, a
-/// Content-Length must be met exactly, otherwise the body runs to the close.
+/// The status once the whole head has arrived.
+fn export_status(raw: &[u8]) -> Option<u16> {
+    raw.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let line = raw.split(|b| *b == b'\r').next()?;
+    let line = std::str::from_utf8(line).ok()?;
+    let mut parts = line.splitn(3, ' ');
+    if parts.next()? != "HTTP/1.1" {
+        return None;
+    }
+    parts.next()?.parse().ok()
+}
+
+/// Whether the body is length- or chunk-delimited (else it runs to the close).
+fn export_framed(raw: &[u8]) -> bool {
+    let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else { return false };
+    let head = String::from_utf8_lossy(&raw[..end]).to_ascii_lowercase();
+    head.split("\r\n").skip(1).any(|l| l.starts_with("content-length:") || l.starts_with("transfer-encoding:"))
+}
+
+/// Head (through the blank line) and the body as delivered: chunked framing is decoded (the
+/// terminal chunk and its trailer section are required), a Content-Length must be met exactly,
+/// otherwise the body runs to the close. Head within 64 KiB, body within MAX_EXPORT.
 fn split_export_response(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     let end = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("export response framing missing")?;
+    if end + 4 > 64 * 1024 {
+        return Err("export exceeds connector bounds".into());
+    }
     let head = raw[..end + 4].to_vec();
     let rest = &raw[end + 4..];
     let text = std::str::from_utf8(&head).map_err(|_| "export headers are not text")?;
     let field = |name: &str| {
         text.split("\r\n").skip(1).filter_map(|l| l.split_once(':')).find(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_owned())
     };
-    if field("transfer-encoding").is_some_and(|v| v.eq_ignore_ascii_case("chunked")) {
+    if let Some(coding) = field("transfer-encoding") {
+        // Accept-Encoding: identity was asked; chunked is the only transfer coding accepted.
+        if !coding.eq_ignore_ascii_case("chunked") {
+            return Err("export transfer coding is not chunked alone".into());
+        }
         let mut body = Vec::new();
-        let mut at = 0;
+        let mut at = 0usize;
         loop {
-            let line_end = rest[at..].windows(2).position(|w| w == b"\r\n").ok_or("export chunk framing incomplete")? + at;
+            let line_end = rest.get(at..).and_then(|r| r.windows(2).position(|w| w == b"\r\n")).ok_or("export chunk framing incomplete")? + at;
             let size_text = std::str::from_utf8(&rest[at..line_end]).map_err(|_| "export chunk size is not text")?;
             let size = usize::from_str_radix(size_text.split(';').next().unwrap_or("").trim(), 16).map_err(|_| "export chunk size is malformed")?;
             at = line_end + 2;
             if size == 0 {
-                return Ok((head, body));
-            }
-            if rest.len() < at + size + 2 || &rest[at + size..at + size + 2] != b"\r\n" {
+                // The trailer section: header lines up to an empty line.
+                let tail = rest.get(at..).ok_or("export chunk framing incomplete")?;
+                if tail.starts_with(b"\r\n") || tail.windows(4).any(|w| w == b"\r\n\r\n") {
+                    return Ok((head, body));
+                }
                 return Err("export chunk framing incomplete".into());
             }
-            body.extend_from_slice(&rest[at..at + size]);
-            if body.len() > MAX_EXPORT {
+            if size > MAX_EXPORT - body.len().min(MAX_EXPORT) {
                 return Err("export exceeds connector bounds".into());
             }
-            at += size + 2;
+            let data_end = at.checked_add(size).ok_or("export chunk size overflows")?;
+            let crlf_end = data_end.checked_add(2).ok_or("export chunk size overflows")?;
+            if rest.len() < crlf_end || &rest[data_end..crlf_end] != b"\r\n" {
+                return Err("export chunk framing incomplete".into());
+            }
+            body.extend_from_slice(&rest[at..data_end]);
+            at = crlf_end;
         }
+    }
+    if rest.len() > MAX_EXPORT {
+        return Err("export exceeds connector bounds".into());
     }
     if let Some(length) = field("content-length") {
         let length: usize = length.parse().map_err(|_| "export Content-Length is malformed")?;
@@ -953,6 +1015,11 @@ mod tests {
         assert!(split_export_response(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nabc").is_err());
         assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab").is_err());
         assert_eq!(split_export_response(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc").unwrap().1, b"abc");
+        // A peer-chosen chunk size near usize::MAX is refused, never an overflow or a panic.
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nffffffffffffffff\r\nab\r\n0\r\n\r\n").is_err());
+        // The terminal chunk without its trailer section's blank line is incomplete.
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nab\r\n0\r\n").is_err());
+        assert!(split_export_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n").is_err());
     }
 
     #[test]
