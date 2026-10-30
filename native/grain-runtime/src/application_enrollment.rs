@@ -198,6 +198,7 @@ fn array<'a>(value: &'a Value, field: &str) -> Result<&'a [Value]> {
         None if matches!(
             field,
             "registeredSharedApplications"
+                | "typedApplications"
                 | "applicationServices"
                 | "allowedApplicationLifetimeRoutes"
         ) =>
@@ -262,6 +263,7 @@ fn permitted(old: &Config, new: &Config, j: &Journal, mode: &str) -> Result<()> 
             let bv = Value::Object(bt.clone());
             let refs = append(&av, &bv, "registeredSharedApplications")?;
             let profiles = append(&av, &bv, "applicationServices")?;
+            let typed = append(&av, &bv, "typedApplications")?;
             let old_routes = array(&av, "allowedApplicationLifetimeRoutes")?;
             let new_routes = array(&bv, "allowedApplicationLifetimeRoutes")?;
             if new_routes.len() < old_routes.len() || new_routes.len() > old_routes.len() + 1 {
@@ -285,15 +287,16 @@ fn permitted(old: &Config, new: &Config, j: &Journal, mode: &str) -> Result<()> 
                 }
             }
             if new_routes.len() == old_routes.len() + 1 {
-                if refs.len() != 1 || profiles.len() != 1 || refreshed != 0 {
+                if refs.len() != 1 || profiles.len() + typed.len() != 1 || refreshed != 0 {
                     return Err(
-                        "new route requires one matching application reference and service".into(),
+                        "new route requires one matching application reference and service or typed attachment".into(),
                     );
                 }
                 let route = new_routes.last().unwrap();
                 let reference = &refs[0];
                 if route["name"] != reference["name"]
-                    || profiles[0]["application"] != route["name"]
+                    || profiles.first().is_some_and(|profile| profile["application"] != route["name"])
+                    || typed.first().is_some_and(|attachment| attachment["routeName"] != route["name"])
                     || route["appResource"] != reference["appTarget"]
                     || route["ticketResource"] != reference["ticketTarget"]
                     || route["dispatchSelectors"]["packageManifest"] != reference["manifestTarget"]
@@ -307,7 +310,7 @@ fn permitted(old: &Config, new: &Config, j: &Journal, mode: &str) -> Result<()> 
                 {
                     return Err("enrollment application reference, route and service do not share exact lineage".into());
                 }
-            } else if !refs.is_empty() || !profiles.is_empty() || refreshed != 1 {
+            } else if !refs.is_empty() || !profiles.is_empty() || !typed.is_empty() || refreshed != 1 {
                 return Err("existing enrollment may refresh exactly one host unit only".into());
             }
             if av["lifetimeApiHostSha256"] != bv["lifetimeApiHostSha256"]
@@ -319,6 +322,7 @@ fn permitted(old: &Config, new: &Config, j: &Journal, mode: &str) -> Result<()> 
                 "registeredSharedApplications",
                 "allowedApplicationLifetimeRoutes",
                 "applicationServices",
+                "typedApplications",
                 "lifetimeApiHostSha256",
             ] {
                 at.remove(field);

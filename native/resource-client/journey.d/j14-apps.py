@@ -13,7 +13,7 @@ J14_APPS_UNTIL names the last phase to run (world, prepare_platform, prepare_app
 worker, room, attach, probe). Extra env: J14_APPS_DECLARATION (apps/interfaces/davros.json),
 J14_APPS_MODEL, J14_APPS_POOL_KEY.
 """
-import fcntl, hashlib, importlib.util, json, os, shutil, sys, time
+import base64, hashlib, http.client, importlib.util, json, os, shutil, socket, sys, time
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('j14_oracle',HERE/'j14-oracle.py')
@@ -26,6 +26,8 @@ def declaration_digest(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 class Apps(m.Journey):
+    PROVIDER_FIXTURE=False
+    DATA_PUBLICATION=False
     MODEL=os.environ.get('J14_APPS_MODEL','anthropic/claude-sonnet-4.5')
     MAX_INPUT=65536
     MAX_OUTPUT=2048
@@ -36,6 +38,67 @@ class Apps(m.Journey):
         self.declaration=read(self.declaration_path)
         self.alias='dav'
         self.c['sizeClass']='M'
+        self.c['expectedHost']='dav-j14.localhost'
+
+    def run(self,label,args,**kwargs):
+        if label=='world':args=['flock','-o','/tank/lanes/world-up.lock',*args]
+        return super().run(label,args,**kwargs)
+
+    def fixed(self,verb,*args,**kwargs):
+        if verb=='controller-export' and not args:args=('application',)
+        return super().fixed(verb,*args,**kwargs)
+
+    def application_input(self):
+        value=super().application_input()
+        human=dict(value['delegates']['bootstrap'])
+        for key in human:
+            if key not in ('subject','sessionKind','expectedHost'):
+                human[key]=str(int(human[key])+1000)
+        human['sessionKind']='web'
+        value['delegates']['human']=human
+        return value
+
+    def cleanup(self):
+        # Stop our controller and public listener before removing the world;
+        # the shared driver then closes its remaining child processes.
+        try:
+            recoveries=list(self.root.glob('broker-*/recovery.json'))
+            if recoveries:
+                if self.controller:self.fixed('controller-stop',timeout=120)
+                for daemon in self.daemons:
+                    if 'serve-public-proxy' in daemon['argv']:
+                        for process in self.processes:
+                            if process.pid==daemon['pid'] and process.poll() is None:
+                                process.terminate();process.wait(timeout=30)
+                teardown=self.root/'teardown';(teardown/'broker-setup').mkdir(parents=True,exist_ok=True)
+                if len(recoveries)!=1:raise ValueError('expected one world recovery locator')
+                shutil.copyfile(recoveries[0],teardown/'broker-setup/recovery.json')
+                self.run('world-down',[m.REPO/'scripts/spk-platform/world-down.sh',teardown])
+                self.controller=False
+        finally:super().cleanup()
+
+    def human_read(self,marker):
+        spec=importlib.util.spec_from_file_location('apps_fixture',m.REPO/'scripts/spk-platform/ws-continuity-fixture.py')
+        fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+        x=fixture.Fixture(read(self.c['preparedApplication'])['fixture'])
+        human=x.f['delegates']['human']
+        x.step('member:human:enrollment',lambda:x.enroll(human))
+        endpoint=human['endpoint']
+        connection=http.client.HTTPConnection(endpoint['host'],timeout=120)
+        connection.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        connection.sock.settimeout(120);connection.sock.connect(endpoint['unix_socket'])
+        try:
+            connection.request('GET','/dav/notes.txt',headers={
+                'Host':endpoint['host'],'Origin':'https://'+endpoint['host'],
+                'Cookie':'__Host-mini_spk_session='+Path(endpoint['token']).read_text().strip()})
+            response=connection.getresponse();body=response.read(1048577)
+            if response.status!=200 or body!=marker.encode():
+                raise ValueError('human web route did not read the exact agent-written file (HTTP %s)'%response.status)
+        finally:connection.close()
+        evidence={'status':response.status,'bodySha256':hashlib.sha256(body).hexdigest(),
+                  'session':human['session'],'subject':human['subject'],'app':x.app,'path':'/dav/notes.txt'}
+        write(self.root/'human-read.json',evidence)
+        return evidence
 
     # ---- provider: the operator's pool row, the real model -------------------------------------
     def start_provider(self,port):
@@ -97,25 +160,71 @@ class Apps(m.Journey):
         history=journal.get('applicationApiHistory') or []
         return [a for a in history if a.get('routeName')=='dav-app' or a.get('route_name')=='dav-app']
 
+    def provider_tool_results(self,exported):
+        results={}
+        for path,record in exported['files'].items():
+            if not path.endswith('.controller-request'):continue
+            data=base64.b64decode(record['base64'],validate=True)
+            if hashlib.sha256(data).hexdigest()!=record['sha256']:raise ValueError('provider evidence digest differs')
+            request=json.loads(data);calls={}
+            for message in request.get('messages',[]):
+                for call in message.get('tool_calls',[]):
+                    calls[call['id']]=call['function']
+                if message.get('role')=='tool' and message.get('tool_call_id') in calls:
+                    call=calls[message['tool_call_id']]
+                    if 'mini_app_dav_' in call.get('name',''):
+                        results[message['tool_call_id']]={'providerRequest':path,'requestSha256':record['sha256'],
+                            'call':call,'content':message.get('content')}
+        return list(results.values())
+
+    def dispatch_evidence(self,attempts,exported):
+        state=Path(self.c['controllerRoot'])/'state';observed=set()
+        for attempt in attempts:
+            if attempt.get('phase')!='definite' or not attempt.get('lifetimeCommittedReceipt') or not attempt.get('lifetimeSettlement'):
+                raise ValueError('Davros call lacks definite admission and settlement receipts')
+            documents=[]
+            for field in ('request','reply'):
+                path=str(Path(attempt[field+'Path']).relative_to(state));record=exported['files'][path]
+                payload=base64.b64decode(record['base64'],validate=True)
+                if hashlib.sha256(payload).hexdigest()!=attempt[field+'Sha256']:raise ValueError('dispatch evidence digest differs')
+                documents.append(json.loads(payload))
+            request,reply=documents
+            if reply.get('type')!='http-v3' or reply.get('status') not in (200,201,204):
+                raise ValueError('Davros dispatch did not complete with a successful HTTP receipt')
+            observed.add((request.get('method'),request.get('path')))
+        if not {('PUT','dav/notes.txt'),('GET','dav/notes.txt')}<=observed:
+            raise ValueError('receipts do not contain both the requested put and get: '+repr(observed))
+
     def probe(self):
-        marker='Hermes was here %s'%self.root.name
+        marker='Hermes was here %s'%self.broker['store']
         refused=self.task_turn('refused','Use your hosted Davros tool mini_app_dav_file_put_text to save the text "x" at path refused.txt, '
             'then tell me the exact outcome you received, including any refusal name.')
         write(self.root/'refused-replies.json',refused)
         if not any('typed-apps-not-granted' in r.get('text','') for r in refused):
             raise ValueError('the ungranted task did not meet the named refusal typed-apps-not-granted')
+        exported=read(self.fixed('controller-export'))
+        results=self.provider_tool_results(exported)
+        write(self.root/'refused-tool-results.json',results)
+        if not any('mini_app_dav_file_put_text' in r['call']['name'] and
+                   'typed-apps-not-granted' in json.dumps(r['content']) for r in results):
+            raise ValueError('no actual refused Davros tool result was returned to the provider')
         if self.application_attempts():raise ValueError('a refused task reached the application API')
         self.shell('alice','tariff lab set hermes/tools 16')
         done=self.task_turn('granted','Use your hosted Davros tools in this one task. First call mini_app_dav_file_put_text to save the text "%s" '
             'at path notes.txt, then call mini_app_dav_file_get_text for notes.txt and tell me the exact content you read back.'%marker)
         write(self.root/'granted-replies.json',done)
-        if not any(marker in r.get('text','') for r in done):raise ValueError('the reply does not carry the read-back content')
+        self.fixed('controller-service-logs')
+        exported=read(self.fixed('controller-export'))
+        write(self.root/'granted-tool-results.json',self.provider_tool_results(exported))
         attempts=self.application_attempts()
         write(self.root/'application-attempts.json',attempts)
+        if not any(marker in r.get('text','') for r in done):raise ValueError('the reply does not carry the read-back content')
         if len(attempts)<2:raise ValueError('expected a put and a get dispatch on the Davros route, saw %d'%len(attempts))
+        self.dispatch_evidence(attempts,exported)
+        human=self.human_read(marker)
         write(self.root/'result.json',{'protocol':'mini-j14-apps-result-v1','passed':True,'marker':marker,'store':self.broker['store'],
-            'rows':['same-store-provision','typed-attachment','room-refusal-by-name','put-and-get-through-mini'],
-            'browserRead':'not yet'})
+            'rows':['same-store-provision','typed-attachment','room-refusal-by-name','put-and-get-through-mini','human-read-same-grain'],
+            'browserRead':human})
         print(self.root/'result.json')
 
 def main():
@@ -124,11 +233,7 @@ def main():
     j=Apps();phase='init'
     try:
         for phase in ORDER[:ORDER.index(until)+1]:
-            if phase=='world':
-                # hbox convention: world-up serialized by a lock held only around world-up.
-                with open('/tank/lanes/world-up.lock','a') as lock:
-                    fcntl.flock(lock,fcntl.LOCK_EX);j.world()
-            else:getattr(j,phase)()
+            getattr(j,phase)()
             write(j.root/('context-after-'+phase+'.json'),j.c)
             print('phase done',phase,flush=True)
     except Exception as error:

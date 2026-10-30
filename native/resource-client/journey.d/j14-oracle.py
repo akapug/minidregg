@@ -40,6 +40,8 @@ def need(name):
     return str(Path(value).resolve(strict=True))
 
 class Journey:
+    PROVIDER_FIXTURE=True
+    DATA_PUBLICATION=True
     # Hooks a derived journey (j14-apps.py) replaces; the Oracle journey uses these defaults.
     MODEL='mini-hermes-protocol-fixture'
 
@@ -79,10 +81,10 @@ class Journey:
         self.sockets=socket_parent/('j14-o7-s-'+secrets.token_hex(4));self.sockets.mkdir(mode=0o700)
         self.bins=Path(need('J14_ORACLE_BIN'))
         self.mini=need('MINI');self.host=need('HOST');self.runtime=need('GRAIN_RUNTIME')
-        self.provider=need('TEST_PROVIDER');self.hermes_root=need('J14_HERMES_ROOT')
+        self.provider=need('TEST_PROVIDER') if self.PROVIDER_FIXTURE else None;self.hermes_root=need('J14_HERMES_ROOT')
         self.candidate_manifest=need('J14_ORACLE_CANDIDATE_MANIFEST')
         self.spk=need('J14_ORACLE_SPK');self.data=need('J14_ORACLE_DATA_SOURCE');self.inventory=need('J14_ORACLE_INVENTORY')
-        for name in ['spk-host','spk-ingest','spk-data-publish','mini-spk-broker','mini-spk-volume-helper',
+        for name in (['spk-data-publish'] if self.DATA_PUBLICATION else [])+['spk-host','spk-ingest','mini-spk-broker','mini-spk-volume-helper',
                      'mini','minidregg-host','grain-runtime','minidregg-client-consent','mini-keys','grain-provider-bridge','launch-gate']:
             if not os.access(self.bins/name,os.X_OK):raise ValueError('missing selected executable '+name)
         for name,path in [('mini',self.mini),('minidregg-host',self.host),('grain-runtime',self.runtime)]:
@@ -475,7 +477,7 @@ class Journey:
             REPO/'scripts/spk-platform/broker-world-up.sh',REPO/'deploy/spk-host/install-user-world',
             REPO/'deploy/spk-host/controller-world.py',REPO/'native/resource-client/newparticipant-acceptance.sh']
         m={'sourceCommit':candidate['sourceCommit'],'sha256':{},'candidateManifest':self.candidate_manifest,
-           'candidateManifestSha256':sha(self.candidate_manifest),'overlays':{'grainRuntime':sha(self.runtime),'testProvider':sha(self.provider)},
+           'candidateManifestSha256':sha(self.candidate_manifest),'overlays':{'grainRuntime':sha(self.runtime),**({'testProvider':sha(self.provider)} if self.provider else {})},
            'orchestrationSource':{'commit':os.environ.get('J14_ORACLE_ORCHESTRATION_COMMIT'),
                                   'files':{str(p.relative_to(REPO)):sha(p) for p in source_files}}}
         for role,path in [('host',self.host),('mini',self.mini),('store',need('STORE')),('verifier',need('VERIFIER')),('spkHost',str(self.bins/'spk-host'))]:
@@ -637,7 +639,15 @@ class Journey:
             finally:os.close(directory)
 
     def prepare_platform(self):
-        env=dict(os.environ,MINI_IMPORT_PROFILE='operator-appliance-v1')
+        # The resident broker checks a concrete inventory for any home paths.
+        # These are the native transport/custody inputs, never a whole home tree.
+        w=Path(self.c['world'])
+        paths=[Path(self.host),Path(self.c['hostConfig']),Path(self.c['operatorSocket']).parent,
+               w/'keys/completion.seed',w/'sponsor.key',
+               *[self.homes/name/'keys/mini.key' for name in ('hhost','hermes','hprov','hdisp')]]
+        inventory=self.root/'resident-home-paths.json'
+        write(inventory,sorted({str(p) for p in paths if p.is_relative_to('/home') or p.is_relative_to('/root')}))
+        env=dict(os.environ,MINI_IMPORT_PROFILE='operator-appliance-v1',MINI_RESIDENT_HOME_PATHS=str(inventory))
         broker=self.root/f'broker-{self.counter+1:04d}'
         self.run('broker-world',[REPO/'scripts/spk-platform/broker-world-up.sh',self.bins,self.c['hostConfig'],broker],env=env)
         self.broker=read(broker/'broker.json')
@@ -654,9 +664,12 @@ class Journey:
         path=self.root/'profile-input.json';write(path,p)
         result=read(self.run('profile',['python3',REPO/'scripts/spk-platform/same-store-profile.py',path]));self.c['profileResult']=result['profileResult']
 
+    def application_input(self):
+        return inputs.provision(self.c)
+
     def prepare_application(self):
         path=self.root/'application-input.json'
-        expected=inputs.provision(self.c)
+        expected=self.application_input()
         if path.exists():
             if read(path)!=expected:raise ValueError('retained application input differs')
         else:write(path,expected)

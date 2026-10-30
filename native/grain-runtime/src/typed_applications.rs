@@ -326,6 +326,9 @@ mod tests {
     fn controller<'a>(pins: &'a [TypedApplicationAttachment], log: &'a mut Vec<Value>, replies: &'a mut Vec<Value>) -> impl FnMut(Value) -> Value + 'a {
         move |request| {
             let mapped = raw_arguments(pins, &request).expect("the controller accepts what the executor prepared");
+            let routes = pins.iter().map(|pin| pin.route_name.clone()).collect::<Vec<_>>();
+            crate::application_api_tools::parse_input(&mapped, &routes)
+                .expect("typed requests satisfy the receiving native HTTP profile");
             log.push(mapped);
             replies.remove(0)
         }

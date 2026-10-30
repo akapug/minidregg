@@ -2,6 +2,9 @@
 
 Branch `lane/apps-agents`, worktree `/Users/ember/dev/minidregg-lanes/apps-agents` (2026-10-29).
 
+Current work and evidence are in **CONTINUATION** below. The earlier sections record prior
+scope and findings; their "not done" statements are historical.
+
 ## Done
 - eca26cc6c: typed Hermes app tools in grain-runtime. `toolTask.typedApplications`
   (typed_applications.rs), MCP projection and worker-side executor (mcp.rs), broker op
@@ -44,44 +47,110 @@ Branch `lane/apps-agents`, worktree `/Users/ember/dev/minidregg-lanes/apps-agent
   wrapper /othersys/lanes/apps-agents/run1.sh; `world-down.sh` over a copied recovery.json tears a
   world down.
 
-## CONTINUATION (rewritten 2026-10-29 at wind-down; a successor starts here)
+## CONTINUATION (codex, 2026-10-30; active verification)
 
-Goal: a Hermes resident in the shared lobby room puts and gets a Davros file in one task through
-Mini (typed tools), a refusal by name without the room apps grant (hermes/tools bit 16), and a human
-read of the same grain; real provider (OpenRouter pool row). Direction from ember: typed operations as
-first-class Mini capabilities across every packaged app, declarations the shared vocabulary (Davros
-first, then Forgejo and the rest as repackaged). Row: native/resource-client/journey.d/j14-apps.py.
+Goal: j14-apps green on hbox: a Hermes room resident receives a real typed-tool refusal
+without hermes/tools bit 16, then puts and gets a Davros text file in one task through
+Mini admission/settlement, followed by a separate human web-session read of that grain.
 
-### Where the Davros journey stands
-- Passing on hbox: phases world, prepare_platform, prepare_application (Davros package 5485d227).
-- The Hermes runtime root is SORTED: /home/hbox/aa-run/hroot, built by deploy/hermes/build-runtime-root
-  from /othersys/lanes/infra/hermes-agent (already at 6d8a8beb) against /home/hbox/aa-run/cand/manifest.json
-  (the 2b8f75 binaries in /home/hbox/aa-run/bin, copies). A newer candidate: `build-runtime-root --rebind
-  /home/hbox/aa-run/hroot CANDIDATE` swaps only the two binaries; the worker's grain-runtime must equal
-  the controller's. Infra also has a c7a632 root at /othersys/lanes/infra/hroot-c7a632f7befd (c7a632
-  contains eca26cc6c typed tools; it lacks e6c5d4da4 v4 web-kind routes, which are only on staging).
-- Run area moved to the NVMe: /home/hbox/aa-run (bin, data, secrets/openrouter.key mode 600, hroot, cand,
-  src = rsync of this worktree, run.sh = the wrapper, step9 = last step dir). Rerun:
-  `mkdir -m 755 /home/hbox/aa-run/stepN`, edit JOURNEY_STEP_DIR in run.sh, rsync the worktree to
-  /home/hbox/aa-run/src, `nohup swarm-build ./run.sh probe > runN.log & echo $! > runN.pid`.
-- FAILS in phase worker (run9, step 56 controller-run, `grain-runtime create`): "prepare dispatch
-  controller full consent exited ... local process
-  /var/lib/mini-spk-worlds/<store>/controller/bin/minidregg-client-consent ended before answering: consent
-  closed (consent transport lost before an answer ...)". Unread yet: the consent process's own stderr
-  (step9/oracle/homes/*, participant.stderr, the world's controller logs). Suspect first: the consent
-  binary in /home/hbox/aa-run/bin (copy of the 2b8f75 candidate's minidregg-client-consent) versus
-  what deploy/spk-host/install-user-world installs, or the controller-world.py pin edit made this lane
-  (typedApplications key; code pin 442af8ed...). Compare with a green J14_ORACLE worker step if any
-  exists in docs/ROWS-OWED.md before concluding.
-- The world of run9 is torn down (world-down.sh, "removal_assertions=1"); one /etc/mini-spk-volumes entry
-  matching ccf03eb may remain: check it before the next world.
+### Diagnosis and changes
+- Read run 9's actual system journal before changing the consent path. The consent process
+  reported `permission denied` reading `/home/hbox/aa-run/bin/minidregg-credential-signature-verifier`.
+  Its installed consent executable and candidate copy have identical SHA256
+  `f72cb9d23009fa789852388ff2ce4be0913554c3d2e8533033b68ebec916d195`.
+  `ProtectHome=yes` hid the configured signature/storage executables; the service exposed
+  its Store directory only. The typedApplications pin was not the cause of this failure.
+- The installer now checks and snapshots the two configured executables into a root-owned
+  `controller/consent-dependencies` directory, records their digests, verifies them on use,
+  and binds only those files read-only at their configured paths. `ProtectHome=tmpfs`
+  hides other home content while explicit binds expose the pinned Store parent (including
+  its replaceable anchor/checkpoint key) and exact transport directories. `ProtectHome=yes`
+  plus ReadWritePaths was insufficient: direct native probes reproduced exec/key failures.
+- Typed declaration JSON files now have a bounded private attachment-file route through
+  controller config publication. Native Rust still validates declaration/package identity.
+- Native application enrollment now permits one typed attachment with its matching new
+  reference/route, instead of requiring a legacy service profile. Existing typed bindings
+  remain immutable on refresh. The broker receives an exact inventory of resident home
+  files/socket parents; the previous empty inventory refused the resident's host binary.
+- `world-down.sh` removes the controller before removing its root world. Controller removal
+  tolerates an already-unlinked legacy public socket, but refuses a replacement inode.
+  j14-apps stops its own public listener before teardown, then tears down its world even on failure.
+- j14-apps provisions an additional web session and checks its exact read of `/dav/notes.txt`.
+  The probe checks linked provider tool-result evidence for refusal, definite application
+  dispatch receipts and settlement, retained request/reply digests, and both PUT and GET.
+  Real-provider runs no longer require an unused test-provider or data-publisher fixture.
+  World creation uses `flock -o /tank/lanes/world-up.lock` only around world-up.
 
-### Still to write
-- The human read: a second delegate (sessionKind web) in inputs.provision plus its route; read notes.txt
-  over the grain's http.sock with the browser token (as featured-qualify.sh `req`).
-- Probe evidence: application_attempts() reads the controller journal's applicationApiHistory; check key
-  names (routeName vs route_name) against the live journal.
-- A test for application-attachment.py's new options; a test that the Davros text ops reach Mini admission.
-- Then Forgejo and other apps: one declaration + typed attachment each (names/aliases unique).
-- Land through the integrator (agent aca7a1fd39def735a): nothing new is green; the lane tip is the
-  already-merged set plus the j14-apps driver (e2a54044e and this docs commit).
+### hbox evidence and run inputs
+- Newest READY candidate selected: `f34b03095c5c440ddce4a1d1c1c875b05d792692` under
+  `/home/hbox/lanes/integ/candidates`. Its manifest still names `.tmp/bin` paths; verified
+  copies and relocated manifest are `/home/hbox/aa-run/bin-f34b03095` and `cand-f34b03095`.
+  The original manifest is retained beside the relocated one. `spk-ingest` is the tracked
+  deployment script, installed separately. No dummy publisher or older native binary is used.
+- Native enrollment overlay: `/home/hbox/aa-run/bin-enrollment` and `cand-enrollment/manifest.json`,
+  with grain-runtime SHA256 `d934a9fa2a557d9c1086ffcc6768b50fc0d72333ddb48cd96e6ef50eb00836c8`.
+  Built from this lane under swarm-build (2 Cargo jobs, 12G), using its own target/scratch.
+  `build-enrollment2.log`: 10 enrollment tests passed, one retained-capture test ignored
+  because its fixture was not supplied. Overlay manifest records source hashes/base candidate.
+- Runtime root `/home/hbox/aa-run/hroot` rebound to that overlay with `build-runtime-root --rebind`.
+  Source `/home/hbox/aa-run/src`; key remains in the private secrets directory (never printed).
+- Run 9 leftover Store `ccf03eb175bf8943` and retry Store `5320a39851e808a4` fully removed.
+  Run 13 Store `887fc39eb7972738` ended with `WORLD DOWN ... removal_assertions=0`.
+  Runs 10/11 stopped at input validation before creating a world.
+- Run 14: `/home/hbox/aa-run/run14.sh`, `run14.pid`, `run14.log`, `step14/oracle`.
+  The declaration-file allowance was added after platform setup, before activation; exact
+  before/after source bytes and hashes are in `step14/oracle/source-overlays`.
+- Run 14 Store `5d0acb33423f64a5` and run 15 Store `46b9ef64fe07728e` torn down with
+  removal_assertions=0. Native consent full-readiness succeeded under the corrected sandbox
+  using run 14's retained Store; output is `step14/oracle/world/consent-mount-probe`.
+- Run 16: `/home/hbox/aa-run/run16.sh`, `run16.pid`, `run16.log`, `step16/oracle`;
+  Store `637a0f8b3e76c3b1`. Worker/room/typed enrollment passed. Actual provider tool-result
+  evidence confirms `typed-apps-not-granted` and no dispatch without the grant. Granted
+  PUT and GET both met `typed-dispatch-not-begun`; native history remained empty. The tool
+  projection discarded the underlying detail, so native dispatch diagnostics were added.
+  Teardown removal_assertions=0 and registry absence checked. Retained diagnostic journal:
+  `step16/oracle/dispatch-diagnosis-journal.json`.
+- Run 17 uses `bin-dispatch`/`cand-dispatch`, runtime SHA256
+  `fbf079a8f7596d5010913746eb88b63e318e3bcc5999bfd32698f49d3aaa8e79`, 13 typed tests passed
+  including the actual native HTTP input parser. `run17.sh`/`run17.pid`/`run17.log`;
+  broker readiness refused a copied bin directory with mode 775. Corrected staging to 755.
+  Store `4ab25f057111c6e3` removed with removal_assertions=0 and absent registry confirmed.
+  Cleanup now follows the recovery locator even before broker.json exists, and stops a
+  loaded/restarting broker. Regression test passes. The first launch lacked the step parent
+  and stopped before any world; that log is retained as `run17-init.log`.
+- Candidate `8cb74aba593663adf5fb42b49c5bf1b6329f16c1` became READY during run 16.
+  Its diff has no grain-runtime, mini-sdk, controller installer, or attachment changes.
+  Run 18 uses this new base with the same diagnostic runtime overlay in `bin-8cb74aba` /
+  `cand-8cb74aba`; original manifest retained and 26 binary-role digests verified before
+  overlay. `/home/hbox/aa-run/run18.sh`, `run18.pid`, `run18.log`, `step18/oracle`.
+  Run 18 completed during a local network/sleep interruption. Store `f668228ec27ece30`
+  torn down with removal_assertions=0; registry absence confirmed after reconnecting.
+- Run 18's diagnostic stderr identified the actual refusal: session verification could
+  no longer read `source-0000000000000031.json`. History compaction had deleted the exact
+  source/attempt/author files still referenced by the admitted birth record. Fixed compaction
+  to retain journal-referenced operation groups and workspace evidence, while still pruning
+  unrelated later operations. Four focused tests pass, including the real birth verifier
+  after compaction and refusal of a changed preimage. No digest-only replacement is accepted.
+- Run 18 also exceeded the full controller export's 4096-file bound. Added the fixed
+  `controller-export ... application` selection: journal, resident completion state,
+  retained provider requests, and application request/reply files; all existing file/byte
+  and ownership bounds remain. Apps uses this selection and records service logs before
+  evidence assertions. Focused export, source-pin and three apps-driver tests pass.
+- Run 19 uses the newest READY `ebaeb14c795051c74489f0ac91dd36ac5e5546df` with the tested
+  retention/enrollment overlay in `bin-retention` / `cand-retention` (original manifest kept;
+  candidate roles SHA-checked). Runtime SHA256
+  `a62684a9291da25629095be2fdf2094ed445e256b9230c756db1e8ace1ab41a6`.
+  Build: `/home/hbox/aa-run/build-retention2.log`, swarm-build 2 Cargo jobs/12G.
+  Run: `/home/hbox/aa-run/run19.sh`, `run19.pid`, `run19.log`, `step19/oracle`.
+  hroot rebound to the same runtime; run active. Candidate changes since 8cb do not change
+  grain-runtime or mini-sdk, so the source overlay is still against identical native inputs.
+- Focused hbox tests passed: consent dependency custody/unit mounts, installer source pin,
+  absent-vs-replaced public socket teardown, bounded attachment paths, typed attachment options,
+  and the journey's refusal/dispatch evidence guards. These are not end-to-end admission evidence.
+
+### Integration
+- Local branch starts at `2b9debe99`. The requested merge of origin/main failed because the
+  sandbox cannot write `/Users/ember/dev/minidregg/.git/worktrees/apps-agents/ORIG_HEAD.lock`.
+  Leave `target/aa-commit.sh` for the parent: merge main, stage named paths only, commit with
+  `Co-Authored-By: codex (gpt-6-astra)`, then push `origin lane/apps-agents`.
+- No end-to-end green is claimed until the live probe and teardown complete.

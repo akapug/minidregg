@@ -3,8 +3,9 @@
 //! files (`attempt-N/`, `query-N/`, `provider-meter-N/`, `source-N.json`, the
 //! provider request files, ...): about 3.8 MiB allocated and 780 inodes per
 //! paid model call on J14. Once the journal retains no work at all (the
-//! quiescence census is empty), every operation below `nextOperationId` is
-//! decided and no recovery path reads its files again. Compaction then
+//! quiescence census is empty), operations below `nextOperationId` are
+//! decided, but retained birth/publication/dispatch records still verify their
+//! exact evidence. Compaction preserves those referenced operation groups, then
 //! appends one line per operation to `history.jsonl` (its file names, the
 //! exact attempt outcome, the source digest) and only after that line is
 //! durable removes the operation's files. The outcome is what an exact
@@ -52,6 +53,33 @@ fn keep_from(journal: &Journal) -> u64 {
         keep = keep.min(o.prompt_operation_id);
     }
     keep
+}
+
+/// Decided does not mean unreferenced. A retained receipt's attempt also needs
+/// its source/query/current-author siblings for exact verification. Collect all
+/// journal paths, including nested settlement and replay records, and retain
+/// their operation group without pinning every later operation behind a birth.
+fn referenced_evidence(journal: &Journal, state: &Path) -> Result<(std::collections::BTreeSet<u64>, std::collections::BTreeSet<PathBuf>)> {
+    fn visit(value: &Value, state: &Path, operations: &mut std::collections::BTreeSet<u64>, paths: &mut std::collections::BTreeSet<PathBuf>) {
+        match value {
+            Value::String(text) => {
+                let path = Path::new(text);
+                let Ok(relative) = path.strip_prefix(state) else { return };
+                if let Some(name) = relative.components().next().and_then(|p| p.as_os_str().to_str()) {
+                    if let Some(id) = operation_of(name) { operations.insert(id); }
+                }
+                for ancestor in path.ancestors().take_while(|p| *p != state) {
+                    paths.insert(ancestor.to_owned());
+                }
+            }
+            Value::Array(values) => for value in values { visit(value, state, operations, paths); },
+            Value::Object(values) => for value in values.values() { visit(value, state, operations, paths); },
+            _ => {}
+        }
+    }
+    let (mut operations, mut paths) = (std::collections::BTreeSet::new(), std::collections::BTreeSet::new());
+    visit(&serde_json::to_value(journal).map_err(|e| e.to_string())?, state, &mut operations, &mut paths);
+    Ok((operations, paths))
 }
 
 fn outcome(path: &Path) -> Value {
@@ -130,11 +158,12 @@ fn transient(homes: &[&Path], workspaces: &[&Path]) -> Result<Vec<PathBuf>> {
 pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], homes: &[&Path]) -> Result<Option<Summary>> {
     if !quiescent(journal) { return Ok(None); }
     let end = keep_from(journal);
+    let (referenced_operations, referenced_paths) = referenced_evidence(journal, state)?;
     let mut groups: BTreeMap<u64, Vec<String>> = BTreeMap::new();
     for entry in fs::read_dir(state).map_err(|e| format!("state: {e}"))? {
         let name = entry.map_err(|e| e.to_string())?.file_name();
         let Some(name) = name.to_str() else { continue };
-        if let Some(id) = operation_of(name).filter(|id| *id < end) {
+        if let Some(id) = operation_of(name).filter(|id| *id < end && !referenced_operations.contains(id)) {
             groups.entry(id).or_default().push(name.to_owned());
         }
     }
@@ -161,7 +190,7 @@ pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], hom
         for entry in listing {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
-            if referenced.contains(&path) { continue; }
+            if referenced.contains(&path) || referenced_paths.contains(&path) { continue; }
             // A decided attempt (its outcome or result); a finished signed read
             // (its view, or the Host's refusal of the read or of a proposal before
             // any submission) with no call or submission of any kind; or a local
@@ -181,7 +210,8 @@ pub(crate) fn compact(journal: &Journal, state: &Path, workspaces: &[&Path], hom
             doomed.push(path);
         }
     }
-    let reads = transient(homes, workspaces)?;
+    let reads: Vec<_> = transient(homes, workspaces)?.into_iter()
+        .filter(|path| !referenced_paths.contains(path)).collect();
     summary.transient = reads.len();
     summary.entries += reads.len();
     for path in reads { remove(&path)?; }
@@ -329,6 +359,55 @@ mod tests {
         compact(&journal, &state, &[], &[]).unwrap().unwrap();
         assert!(!state.join("attempt-0000000000000001").exists() && state.join("attempt-0000000000000002").exists());
         fs::remove_dir_all(state).unwrap();
+    }
+
+    #[test]
+    fn compacted_history_preserves_a_births_exact_verification_evidence() {
+        // Controlled source/receipt fixture: exercises the actual verifier,
+        // not native admission (which the live apps journey checks).
+        let (mut rt, root) = crate::publication_refusal_tests::fixture(false, false, false);
+        rt.config.tool_task.as_mut().unwrap().allowed_birth_families = vec![serde_json::from_value(json!({
+            "name":"page","genesis":{},"template":{},"predicate":{"type":"all","predicates":[]},
+            "factoryTarget":"10","factoryObserveCapability":"54","payerAccount":"11","payerCapability":"41","payerObserveCapability":"42",
+            "tariffBase":"1","tariffPerBirth":"1","targetStart":"9000","ownerCapabilityStart":"9100","controlCapabilityStart":"9200",
+            "maxBirths":2,"maxResultBytes":1024
+        })).unwrap()];
+        rt.journal = Journal::fresh(json!({}));
+        let state = rt.config.state_dir.clone();
+        let tool = rt.config.tool_task.as_ref().unwrap();
+        let family = &tool.allowed_birth_families[0];
+        let view = json!({"authorityRoot":"123","targetRoot":"111","height":"20",
+            "worldRoot":"456","grain":{"generation":"1","status":"3","remaining":"97","reserved":"3"}});
+        let (source, born) = resource_tools::plan_content_birth(family, tool, &rt.config.task, 31, 0, &view, &view).unwrap();
+        let source_path = state.join("source-0000000000000031.json");
+        atomic_json(&source_path, &source).unwrap();
+        let origin = BirthPending { operation_id:31, family:family.name.clone(), ordinal:0,
+            source_sha256:sha256_file(&source_path).unwrap(), born:born.clone(), route:None, born_bundle:vec![],
+            selected_application:None, selected_shared:None, authored_intent_sha256:None,
+            tool_view:view.clone(), parent_view:view, prompt_operation_id:1, session_id:"session".into(), work_origin:None };
+        let attempt = state.join("attempt-0000000000000031"); fs::create_dir(&attempt).unwrap();
+        fs::write(attempt.join("call.bin"), b"exact call").unwrap();
+        fs::write(attempt.join("outcome.bin"), b"exact outcome").unwrap();
+        let outcome = attempt.join("outcome.json");
+        atomic_json(&outcome, &json!({"type":"confirmed","confirmation":"installed",
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"})).unwrap();
+        let pending = Pending { operation_id:31, operation:"tool birth".into(), attempt,
+            uncertain:false, publication:None };
+        let record = rt.confirmed_birth_record(&pending, &origin, &outcome).unwrap().unwrap();
+        rt.journal.birth_next_ordinal.insert(origin.family.clone(), 1);
+        rt.journal.born_resources.push(record);
+        rt.journal.next_operation_id = 100;
+        assert!(rt.verified_born_target(&born.kind, &born.target).unwrap().is_some());
+        let author = state.join("current-author-0000000000000031"); fs::create_dir(&author).unwrap();
+        fs::write(author.join("intent.bin"), b"exact authored input").unwrap();
+        decided(&state, 32);
+        compact(&rt.journal, &state, &[], &[]).unwrap().unwrap();
+        assert!(rt.verified_born_target(&born.kind, &born.target).unwrap().is_some());
+        assert_eq!(fs::read(author.join("intent.bin")).unwrap(), b"exact authored input");
+        assert!(!state.join("source-0000000000000032.json").exists(), "an early birth does not pin unrelated later history");
+        fs::write(&source_path, b"changed preimage").unwrap();
+        assert!(rt.verified_born_target(&born.kind, &born.target).unwrap_err().contains("source changed"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
