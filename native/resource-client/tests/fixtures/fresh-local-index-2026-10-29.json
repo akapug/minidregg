@@ -1,6 +1,28 @@
 {
  "apps": [
   {
+   "appId": "reh7pa3e7jt8ryvjgje97ke5rkyztfg70grru8dewevmunj6ugn0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "games"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ocdtrekkie/3D-Blockstack-sandstorm",
+   "isOpenSource": true,
+   "name": "3D Blockstack",
+   "packageBuiltAt": "2026-10-30T04:38:11Z",
+   "packageId": "adb71c8edd499b6926d5a89e15adc865",
+   "sha256": "adb71c8edd499b6926d5a89e15adc8651ebd8fa9dcd0aeef6cb6ae143ede6dc7",
+   "shortDescription": "Stacking game",
+   "upstreamAuthor": "Jacob Weisz",
+   "upstreamVersion": "0.0.2-2",
+   "version": "0.0.2-2",
+   "versionNumber": 2,
+   "webLink": "https://github.com/ocdtrekkie/3D-Blockstack-sandstorm"
+  },
+  {
    "appId": "f3s5vv8g7xuay08e3x1g5zwuaycz0mt7170nmz3kf5e1g1q9ytr0",
    "author": {
     "name": "Mini"
@@ -224,6 +246,28 @@
    "version": "7.2.4-2",
    "versionNumber": 2,
    "webLink": "https://www.mercurial-scm.org/"
+  },
+  {
+   "appId": "1xs63fcv99c08dv2tgv0dcehjka9141e1egcafffuu0txskvzmq0",
+   "author": {
+    "name": "Mini"
+   },
+   "categories": [
+    "games"
+   ],
+   "class": "M",
+   "codeLink": "https://github.com/ocdtrekkie/perplexity-sudoku",
+   "isOpenSource": true,
+   "name": "Perplexity Sudoku",
+   "packageBuiltAt": "2026-10-30T04:33:13Z",
+   "packageId": "f03718ec2cfa35ea14eda2eb948c288c",
+   "sha256": "f03718ec2cfa35ea14eda2eb948c288c9eebff3400af6b1e4592006d6522736f",
+   "shortDescription": "Number puzzle",
+   "upstreamAuthor": "Jacob Weisz",
+   "upstreamVersion": "0.0.1-2",
+   "version": "0.0.1-2",
+   "versionNumber": 2,
+   "webLink": "https://github.com/ocdtrekkie/perplexity-sudoku"
   },
   {
    "appId": "vku2z06we4n4cfpvn28y6159fsgft9nttvvfeg1wndu8szvrtm3h",
