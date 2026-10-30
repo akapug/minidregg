@@ -26,7 +26,9 @@ SERVER = None
 def start_kiwix():
     global SERVER
     if SERVER is None and os.path.exists(LIBRARY):
-        SERVER = subprocess.Popen(["/opt/app/kiwix-serve", "--address", "127.0.0.1", "--port", str(KIWIX_PORT),
+        # No --address: kiwix-serve would validate it against getifaddrs(), which the grain sandbox
+        # refuses (no AF_NETLINK). The grain has no network beyond loopback, so listening on all is safe.
+        SERVER = subprocess.Popen(["/opt/app/kiwix-serve", "--port", str(KIWIX_PORT),
                                    "--urlRootLocation", "/kiwix", LIBRARY], stdout=sys.stderr, stderr=sys.stderr)
 
 

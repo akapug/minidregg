@@ -27,4 +27,4 @@ flock -o /tank/lanes/world-up.lock \
   bash "$LANE/src/scripts/spk-platform/world-up.sh" "$LANE/bin" "$LANE/bin" "$RUN"
 MINI_MARKET_CACHE="$CACHE" QUALIFY_TABLE="$RECIPE/qualify.tsv" \
   QUALIFY_WRITES="$RECIPE/qualify-writes" QUALIFY_STOP=1 \
-  bash "$LANE/src/scripts/spk-platform/featured-qualify.sh" "$RUN/WORLD.env" "$OUT" m
+  bash "$LANE/src/scripts/spk-platform/featured-qualify.sh" "$RUN/WORLD.env" "$OUT" k
