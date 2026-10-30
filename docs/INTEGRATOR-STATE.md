@@ -33,7 +33,7 @@ gate; hot-path sends it, wire it into the gate).
 
 ## Main and candidates (2026-10-30 ~03:05 EDT)
 
-Main = staging = 41590f420: everything below plus lane/apps-agents 06e6c30eb (native paid planner Lean, controller-world,
+Main = staging = aa5a80b2a (= 41590f420 + infra 5f18b9f50 + its revert): everything below plus lane/apps-agents 06e6c30eb (native paid planner Lean, controller-world,
 grain-runtime, spk-host, j14-apps green on hbox run 25), infra's residents fixes e365dd7e6 (current-height births,
 owner keeps its factory capability) and c3d17f136 (chat join for a member the roster already names), Firefly III, and
 the 20-pin fixture.
@@ -42,7 +42,8 @@ the 20-pin fixture.
 |---|---|
 | 994e36d08 | tour 73/73; composed all PASS except residents (sponsor-mode refusal) and restart; flatness GET PASS, submit FAIL (7.79x CPU, 5.08x wall vs 2x) |
 | 0feb2b026 | distinct mode: tour 73/73; composed residents red at the room join (fixed by c3d17f136); j14-apps red: broker-world-up refuses a group-writable output ancestor (integ/ is 775), fixed in gate12 by rooting j14 under /ci |
-| 41590f420 | THE CANDIDATE. gate12 distinct running (gate-41590f42; j14 at /ci/j-41590f, linked as gate-41590f42/j14): tour 73/73 |
+| 41590f420 | THE CANDIDATE. gate12 distinct: tour 73/73, j14-apps PASS (5 rows), composed rooms/churn/documents/apps/connector/store-restart PASS; residents stops at summon: the Hermes account birth refused PreparationReject.resourceBatch (batch admission, ResourceBirthController.lean:789); restart blocked |
+| 5f18b9f50 | infra's dedup of source capabilities: RED (kernel pairs capabilities 1:1 with operations, NativeHost.lean:353; scratch world could not provision). Reverted on main as aa5a80b2a |
 
 Infra (add189844d158e3a7) runs distinct composed on the forge container against 41590f420 until residents and restart
 pass, and sends fix shas. When those pass, the green candidate goes to infra for `demo-mini.sh ship` (rehearsal 3).
