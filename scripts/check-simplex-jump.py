@@ -46,25 +46,47 @@ def code(text):
     return " ".join("".join(out).split())
 
 
-def kernel_code(text):
-    """Allow only the exact upstream module-header port, not arbitrary imports.
+NAMESPACE = "namespace Minidregg.Kernel.GenericSimplex"
+MODULE_HEADER = ("module\n\npublic import Std\n\n" + "\n".join(
+    "import all " + name for name in (
+        "Init.Data.Repr", "Init.Data.ToString.Basic", "Init.Data.ToString.Extra",
+        "Init.Data.Array.Basic", "Init.Data.ByteArray.Basic", "Init.Data.String.Decode",
+        "Init.Data.String.Defs", "Init.Control.Except", "Init.Data.List.Basic",
+        "Init.Data.Nat.Bitwise.Basic", "Init.Data.String.Bootstrap",
+        "Init.Data.Format.Basic", "Init.Data.List.Scan.Basic", "Init.Util")) +
+    "\n\n@[expose] public section\n\n")
 
-    The executable namespace remains part of the whole-kernel comparison. C5
-    predates this visibility-only header; its original file is still compiled
-    unchanged by --kernel-check.
-    """
-    header = ("module public import Std " + " ".join(
-        "import all " + name for name in (
-            "Init.Data.Repr", "Init.Data.ToString.Basic", "Init.Data.ToString.Extra",
-            "Init.Data.Array.Basic", "Init.Data.ByteArray.Basic", "Init.Data.String.Decode",
-            "Init.Data.String.Defs", "Init.Control.Except", "Init.Data.List.Basic",
-            "Init.Data.Nat.Bitwise.Basic", "Init.Data.String.Bootstrap",
-            "Init.Data.Format.Basic", "Init.Data.List.Scan.Basic", "Init.Util")) +
-        " @[expose] public section")
+
+def kernel_code(text):
+    """Allow only the enumerated module header; retain all namespace tokens."""
+    header = code(MODULE_HEADER)
     normalized = code(text)
-    if normalized.startswith(header + " namespace Minidregg.Kernel.GenericSimplex "):
+    if normalized.startswith(header + " " + NAMESPACE + " "):
         return "import Std" + normalized[len(header):]
     return normalized
+
+
+def check_adapted_oracle(oracle, adapted):
+    """Refuse extra imports and any body change, including whitespace changes."""
+    prefix, marker, body = oracle.partition(NAMESPACE)
+    if not marker or code(prefix) != "import Std":
+        raise ValueError("oracle must have only the legacy import Std header")
+    adapted_prefix, adapted_marker, adapted_body = adapted.partition(NAMESPACE)
+    if (adapted_marker != marker or code(adapted_prefix) != code(MODULE_HEADER)
+            or adapted_body != body or kernel_code(adapted) != code(oracle)):
+        raise ValueError("adapted oracle differs beyond the enumerated module header")
+
+
+def adapt_oracle(oracle):
+    """Port the header only; preserve the raw oracle namespace body byte-for-byte."""
+    prefix, marker, body = oracle.partition(NAMESPACE)
+    if not marker or code(prefix) != "import Std":
+        raise ValueError("oracle must have only the legacy import Std header")
+    start = prefix.rindex("import Std")
+    adapted = (prefix[:start] + MODULE_HEADER + prefix[start + len("import Std"):] +
+               marker + body)
+    check_adapted_oracle(oracle, adapted)
+    return adapted
 
 
 def bind(args):
@@ -104,18 +126,42 @@ def bind(args):
         if not os.environ.get("FAB_ID"):
             raise ValueError("kernel checks run only inside a Fabric job snapshot")
         original = SOURCE.read_bytes()
+        adapted = adapt_oracle(oracle.decode())
+        # Exercise the real adapter guard, not a second permissive comparison.
+        extra_import = adapted.replace(NAMESPACE, "import Lean\n" + NAMESPACE, 1)
         try:
-            SOURCE.write_bytes(oracle)
-            checked = run(["lake", "build", "Kernel.GenericSimplexJumpSafety"])
+            check_adapted_oracle(oracle.decode(), extra_import)
+        except ValueError:
+            print(json.dumps({"check": "adapted-oracle-extra-import", "refused": True},
+                             sort_keys=True), flush=True)
+        else:
+            raise ValueError("extra import beyond enumerated header was accepted")
+        targets = ["lake", "build", "SimplexQualification",
+                   "Verify.GenericSimplexJumpControls", "Compiler.QualificationReport"]
+        try:
+            SOURCE.write_bytes(adapted.encode())
+            checked = run(targets)
             if checked.returncode:
-                raise ValueError("general jump proof failed on exact C5 oracle source\n" + checked.stdout)
-            print(json.dumps({"check": "general-proof-on-exact-c5-oracle", "lean_exit": 0,
-                              "clockdag_tip": args.clockdag_tip}, sort_keys=True), flush=True)
+                raise ValueError("proof closure failed on header-adapted C5 oracle\n" + checked.stdout)
+            print(json.dumps({"check": "general-proof-on-header-adapted-c5-oracle", "lean_exit": 0,
+                              "clockdag_tip": args.clockdag_tip,
+                              "raw_oracle_sha256": hashlib.sha256(oracle).hexdigest(),
+                              "adapted_oracle_sha256": hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
+                              "namespace_body_unchanged": True}, sort_keys=True), flush=True)
+            claims(None)
+            mutate(None, representation="header-adapted-c5-oracle")
+            if SOURCE.read_bytes() != adapted.encode():
+                raise ValueError("same-copy oracle mutation checks did not restore their source")
         finally:
             SOURCE.write_bytes(original)
-            restored = run(["lake", "build", "Kernel.GenericSimplexJumpSafety"])
+            restored = run(targets)
             if restored.returncode:
-                raise ValueError("restored general proof failed\n" + restored.stdout)
+                raise ValueError("restored proof closure failed\n" + restored.stdout)
+            if SOURCE.read_bytes() != original:
+                raise ValueError("local kernel source was not restored")
+            print(json.dumps({"check": "local-kernel-restored-after-oracle", "lean_exit": 0,
+                              "kernel_sha256": hashlib.sha256(original).hexdigest()},
+                             sort_keys=True), flush=True)
 
 
 def run(argv):
@@ -144,14 +190,22 @@ def split_control():
         return run(["lake", "env", "lean", str(path)])
 
 
-def mutate(_args):
+def mutate(_args, *, representation="local-kernel"):
     if not os.environ.get("FAB_ID"):
         raise ValueError("source mutation checks run only inside a Fabric job snapshot")
     original = SOURCE.read_text()
+    source_hash = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
+    baseline_controls = run(["lake", "env", "lean", CONTROLS])
+    if baseline_controls.returncode:
+        raise ValueError("field-level baseline failed\n" + baseline_controls.stdout)
+    print(json.dumps({"check": "field-controls-baseline", "lean_exit": 0,
+                      "representation": representation, "kernel_sha256": source_hash},
+                     sort_keys=True), flush=True)
     baseline = split_control()
     if baseline.returncode:
         raise ValueError("pinned split baseline failed\n" + baseline.stdout)
-    print(json.dumps({"check": "pinned-split-baseline", "lean_exit": 0}), flush=True)
+    print(json.dumps({"check": "pinned-split-baseline", "lean_exit": 0,
+                      "representation": representation, "kernel_sha256": source_hash}), flush=True)
     jump = "s := enterView c s (preparedAbove s + 1)"
     mutations = [
         ("max-to-min", "then max acc n else acc", "then min acc n else acc", "selection_control"),
@@ -169,6 +223,9 @@ def mutate(_args):
             if original.count(old) != 1:
                 raise ValueError(f"{name}: mutation site is not unique")
             SOURCE.write_text(original.replace(old, new))
+            mutant_hash = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
+            if mutant_hash == source_hash:
+                raise ValueError(f"{name}: source mutation did not change the built input")
             built = run(["lake", "build", "Kernel.GenericSimplex"])
             if built.returncode:
                 raise ValueError(f"{name}: mutated executable did not compile\n{built.stdout}")
@@ -183,10 +240,14 @@ def mutate(_args):
                     raise ValueError(f"{name}: pinned split did not reject mutant\n{pinned.stdout}")
                 print(json.dumps({"mutation": name, "executable_compiled": True,
                                   "control": "progressOuter_split", "lean_exit": pinned.returncode,
-                                  "rejected": True}, sort_keys=True), flush=True)
+                                  "rejected": True, "representation": representation,
+                                  "baseline_sha256": source_hash, "mutant_sha256": mutant_hash},
+                                 sort_keys=True), flush=True)
             print(json.dumps({"mutation": name, "executable_compiled": True,
                               "control": expected, "lean_exit": checked.returncode,
-                              "rejected": True}, sort_keys=True), flush=True)
+                              "rejected": True, "representation": representation,
+                              "baseline_sha256": source_hash, "mutant_sha256": mutant_hash},
+                             sort_keys=True), flush=True)
     finally:
         SOURCE.write_text(original)
         restored = run(["lake", "build", "Kernel.GenericSimplex"])
@@ -198,7 +259,10 @@ def mutate(_args):
     restored_split = split_control()
     if restored_split.returncode:
         raise ValueError("restored pinned split failed\n" + restored_split.stdout)
+    if hashlib.sha256(SOURCE.read_bytes()).hexdigest() != source_hash:
+        raise ValueError("mutation checks did not restore the baseline source")
     print(json.dumps({"check": "restored-controls", "lean_exit": 0,
+                      "representation": representation, "kernel_sha256": source_hash,
                       "mutations_rejected": len(mutations), "pinned_split_mutants_rejected": 2},
                      sort_keys=True), flush=True)
 

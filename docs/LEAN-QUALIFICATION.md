@@ -78,8 +78,27 @@ newest-versus-oldest checked-offer policy and the exact upstream module-exposure
 header (legacy `import Std` versus the enumerated `module`/`import all` header).
 No executable namespace tokens or other imports are erased. Run `python3 -I -m
 unittest discover -s scripts -p test_simplex_jump.py` to check that changed imports
-and missing/wrong jumps remain visible to the binding. `--kernel-check` additionally compiles
-the general proof against the exact supplied C5 Lean source and restores the
-local source. It does not execute or extract the archive, and does not pretend
-that source equality is a formal Rust/Lean refinement; a directed native
-Lean/Rust differential receipt at that same C5 tip remains separate evidence.
+and missing/wrong jumps remain visible to the binding, the adapter rejects extra
+imports in either input, and injected compiler/mutation failures restore the
+local source.
+
+`--kernel-check` validates the raw pinned files first, then substitutes **only**
+the enumerated upstream module-exposure header in a temporary C5 oracle copy.
+It preserves the oracle namespace body byte-for-byte and checks normalized
+whole-kernel equality; no arbitrary import removal is permitted. The real
+adapter guard must refuse an extra import beyond that header. The checker
+compiles the actual `SimplexQualification`, control and claim-emitter closure
+against this **header-adapted oracle**, verifies its 16 nonempty standard-axiom
+claims, and runs all nine compiled mutants plus both missing/wrong-jump split
+assertions on that same adapted source. Passing baseline/restored controls and
+distinct baseline/mutant hashes identify the actual tested representation.
+Finally it restores the local source and rebuilds its proof closure even if an
+oracle build or mutation check fails.
+
+This is **header-adapted oracle compilation**, not compilation of the raw oracle
+file. The original qualification on `1d693d1098ffe9a766e350e9a30dbad3f4de5cad`
+compiled the exact legacy C5 file before the upstream module migration; that
+historical result does not qualify a changed successor tree. Neither check
+executes or extracts the archive or pretends source binding is a formal Rust/Lean
+refinement; a directed native Lean/Rust differential receipt at the pinned C5
+tip remains separate evidence.
