@@ -2,9 +2,9 @@
   "format": "mini-app-interface-v1",
   "name": "scrumblr",
   "interfaceVersion": 1,
-  "appId": "w544a46cjwtje73rfearjvszwa3nhjtxjanu5s83qkdutx6k0nz0",
-  "packageId": "cf6ae092f937e7000b875cbb97d17907",
-  "appVersion": "0.5",
+  "appId": "1124qk4mm5zvx294gwn9w23gn2pt96mds6pqkxpn9sxr8w2uwr70",
+  "packageId": "57fa8aab611f5e0ab656e73324d48879",
+  "appVersion": "0.5-1",
   "status": "prototype-unqualified",
   "limits": {
     "bodyBytes": 16384,
@@ -320,7 +320,7 @@
   },
   "sources": [
     "https://github.com/ocdtrekkie/scrumblr",
-    "package:cf6ae092f937e7000b875cbb97d17907/server.js",
-    "package:cf6ae092f937e7000b875cbb97d17907/node_modules/socket.io/node_modules/engine.io/node_modules/engine.io-parser/lib/index.js"
+    "package:57fa8aab611f5e0ab656e73324d48879/server.js",
+    "package:57fa8aab611f5e0ab656e73324d48879/node_modules/socket.io/node_modules/engine.io/node_modules/engine.io-parser/lib/index.js"
   ]
 }
