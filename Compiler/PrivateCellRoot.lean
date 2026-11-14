@@ -4,8 +4,11 @@
 The private cell root, over any `StoreCodec.Wire`, below the cell registry so a cell module can
 select it (docs/PRIVATE-CELLS-STATE.md, FORMAT (a)). A store's private index is the
 `Theory.AuthTrie` over its index entries (`Compiler.PrivateCellIndex.indexEntries`: every live
-address but the blinding, each value as its value bytes), keyed by a 260-bit class tag followed
-by 256 bits of cSHAKE256 of the address's canonical bytes (`paths`). Each node is hashed by
+address but the blinding, each value as its value bytes), keyed by a 260-bit class tag and 256
+bits of cSHAKE256 of the address's canonical bytes (`paths`): the tag first where a reader opens
+a class by its prefix (`KeyTag.leads`), the hashed bits first for a kind with one class
+(`untagged`), whose entries would otherwise share their first 260 bits and put a 260-level
+single-child chain above the trie, rehashed by every write. Each node is hashed by
 cSHAKE256 over the bytes of its path-keyed image (`deployedDig = pathDig ∘ nodeImage`): a leaf is
 its 65 packed path bytes and its content digest (cSHAKE256 under `DREGG/PRIVATE-CELL/CONTENT/v1`
 over the framed address bytes and value bytes). Inner digests are cSHAKE256 outputs framed as
@@ -24,7 +27,11 @@ for an unblinded wire) and the index digest (`privateRoot`).
   (`indexStep`: an insert or an erase, `set_index`); the read is always present
   (`rootAvailable`), so a cell's root is never computed from its bytes.
 * `untagged`: the class tag of a kind whose addresses carry no field (`ResourceObservationAdmission.fieldOf`
-  is `none` on every address), the tag `Kernel.PrivateCellScope.bitCode 256` gives `none`.
+  is `none` on every address), the tag `Kernel.PrivateCellScope.bitCode 256` gives `none`. It
+  does not lead: no reader opens a prefix of such a kind's root (the view openings,
+  `Kernel.PrivateCellView` and `Kernel.PrivateCellOpening`, are over `kindTag`, which leads).
+* `paths_eq_iff`: in either order two addresses share a path exactly when they share a tag and
+  their hashed bits.
 
 Hiding is not claimed here: a blinded wire's narrowed readers are served by the salted ratchet
 root until the zero-knowledge selective opening exists (FORMAT (b)); this module's materializer
@@ -114,10 +121,12 @@ def addressHash (bytes : List UInt8) : List Bool :=
 theorem addressHash_length (bytes : List UInt8) : (addressHash bytes).length = 256 := by
   simp [addressHash, Kernel.WorldRoot.bytesBits_length, (Sp800185Cshake256.hash _ _).length_exact]
 
-/-- A 260-bit class tag per address (the reader's visibility class). -/
+/-- A 260-bit class tag per address (the reader's visibility class), and whether it leads the
+key path (a class a reader opens is a prefix of the path) or follows the hashed address bits. -/
 structure KeyTag (L : Layout.{0, 0, 0}) where
   tag : Address L → List Bool
   length : ∀ a, (tag a).length = 260
+  leads : Bool
 
 /-- The class bits of an address with no field: `bitCode 256`'s tag of `none`
 (`Kernel.PrivateCellView.untagged_eq`). -/
@@ -127,15 +136,33 @@ def untaggedClass : List Bool := [true, false, true] ++ false :: List.replicate 
 theorem untaggedClass_length : untaggedClass.length = 260 := by
   simp only [untaggedClass, List.length_append, List.length_cons, List.length_replicate, List.length_nil]
 
-def untagged (L : Layout.{0, 0, 0}) : KeyTag L := ⟨fun _ => untaggedClass, fun _ => untaggedClass_length⟩
+def untagged (L : Layout.{0, 0, 0}) : KeyTag L :=
+  ⟨fun _ => untaggedClass, fun _ => untaggedClass_length, false⟩
 
 variable (T : KeyTag L)
 
-/-- The key path: the class tag, then the address's 256 hashed bits. -/
-def paths (address : Address L) : List Bool := T.tag address ++ hashedAddrBits W 256 addressHash address
+/-- The key path: the class tag and the address's 256 hashed bits, the tag first exactly when
+it leads. -/
+def paths (address : Address L) : List Bool :=
+  match T.leads with
+  | true => T.tag address ++ hashedAddrBits W 256 addressHash address
+  | false => hashedAddrBits W 256 addressHash address ++ T.tag address
 
 theorem paths_length (address : Address L) : (paths W T address).length = 516 := by
-  simp [paths, T.length, hashedAddrBits_length]
+  unfold paths
+  cases T.leads <;> simp [T.length, hashedAddrBits_length]
+
+/-- **The order of a path's two parts does not change which addresses share one**: two
+addresses have one key path exactly when they have one class tag and one 256 hashed bits. -/
+theorem paths_eq_iff (a b : Address L) :
+    paths W T a = paths W T b ↔
+      T.tag a = T.tag b ∧ hashedAddrBits W 256 addressHash a = hashedAddrBits W 256 addressHash b := by
+  unfold paths
+  cases T.leads
+  · exact ⟨fun same => (List.append_inj same (by rw [hashedAddrBits_length, hashedAddrBits_length])).symm,
+      fun same => by rw [same.1, same.2]⟩
+  · exact ⟨fun same => List.append_inj same (by rw [T.length, T.length]),
+      fun same => by rw [same.1, same.2]⟩
 
 /-! ## cSHAKE256 outputs -/
 

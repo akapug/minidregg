@@ -361,6 +361,7 @@ already in the source is recognised by its position. Return "applied" only after
 receiver's opaque Applied token exists. -/
 def applyNext {config : SourceConfig} (p : Participant config) : IO (Participant config × String) := do
   let context := p.runtime.context
+  let t0 ← IO.monoNanosNow
   let some prior ← p.runtime.current | return (p,"invalid engine journal")
   let replica := prior.state
   let payload :: later := replica.committed | return (p,"no committed work")
@@ -379,14 +380,21 @@ def applyNext {config : SourceConfig} (p : Participant config) : IO (Participant
   if height < index then return (p,"the source is behind the committed records")
   let some record := Minidregg.Compiler.DurableCheckpointCodec.recordFrame.decode payload
     | return (p,"committed payload is not a source record")
+  let t1 ← IO.monoNanosNow
   let some certificate ← recoverCommitment (storage p.runtime.native) (crypto p.runtime.native) context
     | return (p,"waiting for COMMIT witnesses")
+  let t2 ← IO.monoNanosNow
   match ← Minidregg.Kernel.JointOrderedSourceReceiver.apply
       p.source.verified context certificate p.source.history (applicationHistory later)
       record.event.canonicalBytes with
   | .applied receipt =>
-    taken {p with source := ⟨_,receipt.verified,receipt.history p.source.history,
+    let t3 ← IO.monoNanosNow
+    let done ← taken {p with source := ⟨_,receipt.verified,receipt.history p.source.history,
       receipt.ingress p.source.ingress⟩} "applied"
+    -- Operator measurement control: where one application hand-off's time went.
+    if (← IO.getEnv "MINI_APPLY_PHASES").isSome then
+      IO.eprintln s!"apply phases us: height {height + 1} journal-and-decode {(t1-t0)/1000} certificate {(t2-t1)/1000} receive {(t3-t2)/1000} acknowledge {((← IO.monoNanosNow)-t3)/1000}"
+    return done
   | .refused detail => return (p,detail)
   | .ordinary _ => reloadSource p
   | .uncertain _ => reloadSource p

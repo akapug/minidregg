@@ -1214,8 +1214,13 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
 
 /-- Measurement: one `set` of the authority cell's kept private index on a store of `size`
 entries, and the parts of that `set` each alone. -/
-def trieBench (size : Nat) : IO Unit := do
-  let aux := CredentialAuthorityCell.materializer.aux
+def trieBench (size : Nat) (classLeads : Bool) : IO Unit := do
+  -- `classLeads`: the same wire under a class tag that leads the path (every entry in one class),
+  -- what a kind with a real class tag pays per class.
+  let tag : PrivateCellRoot.KeyTag Minidregg.Theory.CredentialAuthorityState.layout :=
+    if classLeads then ⟨fun _ => PrivateCellRoot.untaggedClass, fun _ => PrivateCellRoot.untaggedClass_length, true⟩
+    else PrivateCellRoot.untagged _
+  let aux := (PrivateCellRoot.materializer CredentialAuthorityCell.wire tag).aux
   let address (i : Nat) : Minidregg.Theory.Store.Address Minidregg.Theory.CredentialAuthorityState.layout :=
     ⟨.revoked, .channel ⟨i⟩⟩
   let per (label : String) (count : Nat) (t0 : Nat) : IO Unit := do
@@ -1241,7 +1246,6 @@ def trieBench (size : Nat) : IO Unit := do
   for i in [0:rounds] do once := aux.set next (address (size + 2 * rounds + i)) (some ())
   per s!"set (one entry on a held index, store of {size})" rounds t0
   IO.println s!"root after {(aux.root? once).map (·.value)}"
-  let tag := PrivateCellRoot.untagged Minidregg.Theory.CredentialAuthorityState.layout
   let t0 ← IO.monoNanosNow
   let mut bits := 0
   for i in [0:rounds] do
@@ -8835,7 +8839,11 @@ def runCommandStoreBench (_arguments : List String) (_configPath _command : Stri
           pure 0
   | ["trie", size] =>
           match size.toNat? with
-          | some size => trieBench size; pure 0
+          | some size => trieBench size false; pure 0
+          | none => throw (IO.userError usage)
+  | ["trie", size, "class-leads"] =>
+          match size.toNat? with
+          | some size => trieBench size true; pure 0
           | none => throw (IO.userError usage)
   | _ => throw (IO.userError usage)
 
