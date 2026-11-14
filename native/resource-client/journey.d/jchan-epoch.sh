@@ -57,7 +57,10 @@ check() { # NAME EXPECT GOT [DETAIL]
   [ "$2" = "$3" ] || bad=$((bad + 1))
 }
 probe() { # ARGS... -> stdout of the Lean probe
-  (cd "$ROOT" && PATH=$HOME/.elan/bin:$PATH LEAN_NUM_THREADS=2 lake env lean --run scripts/probe-channel-epoch.lean "$@")
+  # The record's digests are the native kernels': the interpreter resolves them from the library
+  # the lakefile gives every `lean` (`scripts/build-mini-kernels.sh`), which `lake env lean` does not.
+  (cd "$ROOT" && PATH=$HOME/.elan/bin:$PATH LEAN_NUM_THREADS=2 lake env lean \
+    --load-dynlib=.lake/native/libmini_kernels_lean.so --run scripts/probe-channel-epoch.lean "$@")
 }
 mkrec() { # NAME EPOCH ROOTS  -> $D/rec-NAME.{topic,payload,opening}
   probe record 7 "$2" 1 3 "$3" "$MASK48" 90 >"$D/rec-$1.txt" 2>"$D/rec-$1.err" \

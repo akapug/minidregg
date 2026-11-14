@@ -515,12 +515,27 @@ the payload JSON reader). `Payload.append` is a `@[match_pattern]` abbreviation 
 **Next**: nothing of the payload is hand-written. What remains by cases over payload kinds is
 the nine single-kind reader arms on the three patterns (`scalar` 4, `content` 4, `append` 1).
 
-Not run on any head of this lane: JJOB1 and JJOB. They need `JOB_PROGRAMS/collatz.jam` (and
-JJOB `liar.jam` and `NOCK_RUN`); the tree holds `collatz.hoon`, `liar.hoon` and each jam's
-provenance (the pinned `hoonc` at nockchain `cbd9298f` with two bootstrap jams by hash, mode
-`--new --arbitrary`, then a kick at axis 2 and a minimal re-jam), but no script that produces
-the jam, and neither a built `hoonc` nor the tool for the kick and re-jam nor the runner is on
-the Mac or hbox (`~/dev/nockchain` holds the revision, unbuilt).
+**Owed on the registry line** (present state):
+
+* `operationMarker domain semantics command` keeps its command form for its ~70 callers (the
+  lifecycle receivers, the Host); the declaration reads `transactionMarker` at the context's
+  subject and nonce. Moving the callers is a rename with no statement behind it.
+* JINSPECT rows b and c are open.
+* JJOB1 and JJOB have run on no head of this lane. They need `JOB_PROGRAMS/collatz.jam` (and
+  JJOB `liar.jam` and `NOCK_RUN`); the tree holds `collatz.hoon`, `liar.hoon` and each jam's
+  provenance (the pinned `hoonc` at nockchain `cbd9298f` with two bootstrap jams by hash, mode
+  `--new --arbitrary`, then a kick at axis 2 and a minimal re-jam), but no script that produces
+  the jam, and neither a built `hoonc` nor the tool for the kick and re-jam nor the runner is on
+  the Mac or hbox (`~/dev/nockchain` holds the revision, unbuilt).
+* THIN has no row for a signed write the Host then refuses at its semantics (a member patch
+  shown while the semantics refuses is intended: nothing commits).
+* Journeys red at the append head for reasons outside the registry: K11 rows `create-gift`
+  (the journey greps `ownerNotCreator`; the refusal prints `owner-not-creator`) and `same-2`
+  (a second append planned from one read is admitted, as the append pins no root; the row
+  expects `staleTarget`), both identical on the base Host without the binding; KTPL (16 rows
+  read per-leaf birth sources `create-lab.<leaf>.json`; the client writes one
+  `create-lab.index-births.json`); JCHAT's `mirror` row needs a `fake-discord` binary no
+  candidate on hbox holds.
 
 **The payload's JSON has one reader** (`Kernel/ResourcePayloadJson.lean`, `payloadOfJson`). The
 grammar of the hand-armed payloads (`action`, `streamRef`, the world descriptor, definition and
