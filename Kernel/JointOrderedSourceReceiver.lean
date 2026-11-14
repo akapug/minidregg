@@ -79,6 +79,18 @@ def apply {config : Config} {target : Durable} (old : Verified config target)
       let t1 ← IO.monoNanosNow
       let some ordered := JointReceiver.order expected old.opened.durable derived.intent commitment history later
         | return .refused "the commitment's digest is not that of the source prefix, the derived record and the later committed records"
+      if (← IO.getEnv "MINI_STORE_PHASES") == some "1" then
+        -- The two pure steps of the receive, run once more here to be timed alone.
+        let a ← IO.monoNanosNow
+        let ready := match old.opened.durable.prepare derived.intent with
+          | .inl _ => true
+          | .inr _ => false
+        let b ← IO.monoNanosNow
+        let judged := match old.opened.durable.judge (orderedTransport derived) (.ordinary derived.intent) with
+          | .ok _ => true
+          | .error _ => false
+        let c ← IO.monoNanosNow
+        IO.eprintln s!"store judge us at height {old.opened.durable.height + 1}: execute {(b-a)/1000} ({ready}) gates {(c-b)/1000} ({judged}) writes {derived.intent.writes.length}"
       let t2 ← IO.monoNanosNow
       match ← DurableReceiverIO.receiveLoadedDetailed (orderedTransport derived)
           ResourceBirthCodec.rootBytes old.opened.durable derived.intent with

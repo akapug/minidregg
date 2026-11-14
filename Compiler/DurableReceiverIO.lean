@@ -192,14 +192,20 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   let chain := loaded.chainAfterIntent intent
   let some frontier := loaded.frontier
     | return .error "this opening carries no accumulator frontier (it was not read from the Store)"
+  -- Operator measurement control (as `MINI_APPEND_TIMING` at the ordered receiver):
+  -- MINI_STORE_PHASES=1 prints where the preparation spent its time, to stderr.
+  let timing := (← IO.getEnv "MINI_STORE_PHASES") == some "1"
+  let t0 ← IO.monoNanosNow
   -- The index after the head (MAC-verified), then this record's rows (IndexRows.changes) applied.
   let indexBefore ← match ← loaded.headIndexRoot transport key with
     | .ok root => pure root
     | .error message => return .error message
+  let t1 ← IO.monoNanosNow
   let (indexAfter, indexWrites) ← match ← applyIndex transport loaded.height indexBefore height
       (IntentRecord.ofIntent intent) with
     | .ok result => pure result
     | .error message => return .error message
+  let t2 ← IO.monoNanosNow
   -- The tag keeps this record's receipt root, the root the extended image
   -- serves, the accumulator frontier after it and the index root after it.
   let extended := loaded.extend ready
@@ -207,11 +213,15 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   -- refused here, before any byte is written (FD-1 4a).
   if let .lost reason := extended.track then
     return .error s!"not admitted by the World: {reason}"
+  let t3 ← IO.monoNanosNow
   let leaf := leafDigest height recordBytes chain extended.worldRoot
   let frontierAfter := DurableHistory.Frontier.push frontier leaf
   let nodes := appendNodes (DurableHistory.completedNodes frontier height leaf) indexWrites
   let entry : Entry := ⟨recordBytes.toByteArray, trailer key height
     ⟨extended.worldRoot, chain, frontierDigest height frontierAfter, indexAfter⟩⟩
+  if timing then
+    let t4 ← IO.monoNanosNow
+    IO.eprintln s!"store prepare us at height {height}: index-root {(t1-t0)/1000} index-rows {(t2-t1)/1000} extend {(t3-t2)/1000} entry {(t4-t3)/1000} bytes {entry.record.size + entry.tag.length} nodes {nodes.length}"
   return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter⟩
 
 
@@ -225,6 +235,7 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
   let extended := prepared.extended
   let indexAfter := prepared.indexAfter
   let confirm := fun (installed : Bool) (kind : Confirmation) => do
+    let t0 ← IO.monoNanosNow
     match ← readBackEntry transport height with
     | .error message =>
         return (false, DetailedResult.ordinary (.uncertain s!"append attempted; readback unavailable: {message}"))
@@ -232,10 +243,14 @@ def publishAfter (transport : Transport) (rootBytes : List UInt8 → Digest) (lo
         return (false, .ordinary (.uncertain "append attempted; entry absent on readback"))
     | .ok (some stored) =>
         if stored = entry then
+          let t1 ← IO.monoNanosNow
           let tagged := { extended with headTag := some entry.tag }
           let checkpointStored ←
             if checkpointDue transport tagged then storeCheckpoint transport rootBytes tagged indexAfter
             else pure false
+          if (← IO.getEnv "MINI_STORE_PHASES") == some "1" then
+            let t2 ← IO.monoNanosNow
+            IO.eprintln s!"store confirm us at height {height}: read-back {(t1-t0)/1000} checkpoint {(t2-t1)/1000}"
           return (installed, .exact kind
             ⟨afterCheckpoint tagged checkpointStored,
               (afterCheckpoint_image tagged checkpointStored).trans prepared.extendedImage, entry,
@@ -254,8 +269,13 @@ def publish (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded 
     {candidate : Candidate loaded} (_commit : Commit transport loaded candidate)
     (prepared : PreparedAppend loaded candidate.intent) :
     IO (Bool × DetailedResult rootBytes loaded candidate.intent) :=
-  transport.append (loaded.height + 1) prepared.entry prepared.nodes >>=
-    publishAfter transport rootBytes loaded candidate.intent prepared
+  do
+    let t0 ← IO.monoNanosNow
+    let observation ← transport.append (loaded.height + 1) prepared.entry prepared.nodes
+    if (← IO.getEnv "MINI_STORE_PHASES") == some "1" then
+      let t1 ← IO.monoNanosNow
+      IO.eprintln s!"store append us at height {loaded.height + 1}: {(t1-t0)/1000}"
+    publishAfter transport rootBytes loaded candidate.intent prepared observation
 
 /-- A conflicting append is contention, and nothing else is read or written. -/
 theorem publishAfter_conflict (transport : Transport) (rootBytes : List UInt8 → Digest)
