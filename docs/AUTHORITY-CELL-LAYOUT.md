@@ -263,12 +263,14 @@ on that head on hbox unless it says otherwise.
   Before the two trie changes the lane's birth step was 14.8 to 18.5 ms. The Host still walks
   each written entry's path a second time (the family walks it first); at this cost the checked
   hand-off of the family's post cell is not needed and was not built.
+- **Authority-writing families on this head** (candidate `a7d7e48a9eb6`, each journey in its own
+  root after J0 to J5, through `lane-journey`): JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAYE2
+  38/38, JPAYE3 27/27, JJOBM 39/39, J17 212 rows, JROTL 10/10, JROT 34/34, K10C 184 rows, KW
+  20/20, J12 139 rows, J12W 81 rows (213 content actions), K12T 28/28, KCH 12/12, JSLK 23/23.
+  All pass. JROT reaches commitment adoption (its precommitment rows). Which journeys reach
+  factory provisioning, share issue and the lifetime grant was not traced.
 - **Earlier runs, on older bases, not repeated on this head**: J12X, JSERVE, G (1000 writes), K4,
-  KT, JJ, K10, KF pass; JROTL 10/10, JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAYE2 38/38, JPAYE3
-  27/27, JJOBM 39/39, J17 212 rows. JROT reaches commitment adoption (its precommitment rows).
-  Which journeys reach factory provisioning, share issue and the lifetime grant was not
-  established: no journey file names a share issue, and the ones naming a lifetime (J14, the pay
-  journeys) were not traced to the grant family.
+  KT, JJ, K10, KF pass.
 - **Rows failing identically on the base candidate** (control runs of the same row): KBW
   (`stale-birth` expects `birthStale`, the birth is installed); KC (K-CLOCK 31 of 33); K11
   (`create-gift` exits 3 where a refusal is expected, `same-2` accepted where a refusal is
