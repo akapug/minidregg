@@ -140,31 +140,33 @@ existing logical patch to it; only this lowering is new.
 - `Loaded.pastBytes` scans the accepted records from the asked height back for each cell it
   reads, so an `at height` read costs a fixed number of such scans. That scan is the history
   index's, not this layout's.
-- **The step validation costs more than before, measured.** The serving Host follows the written
-  cells itself after its own write (`stepCell`) instead of taking the family's post cell (`HeldCell`
-  is deleted), and rechecks the policies the step can have unsourced. `store-bench` on matched
-  worlds (hbox, one run each, a ratio on one box and not a published timing): after a birth,
-  `validateLoadedStep` and `validateServedStep` take 14.8 ms per step over 12 written cells, against
-  0.6 ms over 5 written cells on main; after a delegation 4.3 ms over 3 written cells against
-  0.8 ms over 1. **Attributed** (`store-bench` now times each part of a served step alone, ten
-  repetitions): after a birth the whole step is 18.5 ms, of which `loadServedAuthorityStep`
-  (`stepCell`) is 16.0 ms and the directory step, the decode of the written cells, the cell law,
-  the affected policies and the sourcing check of 7 policies are each 0.1 ms or less; after a
-  delegation 5.6 ms, of which `stepCell` is 4.6 ms. So the cost is the kept trie: about 1.1 ms per
-  `set` of `PrivateCellRoot.materializer` (the bench frees and sets each entry, two sets; a real
-  step sets a new entry once, so a real birth step is about half the bench's). Policy sourcing is
-  not it. The same 1.1 ms per `set` is paid by the family when it applies its patch, on main too;
-  the lane pays it a second time in the Host. **Not fixed.** Two fixes, both wanted: (a) the
-  Host takes the family's post cell through `Received.appended`, carrying
-  `HoldsAuthority next.served.canonicalBytes authorityCellId post.logical` (each family's
-  `installed_authority`), with `stepCell` as the path when none is handed: main's `HeldCell` was
-  checked by comparing the one cell's bytes, which no longer exists, so the hand-off must carry
-  the proof; (b) find why one path of a 516-bit trie costs 1.1 ms (`Sp800185Cshake256.hash` over
-  `List UInt8`, bit-list paths), which would speed every authority write.
-- **The hand-off time is not flat.** In the 200-birth `append-flatness` run the median application
-  hand-off was 52.7 ms over the first 8 heights and 85.7 ms over the last 8 (1.63 times, inside
-  the row's bound of 2). The record is flat; something else in the hand-off still grows with
-  height. Not attributed.
+- **A kind with a real class tag still pays the shared-prefix chain.** `PrivateCellRoot.paths`
+  under a tag that leads (`kindTag`, for a kind whose addresses carry fields) puts every entry of
+  one class under one 260-bit prefix, and `AuthTrie.tree` hashes a branch at every level where two
+  or more entries remain, so each `set` rehashes about 260 + log2 n nodes. Measured with
+  `store-bench trie 1000 class-leads` (the authority wire under a leading constant tag, 1,000
+  entries of one class): 455 us per `set`, against 77 us with the hashed bits first. The fix is a
+  compressed tree (a single-child chain hashed as one node) or short enumerated class tags; it
+  rewrites `Theory/AuthTrie*` and the view openings and is its own change. Not done here.
+- **One `set` is above the 50 us target.** After both halves below it is 58 to 77 us on stores of
+  10 and 1,000 and 107 to 152 us on 100,000 (hbox, one run each). Of that, `paths` is 16 us and
+  runs twice per insert (once for the walk, once inside the leaf's digest), the rest is the
+  packed path, the content digest and about log2 n node hashes at 1 to 2 us. Computing the path
+  once per insert and packing it without the bit list is the next cut; not done.
+- **The hand-off time is not flat, and the record is.** In the 200-birth `append-flatness` run the
+  median application hand-off is 41 to 54 ms over the first 8 births and 67 to 89 ms over the
+  last 8 (three runs), inside the row's bound of 2. Attributed by phase (`MINI_APPLY_PHASES`,
+  microseconds, one replica, heights 1 / 40 / 120 / 200): journal and decode 349 / 347 / 335 /
+  329; certificate 1,658 / 2,215 / 1,994 / 1,867; acknowledge 4,368 / 4,979 / 5,232 / 5,627;
+  **receive 31,061 / 42,355 / 66,052 / 108,596**. Inside the receive (`MINI_APPEND_TIMING`): order
+  453 / 458 / 464 / 493, readback 2,669 / 2,959 / 3,534 / 3,538, reader 57 / 56 / 60 / 62;
+  **derive 13,961 / 15,209 / 20,720 / 31,271** (`deriveVerified`, the source admission) and
+  **store 13,181 / 23,214 / 44,135 / 73,478** (`DurableReceiverIO.receiveLoadedDetailed`, the
+  durable append). So two things grow linearly with history, the append at about 0.3 ms per
+  height and the admission at about 0.09 ms per height, neither through the record's size. Not
+  attributed below that and not fixed: it is outside the authority layout (the first places to
+  read are the per-append work over the image's cell list and the Book and factory cells, which
+  are still rewritten whole).
 - **The byte paths are still lists.** `scripts/check-bytes-repr.sh` counts 5031 against 4961 on
   main. The rise is the binder `CellId → List UInt8` (the type of `DataSnapshot.canonicalBytes`
   and `Loaded.pastBytes`) on the layout's definitions and theorems, and the list signatures of
@@ -197,67 +199,104 @@ codec encodes an identifier as a variable-length natural.
 - `DurableDataIntent.RejectReason` gains `authoritySpaceWrite`.
 - Every seed's cells (the one authority cell becomes a head and one entry per address), hence
   the world root at every height, the log start, the consensus anchor and every checkpoint.
+- The private root of every `untagged` kind (the authority store, the policy registry's root
+  bytes, hyperdocument event logs): the key path is the 256 hashed address bits FOLLOWED BY the
+  260-bit class tag, where it was the tag first (`PrivateCellRoot.KeyTag.leads`, `paths`,
+  `paths_eq_iff`). No customization string moved. The logical authority root committed in the
+  head therefore differs from the one the same store had before, and so does the world root.
+  Checked by reading: every trie opening over a private root is in `Kernel/PrivateCellView.lean`
+  (`revealVerify` over `keyBits`, the tag first) and `Kernel/PrivateCellOpening.lean`
+  (`revealVerify pathDig` over `paths wire (kindTag kind)`), both at `kindTag`, which still leads;
+  those two modules and `PrivateCellReceiver`, `PrivateCellMaterializer` are imported only by
+  `Kernel.lean`. No light reader, range reader or view opens a path of an `untagged` root: the
+  authority readers are point reads of entry cells against the head, the other two kinds are read
+  by root equality.
+- An old-order private root cannot be presented under the new layout by a store that existed:
+  the path order and the cell layout move in one change, so every store whose roots are of the
+  old order holds the one whole authority cell and is refused by name below. A head forged to
+  carry an old-order root over new entry cells fails the head check (`HoldsAuthority`: the
+  loaded store's root is not the head's), as any wrong root does.
 - A store of the old layout is refused by name: `old_layout_refused`, `old_layout_unrealized`.
 - The legacy Store2 carry (`NeutralPolicyCarry`) converts the source's one authority cell whole
   and lowers it to a head and one entry per address.
 
 ## Validation
 
-What ran, all on hbox in the pooled tree `t2`. The whole build and the static checks ran on
-the lane rebased onto `origin/main` at `a2a03e8e4`; the native Host, the tour, the fixtures and
-the Simplex gate ran one rebase earlier, on base `23f9aac22` (nine commits of main, none in the
-authority files, lie between; the re-recorded fixtures still build on the newer base):
+Head `lane/authority-cells` rebased onto `origin/main` at `e837e5735` (after `76c7a9798`, the
+empty-digest and midstate change, and `f08fe6e5c`, the `append` binding). Everything below ran
+on that head on hbox unless it says otherwise.
 
-- **Whole build**: `swarm-build lake build Minidregg` rc 0, together with the modules outside the
-  umbrella that import the layout (`Host.ClientConsentSession`,
-  `Host.ClientConsentSpecializedSession`, `Host.WorldSim`, `Host.TurnLogFollower`,
-  `Host.CarryVerifierMain`, `Host.Kn2StoreBench`, `Verify.NativeJointSourceFixture`,
-  `Verify.GenericSimplex{Harness,LogReopen,Load}`, `Verify.ResourceReserveBirthFixture`,
-  `Fixtures.BirthPlanPoles`, `Kernel.NativeThinConsent`, `Host.ThinBirthConsent`,
-  `Host.ClientConsentCore`). These were built as Lake targets, which is stricter than `lane-check`.
-- **Static checks**: `check-import-boundary.sh` OK; `check-bytes-repr.sh` 5031 (ceiling 4961: the
-  coordinator sets the new ceiling, see "Owed").
-- **Native Host**: `native-loop` overlay candidate `29af9d6bd9a0` on base candidate `23f9aac22`.
-- **Tour**: J0 to J8 and THIN pass on that candidate. The first native run refused every birth
-  `neutralBirthUnjudged`: `ResourceBirthController.Concrete.bornIn` took an entry cell's first
-  write for a birth the factory step must name. It now excludes the authority space. No Lean
-  build had shown it.
-- **Wider rows, keep-going**: J12X, JSERVE, G (1000 writes), K4, KT, JJ, K10, KF pass. Rows that
-  fail, each failing the same way on the base candidate in a control run of the same row:
-  KBW (`stale-birth` expects `birthStale`, the birth is installed); KC (K-CLOCK 31 of 33);
-  K11 (`create-gift` exits 3 where a refusal is expected, `same-2` is accepted where a refusal is
+- **Whole build**: `swarm-build lake build Minidregg minidregg-host` with the two native
+  fixtures, the four Simplex gate executables and the modules outside the umbrella that import
+  the layout (`Host.ClientConsentSession`, `Host.ClientConsentSpecializedSession`,
+  `Host.WorldSim`, `Host.TurnLogFollower`, `Host.CarryVerifierMain`, `Host.Kn2StoreBench`,
+  `Verify.ResourceReserveBirthFixture`, `Fixtures.BirthPlanPoles`, `Kernel.NativeThinConsent`,
+  `Host.ThinBirthConsent`, `Host.ClientConsentCore`): rc 0, 13,086 jobs.
+- **Static checks**: `check-import-boundary.sh` OK; `check-bytes-repr.sh` 5032 against the ceiling
+  4961 (main itself counts 4962 since `76c7a9798`: the node hash's list binders).
+- **Native Host**: `native-loop` overlay candidate `a7d7e48a9eb6`.
+- **Journeys** (through `scripts/pipeline/lane-journey`): J0 to J8, THIN, JROT 34/34 and K10C 184
+  rows pass. JROT and K10C had four rows expecting the constructor name where the client prints
+  the rendered clause (`not-precommitted`, `not-prerotated`, `not-holder`, `already-revoked`);
+  the rows are corrected in their own commit.
+- **One `set` of the kept private index** (`store-bench trie <n>`; microseconds; the built index
+  still held / a second batch / one entry on a held index; one run each):
+
+  | store | main before `76c7a9798` | empty digest once, midstate | hashed bits first |
+  |---|---|---|---|
+  | 10 | 846 | 454 / 622 / 773 | 58 / 68 / 58 |
+  | 1,000 | 818 / 885 / 926 | 475 / 461 / 512 | 77 / 74 / 64 |
+  | 100,000 | 1,364 / 1,050 / 1,882 | 1,111 / 797 / 1,672 | 152 / 127 / 108 |
+
+  Building 100,000 entries by `set`: 110.5 s, 58.3 s, 16.1 s. The cause was the class tag leading
+  the path: every entry of an `untagged` store shared 260 bits, the trie carried a 260-level
+  single-child chain, and each level hashed its branch and its empty sibling again.
+- **The served step** (`store-bench`, ten repetitions, three runs each, matched worlds made by J0
+  to J2 for the birth and J0 to J3 for the delegation; the bench uses one state as both sides,
+  so each written entry is freed and set again, twice a real step's trie work):
+
+  | last record | lane | main (`cc727d09d`) |
+  |---|---|---|
+  | birth | 1.0 / 1.0 / 1.0 ms over 12 written cells, of which `stepCell` 0.7 | 0.6 / 0.5 / 0.5 ms over 5 |
+  | delegation | 0.5 / 0.5 / 0.5 ms over 3 written cells, of which `stepCell` 0.3 to 0.4 | 0.5 / 0.5 / 0.5 ms over 1 |
+
+  Before the two trie changes the lane's birth step was 14.8 to 18.5 ms. The Host still walks
+  each written entry's path a second time (the family walks it first); at this cost the checked
+  hand-off of the family's post cell is not needed and was not built.
+- **Earlier runs, on older bases, not repeated on this head**: J12X, JSERVE, G (1000 writes), K4,
+  KT, JJ, K10, KF pass; JROTL 10/10, JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAYE2 38/38, JPAYE3
+  27/27, JJOBM 39/39, J17 212 rows. JROT reaches commitment adoption (its precommitment rows).
+  Which journeys reach factory provisioning, share issue and the lifetime grant was not
+  established: no journey file names a share issue, and the ones naming a lifetime (J14, the pay
+  journeys) were not traced to the grant family.
+- **Rows failing identically on the base candidate** (control runs of the same row): KBW
+  (`stale-birth` expects `birthStale`, the birth is installed); KC (K-CLOCK 31 of 33); K11
+  (`create-gift` exits 3 where a refusal is expected, `same-2` accepted where a refusal is
   expected); KCH (its Lean probe needs `supportInterpreter`); KH (`scalar: undeclared-field 3` at
-  prepare); JROT (2 of 34: the refusals are spelled `not-precommitted` and `not-prerotated`, the
-  row expects `notPrecommitted` and `notPrerotated`); K10C (2 of 184: `not-holder` where the row
-  expects `notHolder`).
-- **Writer families on the native Host** (overlay candidate `9417d57ad8bf` on base candidate
-  `a2a03e8e4`): key rotation JROT (32 of 34, the two above) and JROTL 10/10; renounce and kick
-  through K10C (182 of 184, the two above); pay JPAY2 18/18, JPAY3 24/24, JPAY4 26/26, JPAYE2
-  38/38, JPAYE3 27/27; job money JJOBM 39/39; J17 212 rows in its own world. Which of these
-  reach commitment adoption, factory provisioning, share issue and the lifetime grant was not
-  established.
-- **First writes**: `Kernel.FirstWriteCoverage.first_write_covered` (in an intent the gate admits
-  and whose births the step names, a write with the fresh pre-root is named below the authority
-  space, or is a live authority cell in it), `authority_space_never_unnamed`,
-  `unnamed_below_refused`. They are theorems over every step and patch, not executed poles. The
-  executed instances are the tour's J2 on a native Host (a birth admitted with its entry cells
-  unnamed; refused before the `bornIn` change), `ReceivingLawFixture`'s `neutralBirthUnjudged`
-  poles, and `AuthoritySpaceGate.forged_other_kind_refused`. A pole that runs a whole birth
-  receive in Lean with an unnamed cell below the space is owed.
+  prepare).
+- **First writes**: `Kernel.FirstWriteCoverage.first_write_covered`,
+  `authority_space_never_unnamed`, `unnamed_below_refused` (theorems over every step and patch).
+  Executed: `ReceivingLawFixture.neutral_unauthorized_refused` and `neutral_smuggled_refused` run a
+  whole receive whose patch has an unnamed first write of cell 8, below the authority space, and
+  are refused `neutralBirthUnjudged 8`; `AuthoritySpaceGate.forged_other_kind_refused` refuses a
+  cell of another kind at an entry coordinate; every birth of the tour is admitted with its entry
+  cells unnamed. The fixture's family is its own (`bypass`), not the birth family: a pole through
+  `ResourceBirthReceiver` itself is not written.
 - **Fixtures**: `scripts/native-accepted-fixture/rerecord.sh` re-recorded both native fixtures
-  from that candidate; their projections equal the hand-written authorities, which did not change.
-- **Simplex gate**: `scripts/gates/check-generic-simplex .lake/build/bin` with 200 heights:
-  10 runs pass, every plant red as recorded. `append-flatness` over 200 births, by birth ordinal:
+  from candidate `a7d7e48a9eb6`; their projections equal the hand-written authorities.
+- **Simplex gate**: `scripts/gates/check-generic-simplex .lake/build/bin` with 200 heights, three
+  runs: 19 rows pass, 10 plants red as recorded. `append-flatness` over 200 births, by ordinal:
 
   | ordinal | record before | record now | largest write before | largest write now | authority now |
   |---|---|---|---|---|---|
-  | 1 | 5,116 | 5,126 | 1,324 | 107 | 616 B in 8 writes |
-  | 40 | 11,366 | 5,135 | 7,568 | 107 | 616 B in 8 writes |
-  | 120 | 24,169 | 5,123 | 20,377 | 107 | 615 B in 8 writes |
-  | 200 | 36,989 | 5,135 | 33,185 | 107 | 615 B in 8 writes |
+  | 1 | 5,116 | 5,123 | 1,324 | 107 | 615 B in 8 writes |
+  | 40 | 11,366 | 5,110 | 7,568 | 107 | 615 B in 8 writes |
+  | 120 | 24,169 | 5,125 | 20,377 | 107 | 616 B in 8 writes |
+  | 200 | 36,989 | 5,128 | 33,185 | 107 | 615 B in 8 writes |
 
   The row is two raw bounds (hand-off at most 2 times, record at most one eighth above the first
-  window) and prints these as its `WRITES` line.
+  window) and prints these as its `WRITES` line. `GENERIC_SIMPLEX_ROW_LOGS=DIR` keeps each row's
+  whole output.
 - **Executed poles** (compiled in the umbrella): `AuthoritySpaceGate.forged_empty_refused`,
   `forged_other_kind_refused`, `ordinary_admitted`, `last_protected_cell`;
   `ReceivingLawFixture.foreign_authority_writer_refused`.
@@ -267,15 +306,11 @@ authority files, lie between; the re-recorded fixtures still build on the newer 
 
 ## Next (in this order; none of it is done)
 
-1. The step cost: hand the Host the family's post cell with its `HoldsAuthority` proof through
-   `Received.appended` (fix (a) under "Owed"), then `store-bench` after a birth and after a
-   delegation on matched worlds, three runs each, against main.
-2. The hand-off growth: `append-flatness` has one time per application hand-off
-   (`GenericSimplexParticipant` returns one `applyNanos`). Split it by phase (certificate,
-   ordered append with readback, acknowledgement), print the phases at ordinals 1, 40, 120, 200
-   and name the one that grows.
-3. An executed pole of a whole birth receive with an unnamed first write below the authority
-   space, refused `neutralBirthUnjudged`.
-4. Rebase onto `origin/main` once the registry lane's `append` binding has landed, then on that
-   head: the whole build (it has not run since `Kernel.FirstWriteCoverage` joined `Kernel.lean`;
-   the module itself builds), the native Host, J0 to J8, THIN, the Simplex gate at 200 heights.
+1. The hand-off growth: read `DurableReceiverIO.receiveLoadedDetailed` and `deriveVerified` for
+   the work that scales with height (numbers under "Owed"), fix it at the cause, and tighten the
+   flatness row's hand-off bound from 2 toward 1.
+2. `paths` once per insert and the packed path without the bit list, to bring one `set` under
+   50 us.
+3. The compressed tree for kinds with a real class tag (its own lane).
+4. A birth-family pole for the unnamed first write, and tracing which journeys reach factory
+   provisioning, share issue and the lifetime grant.

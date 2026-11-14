@@ -137,6 +137,8 @@ pass() {  # NAME EXPECTED-LAST-LINE-PREFIX CMD...
   local name=$1 want=$2 out rc=0; shift 2
   out=$("$@" 2>&1) || rc=$?
   printf '%s\n' "$out" | tail -n 3
+  # GENERIC_SIMPLEX_ROW_LOGS=DIR keeps each row's whole output (measurement: MINI_APPLY_PHASES prints there).
+  [[ -z ${GENERIC_SIMPLEX_ROW_LOGS:-} ]] || printf '%s\n' "$out" > "$GENERIC_SIMPLEX_ROW_LOGS/$name.log"
   if [[ $rc == 0 && $(printf '%s\n' "$out" | grep -c "^$want") -ge 1 ]]; then echo "RUN $name PASS"
   else echo "RUN $name FAIL rc=$rc (want exit 0 and a line starting '$want')"; status=1; fi
 }
