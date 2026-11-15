@@ -1,15 +1,21 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `74d6535141c7` (ratchet(bytes-repr): the ceiling is the measured count after the authority layout). Round finished 2026-11-14T23:26Z.
-green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-74d65351`.
+Tip: `f264ccfdc2bc` (ratchet(bytes-repr): 5033, one binder of the private index node type). Round finished 2026-11-15T01:10Z.
+green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-f264ccfd`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 053906870674..74d6535141c7`), newest first; owners are the seats whose
+Suspect commits since green (`git log 053906870674..f264ccfdc2bc`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `f264ccfd` ratchet(bytes-repr): 5033, one binder of the private index node type (owner: bytes-repr)
+- `3fbeca33` docs(append-growth): the product row as its own section; what compiled outside the umbrella; what is
+- `362c2f8d` docs: what an append costs as history grows, measured and attributed
+- `c0f71943` directory: `used` is the set's characteristic function; the private index evaluates a path once (owner: apps-hermes, read-path)
+- `bd134ef4` receiver: `MINI_STORE_PHASES=1` prints where one durable append spends its time
+- `c6081864` builder: REDS.md for 74d6535141c7 (1 red) (owner: build-loop)
 - `74d65351` ratchet(bytes-repr): the ceiling is the measured count after the authority layout (owner: bytes-repr)
 - `6b6c219d` docs(authority): the sixteen authority-writing journeys on this head
 - `f21515be` docs(authority): the trie cost found and cut, the step and hand-off numbers, what ran on this head; 
@@ -44,16 +50,15 @@ Suspect commits since green (`git log 053906870674..74d6535141c7`), newest first
 - `e9dc17f1` spk-host: an API `Destination` may be WebDAV's absolute path; an unprojectable dispatch is refused b (owner: apps-hermes, read-path)
 - `f08fe6e5` journey KCH: the channel probe loads the kernel library; docs: what the registry line still owes (owner: apps-hermes)
 - `03685404` effects: the stream append is bound at code 2; `Payload` has one constructor and the arm census is z (owner: apps-hermes, bytes-repr)
-- `6031b01b` builder: REDS.md for 053906870674 (0 red) (owner: build-loop)
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.161 | 0.182 | 1.126 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 27.020 | 81.874 | 3.030 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.130 | 0.165 | 1.267 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 13.924 | 45.737 | 3.285 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.365 | 0.335 | 0.917 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 406.999 | 127.603 | 0.314 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-74d65351/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.207 | 0.222 | 1.072 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 34.716 | 88.834 | 2.559 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_cpu_ms | 0.139 | 0.253 | 1.823 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 19.613 | 75.196 | 3.834 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.345 | 0.339 | 0.982 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 298.050 | 122.416 | 0.411 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-f264ccfd/flatness.log | - | - | - | - | host-execution, store-retained |
