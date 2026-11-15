@@ -1,8 +1,9 @@
 # Generic Simplex safety beyond n = 3f + 1
 
 Ledger row: task/12305 (simbi). Lane `lane/quorum-n-ge-3f1-upstream`, built on emberian/minidregg
-main `5d607d21d` (a port of akapug `lane/quorum-n-ge-3f1` @ `7bfcc0db`). This lane changes Lean proofs only.
-It changes no executable definition, no Rust, and no runtime behaviour.
+main `5d607d21d` (a port of akapug `lane/quorum-n-ge-3f1` @ `7bfcc0db`). That first slice changes
+Lean proofs only. The second slice (task/12332, below) widens the oracle's `Config.wellFormed` to
+`n ≥ 3f + 1`; it changes no Rust and no behaviour at `n = 3f + 1`.
 
 ## What changed
 
@@ -72,38 +73,49 @@ axiom, and on `native_decide`'s compiler trust.
 - The `2f + 1` VOTE/COMMIT support in `LocalFaithful` became `q`. The CANDIDATE→READY
   support became `c`. The READY→prepare/disable support became `r`.
 
-## What is still n = 3f + 1 only (the honest boundary)
+## The oracle and its refinement (lane `lane/quorum-oracle-n-ge-3f1`, task/12332)
 
-The **executable refinement layer** is still `n = 3f + 1` only. This layer proves that the
-real `GenericSimplex.start/step` satisfies `LocalFaithful`. Its modules are
-`GenericSimplexEmissionSupport`, `GenericSimplexActualFaithful`, `GenericSimplexEngineSafety`
-(`actual_local_faithful`, `actual_committed_prefix_consistency`), `GenericSimplexObservationSafety`,
-`GenericSimplexTrail.good_faithful`, `GenericSimplexRebaseGhost` and `GenericSimplexReceiverSafety.actual_*`. There are two reasons:
+This second slice widens the executable oracle and re-proves the refinement layer.
 
-1. The Lean kernel's `Config.wellFormed` (Kernel/GenericSimplex.lean:59-60) admits only
-   `parties == 3 * faults + 1`. Every other config fails at `start`/`step`, so a
-   refinement theorem at `n ≠ 3f + 1` would be vacuously true. Widening `wellFormed` is
-   a change to the oracle's runtime behaviour. That is out of this lane's layer. It
-   also moves the oracle SHA that clockdag's `crates/mesh-simplex/PROVENANCE.txt` pins.
-2. `EmissionSupport.EventSupported` (lines 43-55) records the READY-core, READY-prepare and
-   disable supports at `c.quorum` and not at `2 * c.faults + 1`. Those are equal only when
-   `n = 3f + 1`, which is why `argumentRules_invariant` needs `size`.
+- `Kernel/GenericSimplex.lean` `Config.wellFormed` admits `3 * faults + 1 ≤ parties` (was
+  `parties == 3 * faults + 1`). `Config.quorum` stays `parties - faults`; every guard of
+  `valueRules`/`argumentRules`/`wantsOut` is unchanged (`n - f`, `2f + 1`, `f + 1`).
+  At `n = 3f + 1` the new admission computes the old one (`wellFormed_at_legacy`, proved),
+  so `start`/`step` compute the same states there; a config with `n > 3f + 1` used to fail
+  at `start`/`step` and now runs.
+- `EmissionSupport.EventSupported` and `GlobalEmission.GlobalEventSupported` record the
+  READY-core, READY-prepare and disable supports at `2 * c.faults + 1`, the guard the
+  executable reads, instead of `c.quorum`. `argumentRules_invariant` then needs no size,
+  and neither do `progressView`/`pass`/`pump`/`step` invariants, `step_emission`,
+  `step_readable` or `reachable_emission_invariants`.
+- `localFaithful_of_supported`, `actual_local_faithful` and `Trail.good_faithful` prove
+  `LocalFaithfulAt … c.quorum (2f+1) (2f+1)` with no size premise. `AuditRefinement.faithful`
+  and `RelativeReach.Faithful.rules` carry the same profile.
+- `GeneralSimplexReachability.config_thresholds` turns `3f + 1 ≤ n` into `Thresholds` for
+  that profile. The `actual_*` safety theorems (`actual_committed_prefix_consistency`,
+  `actual_certificates_prefix_consistent`, `actual_certified_next_record_unique`,
+  `actual_state_commits_compatible`, `actual_delivered_blocks_compatible`,
+  `actual_ordered_next_payload_unique`), `refined_engine_commits_compatible`, the
+  `reachable_*` SupportExtends theorems, `ghost_step`, `ghost_rebase` and the
+  `RelativeSide`/`RelativeFaithful`/`RelativeAgreement` chain take `3f + 1 ≤ n` instead
+  of `n = 3f + 1`. Certificates there are `AttributedCommitSendsAt … c.quorum`, the native
+  verifier's own count (`verifiedCommit_attributed_at`).
+- `SupportExtends` gains `support_has_honest_vote_at`, `vote_extends_commit_at` and
+  `support_extends_commit_at`; the legacy names are corollaries. `LocalFaithfulAt.toLegacy`
+  and `config_quorum_legacy` keep the `n = 3f + 1` witness statements
+  (`honest_execution_faithful`, `localFaithful_committed_run`) as they were.
 
-The next slice, mapped:
-- In `EventSupported`, put those three thresholds at `2 * c.faults + 1`. Then
-  `argumentRules_invariant` no longer needs `size`.
-- Drop `size` from the `progressView`/`pass`/`pump`/`step` invariants (about 8 sites in
-  EmissionSupport and about 40 `size` sites across Engine/Observation/ActualFaithful/GlobalEmission/
-  Trail/RebaseGhost).
-- Have `localFaithful_of_supported` produce `LocalFaithfulAt … (n - f) (2f+1) (2f+1)`.
-- Widen `Config.wellFormed` to the Rust NF admission (`n ≥ 4`, `f = (n-1)/3`, keeping `n = 1`).
-- Estimate: about 100-160 LoC of proof edits, plus the oracle-hash re-pin and a rerun of the
-  `Verify/GenericSimplex*` harnesses. Widening `wellFormed` is the runtime decision this lane
-  does not make.
+## What is still n = 3f + 1 only
 
-Also not generalized: `LocalCommitOutputAttestations` and its two theorems. The file itself
-marks them historical, superseded by the COMMIT-send certificate. `GenericSimplexReconfig`
-(churn) is also not generalized.
+- `JumpReach.SettledBelowFrontier`, an unproved statement, keeps its `n = 3f + 1` premise.
+  `EventualCommit` reads `wellFormed` and so now ranges over every admitted roster; it is
+  unproved as before.
+- The legacy abstract theorems (`committed_prefix_consistency`, `verifiedCommit_attributed`,
+  `ordered_next_payload_unique`, `local_output_attestations_*`, …) keep their names and
+  `n = 3f + 1` signatures; their `_at` forms cover any roster.
+- `GenericSimplexReconfig` (churn) is not generalized.
+- Liveness is proved for no roster size.
+- Re-pinning the oracle SHA in clockdag's `crates/mesh-simplex/PROVENANCE.txt` is a separate step.
 
 ## Stretch: the smaller quorum q = ⌈(n + f + 1) / 2⌉
 
@@ -129,4 +141,25 @@ safety theorem applies to it:
 
 All Lean builds ran on the Fabric. None ran on the laptop hub.
 
-FABRIC-EVIDENCE-PLACEHOLDER
+- First slice (proofs only), tip `196483847`: `job_ca862d2a921ffc0f59d745e1`, green
+  (`build-mini-kernels.sh && lake build` of 42 GenericSimplex/Verify targets). This is the baseline
+  of the second slice: `0a3dd1ea8` differs from it only in this file.
+- Second slice, tip `3f8d2c293`: `job_49ad6b4e61ede340e73a68b8`, red. `ghost_rebase` still called
+  four legacy lemmas; fixed in `c2b145d86`.
+- Second slice, tip `c2b145d86`: `job_0876b468f59aec1013a3ba8e`, green (2468 jobs; the 42 targets
+  plus `Kernel.GenericSimplex`, `Erasure`, `Window`, `Relative`, `NativeHostContext`,
+  `Compiler.GenericSimplexServe`, `Compiler.GenericSimplexIO` and five more `Verify.GenericSimplex*`
+  and fixture modules).
+- Second slice, tip `a5d81d7c2`: `job_9a51e2dd7d8ca6d282e4d5d0`, `lake build` of every module
+  that imports a changed module (382 library modules). Red only in seven targets, all inherited:
+  `TokenCensus` and six modules that only the opt-in `ResearchWip` imports
+  (`Compiler.PrivateCircuitAllocationFast`, `Compiler.PortableJointCustodyIO`,
+  `Kernel.RunComputeActivation`, `Kernel.JointReservationFunding`,
+  `Kernel.JointProtectedGateProofs`, `Kernel.RoomReleaseCurrent`). The same seven targets on the
+  base `0a3dd1ea8` (`job_f12e374c6521956b4069ef88`) fail with the identical 34 error lines.
+- Second slice, tip `a5d81d7c2`: `job_cf6b7f7b947e574481cd2fcd`, the `generic-simplex-harness` and
+  `generic-simplex-log-reopen` executables both pass (exit 0).
+- Second slice, tip `a5d81d7c2`: `job_c355a45cd66dc4bf5236c74b`, an uncommitted probe runs the
+  oracle (`Timed.runUntil`) at `(n, f)` = `(4,1)`, `(5,1)`, `(6,1)`, `(7,2)`, `(10,3)`,
+  each with no fault and with member `n - 1` silent. Every run is admitted (quorum `n - f`), every
+  live replica commits the block and `timedSafe` holds; `(3,1)` is refused (`start` fails).
