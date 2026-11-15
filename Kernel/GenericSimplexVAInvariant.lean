@@ -73,6 +73,14 @@ structure LocalFaithfulAt (tr : Trace) (roster faulty : Finset Nat) (f q c r : N
 abbrev LocalFaithful (tr : Trace) (roster faulty : Finset Nat) (f : Nat) : Prop :=
   LocalFaithfulAt tr roster faulty f (2 * f + 1) (2 * f + 1) (2 * f + 1)
 
+/-- The executable profile `(q, 2f + 1, 2f + 1)` is the legacy one where `q = 2f + 1`
+(the VOTE/COMMIT quorum `n - f` at `n = 3f + 1`). -/
+theorem LocalFaithfulAt.toLegacy {tr : Trace} {roster faulty : Finset Nat} {f q : Nat}
+    (rules : LocalFaithfulAt tr roster faulty f q (2 * f + 1) (2 * f + 1))
+    (quorum : q = 2 * f + 1) : LocalFaithful tr roster faulty f := by
+  subst quorum
+  exact rules
+
 theorem support_honest {tr : Trace} {roster faulty : Finset Nat} {f t v q : Nat}
     {kind : Kind} {arg : Argument} (faultBound : faulty.card ≤ f)
     (enough : f + 1 ≤ q) (support : Support tr roster t v kind arg q) :
@@ -310,6 +318,7 @@ theorem honest_vote_has_safe_origin {tr : Trace} {roster faulty : Finset Nat} {f
       ∃ earlier ≤ t, ∃ q, q ∉ faulty ∧ SafeAt tr earlier q v x :=
   honest_vote_has_safe_origin_at rules (by omega) (by omega) (by omega) faultBound t
 
+#assert_axioms LocalFaithfulAt.toLegacy
 #assert_axioms support_honest
 #assert_axioms ready_has_candidate_core
 #assert_axioms committed_excludes_other_prepare

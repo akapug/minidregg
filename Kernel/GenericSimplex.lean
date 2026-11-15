@@ -1,6 +1,6 @@
 /- Complete executable Generic Simplex, arXiv:2609.32985v1 Figures 1,3,4,5.
-Fixed static n=3f+1 committee, authenticated reliable delivery, known delay bound
-after unknown GST. Past views remain active. Exact block ancestry replaces hashes.
+Fixed static committee of n ≥ 3f+1 parties, authenticated reliable delivery, known delay
+bound after unknown GST. Past views remain active. Exact block ancestry replaces hashes.
 Source checking is an INTERNAL controller input, never a network packet.
 
 Commit floor (not in the paper): `lastCommitted` is the highest view this replica has
@@ -56,8 +56,11 @@ structure Config where
   /-- Exponent cap for the view-timeout backoff; 0 keeps the fixed timer. -/
   backoffCap : Nat := 0
   deriving DecidableEq, BEq, Repr, Inhabited
+/-- An admitted committee: `n ≥ 3f + 1` parties tolerating `f` faults (any `n`, not only
+`n = 3f + 1`). The VOTE/COMMIT quorum is `n - f` (`Config.quorum`); the CANDIDATE→READY and
+READY→clear guards stay `2f + 1` and the relay guards `f + 1`. -/
 def Config.wellFormed (c : Config) : Bool :=
-  c.parties == 3 * c.faults + 1 && c.timeout > 0 && c.pumpBudget > 0
+  3 * c.faults + 1 ≤ c.parties && c.timeout > 0 && c.pumpBudget > 0
 def Config.quorum (c : Config) : Nat := c.parties - c.faults
 def Config.leader (c : Config) (view : Nat) : Nat := (view - 1) % c.parties
 /-- How far above its own view (or floor) a replica keeps a record for a view a member

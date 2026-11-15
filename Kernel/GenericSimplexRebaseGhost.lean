@@ -371,13 +371,13 @@ tombstone, each of a faulty member. -/
 theorem ghost_rebase {c : Config} {faulty : Finset Nat} {p base : Nat} {chain tip : Block}
     {trail : List Event} {G G' : State}
     (ghost : Ghost c faulty p base chain trail G) (good : Good c faulty trail)
-    (honest : p ∉ faulty) (size : c.parties = 3 * c.faults + 1) (faultBound : faulty.card ≤ c.faults)
+    (honest : p ∉ faulty) (admitted : 3 * c.faults + 1 ≤ c.parties) (faultBound : faulty.card ≤ c.faults)
     (rebased : Rebased c tip G G') :
     ∃ extra : List Event, (∀ m, (.send m : Event) ∈ extra → m.sender ∈ faulty) ∧
       Ghost c faulty p G.lastCommitted (chain ++ tip) (trail ++ extra) G' ∧
       Good c faulty (trail ++ extra) := by
-  have rules := good_faithful good size
-  have roster : (Finset.range c.parties).card = 3 * c.faults + 1 := by simpa using size
+  have rules := good_faithful good
+  have th := config_thresholds admitted
   have selfG := ghost.self
   have self' : G'.self = p := rebased.self.trans selfG
   have commitEvent : (.commit p G.lastCommitted tip : Event) ∈ G.audit := by
@@ -392,7 +392,7 @@ theorem ghost_rebase {c : Config} {faulty : Finset Nat} {p base : Nat} {chain ti
       ∃ rest, strip tip block = some rest := by
     intro q v kind block hq support above member
     obtain ⟨time, output⟩ := member_trace member
-    exact strip_extends (support_extends_commit rules roster faultBound committed' above hq support output)
+    exact strip_extends (support_extends_commit_at rules th faultBound committed' above hq support output)
   have ownStrips : ∀ v kind value, kind ≠ .propose → G.lastCommitted < v →
       (.send ⟨p, v, kind, value⟩ : Event) ∈ G.audit → ∃ kept, stripArgument tip value = some kept := by
     intro v kind value support above member

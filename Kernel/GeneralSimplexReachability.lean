@@ -236,13 +236,31 @@ inductive Reachable (c : Config) (faulty : Finset Nat)
       (allowed : AllowedInput c faulty sourceChecked net party input) :
       Reachable c faulty sourceChecked initialTime (advance c faulty net party input)
 
+/-- The executable guards of an admitted configuration (`3f + 1 ≤ n`, `Config.wellFormed`)
+satisfy `Thresholds`: VOTE/COMMIT at `Config.quorum = n - f`, CANDIDATE→READY and
+READY→clear at `2f + 1`. -/
+theorem config_thresholds {c : Config} (admitted : 3 * c.faults + 1 ≤ c.parties) :
+    Thresholds (Finset.range c.parties).card c.faults c.quorum
+      (2 * c.faults + 1) (2 * c.faults + 1) := by
+  have card : (Finset.range c.parties).card = c.parties := by simp
+  rw [card]
+  exact thresholds_standard admitted
+
+/-- At `n = 3f + 1` the executable VOTE/COMMIT quorum is the legacy `2f + 1`. -/
+theorem config_quorum_legacy {c : Config} (size : c.parties = 3 * c.faults + 1) :
+    c.quorum = 2 * c.faults + 1 := by
+  unfold Config.quorum
+  omega
+
 /-- Executable observation refinement, constructed from actual Reachable by
 GenericSimplexObservationSafety.actual_audit_refinement. Local fidelity is
-proved from real start/step and retained audit causes; committed and delivered
+proved from real start/step and retained audit causes, at the executable guards
+(`c.quorum`, `2f + 1`, `2f + 1`) for any roster size; committed and delivered
 observations are joined through the actual output-history invariant.
 Cryptographic signature origin and liveness remain separate obligations. -/
 structure AuditRefinement (c : Config) (faulty : Finset Nat) (net : Network) where
-  faithful : LocalFaithful (auditTrace net) (Finset.range c.parties) faulty c.faults
+  faithful : LocalFaithfulAt (auditTrace net) (Finset.range c.parties) faulty c.faults
+    c.quorum (2 * c.faults + 1) (2 * c.faults + 1)
   commits : ∀ party view block, party < c.parties → party ∉ faulty →
     (viewAt (net.localState party) view).committed = some block →
     CommittedAt (auditTrace net) faulty view block
@@ -253,13 +271,13 @@ structure AuditRefinement (c : Config) (faulty : Finset Nat) (net : Network) whe
 /-- Conditional join target for source export. It is intentionally named as a
 refinement consequence, never as an unconditional property of VerifiedCommit. -/
 theorem refined_engine_commits_compatible {c : Config} {faulty : Finset Nat} {net : Network}
-    (audit : AuditRefinement c faulty net) (size : c.parties = 3 * c.faults + 1)
+    (audit : AuditRefinement c faulty net) (admitted : 3 * c.faults + 1 ≤ c.parties)
     (faultBound : faulty.card ≤ c.faults) {p q v w : Nat} {b d : Block}
     (pm : p < c.parties) (qm : q < c.parties) (ph : p ∉ faulty) (qh : q ∉ faulty)
     (left : (viewAt (net.localState p) v).committed = some b)
     (right : (viewAt (net.localState q) w).committed = some d) :
     b.IsPrefix d ∨ d.IsPrefix b := by
-  exact committed_prefix_consistency audit.faithful (by simpa using size) faultBound
+  exact committed_prefix_consistency_at audit.faithful (config_thresholds admitted) faultBound
     (audit.commits p v b pm ph left) (audit.commits q w d qm qh right)
 
 /-- Historical local-output attestation consequence; NOT the production portable
@@ -318,4 +336,6 @@ theorem local_output_attestations_prefix_consistent {tr : Trace} {roster faulty 
 #assert_axioms committed_ancestor_of_later_at
 #assert_axioms committed_prefix_consistency_at
 #assert_axioms committed_prefix_consistency_admitted
+#assert_axioms config_thresholds
+#assert_axioms config_quorum_legacy
 end Minidregg.Kernel.GeneralSimplexReachability

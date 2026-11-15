@@ -31,7 +31,7 @@ theorem honest_intersection_of_overlap (roster faulty left right : Finset Nat) (
   have h₃ := Finset.card_union_add_card_inter left right
   omega
 
-/-- Same concrete committee/model as Config.wellFormed. This supplies the honest
+/-- The legacy `n = 3f + 1` committee (the smallest one `Config.wellFormed` admits). This supplies the honest
 intersection used by COMMIT-vs-CANDIDATE exclusion and exported local-commit
 certificates. It does not replace the distributed protocol refinement proof. -/
 theorem honest_intersection (roster faulty left right : Finset Nat) (f : Nat)
