@@ -67,7 +67,8 @@ requests.map cellId))`, `allocate_success_fresh`, `create_success_iff`, `view_us
 
 After it `preparePostAuthority` is 61 to 75 at every height and `deriveVerified` is 14,693 at
 height 1 and 15,799 at height 200. The flat row's median hand-off is 40,911 over the first 8
-births and 52,707 over the last 8 (before: 41 to 54 ms and 67 to 89 ms).
+births and 52,707 over the last 8 (before: 41 to 54 ms and 67 to 89 ms). The trie bench was not
+rerun after the path-once change.
 
 With it, `PrivateCellRoot.indexStep` is compiled as `indexStepOnce` (`indexStep_eq_once`): an
 insert evaluates the address's path once, for the walk and for the leaf digest.
@@ -102,23 +103,33 @@ insert evaluates the address's path once, for the walk and for the leaf digest.
   5,502 / 5,747 bytes at births 1 / 40 / 120 / 200 and its largest write, the Book, 108 / 196 /
   436 / 676: three bytes per account. The bound on a birth's complete record is false.
 - **`ExactReadback.ofAppended` prepares and extends a second time**: 2.6 to 3.9 ms, level.
-- **The product's flat row is another path.** `flatness-bench.py` appends to one document; it
-  makes no birth, and the allocation fix does not move it: the median propose and submit wall
-  times over operations 1 to 10, 46 to 55 and 91 to 100 are 9.9 / 30.3 / 48.3 and 23.5 / 48.0 /
-  54.7 ms on main and 10.8 / 33.3 / 49.2 and 31.9 / 67.4 / 59.2 ms on the lane (one run each).
-  By the client's exchange trace over 80 operations, comparing operations 9 to 16 with the last
-  8: Host operation 5 answers 9,426 bytes early and 66,950 late (2.5 to 8.3 ms); the client then
-  makes five codec exchanges of operation 8 over that answer (1.6 to 4.7 ms each); Host
-  operation 2, whose request is 2,415 bytes throughout, takes 19.1 ms early and 43.4 late; Host
-  operation 1 is level at 9 ms. So the client reads something that grows by about 720 bytes per
-  append and recodes it five times per proposal, and the Host's handling of operation 2 grows by
-  0.3 ms per append of history. Neither is read in the code yet; the serving Host's append does
-  not go through `prepareAppend` (only its index apply printed, 1.4 to 2.4 ms, level).
 
-## What ran on `5e05cf4fc`
+## The product's flat row: another path, attributed, for its own lane
+
+`flatness-bench.py` appends to one document; it
+makes no birth, and the allocation fix does not move it: the median propose and submit wall
+times over operations 1 to 10, 46 to 55 and 91 to 100 are 9.9 / 30.3 / 48.3 and 23.5 / 48.0 /
+54.7 ms on main and 10.8 / 33.3 / 49.2 and 31.9 / 67.4 / 59.2 ms on the lane (one run each).
+By the client's exchange trace over 80 operations, comparing operations 9 to 16 with the last
+8: Host operation 5 answers 9,426 bytes early and 66,950 late (2.5 to 8.3 ms); the client then
+makes five codec exchanges of operation 8 over that answer (1.6 to 4.7 ms each); Host
+operation 2, whose request is 2,415 bytes throughout, takes 19.1 ms early and 43.4 late; Host
+operation 1 is level at 9 ms. So the client reads something that grows by about 720 bytes per
+append and recodes it five times per proposal, and the Host's handling of operation 2 grows by
+0.3 ms per append of history. Neither is read in the code yet; the serving Host's append does
+not go through `prepareAppend` (only its index apply printed, 1.4 to 2.4 ms, level).
+
+Not fixed here and not this lane's: the row's owners are host-execution and store-retained.
+
+## What ran on `5e05cf4fc` (the head's Lean; later commits are this file)
 
 Whole `swarm-build lake build Minidregg minidregg-host` with the fixture and the gate
-executables, rc 0, 13,062 jobs. `check-import-boundary.sh` OK. `check-bytes-repr.sh` 5033 against
+executables, rc 0, 13,062 jobs. The modules outside the umbrella that import the directory
+(`Host.ClientConsentCore`, `Host.ClientConsentSession`, `Host.ClientConsentSpecializedSession`,
+`Host.WorldSim`, `Host.TurnLogFollower`, `Host.CarryVerifierMain`, `Host.Kn2StoreBench`,
+`Verify.ResourceReserveBirthFixture`, `Fixtures.BirthPlanPoles`, `Kernel.NativeThinConsent`,
+`Host.ThinBirthConsent`) build, rc 0; `Host.Json`, `Host.SourceAgreementJson` and `Host.Main` are
+in the Host executable's build. `check-import-boundary.sh` OK. `check-bytes-repr.sh` 5033 against
 the ceiling 5032: the one new occurrence is `digWithPath`'s node argument, `NodeIn (Address L)
 (List UInt8) Inner`, the private index's existing node type. Native Host: overlay candidate
 `d2eb8f7d8c4f` over the builder's `74d653514`. `scripts/pipeline/lane-journey-selftest` passes
@@ -137,4 +148,11 @@ in the run's short socket directory, were stopped by PID file by the runner.
    conversions. Target: the store phase off a checkpoint under 3 ms.
 2. The checkpoint design message, then the checkpoint as a sealed head and cell rows.
 3. The Book split, the same move.
-4. Read the product row's two growing exchanges (Host operations 5 and 2) in the code.
+
+## Left on hbox for the successor
+
+Tree `t2`, leased as `append-growth`, warm at this head with its own package copy (`lane-tree
+native` done). One candidate, `/home/hbox/pool/lanes/append-growth/candidates/d2eb8f7d8c4f`.
+`/ci/lane-appendgrowth/flat-fix1`: the product bench's world on that candidate (no process
+running); its `w/deployment/operator-config.json` is the configuration `store-bench index N` was
+run with. Build logs in `/home/hbox/lanes/append-growth-scratch`.
