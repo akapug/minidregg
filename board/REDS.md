@@ -1,15 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `07eeb91a239d` (holder: the invariant of the held index rows, stated and proved; the hand-over only for an). Round finished 2026-11-15T03:32Z.
-green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-07eeb91a`.
+Tip: `b8286f686194` (docs(append-growth): the store phase by part before and after; what an append still pays; ). Round finished 2026-11-15T04:29Z.
+green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-b8286f68`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 053906870674..07eeb91a239d`), newest first; owners are the seats whose
+Suspect commits since green (`git log 053906870674..b8286f686194`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `b8286f68` docs(append-growth): the store phase by part before and after; what an append still pays; the order 
+- `c9fa8ec7` append: the Store's node insert prepared once, the NODES file written as a byte array, the holder a 
+- `bbd08400` builder: REDS.md for 07eeb91a239d (1 red) (owner: build-loop)
 - `07eeb91a` holder: the invariant of the held index rows, stated and proved; the hand-over only for an installed
 - `ef8e5a8c` receiver: an append hands the index rows it wrote to the holder; the holder is keyed by Store root
 - `39689195` builder: REDS.md for 9ac0425a6f14 (1 red) (owner: build-loop)
@@ -47,18 +50,15 @@ Suspect commits since green (`git log 053906870674..07eeb91a239d`), newest first
 - `1f691b75` authority: `BirthAuthorityWritesBounded` is proved over the lowering
 - `e2cbffb6` authority: the layout's refinement is proved; the design is rewritten as present state
 - `f4651f6a` authority: the physical layout's foundation, `Compiler.CredentialAuthorityLayout` (work in progress,
-- `537ce49f` builder: REDS.md for e837e57358a4 (2 red) (owner: build-loop)
-- `e837e573` builder: REDS.md for cc727d09d078 (1 red) (owner: build-loop)
-- `ee1f6899` pipeline: `lane-journey` tears down the world it runs; `lane-candidates prune` keeps a lane's newest
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.310 | 0.217 | 0.700 | 1.849 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 53.620 | 120.097 | 2.240 | 1.849 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.271 | 0.221 | 0.815 | 1.849 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 36.817 | 120.923 | 3.284 | 1.849 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.472 | 0.316 | 0.671 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 171.701 | 132.853 | 0.774 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-07eeb91a/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.190 | 0.220 | 1.156 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 85.331 | 146.646 | 1.719 | 1.590 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.167 | 0.194 | 1.161 | 1.590 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 35.313 | 132.718 | 3.758 | 1.590 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.488 | 0.448 | 0.918 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 338.550 | 246.802 | 0.729 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-b8286f68/flatness.log | - | - | - | - | host-execution, store-retained |
