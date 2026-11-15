@@ -90,7 +90,8 @@ impl State {
 pub struct Ticket {
     pub id: String,
     pub peer: u32,
-    /// Digest of the authorize request (uid, kind, provider, runner, owner, body digest).
+    /// Digest of the authorize request (uid, kind, provider, runner, owner, body
+    /// digest; for a service: uid, row, method, path, body digest).
     pub request: String,
     pub provider: String,
     pub endpoint: String,
@@ -105,6 +106,8 @@ pub struct Ticket {
     pub owner: Option<Owner>,
     pub route: String,
     pub owner_epoch: Option<String>,
+    /// A service ticket's method; `None` is a provider ticket (always POST).
+    pub method: Option<String>,
     pub expires: u64,
     pub state: State,
     /// When the forward settled (answered, uncertain or refused).
@@ -117,7 +120,7 @@ impl Ticket {
             "provider":self.provider,"endpoint":self.endpoint,"models":self.models,"model":self.model,
             "perCall":self.per_call,"bodySha256":self.body_sha256,
             "owner":self.owner.as_ref().map(|o| json!({"subject":o.subject,"publicKey":o.public_key})),
-            "route":self.route,"ownerEpoch":self.owner_epoch,"expires":self.expires,"state":self.state.name(),"settled":self.settled})
+            "route":self.route,"ownerEpoch":self.owner_epoch,"method":self.method,"expires":self.expires,"state":self.state.name(),"settled":self.settled})
     }
 
     fn from_json(v: &Value) -> Option<Self> {
@@ -143,6 +146,7 @@ impl Ticket {
             owner,
             route: s("route")?,
             owner_epoch: s("ownerEpoch"),
+            method: s("method"),
             expires: n("expires")?,
             state: State::parse(v.get("state")?.as_str()?)?,
             settled: n("settled")?,
@@ -400,6 +404,7 @@ mod tests {
             owner: None,
             route: "pool".into(),
             owner_epoch: None,
+            method: None,
             expires: 1,
             state: State::Counted,
             settled: 0,

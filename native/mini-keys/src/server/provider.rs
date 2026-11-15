@@ -34,22 +34,22 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-const MAX_HEADERS: usize = 65_536;
-const MAX_TIMEOUT: Duration = Duration::from_secs(600);
+pub(super) const MAX_HEADERS: usize = 65_536;
+pub(super) const MAX_TIMEOUT: Duration = Duration::from_secs(600);
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-fn exact(value: &Value, fields: &[&str]) -> Result<(), Refusal> {
+pub(super) fn exact(value: &Value, fields: &[&str]) -> Result<(), Refusal> {
     match value.as_object() {
         Some(m) if m.keys().all(|k| fields.contains(&k.as_str())) => Ok(()),
         _ => Err(refuse("bad-request", format!("request fields must be within {fields:?}"))),
     }
 }
 
-fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str, Refusal> {
+pub(super) fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str, Refusal> {
     value.get(key).and_then(Value::as_str).ok_or_else(|| refuse("bad-request", format!("{key} must be a string")))
 }
 
-fn number(value: &Value, key: &str) -> Result<u64, Refusal> {
+pub(super) fn number(value: &Value, key: &str) -> Result<u64, Refusal> {
     value.get(key).and_then(Value::as_u64).ok_or_else(|| refuse("bad-request", format!("{key} must be a natural number")))
 }
 
@@ -66,7 +66,7 @@ fn owner_of(value: &Value) -> Result<Owner, Refusal> {
     Owner::new(text(o, "subject")?, text(o, "publicKey")?).map_err(|e| refuse("bad-request", e))
 }
 
-fn sha_field(value: &Value, key: &str) -> Result<String, Refusal> {
+pub(super) fn sha_field(value: &Value, key: &str) -> Result<String, Refusal> {
     let s = text(value, key)?;
     if s.len() != 64 || wire::unhex(s).is_err() {
         return Err(refuse("bad-request", format!("{key} must be 64 lowercase hex")));
@@ -83,7 +83,7 @@ fn table(broker: &Broker) -> Result<ProviderTable, Refusal> {
     super::provider_table(&c.providers, broker.config.trust_owner).map_err(|e| refuse("provider-table", e))
 }
 
-fn store(broker: &Broker) -> Result<CredentialStore, Refusal> {
+pub(super) fn store(broker: &Broker) -> Result<CredentialStore, Refusal> {
     let c = configured(broker)?;
     CredentialStore::open(&c.root, &c.key).map_err(store_refusal)
 }
@@ -104,7 +104,7 @@ fn observed(broker: &Broker, owner: &Owner, claimed: u64) -> Result<(String, u64
     Ok((view.epoch, height))
 }
 
-fn ticket_id() -> Result<String, Refusal> {
+pub(super) fn ticket_id() -> Result<String, Refusal> {
     let mut bytes = [0u8; 32];
     ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes).map_err(|_| refuse("entropy", "ticket entropy unavailable"))?;
     Ok(wire::hex(&bytes))
@@ -179,6 +179,7 @@ pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note)
         owner: owner.clone(),
         route: "pool".into(),
         owner_epoch: None,
+        method: None,
         expires: ticket::now() + ticket::TICKET_TTL_S,
         state: State::Minted,
         settled: 0,
@@ -224,13 +225,14 @@ pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note)
     Ok(reply(&minted))
 }
 
-/// What one forward resolved to: an endpoint and maybe a bearer.
-struct Plan {
-    endpoint: String,
-    secret: Option<Secret>,
+/// What one forward resolved to: an endpoint, a method and maybe a bearer.
+pub(super) struct Plan {
+    pub endpoint: String,
+    pub method: String,
+    pub secret: Option<Secret>,
 }
 
-fn create_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(super) fn create_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(path).map_err(|e| format!("spool: {e}"))?;
     f.write_all(bytes).map_err(|e| format!("spool: {e}"))
 }
@@ -244,7 +246,7 @@ fn read_bounded(path: &Path, bound: usize) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn header_config(secret: &Secret) -> String {
+pub(super) fn header_config(secret: &Secret) -> String {
     let escaped = secret.expose().replace('\\', "\\\\").replace('"', "\\\"");
     format!("header = \"Authorization: Bearer {escaped}\"\n")
 }
@@ -264,13 +266,13 @@ pub fn caller_gone(stream: &UnixStream) -> bool {
     n == 0
 }
 
-enum Sent {
+pub(super) enum Sent {
     Received { complete: bool, headers: Vec<u8>, body: Vec<u8> },
     Withheld,
     CallerGone,
 }
 
-fn send(spool: &Path, plan: &Plan, body: &[u8], timeout: Duration, max_response: usize, caller: &UnixStream) -> Result<Sent, Refusal> {
+pub(super) fn send(spool: &Path, plan: &Plan, body: &[u8], timeout: Duration, max_response: usize, caller: &UnixStream) -> Result<Sent, Refusal> {
     let seq = SEQ.fetch_add(1, Ordering::SeqCst);
     let prefix = format!("forward-{}-{seq}", std::process::id());
     let request_path = spool.join(format!("{prefix}.request"));
@@ -291,15 +293,20 @@ fn send(spool: &Path, plan: &Plan, body: &[u8], timeout: Duration, max_response:
         .env_clear()
         .current_dir(spool)
         .arg("--disable")
-        .args(["--silent", "--http1.1", "--request", "POST"])
+        .args(["--silent", "--http1.1", "--request", &plan.method])
         .args(["--proto", protocol, "--noproxy", "*", "--proxy", ""])
         .args(["--max-redirs", "0", "--connect-timeout", "10"])
         .args(["--max-time", &timeout.as_secs().max(1).to_string()])
-        .args(["--max-filesize", &max_response.to_string()])
-        .args(["--header", "Content-Type: application/json"])
-        .args(["--header", "Accept-Encoding: identity"])
-        .arg("--data-binary")
-        .arg(format!("@{}", request_path.display()))
+        .args(["--max-filesize", &max_response.to_string()]);
+    // A provider body is never empty; a service GET has none to send.
+    if !body.is_empty() {
+        command.args(["--header", "Content-Type: application/json"]);
+    }
+    command.args(["--header", "Accept-Encoding: identity"]);
+    if !body.is_empty() {
+        command.arg("--data-binary").arg(format!("@{}", request_path.display()));
+    }
+    command
         .arg("--dump-header")
         .arg(&header_path)
         .arg("--output")
@@ -403,7 +410,7 @@ pub fn forward(broker: &Broker, peer: &Peer, request: &Value, stream: &mut UnixS
             if row.credential != CredentialSource::Homelab {
                 return Err(refuse("provider-kind-mismatch", format!("row {name} carries a credential: authorize a ticket")));
             }
-            let plan = Plan { endpoint: row.endpoint.clone(), secret: None };
+            let plan = Plan { endpoint: row.endpoint.clone(), method: "POST".into(), secret: None };
             credentials::validate_endpoint(&plan.endpoint).map_err(|e| refuse("provider-table", e))?;
             match send(&broker.config.spool, &plan, &body, timeout, max_response, stream)? {
                 Sent::CallerGone => Err(refuse("caller-gone", "the caller closed the connection; the provider call was stopped")),
@@ -414,7 +421,7 @@ pub fn forward(broker: &Broker, peer: &Peer, request: &Value, stream: &mut UnixS
     }
 }
 
-fn answer_of(sent: Sent, note: &mut Note) -> Value {
+pub(super) fn answer_of(sent: Sent, note: &mut Note) -> Value {
     match sent {
         Sent::Received { complete, headers, body } => {
             note.set("complete", complete);
@@ -429,32 +436,106 @@ fn answer_of(sent: Sent, note: &mut Note) -> Value {
     }
 }
 
-/// The journaled forward of one ticket. Its state decides: counted sends once;
-/// answered replays; sending or uncertain refuses; refused is spent.
+/// The journaled forward of one provider ticket: the body is held to the
+/// grant, the bearer is the namespace's, and the send is one POST.
 #[allow(clippy::too_many_arguments)]
 fn forward_ticket(broker: &Broker, peer: &Peer, id: &str, body: &[u8], body_sha256: &str, timeout: Duration, max_response: usize, stream: &mut UnixStream, note: &mut Note) -> Result<Value, Refusal> {
+    journaled(
+        broker,
+        peer,
+        id,
+        body_sha256,
+        "provider",
+        note,
+        |t| {
+            if t.method.is_some() {
+                return Err(refuse("provider-kind-mismatch", "a service ticket is forwarded by service-forward").into());
+            }
+            if let Err(e) = ticket::body_within_grant(t, body) {
+                return Err(NotAdmitted::spend(refuse(&credentials::refused("body-exceeds-grant"), e)));
+            }
+            let namespace = match &t.owner {
+                Some(o) => Namespace::Owner(o),
+                None => Namespace::Pool,
+            };
+            let secret = store(broker)?.unseal(namespace, &t.provider).map_err(store_refusal)?;
+            credentials::validate_endpoint(&t.endpoint).map_err(|e| refuse("provider-table", e))?;
+            Ok(Plan { endpoint: t.endpoint.clone(), method: "POST".into(), secret: Some(secret) })
+        },
+        |plan, note| match send(&broker.config.spool, &plan, body, timeout, max_response, stream)? {
+            Sent::CallerGone => Ok(Settle::Uncertain(refuse("caller-gone", "the caller closed the connection; the provider call was stopped and the ticket is uncertain"))),
+            sent => Ok(Settle::Answered(answer_of(sent, note))),
+        },
+    )
+}
+
+/// Why a ticket was not admitted to its forward; `spend` marks it spent
+/// (it was presented with something it may never carry).
+pub(super) struct NotAdmitted {
+    refusal: Refusal,
+    spend: bool,
+}
+
+impl NotAdmitted {
+    pub(super) fn spend(refusal: Refusal) -> Self {
+        NotAdmitted { refusal, spend: true }
+    }
+}
+
+impl From<Refusal> for NotAdmitted {
+    fn from(refusal: Refusal) -> Self {
+        NotAdmitted { refusal, spend: false }
+    }
+}
+
+/// How one journaled send settled.
+pub(super) enum Settle {
+    /// The answer is retained before the ticket moves to `answered`; an exact
+    /// retry replays it.
+    Answered(Value),
+    /// Stopped where the upstream may have been called: never sent again.
+    Uncertain(Refusal),
+}
+
+/// The forward journal around one ticket, whatever it carries. Its state
+/// decides: counted sends once; answered replays; sending or uncertain
+/// refuses; refused is spent. `admit` holds the ticket to what it may carry
+/// and names the plan (the bearer is unsealed here, never earlier); `run`
+/// sends it. A `run` error means nothing left the box: the ticket stays
+/// counted.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn journaled(
+    broker: &Broker,
+    peer: &Peer,
+    id: &str,
+    body_sha256: &str,
+    row: &str,
+    note: &mut Note,
+    admit: impl FnOnce(&Ticket) -> Result<Plan, NotAdmitted>,
+    run: impl FnOnce(Plan, &mut Note) -> Result<Settle, Refusal>,
+) -> Result<Value, Refusal> {
     note.set("ticketSha256", native::sha256_hex(id.as_bytes())[..16].to_owned());
     let journal = |e: String| refuse("ticket-journal", e);
-    let (mut t, secret) = {
+    let (mut t, plan) = {
         let _g = broker.tickets.guard();
         let mut t = broker
             .tickets
             .get(id)
             .map_err(journal)?
             .ok_or_else(|| refuse("ticket-unknown", "no ticket by that id (never minted, or swept after it expired): authorize again"))?;
-        note.set("provider", t.provider.clone());
+        note.set(row, t.provider.clone());
         if t.peer != peer.uid {
             return Err(refuse("ticket-not-yours", format!("the ticket was minted for uid {}", t.peer)));
         }
-        let spend = |t: &mut Ticket, code: &str, detail: String| -> Refusal {
+        let spend = |t: &mut Ticket, r: Refusal| -> Refusal {
             t.state = State::Refused;
             t.settled = ticket::now();
             let _ = broker.tickets.put(t);
-            refuse(code, detail)
+            r
         };
         if t.body_sha256 != body_sha256 {
             if t.state == State::Counted {
-                return Err(spend(&mut t, "ticket-body-mismatch", "the body differs from the one this ticket was minted for; the ticket is spent".into()));
+                return Err(spend(&mut t, refuse("ticket-body-mismatch", "the body differs from the one this ticket was minted for; the ticket is spent")));
             }
             return Err(refuse("ticket-body-mismatch", "the body differs from the one this ticket was minted for"));
         }
@@ -467,24 +548,20 @@ fn forward_ticket(broker: &Broker, peer: &Peer, id: &str, body: &[u8], body_sha2
             }
             State::Sending if broker.tickets.flying(id) => return Err(refuse("forward-in-flight", "this ticket's forward is running now")),
             State::Sending | State::Uncertain => {
-                return Err(refuse("forward-uncertain", "this ticket's forward stopped where the provider may have been called; the broker will not call it again"));
+                return Err(refuse("forward-uncertain", "this ticket's forward stopped where the upstream may have been called; the broker will not call it again"));
             }
             State::Refused => return Err(refuse("ticket-spent", "this ticket was presented with a body it may not carry")),
             State::Minted => return Err(refuse("ticket-unknown", "the ticket was never counted: authorize again")),
             State::Counted => {}
         }
         if t.expires <= ticket::now() {
-            return Err(spend(&mut t, "ticket-expired", "authorize again".into()));
+            return Err(spend(&mut t, refuse("ticket-expired", "authorize again")));
         }
-        if let Err(e) = ticket::body_within_grant(&t, body) {
-            return Err(spend(&mut t, &credentials::refused("body-exceeds-grant"), e));
-        }
-        let namespace = match &t.owner {
-            Some(o) => Namespace::Owner(o),
-            None => Namespace::Pool,
+        let plan = match admit(&t) {
+            Ok(plan) => plan,
+            Err(NotAdmitted { refusal, spend: true }) => return Err(spend(&mut t, refusal)),
+            Err(NotAdmitted { refusal, spend: false }) => return Err(refusal),
         };
-        let secret = store(broker)?.unseal(namespace, &t.provider).map_err(store_refusal)?;
-        credentials::validate_endpoint(&t.endpoint).map_err(|e| refuse("provider-table", e))?;
         if !broker.tickets.take_flight(id) {
             return Err(refuse("forward-in-flight", "this ticket's forward is running now"));
         }
@@ -493,11 +570,9 @@ fn forward_ticket(broker: &Broker, peer: &Peer, id: &str, body: &[u8], body_sha2
             broker.tickets.land(id);
             return Err(journal(e));
         }
-        (t, secret)
+        (t, plan)
     };
-    let plan = Plan { endpoint: t.endpoint.clone(), secret: Some(secret) };
-    let sent = send(&broker.config.spool, &plan, body, timeout, max_response, stream);
-    drop(plan);
+    let sent = run(plan, note);
     let _g = broker.tickets.guard();
     let settled = (|| match sent {
         // Nothing left the box: the ticket is as good as before.
@@ -506,14 +581,13 @@ fn forward_ticket(broker: &Broker, peer: &Peer, id: &str, body: &[u8], body_sha2
             broker.tickets.put(&t).map_err(journal)?;
             Err(r)
         }
-        Ok(Sent::CallerGone) => {
+        Ok(Settle::Uncertain(r)) => {
             t.state = State::Uncertain;
             t.settled = ticket::now();
             broker.tickets.put(&t).map_err(journal)?;
-            Err(refuse("caller-gone", "the caller closed the connection; the provider call was stopped and the ticket is uncertain"))
+            Err(r)
         }
-        Ok(sent) => {
-            let answer = answer_of(sent, note);
+        Ok(Settle::Answered(answer)) => {
             broker.tickets.put_answer(&t.id, &answer).map_err(journal)?;
             t.state = State::Answered;
             t.settled = ticket::now();
