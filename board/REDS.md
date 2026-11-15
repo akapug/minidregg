@@ -1,15 +1,18 @@
 # Reds (owned by the builder, rewritten whole each round)
 
-Tip: `9ac0425a6f14` (ratchet(bytes-repr): 5056, the index rows compiled twins repeat existing list types). Round finished 2026-11-15T02:40Z.
-green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-9ac0425a`.
+Tip: `07eeb91a239d` (holder: the invariant of the held index rows, stated and proved; the hand-over only for an). Round finished 2026-11-15T03:32Z.
+green: `053906870674`. Builder: hbox `/home/hbox/lanes/integ`, logs `/home/hbox/lanes/integ/builder`, gate `/home/hbox/lanes/integ/gate-07eeb91a`.
 
 | stage | signature | reruns? | same place as last round? | owner | detail |
 |---|---|---|---|---|---|
 | umbrella-tree | running | - | yes | build-loop | the umbrellas have not finished; this file is rewritten when they do |
 
-Suspect commits since green (`git log 053906870674..9ac0425a6f14`), newest first; owners are the seats whose
+Suspect commits since green (`git log 053906870674..07eeb91a239d`), newest first; owners are the seats whose
 `Owns:` line (board/seats/*.md) names a path the commit touched:
 
+- `07eeb91a` holder: the invariant of the held index rows, stated and proved; the hand-over only for an installed
+- `ef8e5a8c` receiver: an append hands the index rows it wrote to the holder; the holder is keyed by Store root
+- `39689195` builder: REDS.md for 9ac0425a6f14 (1 red) (owner: build-loop)
 - `9ac0425a` ratchet(bytes-repr): 5056, the index rows compiled twins repeat existing list types (owner: bytes-repr)
 - `346b2d1a` docs(append-growth): the index after its compiled half; what the root still costs; the holder hand-o
 - `539bc23c` index: the journal index's compiled half, by `@[csimp]` equalities to the stated definitions
@@ -47,18 +50,15 @@ Suspect commits since green (`git log 053906870674..9ac0425a6f14`), newest first
 - `537ce49f` builder: REDS.md for e837e57358a4 (2 red) (owner: build-loop)
 - `e837e573` builder: REDS.md for cc727d09d078 (1 red) (owner: build-loop)
 - `ee1f6899` pipeline: `lane-journey` tears down the world it runs; `lane-candidates prune` keeps a lane's newest
-- `76c7a979` private root: the empty node's digest is computed once and a node is hashed from the absorbed custom
-- `705324d1` host: the trie bench names its layout and store
-- `f26ea94a` host: `store-bench trie <n>` times one `set` of the kept private index and its parts
 
 ## Flatness (published, does not gate `green`)
 
 | row | verdict | metric | early | late | ratio | bound | owner |
 |---|---|---|---|---|---|---|---|
-| flatness-submit | PASS | submit_cpu_ms | 0.200 | 0.199 | 0.992 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | submit_wall_ms | 32.336 | 76.154 | 2.355 | 1.590 | host-execution, store-retained |
-| flatness-submit | PASS | propose_cpu_ms | 0.164 | 0.196 | 1.192 | 1.590 | host-execution, store-retained |
-| flatness-submit | FAIL | propose_wall_ms | 19.321 | 70.449 | 3.646 | 1.590 | host-execution, store-retained |
-| flatness-get | PASS | get_cpu_ms | 0.402 | 0.396 | 0.985 | 1.856 | read-path |
-| flatness-get | PASS | get_wall_ms | 149.065 | 130.290 | 0.874 | 1.856 | read-path |
-| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-9ac0425a/flatness.log | - | - | - | - | host-execution, store-retained |
+| flatness-submit | PASS | submit_cpu_ms | 0.310 | 0.217 | 0.700 | 1.849 | host-execution, store-retained |
+| flatness-submit | FAIL | submit_wall_ms | 53.620 | 120.097 | 2.240 | 1.849 | host-execution, store-retained |
+| flatness-submit | PASS | propose_cpu_ms | 0.271 | 0.221 | 0.815 | 1.849 | host-execution, store-retained |
+| flatness-submit | FAIL | propose_wall_ms | 36.817 | 120.923 | 3.284 | 1.849 | host-execution, store-retained |
+| flatness-get | PASS | get_cpu_ms | 0.472 | 0.316 | 0.671 | 1.856 | read-path |
+| flatness-get | PASS | get_wall_ms | 171.701 | 132.853 | 0.774 | 1.856 | read-path |
+| flatness-run | FAIL | no numbers: exit=1; /home/hbox/lanes/integ/gate-07eeb91a/flatness.log | - | - | - | - | host-execution, store-retained |
