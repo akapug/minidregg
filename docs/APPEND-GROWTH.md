@@ -73,7 +73,77 @@ rerun after the path-once change.
 With it, `PrivateCellRoot.indexStep` is compiled as `indexStepOnce` (`indexStep_eq_once`): an
 insert evaluates the address's path once, for the walk and for the leaf digest.
 
+## Fixed: the journal index's compiled half
+
+No statement, row, root or interface moved. What compiled code runs is replaced by `@[csimp]`
+equalities, each proved for all inputs (nothing is executed-only): `dig = digFast` (the
+customization absorbed once, the node written into a byte array, the empty digest and its
+spelling constants), `IndexKey.bytes = bytesFast`, `bitsOf = bitsOfFast`, `verify = verifyFast`
+(in `Compiler/DurableIndex.lean`, at the definitions, so every reader compiled after them gets
+them); `set = setFast` (one walk, the bits once, `split`'s first differing bit in one pass, a
+sibling's row read only under an empty subtree), `IndexRows.insert = insertFast` (one walk and
+one verification per key), `setAll` and `IndexRows.apply` over one hash map of the rows written
+and one hash set of the prefixes written (`foldMap_agrees`: the same root, the same rows, the
+same order) in `Compiler/DurableIndexFast.lean`.
+
+`store-bench index`, microseconds, before / after, at 1,000 keys (20,000 in brackets):
+
+| | before | after |
+|---|---|---|
+| `bitsOf` (with the bench's key hash, 2.5) | 16.6 (24.1) | 7.3 (6.8) |
+| digest of a leaf | 10.4 | 4.5 (4.7) |
+| digest of a branch | 5.4 | 3.6 (3.8) |
+| `lookupRows` | 161.7 (227.8) | 76 (104) |
+| `set`, a new key | 564.5 (1,149.1) | 144 (183) |
+| `set`, over a held key | 326.8 (454.0) | 143 (181) |
+| `setAll`, twelve new keys, per key | 911 (1,530) | 155 (210) |
+
+The target of 100 for a new key at 20,000 is not met. What remains is hashing, and two choices
+of the ROOT that this change may not move:
+- **The base-255 spelling of a digest.** A branch's digest costs 3.6: 2.7 to spell its two
+  children base 255 into the node's bytes (1.3 each, `nodeArray of a branch`), 0.2 for the
+  permutation, 0.7 to read the output as a number. One level of one `set` is two such hashes
+  (the verification's and the rebuild's): 5.4 of its 7.2 is the spelling.
+- **The family byte leads every path.** A trie of 1,000 keys of one family has 2,436 rows and a
+  key about 19 levels, where 11 would hold it: the family's eight bits are a chain of branches
+  with an empty sibling, hashed twice per key. (The empty sibling's spelling is a constant now.)
+A re-genesis that moves the index root (the checkpoint design does) can fix both: digests as
+fixed 32 octets in a node's bytes, and the family in three bits or after the hashed bits where
+no reader reveals by family.
+`rebuildLazy (siblings given)` reads 272 at 20,000 keys against 68 at 1,000 while a whole `set`
+is 183: a bench artifact, not explained.
+
+In the product (`flatness-bench.py`, 100 appends to one document, `MINI_STORE_PHASES=1`) the
+index apply is 283 / 376 / 1,091 (minimum, median, maximum) over 103 appends; it was 1,400 to
+2,400. On the four-source fixture's births (14 keys) it is 5,331 / 7,336 / 7,912 / 8,409 at
+heights 1 / 40 / 120 / 200 (11,505 / 14,424 / 18,271 / 18,597 before), and that is NOT the trie:
+
+## Found, fixed on the lane after the landed head, and RED: the receiving loop reads its index rows from the Store on every append
+
+`store index ... held true` only says a holder exists after the read. In `receiveCandidateWithFresh`
+nothing hands the appended rows to the holder (`DurableServed.receiveServed` does), so the holder
+is one height behind and every append reads its keys' prefixes from the Store (about 1,350 row
+keys for a birth); and `DurableNodeCache.decoded` was one slot per process, so the fixture's four
+Stores evicted one another. Commit "receiver: an append hands the index rows it wrote to the
+holder; the holder is keyed by Store root" (the lane's head, after the landed commit) does both.
+With it the fixture's index apply is 2,170 / 2,717 / 2,512 at heights 40 / 120 / 200 and the
+flat row's median hand-off 32,647 over the first 8 births and 39,170 over the last 8; its whole
+build is green (13,080 jobs); but the Simplex gate's row `four-source-serve` FAILS with it
+("uncaught exception: partial source completion", after "AWAIT second confirmed by 3 of 4
+identical receipts"), and passes without it. Not diagnosed. First suspects: the holder moved at
+a confirmation that was `alreadyPresent` or recovered; a Store reopened in the same process under
+the same root string finding rows of its earlier life. Do not land that commit before the row
+passes.
+
 ## Measured, not fixed
+
+- **`Loaded.extend` and the World's turn**: 1,848 to 2,966 per birth. Of it (`store extend`
+  line): the engine's install 11 to 43, the presence index 6 to 49, links 22, cell ids and
+  transaction index 3 to 46 (these three grow slowly with height), the leaf digest 0. The rest,
+  about 2.3 ms, is the world-root cache's advance over the record's 12 written cells and the
+  World's turn (`WorldTrack.advance`: `Turn.ofIntent`, the charge comparison, `admitPinned`);
+  those two are not split yet.
+
 
 - **The checkpoint seals the whole state.** `storeCheckpoint` encodes and MACs the whole `State`
   and the World's system store (`DurableCheckpointCodec.sealedBytesAt`) at every height that is
@@ -84,21 +154,6 @@ insert evaluates the address's path once, for the walk and for the leaf digest.
   are rows the append writes in its own transaction. The design message for it is owed before
   any of it is built (the keystone, what an open costs before and after, how a past height reads,
   what retires old cell versions, which formats move).
-- **The journal index apply is the largest steady term**: 11 to 18 ms for a birth's 14 keys (150
-  rows at height 200), levelling like a log; 1.4 to 2.4 ms for a document append's 3 keys. The
-  rows are held (`heldIndexRows` answers), so there is no Store round trip. On a trie of 1,000
-  keys (`store-bench index 1000`; 20,000 in brackets): `bitsOf` 16.6 (24.1); the digest of a leaf
-  10.4, of a branch 5.4 (the private index's is 1.6: here a digest is a number, converted from
-  and to 32 bytes around every hash); `openingOf` 19.0 (35.5); `lookupRows` 161.7 (227.8);
-  `set` of a new key 564.5 (1,149.1); `set` over a held key 326.8 (454.0); `setAll` of twelve new
-  keys 10,932 (18,362), that is 911 per key. Read from `Compiler/DurableIndex.lean`, each key
-  pays: `lookupRows` then `set` (`IndexRows.insert`), so two walks and two verifications of
-  about 20 hashes; `bitsOf` (65 bytes to 520 booleans) once per walk, per verification and per
-  set; `here ++ [bit]` and `bits[here.length]?` at every level of a walk; a leaf digest per
-  leaf sibling (`siblingSub`); in `split`, `(List.range 520).filter fun i => … bits[i]? ≠
-  otherBits[i]?`, 520 list reads of up to 520 steps; the climb's 20 hashes; and in `setAll` and
-  `insert` an `overlay` closure per key searched by `List.find?` and a quadratic
-  `later ++ rows.filter (!later.any …)` over the rows written.
 - **The Book is written whole.** With `MINI_FLAT_BORN=account` the record is 5,144 / 5,260 /
   5,502 / 5,747 bytes at births 1 / 40 / 120 / 200 and its largest write, the Book, 108 / 196 /
   436 / 676: three bytes per account. The bound on a birth's complete record is false.
@@ -121,7 +176,7 @@ not go through `prepareAppend` (only its index apply printed, 1.4 to 2.4 ms, lev
 
 Not fixed here and not this lane's: the row's owners are host-execution and store-retained.
 
-## What ran on `5e05cf4fc` (the head's Lean; later commits are this file)
+## What ran for the allocation fix (`5e05cf4fc`)
 
 Whole `swarm-build lake build Minidregg minidregg-host` with the fixture and the gate
 executables, rc 0, 13,062 jobs. The modules outside the umbrella that import the directory
@@ -142,17 +197,27 @@ in the run's short socket directory, were stopped by PID file by the runner.
 
 ## Next, in this order
 
-1. The journal index apply: one walk and one verification per key, the key's bits once, no
-   per-level list rebuilding, `split`'s first differing bit by one pass, the overlay as a map,
-   each proved equal to the stated function (`@[csimp]`); then the digest without the number
-   conversions. Target: the store phase off a checkpoint under 3 ms.
-2. The checkpoint design message, then the checkpoint as a sealed head and cell rows.
-3. The Book split, the same move.
+1. Make `four-source-serve` pass with the holder hand-over, then land that commit.
+2. Split and fix `Loaded.extend`: the root cache's advance and the World's turn (2.3 ms a birth),
+   then the Store's append call (0.4 to 1.8 ms) and the read-back's second preparation.
+3. The checkpoint as rows, stage A then stage B: the design and the coordinator's five conditions
+   are in the session's messages (no periodic seal; the tag is the head; cells as node rows;
+   the system store as index families; `journal` and `spent` are already the index's transaction
+   and nullifier families). Before its first commit: read `DurableFastForwardSpec` whole, the fn
+   archive journal's anchoring, and list every place an index root leaves the Host; name what
+   each reader that starts from a checkpoint starts from instead; the migration as a command with
+   a test on a tour-built world; the retention Prop and refusal name; Store bytes per record
+   before and after; the cold open at 1,000 and 10,000 records. Move the two root choices above
+   in the same re-genesis.
+4. The Book split, the same move.
 
 ## Left on hbox for the successor
 
-Tree `t2`, leased as `append-growth`, warm at this head with its own package copy (`lane-tree
-native` done). One candidate, `/home/hbox/pool/lanes/append-growth/candidates/d2eb8f7d8c4f`.
-`/ci/lane-appendgrowth/flat-fix1`: the product bench's world on that candidate (no process
-running); its `w/deployment/operator-config.json` is the configuration `store-bench index N` was
-run with. Build logs in `/home/hbox/lanes/append-growth-scratch`.
+Tree `t2`, leased as `append-growth`, with its own package copy; its build is of the landed
+index commit (the candidate's source). One candidate,
+`/home/hbox/pool/lanes/append-growth/candidates/501f0a28513c` (the landed index commit over the
+builder's `f264ccfdc`; J0 to J8 and THIN pass on it through `lane-journey`).
+`/ci/lane-appendgrowth/flat-fix1`: a product bench world whose
+`w/deployment/operator-config.json` is the configuration `store-bench index N` runs with. Build
+and gate logs in `/home/hbox/lanes/append-growth-scratch` (`simplex-11.log` and
+`rows/four-source-serve.log` are the failing row's).
