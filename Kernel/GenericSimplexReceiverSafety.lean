@@ -33,6 +33,41 @@ theorem verifiedCommit_attributed {tr : Trace} {faulty : Finset Nat}
   · intro party member honest
     exact honestOrigin party (List.mem_toFinset.mp member) honest
 
+/-- Any roster size: the native verifier's own `Config.quorum = n - f` signer count
+is the certificate quorum, with no `n = 3f + 1` premise. -/
+theorem verifiedCommit_attributed_at {tr : Trace} {faulty : Finset Nat}
+    {context : GenericSimplexCodec.Context}
+    (certificate : GenericSimplexIO.VerifiedCommit context)
+    (honestOrigin : ∀ party ∈ certificate.signerIds, party ∉ faulty →
+      ∃ time, Sent tr time party certificate.view .commit (some certificate.block)) :
+    AttributedCommitSendsAt tr (Finset.range context.config.parties) faulty
+      context.config.quorum certificate.view certificate.block := by
+  refine ⟨certificate.signerIds.toFinset, ?_, ?_, ?_⟩
+  · intro party member
+    exact Finset.mem_range.mpr
+      (certificate.signers_members party (List.mem_toFinset.mp member))
+  · rw [List.toFinset_card_of_nodup certificate.signers_distinct]
+    exact certificate.quorum_size
+  · intro party member honest
+    exact honestOrigin party (List.mem_toFinset.mp member) honest
+
+/-- Exact consumer join for any roster size whose thresholds satisfy `Thresholds`. -/
+theorem ordered_next_payload_unique_at {tr : Trace} {roster faulty : Finset Nat}
+    {f q c r : Nat} {context : GenericSimplexCodec.Context} {loaded : Durable}
+    {leftIntent rightIntent : DataIntent ResourceBirthCodec.rootBytes}
+    (rules : LocalFaithfulAt tr roster faulty f q c r)
+    (th : Minidregg.Kernel.GenericSimplexQuorum.Thresholds roster.card f q c r)
+    (faultBound : faulty.card ≤ f)
+    (left : JointReceiver.Ordered context loaded leftIntent)
+    (right : JointReceiver.Ordered context loaded rightIntent)
+    (leftOrigin : AttributedCommitSendsAt tr roster faulty q
+      left.commitment.view left.commitment.block)
+    (rightOrigin : AttributedCommitSendsAt tr roster faulty q
+      right.commitment.view right.commitment.block) :
+    JointReceiver.sourcePayload leftIntent = JointReceiver.sourcePayload rightIntent := by
+  exact certified_next_record_unique_at rules th faultBound leftOrigin rightOrigin
+    left.sourceOrdered right.sourceOrdered
+
 /-- Exact consumer join for two currently ordered native source records at the
 same durable source prefix. Attribution MUST be produced by the signature origin
 and actual engine refinement; the opaque VerifiedCommit alone does not supply it.
@@ -120,4 +155,6 @@ theorem actual_ordered_next_payload_unique {faulty : Finset Nat}
 #assert_axioms verifiedCommit_attributed
 #assert_axioms ordered_next_payload_unique
 #assert_axioms ordered_next_payload_at_index
+#assert_axioms verifiedCommit_attributed_at
+#assert_axioms ordered_next_payload_unique_at
 end Minidregg.Kernel.GenericSimplexReceiverSafety
