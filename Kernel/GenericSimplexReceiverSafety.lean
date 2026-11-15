@@ -39,14 +39,16 @@ theorem verifiedCommit_attributed {tr : Trace} {faulty : Finset Nat}
     exact honestOrigin party (List.mem_toFinset.mp member) honest
 
 /-- Any roster size: the native verifier's own `Config.quorum = n - f` signer count
-is the certificate quorum, with no `n = 3f + 1` premise. -/
+is the certificate quorum, with no `n = 3f + 1` premise. `block` is the caller's chain,
+under the same origin and digest premises as `verifiedCommit_attributed`. -/
 theorem verifiedCommit_attributed_at {tr : Trace} {faulty : Finset Nat}
     {context : GenericSimplexCodec.Context}
     (certificate : GenericSimplexIO.VerifiedCommit context)
+    (block : Minidregg.Kernel.GenericSimplex.Block)
     (honestOrigin : ∀ party ∈ certificate.signerIds, party ∉ faulty →
-      ∃ time, Sent tr time party certificate.view .commit (some certificate.block)) :
+      ∃ time, Sent tr time party certificate.view .commit (some block)) :
     AttributedCommitSendsAt tr (Finset.range context.config.parties) faulty
-      context.config.quorum certificate.view certificate.block := by
+      context.config.quorum certificate.view block := by
   refine ⟨certificate.signerIds.toFinset, ?_, ?_, ?_⟩
   · intro party member
     exact Finset.mem_range.mpr
@@ -65,13 +67,16 @@ theorem ordered_next_payload_unique_at {tr : Trace} {roster faulty : Finset Nat}
     (faultBound : faulty.card ≤ f)
     (left : JointReceiver.Ordered context loaded leftIntent)
     (right : JointReceiver.Ordered context loaded rightIntent)
+    (leftBlock rightBlock : Minidregg.Kernel.GenericSimplex.Block)
+    (leftReads : sourceHistory leftBlock = left.history)
+    (rightReads : sourceHistory rightBlock = right.history)
     (leftOrigin : AttributedCommitSendsAt tr roster faulty q
-      left.commitment.view left.commitment.block)
+      left.commitment.view leftBlock)
     (rightOrigin : AttributedCommitSendsAt tr roster faulty q
-      right.commitment.view right.commitment.block) :
+      right.commitment.view rightBlock) :
     JointReceiver.sourcePayload leftIntent = JointReceiver.sourcePayload rightIntent := by
   exact certified_next_record_unique_at rules th faultBound leftOrigin rightOrigin
-    left.sourceOrdered right.sourceOrdered
+    (leftReads ▸ left.sourceOrdered) (rightReads ▸ right.sourceOrdered)
 
 /-- Exact consumer join for two currently ordered native source records at the
 same durable source prefix. Attribution MUST be produced by the signature origin
