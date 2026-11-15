@@ -606,3 +606,436 @@ fn two_uid_a_foreign_account_reaches_only_its_role_and_cannot_read_a_secret() {
     // This test's own process holds no role in the split shape.
     assert_eq!(client::hello(&b).unwrap_err().code, "peer-not-allowed");
 }
+
+// ------------------------------------------------------------------ service bearers
+
+const SVC_SECRET: &str = "sk-service-secret-a1b2c3d4e5f6";
+
+/// A fake event-stream upstream. The path picks the script; every request head
+/// is recorded, and `closed` counts the connections the far side ended while
+/// the stub was still writing.
+fn event_upstream() -> (String, Arc<Mutex<Vec<String>>>, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let closed = Arc::new(AtomicUsize::new(0));
+    let (log, gone) = (seen.clone(), closed.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let (log, gone) = (log.clone(), gone.clone());
+            std::thread::spawn(move || {
+                stream.set_nodelay(true).unwrap();
+                let (head, _) = http_request(&mut stream);
+                log.lock().unwrap().push(head.clone());
+                let path = head.split_whitespace().nth(1).unwrap_or("").to_owned();
+                let bearer = head.lines().find_map(|l| l.strip_prefix("Authorization: Bearer ").or_else(|| l.strip_prefix("authorization: Bearer "))).unwrap_or("").trim().to_owned();
+                let mut extra = String::new();
+                if path.ends_with("/echo-head") {
+                    extra = format!("X-Echo: {bearer}\r\n");
+                }
+                let mut out = |bytes: &[u8], pause: u64| -> bool {
+                    let ok = stream.write_all(bytes).and_then(|_| stream.flush()).is_ok();
+                    std::thread::sleep(Duration::from_millis(pause));
+                    ok
+                };
+                out(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n{extra}\r\n").as_bytes(), 0);
+                if path.ends_with("/two") {
+                    out(b"id: 1\ndata: one\n\n", 1200);
+                    out(b"id: 2\ndata: two\n\n", 0);
+                } else if path.ends_with("/echo") {
+                    let (a, b) = bearer.split_at(10);
+                    out(b"data: before\n\n", 300);
+                    out(format!("data: Bearer {a}").as_bytes(), 300);
+                    out(format!("{b}\n\n").as_bytes(), 300);
+                    out(b"data: after\n\n", 0);
+                } else if path.ends_with("/held") || path.ends_with("/first") {
+                    // One event at once, then keep-alives until the far side goes.
+                    out(b"id: 1\ndata: one\n\n", 0);
+                    for _ in 0..300 {
+                        if !out(b":\n\n", 100) {
+                            gone.fetch_add(1, Ordering::SeqCst);
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    (base, seen, closed)
+}
+
+impl Fixture {
+    /// Every role this uid may hold, the service role among them.
+    fn service_roles(&self) -> Value {
+        let mut roles = self.all_roles();
+        roles.as_array_mut().unwrap().push(json!({"role":"service","uids":[peer::euid()]}));
+        roles
+    }
+
+    /// The broker config with a service table holding `rows`.
+    fn service_config(&self, peers: Value, rows: Value) -> Value {
+        let path = self.dir.join("etc/services.json");
+        write_mode(&path, json!({"type":"mini-service-table-v1","services":rows}).to_string().as_bytes(), 0o644);
+        let mut v = self.config_json(peers, true);
+        v["credentials"]["services"] = json!(path);
+        v
+    }
+
+    /// A broker started from the parsed config bytes. The config FILE's custody
+    /// walk (every ancestor root's or the owner's) is `start`'s concern and
+    /// `start_refuses_every_unsafe_custody_by_name` holds it; the service rows
+    /// start here so they also run where `/` is not root's (a build sandbox).
+    fn start_parsed(&self, config: Value) -> Result<Broker, String> {
+        let config = Config::parse(config.to_string().as_bytes(), peer::euid())?;
+        let (broker, listener) = server::Broker::start(config)?;
+        std::thread::spawn(move || broker.serve(listener));
+        Ok(Broker::new(&self.socket, peer::euid()))
+    }
+}
+
+fn chat_row(origin: &str, uids: Value) -> Value {
+    json!({"name":"chat","origin":origin,"paths":["/v1/messages"],"streams":["/v1/events"],"methods":["GET","POST"],"maxRequestBytes":"256","uids":uids})
+}
+
+fn set_service(b: &Broker) -> Value {
+    b.call(&json!({"op":"service","action":"set","service":"chat","secret":SVC_SECRET}), Duration::from_secs(10)).unwrap()
+}
+
+fn service_authorize(b: &Broker, method: &str, path: &str, body: &[u8]) -> Result<Value, client::Refused> {
+    b.call(&json!({"op":"service-authorize","service":"chat","method":method,"path":path,"bodySha256":body_sha(body)}), Duration::from_secs(10))
+}
+
+fn service_forward(b: &Broker, ticket: &str, body: &[u8]) -> Result<Value, client::Refused> {
+    b.call(&json!({"op":"service-forward","ticket":ticket,"body":wire::hex(body),"timeoutMs":5000,"maxResponseBytes":65536}), Duration::from_secs(20))
+}
+
+fn open_stream(b: &Broker, ticket: &str, last_event_id: Option<&str>) -> std::os::unix::net::UnixStream {
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut s = b.connect(end).unwrap();
+    let mut request = json!({"op":"service-stream","ticket":ticket,"body":""});
+    if let Some(id) = last_event_id {
+        request["lastEventId"] = json!(id);
+    }
+    wire::send(&mut s, &request, end).unwrap();
+    s
+}
+
+fn next_frame(s: &mut std::os::unix::net::UnixStream, secs: u64) -> Value {
+    wire::recv(s, wire::MAX_FRAME, Instant::now() + Duration::from_secs(secs)).unwrap()
+}
+
+fn data_of(frame: &Value) -> String {
+    String::from_utf8(wire::unhex(frame["body"].as_str().unwrap()).unwrap()).unwrap()
+}
+
+#[test]
+fn a_service_bearer_is_sealed_by_the_operator_and_never_comes_back() {
+    let f = Fixture::new("svc-seal");
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([peer::euid()]))]))).unwrap();
+    let set = set_service(&b);
+    assert_eq!(set["result"]["stored"], "sealed", "{set}");
+    let ls = b.call(&json!({"op":"service","action":"ls"}), Duration::from_secs(10)).unwrap();
+    assert_eq!(ls["result"]["services"][0]["sealed"], true, "{ls}");
+    assert_eq!(b.call(&json!({"op":"service","action":"set","service":"nope","secret":SVC_SECRET}), Duration::from_secs(10)).unwrap_err().code, "service-row-unknown");
+    let body = br#"{"text":"hi"}"#;
+    let t = service_authorize(&b, "POST", "/v1/messages", body).unwrap();
+    let r = service_forward(&b, t["ticket"].as_str().unwrap(), body).unwrap();
+    for v in [&set, &ls, &t, &r] {
+        assert!(!v.to_string().contains(SVC_SECRET), "{v}");
+    }
+    // Sealed on disk; the audit log names the action, never the value.
+    let mut disk = Vec::new();
+    for entry in walk(&f.root) {
+        disk.extend(std::fs::read(entry).unwrap());
+    }
+    assert!(!disk.windows(SVC_SECRET.len()).any(|w| w == SVC_SECRET.as_bytes()));
+    let audit = f.audit_text();
+    assert!(!audit.contains(SVC_SECRET) && audit.contains("\"op\":\"service\""), "{audit}");
+    // Revoked: the next authorization refuses by name.
+    let revoked = b.call(&json!({"op":"service","action":"revoke","service":"chat"}), Duration::from_secs(10)).unwrap();
+    assert_eq!(revoked["result"]["removed"], true);
+    assert_eq!(service_authorize(&b, "POST", "/v1/messages", body).unwrap_err().code, "provider-refused:no-credential");
+    // A service row may not share a provider row's name: both live in the operator's namespace.
+    let f2 = Fixture::new("svc-collide");
+    let mut row = chat_row(&f2.provider.0, json!([peer::euid()]));
+    row["name"] = json!("poolrow");
+    let err = f2.start_parsed(f2.service_config(f2.service_roles(), json!([row]))).unwrap_err();
+    assert!(err.contains("also a provider row"), "{err}");
+    // A plain-HTTP origin off loopback never loads.
+    let err = f2.start_parsed(f2.service_config(f2.service_roles(), json!([chat_row("http://api.example.test", json!([1]))]))).unwrap_err();
+    assert!(err.contains("only on loopback"), "{err}");
+}
+
+#[test]
+fn a_service_row_refuses_another_path_method_or_body_and_nothing_is_sent() {
+    let f = Fixture::new("svc-refuse");
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    let body = br#"{"text":"hi"}"#;
+    for (method, path, code) in [
+        ("DELETE", "/v1/messages", "service-method-refused"),
+        ("POST", "/v1/other", "service-path-refused"),
+        ("POST", "/v1/messages/../../admin", "service-path-refused"),
+        ("POST", "/v1/messages%2f..%2fadmin", "service-path-refused"),
+        ("POST", "//api.example.test/v1/messages", "service-path-refused"),
+        ("GET", "/v1/events", "service-body-refused"),
+    ] {
+        assert_eq!(service_authorize(&b, method, path, body).unwrap_err().code, code, "{method} {path}");
+    }
+    let unknown = b.call(&json!({"op":"service-authorize","service":"other","method":"POST","path":"/v1/messages","bodySha256":body_sha(body)}), Duration::from_secs(10)).unwrap_err();
+    assert_eq!(unknown.code, "service-row-unknown");
+    // Each operation keeps to its own paths.
+    let t = service_authorize(&b, "GET", "/v1/events", b"").unwrap();
+    assert_eq!(t["reply"], "stream");
+    assert_eq!(service_forward(&b, t["ticket"].as_str().unwrap(), b"").unwrap_err().code, "service-reply-streamed");
+    let t = service_authorize(&b, "GET", "/v1/messages", b"").unwrap();
+    assert_eq!(t["reply"], "whole");
+    let mut s = open_stream(&b, t["ticket"].as_str().unwrap(), None);
+    assert_eq!(next_frame(&mut s, 5)["refused"], "service-reply-whole");
+    // A body over the row's cap, or not JSON, spends its ticket and is never sent.
+    let big = format!("{{\"text\":\"{}\"}}", "x".repeat(300));
+    let t = service_authorize(&b, "POST", "/v1/messages", big.as_bytes()).unwrap();
+    let ticket = t["ticket"].as_str().unwrap();
+    assert_eq!(service_forward(&b, ticket, big.as_bytes()).unwrap_err().code, "service-body-exceeds-row");
+    assert_eq!(service_forward(&b, ticket, big.as_bytes()).unwrap_err().code, "ticket-spent");
+    let t = service_authorize(&b, "POST", "/v1/messages", b"not json").unwrap();
+    assert_eq!(service_forward(&b, t["ticket"].as_str().unwrap(), b"not json").unwrap_err().code, "service-body-refused");
+    assert!(f.provider.1.lock().unwrap().is_empty(), "nothing reached the upstream");
+}
+
+#[test]
+fn a_json_post_goes_out_with_the_bearer_and_an_exact_retry_replays_it() {
+    let f = Fixture::new("svc-post");
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    let body = br#"{"text":"hi","nonce":1}"#;
+    let path = "/v1/messages/7?thread=a%20b";
+    let t = service_authorize(&b, "POST", path, body).unwrap();
+    assert_eq!(service_authorize(&b, "POST", path, body).unwrap()["ticket"], t["ticket"], "an authorize retry gets the same ticket");
+    let ticket = t["ticket"].as_str().unwrap().to_owned();
+    let r = service_forward(&b, &ticket, body).unwrap();
+    assert_eq!(r["complete"], true, "{r}");
+    assert!(String::from_utf8(wire::unhex(r["body"].as_str().unwrap()).unwrap()).unwrap().contains("hello"));
+    {
+        let seen = f.provider.1.lock().unwrap();
+        let (head, sent) = seen.last().unwrap();
+        assert!(head.starts_with(&format!("POST {path} HTTP/1.1")), "{head}");
+        assert!(head.contains(&format!("Bearer {SVC_SECRET}")), "the upstream got the bearer");
+        assert!(head.to_ascii_lowercase().contains("content-type: application/json"));
+        assert_eq!(sent.as_slice(), body, "and exactly the authorized body");
+    }
+    // The reply was lost: the same ticket replays it and nothing is posted twice.
+    let replay = service_forward(&b, &ticket, body).unwrap();
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(replay["body"], r["body"]);
+    assert_eq!(f.provider.1.lock().unwrap().len(), 1);
+    // The same body posted on purpose a second time is a second ticket.
+    let again = service_authorize(&b, "POST", path, body).unwrap();
+    assert_ne!(again["ticket"], t["ticket"]);
+    service_forward(&b, again["ticket"].as_str().unwrap(), body).unwrap();
+    assert_eq!(f.provider.1.lock().unwrap().len(), 2);
+    // An upstream that echoes the bearer: the whole reply is withheld.
+    let echo = br#"{"echo-the-bearer":true}"#;
+    let t = service_authorize(&b, "POST", "/v1/messages", echo).unwrap();
+    let w = service_forward(&b, t["ticket"].as_str().unwrap(), echo).unwrap();
+    assert_eq!(w["withheld"], true);
+    assert!(!w.to_string().contains(SVC_SECRET));
+    // A service ticket is not a provider ticket, nor the other way round.
+    b.call(&json!({"op":"pool","action":"set","provider":"poolrow","secret":POOL_SECRET}), Duration::from_secs(10)).unwrap();
+    let model = br#"{"model":"m1","max_tokens":8}"#;
+    let pool = b.call(&json!({"op":"provider-authorize","kind":"pool","provider":"poolrow","runner":"9","maxTokens":8,"bodySha256":body_sha(model)}), Duration::from_secs(10)).unwrap();
+    assert_eq!(service_forward(&b, pool["ticket"].as_str().unwrap(), model).unwrap_err().code, "service-kind-mismatch");
+    let svc = service_authorize(&b, "POST", "/v1/messages", model).unwrap();
+    assert_eq!(forward(&b, svc["ticket"].as_str().unwrap(), model).unwrap_err().code, "provider-kind-mismatch");
+    assert!(!f.audit_text().contains(SVC_SECRET));
+}
+
+#[test]
+fn a_streamed_reply_reaches_the_caller_as_it_arrives_and_a_retry_never_reconnects() {
+    let f = Fixture::new("svc-stream");
+    let (origin, seen, closed) = event_upstream();
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&origin, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    let t = service_authorize(&b, "GET", "/v1/events/two", b"").unwrap();
+    let ticket = t["ticket"].as_str().unwrap().to_owned();
+    let started = Instant::now();
+    let mut s = open_stream(&b, &ticket, None);
+    let head = next_frame(&mut s, 10);
+    assert_eq!((head["stream"].as_str(), head["status"].as_u64()), (Some("head"), Some(200)), "{head}");
+    assert!(String::from_utf8(wire::unhex(head["headers"].as_str().unwrap()).unwrap()).unwrap().contains("text/event-stream"));
+    let one = next_frame(&mut s, 10);
+    let at_one = started.elapsed();
+    assert_eq!(data_of(&one), "id: 1\ndata: one\n\n");
+    let two = next_frame(&mut s, 10);
+    let at_two = started.elapsed();
+    assert_eq!(data_of(&two), "id: 2\ndata: two\n\n");
+    assert!(at_one < Duration::from_millis(900) && at_two >= Duration::from_millis(1100), "the first event came before the second was written: {at_one:?} {at_two:?}");
+    let end = next_frame(&mut s, 10);
+    assert_eq!((end["stream"].as_str(), end["complete"].as_bool(), end["bytes"].as_u64()), (Some("end"), Some(true), Some(34)), "{end}");
+    {
+        let heads = seen.lock().unwrap();
+        assert!(heads[0].starts_with("GET /v1/events/two HTTP/1.1") && heads[0].contains(&format!("Bearer {SVC_SECRET}")) && heads[0].contains("Accept: text/event-stream"), "{}", heads[0]);
+    }
+    // An exact retry of a streamed ticket replays the summary and does not reconnect.
+    let mut r = open_stream(&b, &ticket, None);
+    let replay = next_frame(&mut r, 10);
+    assert_eq!((replay["stream"].as_str(), replay["replayed"].as_bool()), (Some("end"), Some(true)), "{replay}");
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    // The caller ends a stream that would run for hours; the upstream call stops.
+    let t = service_authorize(&b, "GET", "/v1/events/held", b"").unwrap();
+    let mut s = open_stream(&b, t["ticket"].as_str().unwrap(), None);
+    assert_eq!(next_frame(&mut s, 10)["stream"], "head");
+    // The event, and then keep-alives (a read may carry both).
+    assert!(data_of(&next_frame(&mut s, 10)).starts_with("id: 1\ndata: one\n\n"));
+    s.shutdown(std::net::Shutdown::Write).unwrap();
+    let stop = Instant::now();
+    loop {
+        let frame = next_frame(&mut s, 5);
+        if frame["stream"] == "end" {
+            assert_eq!(frame["complete"], false, "{frame}");
+            break;
+        }
+        assert_eq!(frame["stream"], "data", "{frame}");
+    }
+    while closed.load(Ordering::SeqCst) == 0 {
+        assert!(stop.elapsed() < Duration::from_secs(4), "the upstream call outlived the caller");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // A reconnect is a new ticket and may resume from the last event id.
+    let again = service_authorize(&b, "GET", "/v1/events/held", b"").unwrap();
+    assert_ne!(again["ticket"], t["ticket"]);
+    let mut s = open_stream(&b, again["ticket"].as_str().unwrap(), Some("1"));
+    assert_eq!(next_frame(&mut s, 10)["stream"], "head");
+    drop(s);
+    assert!(seen.lock().unwrap().last().unwrap().contains("Last-Event-ID: 1"));
+    assert!(f.audit_text().contains("\"closedBy\":\"caller\""));
+}
+
+#[test]
+fn a_stream_that_echoes_the_bearer_is_cut_before_any_of_it_passes() {
+    let f = Fixture::new("svc-echo");
+    let (origin, _seen, _closed) = event_upstream();
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&origin, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    // The bearer arrives in two reads, 300 ms apart.
+    let t = service_authorize(&b, "GET", "/v1/events/echo", b"").unwrap();
+    let mut s = open_stream(&b, t["ticket"].as_str().unwrap(), None);
+    assert_eq!(next_frame(&mut s, 10)["stream"], "head");
+    let mut passed = String::new();
+    let end = loop {
+        let frame = next_frame(&mut s, 10);
+        match frame["stream"].as_str() {
+            Some("data") => passed.push_str(&data_of(&frame)),
+            _ => break frame,
+        }
+    };
+    assert_eq!(end["withheld"], true, "{end}");
+    assert_eq!(end["complete"], false);
+    assert!(passed.starts_with("data: before\n\n"), "{passed}");
+    assert!(!passed.contains(&SVC_SECRET[..10]) && !passed.contains("after"), "{passed}");
+    // The bearer in a header: no head reaches the caller at all.
+    let t = service_authorize(&b, "GET", "/v1/events/echo-head", b"").unwrap();
+    let mut s = open_stream(&b, t["ticket"].as_str().unwrap(), None);
+    let first = next_frame(&mut s, 10);
+    assert_eq!((first["stream"].as_str(), first["withheld"].as_bool()), (Some("end"), Some(true)), "{first}");
+    assert!(!first.to_string().contains(SVC_SECRET));
+}
+
+#[test]
+fn a_service_ticket_and_row_are_bound_to_their_caller() {
+    let f = Fixture::new("svc-bind");
+    let me = peer::euid();
+    // A row that names another account: this uid may not send with its bearer.
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([me.wrapping_add(1)]))]))).unwrap();
+    set_service(&b);
+    let body = br#"{"text":"hi"}"#;
+    assert_eq!(service_authorize(&b, "POST", "/v1/messages", body).unwrap_err().code, "service-not-yours");
+    // A ticket minted for another uid (written into the journal as that uid's) is refused.
+    let f = Fixture::new("svc-bind2");
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([me, me.wrapping_add(1)]))]))).unwrap();
+    set_service(&b);
+    let t = service_authorize(&b, "POST", "/v1/messages", body).unwrap();
+    let ticket = t["ticket"].as_str().unwrap();
+    let record = f.dir.join(format!("state/spool/tickets/{ticket}.json"));
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    v["peer"] = json!(me.wrapping_add(1));
+    write_mode(&record, v.to_string().as_bytes(), 0o600);
+    assert_eq!(service_forward(&b, ticket, body).unwrap_err().code, "ticket-not-yours");
+    let mut s = open_stream(&b, ticket, None);
+    assert_eq!(next_frame(&mut s, 5)["refused"], "ticket-not-yours");
+    assert!(f.provider.1.lock().unwrap().is_empty(), "nothing reached the upstream");
+    // An account without the service role reaches none of its operations.
+    let f = Fixture::new("svc-bind3");
+    let b = f.start_parsed(f.service_config(json!([{"role":"member","gids":[peer::egid()]}]), json!([chat_row(&f.provider.0, json!([me]))]))).unwrap();
+    assert_eq!(service_authorize(&b, "POST", "/v1/messages", body).unwrap_err().code, "op-not-granted");
+    assert_eq!(b.call(&json!({"op":"service","action":"ls"}), Duration::from_secs(5)).unwrap_err().code, "op-not-granted");
+}
+
+fn stats(label: &str, mut v: Vec<Duration>) {
+    v.sort();
+    let us = |d: Duration| d.as_micros();
+    let mean = v.iter().sum::<Duration>() / v.len() as u32;
+    println!("MEASURE {label}: n={} mean_us={} p50_us={} p95_us={} max_us={}", v.len(), us(mean), us(v[v.len() / 2]), us(v[v.len() * 95 / 100]), us(v[v.len() - 1]));
+}
+
+/// Sequential small posts and stream starts against local stubs; prints MEASURE lines.
+#[test]
+#[ignore = "measurement: cargo test --test broker measure_ -- --ignored --nocapture"]
+fn measure_service_round_trips() {
+    const N: usize = 200;
+    let f = Fixture::new("svc-measure");
+    let (events, _, _) = event_upstream();
+    let rows = json!([chat_row(&f.provider.0, json!([peer::euid()])), {"name":"events","origin":events,"streams":["/v1/events"],"methods":["GET"],"maxRequestBytes":"1","uids":[peer::euid()]}]);
+    let b = f.start_parsed(f.service_config(f.service_roles(), rows)).unwrap();
+    set_service(&b);
+    b.call(&json!({"op":"service","action":"set","service":"events","secret":SVC_SECRET}), Duration::from_secs(10)).unwrap();
+    let addr = f.provider.0.strip_prefix("http://").unwrap().to_owned();
+    let (mut raw, mut curl, mut auth, mut fwd, mut both) = (vec![], vec![], vec![], vec![], vec![]);
+    for i in 0..N {
+        let body = format!("{{\"text\":\"message {i}\"}}");
+        let t0 = Instant::now();
+        let mut tcp = std::net::TcpStream::connect(&addr).unwrap();
+        write!(tcp, "POST /v1/messages HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        let mut reply = Vec::new();
+        tcp.read_to_end(&mut reply).unwrap();
+        raw.push(t0.elapsed());
+        let t0 = Instant::now();
+        let out = std::process::Command::new("/usr/bin/curl")
+            .args(["--disable", "--silent", "--http1.1", "--request", "POST", "--header", "Content-Type: application/json", "--data-binary", &body, "--url", &format!("{}/v1/messages", f.provider.0)])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        curl.push(t0.elapsed());
+        let t0 = Instant::now();
+        let t = service_authorize(&b, "POST", "/v1/messages", body.as_bytes()).unwrap();
+        let t1 = Instant::now();
+        let r = service_forward(&b, t["ticket"].as_str().unwrap(), body.as_bytes()).unwrap();
+        let t2 = Instant::now();
+        assert_eq!(r["complete"], true);
+        auth.push(t1 - t0);
+        fwd.push(t2 - t1);
+        both.push(t2 - t0);
+    }
+    stats("raw-tcp-post", raw);
+    stats("curl-post", curl);
+    stats("broker-authorize", auth.clone());
+    stats("broker-authorize-first-20", auth[..20].to_vec());
+    stats("broker-authorize-last-20", auth[N - 20..].to_vec());
+    stats("broker-forward", fwd);
+    stats("broker-authorize+forward", both);
+    let (mut head, mut first) = (vec![], vec![]);
+    for _ in 0..20 {
+        let t = b.call(&json!({"op":"service-authorize","service":"events","method":"GET","path":"/v1/events/first","bodySha256":body_sha(b"")}), Duration::from_secs(10)).unwrap();
+        let t0 = Instant::now();
+        let mut s = open_stream(&b, t["ticket"].as_str().unwrap(), None);
+        assert_eq!(next_frame(&mut s, 10)["stream"], "head");
+        head.push(t0.elapsed());
+        assert_eq!(next_frame(&mut s, 10)["stream"], "data");
+        first.push(t0.elapsed());
+        s.shutdown(std::net::Shutdown::Write).unwrap();
+        while next_frame(&mut s, 10)["stream"] != "end" {}
+    }
+    stats("stream-to-head", head);
+    stats("stream-to-first-event", first);
+}
