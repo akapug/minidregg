@@ -43,6 +43,11 @@
 //! `"withheld":true` when the stream was cut) or a named refusal. The caller
 //! ends a stream by shutting down its side of the socket (or sending any
 //! byte); the broker stops the upstream call and sends the summary.
+//!
+//! Revoking (or replacing) a row's bearer cuts a stream running with it: the
+//! relay opens the row's sealed bearer again every [`BEARER_RECHECK`], and
+//! when it no longer opens as the one this stream sent, it stops the upstream
+//! call and sends the summary with `"revoked":true`.
 use super::credentials::{self, Namespace, Secret};
 use super::provider::{self, exact, journaled, number, sha_field, text, NotAdmitted, Plan, Sent, Settle};
 use super::ticket::{self, State, Ticket};
@@ -70,6 +75,9 @@ const MAX_EVENT_ID: usize = 256;
 const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 /// One read of a streamed reply, and so at most one data frame's body.
 const CHUNK: usize = 16_384;
+/// A running stream checks its row's sealed bearer this often, and so ends
+/// within about this long of a revoke.
+pub const BEARER_RECHECK: Duration = Duration::from_secs(1);
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// How a path's reply comes back.
@@ -434,6 +442,9 @@ pub fn stream(broker: &Broker, peer: &Peer, request: &Value, caller: &mut UnixSt
     };
     let body_sha256 = native::sha256_hex(&body);
     note.set("bodySha256", body_sha256.clone());
+    let row = std::cell::OnceCell::new();
+    // The row's bearer as sealed now; `None` once it is revoked.
+    let sealed = || row.get().and_then(|name: &String| provider::store(broker).ok()?.unseal(Namespace::Pool, name).ok());
     journaled(
         broker,
         peer,
@@ -441,8 +452,11 @@ pub fn stream(broker: &Broker, peer: &Peer, request: &Value, caller: &mut UnixSt
         &body_sha256,
         "service",
         note,
-        |t| admit(broker, peer, t, &body, Reply::Stream),
-        |plan, note| relay(&broker.config.spool, plan, &body, last_event_id, caller, note).map(Settle::Answered),
+        |t| {
+            let _ = row.set(t.provider.clone());
+            admit(broker, peer, t, &body, Reply::Stream)
+        },
+        |plan, note| relay(&broker.config.spool, plan, &body, last_event_id, caller, &sealed, note).map(Settle::Answered),
     )
 }
 
@@ -514,8 +528,10 @@ fn data(caller: &mut UnixStream, bytes: &[u8]) -> bool {
 
 /// The streamed send: curl writes the reply head and body to a pipe as they
 /// arrive (`--include --no-buffer`); each read is checked and framed. Ends
-/// when the upstream closes, the bearer appears, or the caller stops.
-fn relay(spool: &Path, plan: Plan, body: &[u8], last_event_id: Option<&str>, caller: &mut UnixStream, note: &mut Note) -> Result<Value, Refusal> {
+/// when the upstream closes, the bearer appears, the caller stops, or
+/// `sealed` (checked every [`BEARER_RECHECK`]) no longer opens the bearer sent.
+#[allow(clippy::too_many_arguments)]
+fn relay(spool: &Path, plan: Plan, body: &[u8], last_event_id: Option<&str>, caller: &mut UnixStream, sealed: &dyn Fn() -> Option<Secret>, note: &mut Note) -> Result<Value, Refusal> {
     let secret: &Secret = plan.secret.as_ref().ok_or_else(|| refuse("not-sent", "a service stream carries its row's bearer"))?;
     let request_path = spool.join(format!("forward-stream-{}-{}.request", std::process::id(), SEQ.fetch_add(1, Ordering::SeqCst)));
     if !body.is_empty() {
@@ -576,14 +592,15 @@ fn relay(spool: &Path, plan: Plan, body: &[u8], last_event_id: Option<&str>, cal
     let mut echo = Echo::new(secret.expose().as_bytes());
     let mut head = Vec::new();
     let mut status: Option<u16> = None;
-    let (mut bytes, mut withheld, mut by_caller, mut eof) = (0usize, false, false, false);
+    let (mut bytes, mut withheld, mut by_caller, mut eof, mut revoked) = (0usize, false, false, false, false);
     let mut buf = vec![0u8; CHUNK];
+    let mut checked = Instant::now();
     loop {
         let mut fds = [
             libc::pollfd { fd: out.as_raw_fd(), events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: caller.as_raw_fd(), events: libc::POLLIN, revents: 0 },
         ];
-        if unsafe { libc::poll(fds.as_mut_ptr(), 2, 1000) } < 0 {
+        if unsafe { libc::poll(fds.as_mut_ptr(), 2, BEARER_RECHECK.as_millis() as i32) } < 0 {
             if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
                 continue;
             }
@@ -593,6 +610,13 @@ fn relay(spool: &Path, plan: Plan, body: &[u8], last_event_id: Option<&str>, cal
         if fds[1].revents != 0 {
             by_caller = true;
             break;
+        }
+        if checked.elapsed() >= BEARER_RECHECK {
+            checked = Instant::now();
+            if !sealed().is_some_and(|now| now.expose() == secret.expose()) {
+                revoked = true;
+                break;
+            }
         }
         if fds[0].revents == 0 {
             continue;
@@ -657,11 +681,14 @@ fn relay(spool: &Path, plan: Plan, body: &[u8], last_event_id: Option<&str>, cal
     let complete = eof && !withheld && status.is_some() && exited.is_some_and(|s| s.success());
     note.set("complete", complete);
     note.set("responseBytes", bytes);
-    note.set("closedBy", if by_caller { "caller" } else if eof { "upstream" } else { "broker" });
+    note.set("closedBy", if by_caller { "caller" } else if revoked { "revoked" } else if eof { "upstream" } else { "broker" });
     let mut end = json!({"ok":true,"stream":"end","complete":complete,"bytes":bytes,"status":status});
     if withheld {
         note.set("withheld", true);
         end["withheld"] = json!(true);
+    }
+    if revoked {
+        end["revoked"] = json!(true);
     }
     Ok(end)
 }
@@ -690,7 +717,7 @@ pub fn operator(broker: &Broker, request: &Value, note: &mut Note) -> Result<Val
             table.row(name)?;
             let removed = store.revoke(Namespace::Pool, name, None).map_err(store_refusal)?;
             json!({"type":"mini-service-key-revoke-v1","service":name,"removed":removed,
-                "effect":"Future authorizations and forwards refuse; a stream already running runs until it ends."})
+                "effect":"Future authorizations and forwards refuse; a stream already running with it ends within a second."})
         }
         "ls" => {
             exact(request, &["op", "action"])?;

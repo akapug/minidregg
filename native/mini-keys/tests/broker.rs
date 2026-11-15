@@ -1018,6 +1018,37 @@ fn a_broker_that_holds_only_service_bearers_starts_without_a_provider_table() {
     assert!(err.contains("a provider table, a service table, or both"), "{err}");
 }
 
+#[test]
+fn revoking_a_service_bearer_cuts_a_stream_already_running_with_it() {
+    let f = Fixture::new("svc-revoke");
+    let (origin, _seen, closed) = event_upstream();
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&origin, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    let t = service_authorize(&b, "GET", "/v1/events/held", b"").unwrap();
+    let mut s = open_stream(&b, t["ticket"].as_str().unwrap(), None);
+    assert_eq!(next_frame(&mut s, 10)["stream"], "head");
+    assert!(data_of(&next_frame(&mut s, 10)).starts_with("id: 1\ndata: one\n\n"));
+    let revoked_at = Instant::now();
+    let revoked = b.call(&json!({"op":"service","action":"revoke","service":"chat"}), Duration::from_secs(10)).unwrap();
+    assert_eq!(revoked["result"]["removed"], true);
+    // Keep-alives may still pass until the broker next looks; then the summary says why it ended.
+    let end = loop {
+        let frame = next_frame(&mut s, 5);
+        if frame["stream"] != "data" {
+            break frame;
+        }
+        assert!(revoked_at.elapsed() < Duration::from_secs(4), "the stream outlived the revoke of its bearer");
+    };
+    assert_eq!((end["stream"].as_str(), end["revoked"].as_bool(), end["complete"].as_bool()), (Some("end"), Some(true), Some(false)), "{end}");
+    assert!(revoked_at.elapsed() < Duration::from_secs(3), "{:?}", revoked_at.elapsed());
+    while closed.load(Ordering::SeqCst) == 0 {
+        assert!(revoked_at.elapsed() < Duration::from_secs(4), "the upstream call outlived the revoke");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(service_authorize(&b, "GET", "/v1/events/held", b"").unwrap_err().code, "provider-refused:no-credential");
+    assert!(f.audit_text().contains("\"closedBy\":\"revoked\""));
+}
+
 /// Rewrite one field of a ticket record in the journal, as time passing would leave it.
 fn age_ticket(journal: &Path, ticket: &str, field: &str, value: u64) {
     let record = journal.join(format!("{ticket}.json"));
