@@ -1018,6 +1018,52 @@ fn a_broker_that_holds_only_service_bearers_starts_without_a_provider_table() {
     assert!(err.contains("a provider table, a service table, or both"), "{err}");
 }
 
+/// Rewrite one field of a ticket record in the journal, as time passing would leave it.
+fn age_ticket(journal: &Path, ticket: &str, field: &str, value: u64) {
+    let record = journal.join(format!("{ticket}.json"));
+    let mut v: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    v[field] = json!(value);
+    write_mode(&record, v.to_string().as_bytes(), 0o600);
+}
+
+#[test]
+fn a_running_broker_sweeps_expired_tickets_and_keeps_live_and_replayable_ones() {
+    let f = Fixture::new("svc-sweep");
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    let journal = f.dir.join("state/spool/tickets");
+    let now = server::ticket::now();
+    let post = |body: &[u8]| -> String {
+        let t = service_authorize(&b, "POST", "/v1/messages", body).unwrap()["ticket"].as_str().unwrap().to_owned();
+        assert_eq!(service_forward(&b, &t, body).unwrap()["complete"], true);
+        t
+    };
+    // Answered, and past the time its answer is kept for a retry.
+    let settled = post(br#"{"n":"settled"}"#);
+    age_ticket(&journal, &settled, "settled", now - server::ticket::ANSWER_RETAIN_S - 1);
+    // Authorized, never forwarded, and its lifetime is over.
+    let stale = service_authorize(&b, "POST", "/v1/messages", br#"{"n":"stale"}"#).unwrap()["ticket"].as_str().unwrap().to_owned();
+    age_ticket(&journal, &stale, "expires", now - 1);
+    // Live, and answered just now: both must survive any sweep.
+    let live_body = br#"{"n":"live"}"#;
+    let live = service_authorize(&b, "POST", "/v1/messages", live_body).unwrap()["ticket"].clone();
+    let recent_body = br#"{"n":"recent"}"#;
+    let recent = post(recent_body);
+    // A long-running broker keeps authorizing; the expired records must go while it runs.
+    let mut n = 0;
+    while journal.join(format!("{settled}.json")).exists() && n < 160 {
+        post(format!("{{\"n\":{n}}}").as_bytes());
+        n += 1;
+    }
+    assert!(!journal.join(format!("{settled}.json")).exists() && !journal.join(format!("{settled}.answer")).exists(),
+        "after {n} more authorizations the journal still holds a ticket past its retention");
+    assert!(!journal.join(format!("{stale}.json")).exists(), "an expired ticket is still in the journal");
+    assert_eq!(service_authorize(&b, "POST", "/v1/messages", live_body).unwrap()["ticket"], live, "a live ticket was swept");
+    let replay = service_forward(&b, &recent, recent_body).unwrap();
+    assert_eq!(replay["replayed"], true, "an answer inside its retention was swept: {replay}");
+    assert_eq!(service_forward(&b, &settled, br#"{"n":"settled"}"#).unwrap_err().code, "ticket-unknown");
+}
+
 fn stats(label: &str, mut v: Vec<Duration>) {
     v.sort();
     let us = |d: Duration| d.as_micros();
@@ -1084,4 +1130,41 @@ fn measure_service_round_trips() {
     }
     stats("stream-to-head", head);
     stats("stream-to-first-event", first);
+}
+
+/// A broker that posts for many hours, compressed: after every `PER_HOUR` posts
+/// each settled ticket is aged past its retention, as an hour passing would
+/// leave it. Prints authorize latency at the start and the end, and the
+/// journal's size at the end.
+#[test]
+#[ignore = "measurement: cargo test --test broker measure_ -- --ignored --nocapture"]
+fn measure_authorize_over_a_long_run() {
+    const HOURS: usize = 10;
+    const PER_HOUR: usize = 70;
+    let f = Fixture::new("svc-measure-long");
+    let b = f.start_parsed(f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([peer::euid()]))]))).unwrap();
+    set_service(&b);
+    let journal = f.dir.join("state/spool/tickets");
+    let mut auth = vec![];
+    for hour in 0..HOURS {
+        for i in 0..PER_HOUR {
+            let body = format!("{{\"text\":\"hour {hour} message {i}\"}}");
+            let t0 = Instant::now();
+            let t = service_authorize(&b, "POST", "/v1/messages", body.as_bytes()).unwrap();
+            auth.push(t0.elapsed());
+            assert_eq!(service_forward(&b, t["ticket"].as_str().unwrap(), body.as_bytes()).unwrap()["complete"], true);
+        }
+        let past = server::ticket::now() - server::ticket::ANSWER_RETAIN_S - 1;
+        for entry in std::fs::read_dir(&journal).unwrap() {
+            let name = entry.unwrap().file_name().into_string().unwrap();
+            if let Some(id) = name.strip_suffix(".json") {
+                age_ticket(&journal, id, "settled", past);
+            }
+        }
+    }
+    let n = auth.len();
+    stats("long-run-authorize-first-20", auth[..20].to_vec());
+    stats("long-run-authorize-last-20", auth[n - 20..].to_vec());
+    let records = std::fs::read_dir(&journal).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().ends_with(".json")).count();
+    println!("MEASURE long-run-journal: posts={n} ticket_records={records}");
 }

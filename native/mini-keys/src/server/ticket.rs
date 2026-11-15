@@ -19,7 +19,9 @@
 //! before it is marked counted re-counts on the retry (over by one, never under).
 //! Answers are retained [`ANSWER_RETAIN_S`] after they settle and then swept;
 //! the answer file holds the provider's response in plaintext in the broker's
-//! 0700 spool for that long.
+//! 0700 spool for that long. The sweep runs at start and, while the broker
+//! runs, once every [`SWEEP_EVERY`] authorizations, so the journal holds what
+//! is live or replayable, not every ticket since the broker started.
 use crate::credentials::Owner;
 use crate::wire;
 use serde_json::{json, Value};
@@ -28,10 +30,13 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// A minted ticket is good for this long.
 pub const TICKET_TTL_S: u64 = 600;
+/// A running broker sweeps the journal once per this many authorizations.
+pub const SWEEP_EVERY: u64 = 64;
 /// A settled forward's answer stays replayable for this long.
 pub const ANSWER_RETAIN_S: u64 = 3600;
 /// Live (minted or counted) tickets one uid may hold at once.
@@ -175,6 +180,8 @@ pub struct Tickets {
     lock: Mutex<()>,
     /// Tickets whose forward is running in this process now.
     in_flight: Mutex<HashSet<String>>,
+    /// Authorizations since start, for [`Tickets::sweep_due`].
+    authorized: AtomicU64,
 }
 
 impl Tickets {
@@ -190,8 +197,8 @@ impl Tickets {
         if !meta.is_dir() || meta.uid() != crate::peer::euid() || meta.mode() & 0o077 != 0 {
             return Err(format!("ticket journal {} must be the broker's 0700 directory", dir.display()));
         }
-        let tickets = Tickets { dir, lock: Mutex::new(()), in_flight: Mutex::new(HashSet::new()) };
-        tickets.sweep()?;
+        let tickets = Tickets { dir, lock: Mutex::new(()), in_flight: Mutex::new(HashSet::new()), authorized: AtomicU64::new(0) };
+        tickets.sweep(true)?;
         Ok(tickets)
     }
 
@@ -292,14 +299,29 @@ impl Tickets {
         Ok(self.all()?.iter().filter(|t| t.peer == peer && t.state.live() && t.expires > now).count())
     }
 
-    /// Drop expired live tickets, answers past retention, and stray temp files.
-    pub fn sweep(&self) -> Result<(), String> {
+    /// Count one authorization; every [`SWEEP_EVERY`]th sweeps the journal.
+    /// The caller holds no journal lock: the sweep takes it, so no forward's
+    /// state change runs between its read of a ticket and its removal.
+    pub fn sweep_due(&self) -> Result<(), String> {
+        if self.authorized.fetch_add(1, Ordering::Relaxed) % SWEEP_EVERY != SWEEP_EVERY - 1 {
+            return Ok(());
+        }
+        let _g = self.guard();
+        self.sweep(false)
+    }
+
+    /// Drop expired live tickets and answers past retention; at start
+    /// (`strays`), also temp files a crash left. While the broker runs a temp
+    /// file may be a write in progress, so it stays.
+    pub fn sweep(&self, strays: bool) -> Result<(), String> {
         let now = now();
         for entry in std::fs::read_dir(&self.dir).map_err(|e| format!("ticket journal: {e}"))? {
             let path = entry.map_err(|e| e.to_string())?.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_owned();
             if name.ends_with(".tmp") {
-                let _ = std::fs::remove_file(&path);
+                if strays {
+                    let _ = std::fs::remove_file(&path);
+                }
                 continue;
             }
             let Some(id) = name.strip_suffix(".json").or_else(|| name.strip_suffix(".answer")) else { continue };
@@ -458,7 +480,7 @@ mod tests {
         t.settled = now() - ANSWER_RETAIN_S - 1;
         tickets.put(&t).unwrap();
         assert_eq!(tickets.answer(&t.id).unwrap().unwrap()["body"], "00");
-        tickets.sweep().unwrap();
+        tickets.sweep(true).unwrap();
         assert!(tickets.get(&t.id).unwrap().is_none() && tickets.answer(&t.id).unwrap().is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }

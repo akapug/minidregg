@@ -144,6 +144,7 @@ pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note)
     }
     let table = table(broker)?;
     let row = table.rows.iter().find(|r| r.name == provider).ok_or_else(|| refuse("provider-row-unknown", format!("the provider table has no row {provider}")))?;
+    broker.tickets.sweep_due().map_err(|e| refuse("ticket-journal", e))?;
     if row.credential.route() != kind {
         return Err(refuse("provider-kind-mismatch", format!("row {provider} is a {} row, not {kind}", row.credential.route())));
     }

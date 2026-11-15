@@ -329,6 +329,7 @@ pub fn authorize(broker: &Broker, peer: &Peer, request: &Value, note: &mut Note)
         json!({"ok":true,"ticket":t.id,"service":t.provider,"method":t.method,"path":path,"reply":reply.name(),
             "expiresInS":t.expires.saturating_sub(ticket::now())})
     };
+    broker.tickets.sweep_due().map_err(|e| refuse("ticket-journal", e))?;
     let _g = broker.tickets.guard();
     if let Some(t) = broker.tickets.find_request(peer.uid, &key).map_err(|e| refuse("ticket-journal", e))? {
         note.set("ticketSha256", native::sha256_hex(t.id.as_bytes())[..16].to_owned());
