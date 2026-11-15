@@ -331,7 +331,7 @@ def accountCtx : LiveCtx := { sampleCtx with kind := .account }
 /-- A directory holding the blinded sample content cell at the sample target, and nothing else. -/
 def sampleDirectory : CellRegistry.Directory Nat DeclaredResourceController.Registry where
   slots := fun id => if id = 0 then .present ⟨.content, cellOf blindedStore⟩ else .absent
-  used := {0}
+  used := fun id => id = 0
   present_used := by
     intro id cell held
     split at held

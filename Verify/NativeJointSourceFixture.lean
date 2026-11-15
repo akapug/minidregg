@@ -249,7 +249,11 @@ Returned with its number of signed slots. -/
 def authorOn (config : NativeHost.Config) (source : NativeHostGenesis.Config)
     (opened : NativeHost.Opened config) (signer : System.FilePath) (target nonce : Nat) :
     IO (ByteArray × Nat) := do
-  let born := ResourceReserveBirthFixture.content target ⟨7⟩ ⟨target + 1000⟩ ⟨target + 2000⟩
+  -- MINI_FLAT_BORN=account: every birth registers an account, so the Book gains one per birth
+  -- (the measurement of what a birth's record carries of the Book); content otherwise.
+  let born := if (← IO.getEnv "MINI_FLAT_BORN") == some "account" then
+      ResourceReserveBirthFixture.account target ⟨7⟩ ⟨target + 1000⟩ ⟨target + 2000⟩
+    else ResourceReserveBirthFixture.content target ⟨7⟩ ⟨target + 1000⟩ ⟨target + 2000⟩
   let descriptor := ResourceReserveBirthFixture.ordinaryDescriptor config source opened ⟨7⟩ nonce 7 [born]
   let plan ← IO.ofExcept ((NativeHost.prepareLoaded config opened
     (.birth (CanonicalCellRegistry.sourceEncoding.codec.encode descriptor)

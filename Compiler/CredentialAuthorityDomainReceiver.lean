@@ -494,9 +494,9 @@ def directoryRows (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootByt
 /-! ## The directory held as data
 
 A served state's directory is held as one lifecycle image per identifier (a persistent map, no
-entry for a fresh image) and the used set beside it, which is exactly the identifiers whose
-image was ever used. A step writes the images of the cells it wrote (`HeldImages.write`): one
-map update per written cell, and the used set moves by a cons at an identifier's first use. -/
+entry for a fresh image). An identifier is used exactly when its image ever was, so the used set
+is read off the map and nothing is held beside it. A step writes the images of the cells it wrote
+(`HeldImages.write`): one map update per written cell. -/
 
 /-- The stored form of an image: a fresh image is no entry, so the map is determined by its images. -/
 def storedImage : LifecycleImage registry → Option (LifecycleImage registry)
@@ -509,14 +509,10 @@ theorem storedImage_getD (image : LifecycleImage registry) : (storedImage image)
 theorem storedImage_ne_fresh (image : LifecycleImage registry) : storedImage image ≠ some .fresh := by
   cases image <;> simp [storedImage]
 
-/-- Lifecycle images by identifier with the used set: `used` is exactly the identifiers whose
-image was ever used, so a first use is a cons, decided by the image, never by a scan of the set. -/
+/-- Lifecycle images by identifier. -/
 structure HeldImages where
   images : SparseMap Nat (fun _ => LifecycleImage registry)
-  used : Finset Nat
   noFresh : ∀ identifier, images.get? identifier ≠ some .fresh
-  usedExact : ∀ identifier,
-    identifier ∈ used ↔ LifecycleImage.everUsed registry ((images.get? identifier).getD .fresh) = true
 
 namespace HeldImages
 
@@ -537,44 +533,28 @@ theorem images_eq (held : HeldImages) (identifier : Nat) :
       | retired => rfl
       | live cell => rfl
 
-theorem mem_used (held : HeldImages) (identifier : Nat) :
-    identifier ∈ held.used ↔ LifecycleImage.everUsed registry (held.image identifier) = true :=
-  held.usedExact identifier
-
 /-- Held images are equal when their images are. -/
 theorem ext {left right : HeldImages} (same : ∀ identifier, left.image identifier = right.image identifier) :
     left = right := by
   have images : left.images = right.images := SparseMap.ext fun identifier => by
     show left.images.get? identifier = right.images.get? identifier
     rw [left.images_eq, right.images_eq, same]
-  have used : left.used = right.used := Finset.ext fun identifier => by
-    rw [left.mem_used, right.mem_used, same]
   cases left
   cases right
-  simp only at images used
+  simp only at images
   subst images
-  subst used
   rfl
 
 def empty : HeldImages where
   images := SparseMap.empty
-  used := ∅
   noFresh := by simp
-  usedExact := by simp [LifecycleImage.everUsed]
 
 theorem image_empty (identifier : Nat) : empty.image identifier = .fresh := by
   simp [image, empty]
 
-/-- Write one identifier's image. The used set conses the identifier at its first use and drops
-it only when a used image is overwritten by a fresh one. -/
+/-- Write one identifier's image. -/
 def set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) : HeldImages where
   images := held.images.set identifier (storedImage next)
-  used :=
-    if LifecycleImage.everUsed registry next then
-      if was : LifecycleImage.everUsed registry (held.image identifier) = true then held.used
-      else Finset.cons identifier held.used fun member => was ((held.mem_used identifier).mp member)
-    else if LifecycleImage.everUsed registry (held.image identifier) then held.used.erase identifier
-    else held.used
   noFresh := by
     intro other
     by_cases same : other = identifier
@@ -583,32 +563,6 @@ def set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) 
       exact storedImage_ne_fresh next
     · rw [SparseMap.set_ne _ _ _ _ same]
       exact held.noFresh other
-  usedExact := by
-    intro other
-    by_cases same : other = identifier
-    · subst same
-      rw [SparseMap.set_eq, storedImage_getD]
-      have was := held.mem_used other
-      by_cases nextUsed : LifecycleImage.everUsed registry next = true
-      · rw [if_pos nextUsed]
-        split
-        · rename_i old
-          exact ⟨fun _ => nextUsed, fun _ => was.mpr old⟩
-        · simp [nextUsed]
-      · rw [if_neg nextUsed]
-        split
-        · simp [nextUsed]
-        · rename_i old
-          exact ⟨fun member => absurd (was.mp member) old, fun used => absurd used nextUsed⟩
-    · rw [SparseMap.set_ne _ _ _ _ same]
-      have was := held.usedExact other
-      split
-      · split
-        · exact was
-        · simp [same, was]
-      · split
-        · simp [same, was]
-        · exact was
 
 theorem image_set (held : HeldImages) (identifier : Nat) (next : LifecycleImage registry) (other : Nat) :
     (held.set identifier next).image other = if other = identifier then next else held.image other := by
@@ -664,23 +618,29 @@ theorem write_none {bytesAt : Nat → List UInt8} :
       · obtain ⟨other, member, decoded⟩ := write_none written
         exact ⟨other, List.mem_cons_of_mem _ member, decoded⟩
 
-/-- The directory the held images are: a slot from each image, the held used set. -/
+/-- The directory the held images are: a slot from each image, and an identifier used exactly
+when its image ever was (one map lookup). -/
 def directory (held : HeldImages) : Directory Nat registry where
   slots identifier := LifecycleImage.slot registry (held.image identifier)
-  used := held.used
+  used identifier := LifecycleImage.everUsed registry (held.image identifier)
   present_used := by
     intro identifier cell present
-    apply (held.mem_used identifier).mpr
     cases image : held.image identifier <;>
       simp_all [LifecycleImage.slot, LifecycleImage.everUsed]
 
-theorem view_directory (held : HeldImages) (identifier : Nat) :
-    LifecycleImage.view registry held.directory identifier = held.image identifier := by
-  have used := held.mem_used identifier
+/-- A directory whose slot and used answer at an identifier are an image's views that image. -/
+theorem view_of_image (directory : Directory Nat registry) (identifier : Nat)
+    (image : LifecycleImage registry)
+    (slot : directory.slots identifier = LifecycleImage.slot registry image)
+    (used : directory.used identifier = LifecycleImage.everUsed registry image) :
+    LifecycleImage.view registry directory identifier = image := by
   unfold LifecycleImage.view
-  simp only [directory]
-  cases image : held.image identifier <;>
-    simp_all [LifecycleImage.slot, LifecycleImage.everUsed]
+  rw [slot, used]
+  cases image <;> simp [LifecycleImage.slot, LifecycleImage.everUsed]
+
+theorem view_directory (held : HeldImages) (identifier : Nat) :
+    LifecycleImage.view registry held.directory identifier = held.image identifier :=
+  view_of_image held.directory identifier (held.image identifier) rfl rfl
 
 end HeldImages
 
@@ -690,7 +650,7 @@ theorem directory_eq_of_view {left right : Directory Nat registry}
       LifecycleImage.view registry right identifier) : left = right := by
   have slots : left.slots = right.slots := funext fun identifier => by
     rw [← LifecycleImage.view_slot registry left identifier, same, LifecycleImage.view_slot]
-  have used : left.used = right.used := Finset.ext fun identifier => by
+  have used : left.used = right.used := funext fun identifier => by
     rw [← LifecycleImage.view_used registry left identifier, same, LifecycleImage.view_used]
   cases left
   cases right

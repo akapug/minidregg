@@ -2633,27 +2633,39 @@ def admitDecodedNative [DecidableEq F]
     (native : CredentialSignatureIO.NativeConfig) (ground : Ground deployment) (height : Height)
     (ingress : DecodedIngress) (sourced : List (Nat × PackedCell Registry) := []) :
     IO (Except Reject (AcceptedBirth profile deployment pins ground height)) := do
+  -- Operator measurement control (as `MINI_STORE_PHASES` at the durable append): where one
+  -- birth admission spent its time, in microseconds, to stderr.
+  let timing := (← IO.getEnv "MINI_STORE_PHASES") == some "1"
+  let t0 ← IO.monoNanosNow
   match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile
       profile.disabledEvaluators deployment pins
       ground ingress.descriptor height sourced with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
+      let t1 ← IO.monoNanosNow
       match preparePending prepared height ingress.method with
       | .error reason => return .error reason
       | .ok pending =>
           match require (pending.method = ingress.method) .credentialShape with
           | .error reason => return .error reason
           | .ok methodExact =>
+              let t2 ← IO.monoNanosNow
               match ← verifyOwnerConsentsNative prepared height native ingress.ownerConsentEnvelopes with
               | .error reason => return .error reason
               | .ok owners =>
+                  let t3 ← IO.monoNanosNow
                   match ← pending.admitBundleNative native ingress.ingress.credentials with
                   | .error reason => return .error reason
                   | .ok branches =>
+                      let t4 ← IO.monoNanosNow
                       match ResourceBirthController.Concrete.checkNamed (pending.branchStep .factory)
                           prepared.writes with
                       | .error cell => return .error (.neutralBirthUnjudged cell)
                       | .ok named =>
+                          if timing then
+                            let t5 ← IO.monoNanosNow
+                            IO.eprintln s!"birth prepare us at {height}: {← ResourceBirthController.Concrete.prepareBirthPhases profile.compilerProfile profile.disabledEvaluators deployment pins ground ingress.descriptor height sourced}"
+                            IO.eprintln s!"birth admit us at {height}: prepare {(t1-t0)/1000} pending {(t2-t1)/1000} owners {(t3-t2)/1000} bundle {(t4-t3)/1000} named {(t5-t4)/1000}"
                           return .ok ⟨ingress, prepared, pending, methodExact.down, owners, branches,
                             named.down⟩
 

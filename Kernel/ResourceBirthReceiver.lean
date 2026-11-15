@@ -296,7 +296,8 @@ theorem platform_unwritten
       prepared.allocated.accepted request inRequests
     change request.cellId = (PlatformCellDomain.cellIdOf deployment).value at ids
     rw [← ids] at platform
-    exact fresh (ground.directory.present_used platform)
+    rw [ground.directory.present_used platform] at fresh
+    cases fresh
   · subst factory
     have present := prepared.factory.present
     change deployment.factoryId = (PlatformCellDomain.cellIdOf deployment).value at ids

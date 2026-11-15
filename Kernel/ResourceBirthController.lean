@@ -251,11 +251,13 @@ theorem allocation_candidate_physical_post {registry : TypeRegistry Digest}
 
 theorem no_allocation_mode_of_retired {registry : TypeRegistry Digest}
     {before : Directory Nat registry} {request : CreateRequest (CellId := Nat) registry}
-    {descriptor : Descriptor registry} (used : request.cellId ∈ before.used) :
+    {descriptor : Descriptor registry} (used : before.used request.cellId = true) :
     ¬AllocationMode before request descriptor := by
   rintro ⟨member, after, accepted⟩
-  exact ResourceBirth.allocate_success_fresh registry before after descriptor.createRequests
-    accepted request member used
+  have fresh := ResourceBirth.allocate_success_fresh registry before after descriptor.createRequests
+    accepted request member
+  rw [used] at fresh
+  cases fresh
 
 /-! ## Durable execution is all-or-nothing -/
 
@@ -925,6 +927,35 @@ def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled :
     pre.markerDeclared, pre.parentsPresent, pre.kindsPresent, pre.sourced, pre.initials, pre.policiesBound, pre.factory, pre.book,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
     post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms, pre.exports, candidates⟩
+
+/-- Operator measurement (`MINI_STORE_PHASES`): the four parts of `prepareBirth`, each run once
+more and timed alone, in microseconds. -/
+def prepareBirthPhases [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
+    (deployment : Deployment) (pins : FactoryPins)
+    (ground : Ground deployment) (descriptor : Descriptor Registry) (height : Height)
+    (sourced : List (Nat × PackedCell Registry) := []) : IO String := do
+  let t0 ← IO.monoNanosNow
+  match preparePreAuthority profile disabled deployment pins ground descriptor height sourced with
+  | .error _ => return "pre refused"
+  | .ok pre =>
+    let t1 ← IO.monoNanosNow
+    match CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment ground.authority
+        descriptor with
+    | none => return "grants refused"
+    | some grants =>
+      let t2 ← IO.monoNanosNow
+      let candidates := (BirthCandidateAdmission.check profile deployment ground
+        grants.post grants.initialSources.records).isSome
+      let t3 ← IO.monoNanosNow
+      let writes := ground.authorityWrites grants.update
+      let count := writes.length
+      let t4 ← IO.monoNanosNow
+      match preparePostAuthority pre writes
+          (authorityWrites_postLaw pre.deploymentValid ground grants.update) with
+      | .error _ => return "post refused"
+      | .ok _ =>
+        let t5 ← IO.monoNanosNow
+        return s!"pre {(t1-t0)/1000} grants {(t2-t1)/1000} candidates {(t3-t2)/1000} ({candidates}) authority-writes {(t4-t3)/1000} ({count}) post {(t5-t4)/1000}"
 
 /-- Preparation for the composite route retains a single old-image authority
 post covering initial grants and both replay markers. `operationMarker` here is

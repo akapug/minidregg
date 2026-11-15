@@ -2338,6 +2338,9 @@ def applyIndex (transport : Transport) (held : Nat) (root : Digest) (height : Na
     IO (Except String (Digest × List (List Bool × DurableIndex.Row))) := do
   let cells := record.writes.map Minidregg.Kernel.DurableDataIntent.DataWrite.cellId
   let seqs := Minidregg.Theory.JournalSequences.distinct (Minidregg.Kernel.JournalIndex.sequences record)
+  -- Operator measurement control (`MINI_STORE_PHASES=1`, as at the append): the two index steps.
+  let timing := (← IO.getEnv "MINI_STORE_PHASES") == some "1"
+  let t0 ← IO.monoNanosNow
   let mut counts : List (Tower256ConcreteBackend.Digest256 × Nat) := []
   unless seqs.isEmpty do
     match ← withIndexRows transport held (seqs.map DurableIndex.seqCountKey)
@@ -2346,9 +2349,15 @@ def applyIndex (transport : Transport) (held : Nat) (root : Digest) (height : Na
     | .ok read => counts := read
   let keys := DurableIndex.IndexRows.appendKeys record.transactionId record.nullifiers cells ++
     DurableIndex.IndexRows.seqKeys counts
-  withIndexRows transport held keys fun rows =>
+  let t1 ← IO.monoNanosNow
+  let result ← withIndexRows transport held keys fun rows =>
     DurableIndex.IndexRows.apply rows root height record.transactionId record.nullifiers cells
       (Minidregg.Kernel.JournalIndex.sequences record)
+  if timing then
+    let t2 ← IO.monoNanosNow
+    let holds := (← transport.heldIndexRows held).isSome
+    IO.eprintln s!"store index us at height {height}: counts {(t1-t0)/1000} ({seqs.length} sequences) apply {(t2-t1)/1000} ({keys.length} keys, {cells.length} cells, {record.nullifiers.length} nullifiers) held {holds}"
+  return result
 
 /-- Hand the holder the whole index trie at `height` (the serving Host's open, row 37 of
 docs/PERF-CLIENT.md): a breadth-first walk from the root, one Store read per level, following each

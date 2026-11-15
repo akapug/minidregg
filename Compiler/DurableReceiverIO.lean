@@ -269,13 +269,8 @@ def publish (transport : Transport) (rootBytes : List UInt8 → Digest) (loaded 
     {candidate : Candidate loaded} (_commit : Commit transport loaded candidate)
     (prepared : PreparedAppend loaded candidate.intent) :
     IO (Bool × DetailedResult rootBytes loaded candidate.intent) :=
-  do
-    let t0 ← IO.monoNanosNow
-    let observation ← transport.append (loaded.height + 1) prepared.entry prepared.nodes
-    if (← IO.getEnv "MINI_STORE_PHASES") == some "1" then
-      let t1 ← IO.monoNanosNow
-      IO.eprintln s!"store append us at height {loaded.height + 1}: {(t1-t0)/1000}"
-    publishAfter transport rootBytes loaded candidate.intent prepared observation
+  transport.append (loaded.height + 1) prepared.entry prepared.nodes >>=
+    publishAfter transport rootBytes loaded candidate.intent prepared
 
 /-- A conflicting append is contention, and nothing else is read or written. -/
 theorem publishAfter_conflict (transport : Transport) (rootBytes : List UInt8 → Digest)

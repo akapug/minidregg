@@ -493,6 +493,69 @@ def indexStep (index : Index W T) (a : Address L) (v : Option (L.Value a.1)) : I
   | some x => index.insert (paths_length W T) a (valueBytes W a x)
   | none => index.erase a
 
+/-- The deployed digest with one address's path handed in: that address's leaf is hashed from the
+given path, never from a second evaluation of `paths`. -/
+def digWithPath (a : Address L) (path : Path) (node : NodeIn (Address L) (List UInt8) Inner) : Inner :=
+  match node with
+  | .leaf a' v => if a' = a then pathDig (.leaf path (contentDigest W a' v)) else deployedDig W T node
+  | other => deployedDig W T other
+
+theorem digWithPath_eq (a : Address L) :
+    digWithPath W T a ⟨paths W T a, paths_length W T a⟩ = deployedDig W T := by
+  funext node
+  cases node with
+  | empty => rfl
+  | branch l r => rfl
+  | leaf a' v =>
+      show (if a' = a then pathDig (.leaf ⟨paths W T a, paths_length W T a⟩ (contentDigest W a' v))
+        else deployedDig W T (.leaf a' v)) = deployedDig W T (.leaf a' v)
+      split
+      · rename_i same
+        subst same
+        rfl
+      · rfl
+
+/-- Two kept indexes over one trie are one index. -/
+theorem Index.eq_of_trie {left right : Index W T} (same : left.trie = right.trie) : left = right := by
+  cases left
+  cases right
+  simp only at same
+  subst same
+  rfl
+
+/-- `indexStep` as compiled: an insert evaluates the address's path once, for the walk and for
+the leaf's digest (`indexStep_eq_once`). -/
+def indexStepOnce (index : Index W T) (a : Address L) (v : Option (L.Value a.1)) : Index W T :=
+  match v with
+  | some x =>
+      let path : Path := ⟨paths W T a, paths_length W T a⟩
+      have same : Theory.AuthTrie.Trie.insert (digWithPath W T a path) a (valueBytes W a x) 516 path.1
+            index.trie =
+          (index.insert (paths_length W T) a (valueBytes W a x)).trie := by
+        show Theory.AuthTrie.Trie.insert (digWithPath W T a ⟨paths W T a, paths_length W T a⟩) a
+          (valueBytes W a x) 516 (paths W T a) index.trie = _
+        rw [digWithPath_eq]
+        rfl
+      { trie := Theory.AuthTrie.Trie.insert (digWithPath W T a path) a (valueBytes W a x) 516 path.1
+          index.trie
+        inv := same ▸ (index.insert (paths_length W T) a (valueBytes W a x)).inv
+        paths := same ▸ (index.insert (paths_length W T) a (valueBytes W a x)).paths
+        nodup := same ▸ (index.insert (paths_length W T) a (valueBytes W a x)).nodup }
+  | none => index.erase a
+
+@[csimp] theorem indexStep_eq_once : @indexStep = @indexStepOnce := by
+  funext L W T index a v
+  cases v with
+  | none => rfl
+  | some x =>
+      refine (Index.eq_of_trie W T ?_).symm
+      show Theory.AuthTrie.Trie.insert (digWithPath W T a ⟨paths W T a, paths_length W T a⟩) a
+        (valueBytes W a x) 516 (paths W T a) index.trie = _
+      rw [digWithPath_eq]
+      rfl
+
+#assert_axioms indexStep_eq_once
+
 /-- What a private cell carries: its index and its held blinding bytes. -/
 structure Kept where
   index : Index W T

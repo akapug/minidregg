@@ -1523,7 +1523,7 @@ theorem policy_source_occupied_refused (domain : Digest) (directory : Directory 
 theorem policy_source_retired_refused (domain : Digest) (directory : Directory Nat registry)
     (record : CanonicalPolicyAdmission.PolicyRecord)
     (absent : directory.slots (policySourceCreate domain record).cellId = .absent)
-    (used : (policySourceCreate domain record).cellId ∈ directory.used) :
+    (used : directory.used (policySourceCreate domain record).cellId = true) :
     CellRegistry.create registry directory (policySourceCreate domain record) =
       .error .retiredIdentifier := by
   simp [CellRegistry.create, absent, used]

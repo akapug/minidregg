@@ -28,6 +28,12 @@ def declared (target : Nat) (owner : SubjectId) (ownerCapability controlCapabili
       NativeHostGenesis.declaredPacked target false .open⟩,
     .object, owner, none, none⟩, ownerCapability, controlCapability⟩
 
+/-- A declared cell born as an account: the birth registers it in the Book. -/
+def account (target : Nat) (owner : SubjectId) (ownerCapability controlCapability : CapabilityId) : Born :=
+  ⟨⟨⟨target, CellRegistry.CellSlot.root CanonicalCellRegistry.registry .absent,
+      NativeHostGenesis.declaredPacked target true .open⟩,
+    .account, owner, none, none⟩, ownerCapability, controlCapability⟩
+
 /-- Initial content remains empty as required by CanonicalCellRegistry.UserInitial.
 The pinned control atom must be initialized by a second admitted content operation. -/
 def content (target : Nat) (owner : SubjectId) (ownerCapability controlCapability : CapabilityId) : Born :=

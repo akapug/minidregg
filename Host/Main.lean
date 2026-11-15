@@ -1264,6 +1264,83 @@ def trieBench (size : Nat) (classLeads : Bool) : IO Unit := do
   IO.println s!"chained branch digest {inner.bytes.headD 0}"
   per "pathDig of a branch" 20000 t0
 
+/-- Measurement: the journal index's row operations on a trie of `size` last-write keys held in
+a hash map of rows, each alone, then one batch of twelve as an append applies them. -/
+def indexBench (size : Nat) : IO Unit := do
+  let key (i : Nat) : DurableIndex.IndexKey := DurableIndex.cellKey ⟨i⟩
+  let per (label : String) (count : Nat) (t0 : Nat) : IO Unit := do
+    let nanos := (← IO.monoNanosNow) - t0
+    IO.println s!"{label}: {nanos / count / 1000}.{(nanos / count % 1000) / 100} us each over {count}"
+  let value := DurableIndex.heightValue 7
+  let mut rows : Std.HashMap (List Bool) DurableIndex.Row := {}
+  let mut root := DurableIndex.emptyDigest
+  let t0 ← IO.monoNanosNow
+  for i in [0:size] do
+    let held := rows
+    match DurableIndex.set (fun path => held.get? path) root (key i) (some value) with
+    | .error message => throw (IO.userError message)
+    | .ok (next, written) =>
+        root := next
+        rows := written.foldl (fun map row => map.insert row.1 row.2) rows
+  IO.println s!"built {size} keys by set in {((← IO.monoNanosNow) - t0) / 1000000} ms, {rows.size} rows, root {root.value % 1000000}"
+  let held := rows
+  let store : List Bool → Option DurableIndex.Row := fun path => held.get? path
+  let rounds := 200
+  let t0 ← IO.monoNanosNow
+  let mut bits := 0
+  for i in [0:rounds] do bits := bits + ((DurableIndex.bitsOf (key (size + i))).filter id).length
+  IO.println s!"bits set {bits}"
+  per "bitsOf" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut sum := 0
+  for i in [0:rounds] do sum := sum + (DurableIndex.dig (.leaf (key (size + i)) value)).value % 7
+  IO.println s!"leaf digests {sum}"
+  per "dig of a leaf" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut inner := DurableIndex.emptyDigest
+  for _ in [0:2000] do inner := DurableIndex.dig (.branch inner inner)
+  IO.println s!"chained branch digest {inner.value % 1000000}"
+  per "dig of a branch" 2000 t0
+  let t0 ← IO.monoNanosNow
+  let mut depth := 0
+  for i in [0:rounds] do
+    depth := depth + (DurableIndex.openingOf store root (key (i * (size / rounds)))).siblings.length
+  IO.println s!"opening depth sum {depth}"
+  per "openingOf (a held key)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut found := 0
+  for i in [0:rounds] do
+    match DurableIndex.lookupRows store root (key (i * (size / rounds))) with
+    | .ok answer => if answer.value.isSome then found := found + 1
+    | .error _ => pure ()
+  IO.println s!"found {found}"
+  per "lookupRows (walk and verify)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut wrote := 0
+  for i in [0:rounds] do
+    match DurableIndex.set store root (key (size + i)) (some value) with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "set (a new key)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let other := DurableIndex.heightValue 8
+  wrote := 0
+  for i in [0:rounds] do
+    match DurableIndex.set store root (key (i * (size / rounds))) (some other) with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "set (overwrite a held key)" rounds t0
+  let t0 ← IO.monoNanosNow
+  wrote := 0
+  for i in [0:20] do
+    match DurableIndex.setAll store root ((List.range 12).map fun j => (key (size + 100 * i + j), some value)) with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "setAll of twelve new keys" 20 t0
+
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
   let timed {α : Type} (label : String) (action : IO α) : IO α := do
@@ -8840,6 +8917,10 @@ def runCommandStoreBench (_arguments : List String) (_configPath _command : Stri
   | ["trie", size] =>
           match size.toNat? with
           | some size => trieBench size false; pure 0
+          | none => throw (IO.userError usage)
+  | ["index", size] =>
+          match size.toNat? with
+          | some size => indexBench size; pure 0
           | none => throw (IO.userError usage)
   | ["trie", size, "class-leads"] =>
           match size.toNat? with
