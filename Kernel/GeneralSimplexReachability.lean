@@ -246,6 +246,13 @@ theorem config_thresholds {c : Config} (admitted : 3 * c.faults + 1 ≤ c.partie
   rw [card]
   exact thresholds_standard admitted
 
+/-- At `n = 3f + 1` the widened admission computes the old one (`parties == 3 * faults + 1`),
+so `start` and `step`, which read the configuration's size only through `wellFormed`,
+`quorum` and the unchanged guards, behave exactly as before on every such roster. -/
+theorem wellFormed_at_legacy (c : Config) (size : c.parties = 3 * c.faults + 1) :
+    c.wellFormed = (c.parties == 3 * c.faults + 1 && c.timeout > 0 && c.pumpBudget > 0) := by
+  simp [Config.wellFormed, size]
+
 /-- At `n = 3f + 1` the executable VOTE/COMMIT quorum is the legacy `2f + 1`. -/
 theorem config_quorum_legacy {c : Config} (size : c.parties = 3 * c.faults + 1) :
     c.quorum = 2 * c.faults + 1 := by
@@ -337,5 +344,6 @@ theorem local_output_attestations_prefix_consistent {tr : Trace} {roster faulty 
 #assert_axioms committed_prefix_consistency_at
 #assert_axioms committed_prefix_consistency_admitted
 #assert_axioms config_thresholds
+#assert_axioms wellFormed_at_legacy
 #assert_axioms config_quorum_legacy
 end Minidregg.Kernel.GeneralSimplexReachability
