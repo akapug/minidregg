@@ -29,6 +29,7 @@ public import Compiler.NativeCoprocess
 public import Compiler.DurableLogTags
 public import Compiler.DurableHistory
 public import Compiler.DurableIndex
+public import Compiler.DurableIndexFast
 public import Kernel.JournalIndex
 public import Std.Data.HashMap
 public import Std.Data.HashSet

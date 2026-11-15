@@ -33,6 +33,7 @@ public import Theory.JournalSequences
 public import Theory.KeyedModel
 public import Theory.SequenceSpread
 public import Compiler.Sp800185Cshake256
+public import Theory.Sp800185Cshake256Midstate
 public import Kernel.WorldRoot
 public import Compiler.DurableReceiverCodec
 public import Theory.AssertAxioms
@@ -107,6 +108,39 @@ def IndexKey.bytes (k : IndexKey) : List UInt8 :=
 theorem IndexKey.bytes_length (k : IndexKey) : k.bytes.length = 65 := by
   simp [IndexKey.bytes, fixedStream_encode_length]
 
+/-! ### The key's bytes, compiled: eight octets per machine word -/
+
+def wordOctets (w : UInt64) (tail : List UInt8) : List UInt8 :=
+  w.toUInt8 :: (w >>> 8).toUInt8 :: (w >>> 16).toUInt8 :: (w >>> 24).toUInt8 ::
+    (w >>> 32).toUInt8 :: (w >>> 40).toUInt8 :: (w >>> 48).toUInt8 :: (w >>> 56).toUInt8 :: tail
+
+def octets32 (v : Nat) : List UInt8 :=
+  wordOctets v.toUInt64 (wordOctets (v >>> 64).toUInt64 (wordOctets (v >>> 128).toUInt64
+    (wordOctets (v >>> 192).toUInt64 [])))
+
+theorem octet_eq (n : Nat) (w : UInt64) (same : w.toNat % 256 = n % 256) : UInt8.ofNat n = w.toUInt8 := by
+  apply UInt8.toNat_inj.mp
+  simp only [UInt8.toNat_ofNat', UInt64.toNat_toUInt8]
+  omega
+
+theorem octets32_eq (v : Nat) : fixedOctets 32 v = octets32 v := by
+  simp only [fixedOctets, Minidregg.Theory.Bignum.digitsLE, List.map_cons, List.map_nil, octets32, wordOctets]
+  repeat' (first
+    | rfl
+    | (apply congrArg₂ List.cons
+       · apply octet_eq
+         simp only [UInt64.toNat_shiftRight, Nat.toUInt64, UInt64.toNat_ofNat', Nat.shiftRight_eq_div_pow,
+           UInt64.reduceToNat, Nat.reduceMod, Nat.reducePow]
+         omega))
+
+def IndexKey.bytesFast (k : IndexKey) : List UInt8 :=
+  k.family :: (octets32 k.pathPrimary.val ++ octets32 k.secondary.val)
+
+@[csimp] theorem IndexKey.bytes_eq_fast : @IndexKey.bytes = @IndexKey.bytesFast := by
+  funext k
+  rw [IndexKey.bytesFast, ← octets32_eq, ← octets32_eq]
+  rfl
+
 private theorem fixed_injective {a b : Digest256}
     (same : (fixedStream 32).encode a = (fixedStream 32).encode b) : a = b := by
   have decodedA := (fixedStream 32).decodePrefix_encode a []
@@ -147,6 +181,40 @@ def bitsOf (k : IndexKey) : List Bool := Kernel.WorldRoot.bytesBits k.bytes
 theorem bitsOf_length (k : IndexKey) : (bitsOf k).length = 520 := by
   simp [bitsOf, Kernel.WorldRoot.bytesBits_length, IndexKey.bytes_length]
 
+/-! ### The key's bits, compiled: eight per octet by masks -/
+
+def byteBitsOnto (b : UInt8) (tail : List Bool) : List Bool :=
+  (b &&& 128 != 0) :: (b &&& 64 != 0) :: (b &&& 32 != 0) :: (b &&& 16 != 0) ::
+    (b &&& 8 != 0) :: (b &&& 4 != 0) :: (b &&& 2 != 0) :: (b &&& 1 != 0) :: tail
+
+def bytesBitsFast : List UInt8 → List Bool
+  | [] => []
+  | b :: rest => byteBitsOnto b (bytesBitsFast rest)
+
+set_option maxRecDepth 100000 in
+theorem byteBits_ofNat : ∀ n : Fin 256,
+    Kernel.WorldRoot.byteBits (UInt8.ofNat n.val) = byteBitsOnto (UInt8.ofNat n.val) [] := by
+  decide +kernel
+
+theorem byteBits_eq (b : UInt8) : Kernel.WorldRoot.byteBits b = byteBitsOnto b [] := by
+  have := byteBits_ofNat ⟨b.toNat, b.toNat_lt⟩
+  simpa using this
+
+theorem bytesBits_eq_fast (bytes : List UInt8) : Kernel.WorldRoot.bytesBits bytes = bytesBitsFast bytes := by
+  induction bytes with
+  | nil => rfl
+  | cons b rest ih =>
+      rw [bytesBitsFast, ← ih]
+      show Kernel.WorldRoot.byteBits b ++ Kernel.WorldRoot.bytesBits rest = _
+      rw [byteBits_eq]
+      rfl
+
+def bitsOfFast (k : IndexKey) : List Bool := bytesBitsFast k.bytes
+
+@[csimp] theorem bitsOf_eq_fast : @bitsOf = @bitsOfFast := by
+  funext k
+  exact bytesBits_eq_fast _
+
 /-! ## The node digest -/
 
 def nodeCustomization : List UInt8 := "DREGG/NATIVE-HOST/INDEX-NODE/v1".toUTF8.toList
@@ -186,6 +254,85 @@ theorem nodeBytes_injective {a b : NodeIn IndexKey (List UInt8) Digest}
 /-- The deployed node digest. -/
 def dig (node : NodeIn IndexKey (List UInt8) Digest) : Digest :=
   (Sp800185Cshake256.hash nodeCustomization (nodeBytes node)).digest
+
+/-! ### The node digest, compiled
+
+The customization is absorbed once and every node finishes from it; a node's bytes are written
+straight into a byte array; the empty node's digest is a constant. -/
+
+theorem byteArray_eq_of_toList {a b : ByteArray} (same : a.data.toList = b.data.toList) : a = b :=
+  ByteArray.ext (Array.ext' same)
+
+def nodeMidstate : ByteArray :=
+  Sp800185Cshake256.Midstate.cshake256AbsorbKernel
+    (Sp800185Cshake256.Native.bytesOfList nodeCustomization) (Sp800185Cshake256.Native.bytesOfList [])
+
+def emptyDigestConst : Digest := (Sp800185Cshake256.hash nodeCustomization [2]).digest
+
+/-- The empty digest's base-255 spelling, written once: the family byte leads every path, so the
+top levels of every walk have an empty sibling. -/
+def emptyEncoded : ByteArray := StreamCodec.encodeNatInto ByteArray.empty emptyDigestConst.value
+
+def pushDigest (out : ByteArray) (digest : Digest) : ByteArray :=
+  if digest = emptyDigestConst then out ++ emptyEncoded else StreamCodec.encodeNatInto out digest.value
+
+theorem pushDigest_data (out : ByteArray) (digest : Digest) :
+    (pushDigest out digest).data.toList = out.data.toList ++ StreamCodec.encodeNat digest.value := by
+  unfold pushDigest
+  split
+  · next isEmpty =>
+      rw [ByteArray.data_append, Array.toList_append, emptyEncoded, StreamCodec.encodeNatInto_data, isEmpty]
+      rfl
+  · exact StreamCodec.encodeNatInto_data out digest.value
+
+def nodeArray : NodeIn IndexKey (List UInt8) Digest → ByteArray
+  | .empty => ByteArray.empty.push 2
+  | .leaf k v => pushOctets (pushOctets (ByteArray.empty.push 0) k.bytes) v
+  | .branch l r => pushDigest (pushDigest (ByteArray.empty.push 1) l) r
+
+theorem nodeArray_data (node : NodeIn IndexKey (List UInt8) Digest) :
+    (nodeArray node).data.toList = nodeBytes node := by
+  cases node with
+  | empty => rfl
+  | leaf k v =>
+      rw [nodeArray, pushOctets_data, pushOctets_data, push_data]
+      rfl
+  | branch l r =>
+      rw [nodeArray, pushDigest_data, pushDigest_data, push_data]
+      rfl
+
+def digestOfArray (out : ByteArray) : Digest :=
+  if fits : 0 + 32 ≤ out.size then ⟨fixedValueAt out 0 32 fits⟩
+  else Sp800185Cshake256.digestOfBytesLE out.data.toList
+
+theorem digestOfArray_eq (out : ByteArray) (len : out.data.toList.length = 32) :
+    digestOfArray out = Sp800185Cshake256.digestOfBytesLE out.data.toList := by
+  unfold digestOfArray
+  split
+  · rw [fixedValueAt_eq, List.drop_zero, List.take_of_length_le (by omega)]
+    rfl
+  · rfl
+
+def digFast : NodeIn IndexKey (List UInt8) Digest → Digest
+  | .empty => emptyDigestConst
+  | node => digestOfArray (Sp800185Cshake256.Midstate.cshake256FinishKernel nodeMidstate (nodeArray node))
+
+theorem dig_eq_hashed (node : NodeIn IndexKey (List UInt8) Digest) :
+    dig node = digestOfArray (Sp800185Cshake256.Midstate.cshake256FinishKernel nodeMidstate (nodeArray node)) := by
+  have array : nodeArray node = Sp800185Cshake256.Native.bytesOfList (nodeBytes node) :=
+    byteArray_eq_of_toList (by rw [nodeArray_data, Sp800185Cshake256.Native.bytesOfList_toList])
+  have cached := Sp800185Cshake256.Midstate.cshake256_cached nodeCustomization [] (nodeBytes node)
+  rw [List.nil_append] at cached
+  rw [array, nodeMidstate, digestOfArray_eq _ (by rw [cached]; exact Sp800185Cshake256.cshake256Bytes_length _ _),
+    cached]
+  rfl
+
+@[csimp] theorem dig_eq_digFast : @dig = @digFast := by
+  funext node
+  cases node with
+  | empty => rfl
+  | leaf k v => exact dig_eq_hashed _
+  | branch l r => exact dig_eq_hashed _
 
 /-- One node digest is one cSHAKE256 output over the node bytes. -/
 theorem hash_eq_of_dig_eq {a b : NodeIn IndexKey (List UInt8) Digest} (same : dig a = dig b) :
@@ -407,6 +554,31 @@ def emptyDigest : Digest := dig .empty
 /-- **The verifier** (one key): `Theory.AuthTrie.verify` at this digest and path. -/
 def verify (root : Digest) (k : IndexKey) (answer : Option (List UInt8)) (opening : Opening) : Bool :=
   Theory.AuthTrie.verify dig bitsOf root k answer opening
+
+/-! ### The verifier, compiled: the key's bits and the terminal's digest computed once -/
+
+def verifyBits (root : Digest) (k : IndexKey) (bits : List Bool) (answer : Option (List UInt8))
+    (opening : Opening) (terminalDigest : Digest) : Bool :=
+  let depth := opening.siblings.length
+  decide (depth ≤ bits.length) &&
+  (match opening.terminal, answer with
+    | .empty, none => true
+    | .leaf other value, some claimed => decide (other = k ∧ value = claimed)
+    | .leaf other _, none => decide (other ≠ k ∧ (bitsOf other).take depth = bits.take depth)
+    | .empty, some _ => false) &&
+  decide (Theory.AuthTrie.climb dig (bits.take depth) opening.siblings terminalDigest = root)
+
+theorem verifyBits_eq (root : Digest) (k : IndexKey) (answer : Option (List UInt8)) (opening : Opening) :
+    verifyBits root k (bitsOf k) answer opening (dig opening.terminal.input) = verify root k answer opening := by
+  obtain ⟨siblings, terminal⟩ := opening
+  cases terminal <;> cases answer <;> rfl
+
+def verifyFast (root : Digest) (k : IndexKey) (answer : Option (List UInt8)) (opening : Opening) : Bool :=
+  verifyBits root k (bitsOf k) answer opening (dig opening.terminal.input)
+
+@[csimp] theorem verify_eq_fast : @verify = @verifyFast := by
+  funext root k answer opening
+  exact (verifyBits_eq root k answer opening).symm
 
 /-- The proposition a verified answer carries. -/
 def Opens (root : Digest) (k : IndexKey) (answer : Option (List UInt8)) : Prop :=

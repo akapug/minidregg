@@ -222,6 +222,21 @@ def prepareAppend (transport : Transport) {rootBytes : List UInt8 → Digest}
   if timing then
     let t4 ← IO.monoNanosNow
     IO.eprintln s!"store prepare us at height {height}: index-root {(t1-t0)/1000} index-rows {(t2-t1)/1000} extend {(t3-t2)/1000} entry {(t4-t3)/1000} bytes {entry.record.size + entry.tag.length} nodes {nodes.length}"
+    -- The parts of `Loaded.extend`, each run once more to be timed (a reference keeps each value).
+    let record := IntentRecord.ofIntent intent
+    let a0 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.engine.install rootBytes intent)
+    let a1 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.index.admit height record)
+    let a2 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.links.admit height record)
+    let a3 ← IO.monoNanosNow
+    discard <| IO.mkRef (loaded.ids.admit record)
+    discard <| IO.mkRef (loaded.txs.admitAt loaded.height record)
+    let a4 ← IO.monoNanosNow
+    discard <| IO.mkRef (leafDigest height recordBytes chain extended.worldRoot)
+    let a5 ← IO.monoNanosNow
+    IO.eprintln s!"store extend us at height {height}: engine-install {(a1-a0)/1000} presence {(a2-a1)/1000} links {(a3-a2)/1000} ids-txs {(a4-a3)/1000} leaf-digest {(a5-a4)/1000}; the rest of extend is the root cache and the World's turn"
   return .ok ⟨entry, DurableHistory.toByteArray_toList _, nodes, extended, rfl, indexAfter⟩
 
 

@@ -1340,6 +1340,89 @@ def indexBench (size : Nat) : IO Unit := do
     | .error _ => pure ()
   IO.println s!"rows written {wrote}"
   per "setAll of twelve new keys" 20 t0
+  let t0 ← IO.monoNanosNow
+  wrote := 0
+  for i in [0:rounds] do
+    match DurableIndex.setAll store root [(key (size + 5000 + i), some value)] with
+    | .ok (_, written) => wrote := wrote + written.length
+    | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "setAll of one new key" rounds t0
+  let t0 ← IO.monoNanosNow
+  wrote := 0
+  for i in [0:20] do
+    let mut over : Std.HashMap (List Bool) DurableIndex.Row := {}
+    let mut at_ := root
+    for j in [0:12] do
+      let seen := over
+      match DurableIndex.set (fun path => match seen.get? path with | some row => some row | none => held.get? path)
+          at_ (key (size + 9000 + 100 * i + j)) (some value) with
+      | .ok (next, written) =>
+          at_ := next
+          wrote := wrote + written.length
+          over := written.foldl (fun map row => map.insert row.1 row.2) over
+      | .error _ => pure ()
+  IO.println s!"rows written {wrote}"
+  per "twelve chained sets over a map" 20 t0
+  let openings := (List.range rounds).map fun i =>
+    let k := key (i * (size / rounds))
+    (k, DurableIndex.bitsOf k, DurableIndex.openingOf store root k)
+  let t0 ← IO.monoNanosNow
+  let mut oks := 0
+  for (k, _, opening) in openings do
+    if DurableIndex.verify root k (opening.claims k) opening then oks := oks + 1
+  IO.println s!"verified {oks}"
+  per "verify (opening given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  oks := 0
+  for (k, path, opening) in openings do
+    if DurableIndex.verifyBits root k path (opening.claims k) opening (DurableIndex.dig opening.terminal.input) then
+      oks := oks + 1
+  IO.println s!"verified {oks}"
+  per "verifyBits (bits given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut climbed := 0
+  for (_, path, opening) in openings do
+    climbed := climbed + (Theory.AuthTrie.climb DurableIndex.dig (path.take opening.siblings.length)
+      opening.siblings root).value % 3
+  IO.println s!"climbed {climbed}"
+  per "climb (siblings given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut rebuilt := 0
+  for (_, path, opening) in openings do
+    rebuilt := rebuilt + (DurableIndex.rebuildLazy store path opening.siblings 0 (.node root) []).2.length
+  IO.println s!"rebuilt {rebuilt}"
+  per "rebuildLazy (siblings given)" rounds t0
+  let t0 ← IO.monoNanosNow
+  let mut keysum := 0
+  for i in [0:rounds] do keysum := keysum + (key (size + i)).primary.val % 7
+  IO.println s!"keys {keysum}"
+  per "cellKey" rounds t0
+  let k0 := key 5
+  let t0 ← IO.monoNanosNow
+  let mut bytesum := 0
+  for i in [0:2000] do bytesum := bytesum + (DurableIndex.IndexKey.bytes { k0 with secondary := DurableIndex.seqPosition i }).length
+  IO.println s!"bytes {bytesum}"
+  per "IndexKey.bytes" 2000 t0
+  let t0 ← IO.monoNanosNow
+  let mut arr := 0
+  for i in [0:2000] do
+    arr := arr + (DurableIndex.nodeArray (.branch root ⟨root.value + i⟩)).size
+  IO.println s!"array bytes {arr}"
+  per "nodeArray of a branch" 2000 t0
+  let node := DurableIndex.nodeArray (.branch root root)
+  let t0 ← IO.monoNanosNow
+  let mut out := 0
+  for _ in [0:2000] do
+    out := out + (Compiler.Sp800185Cshake256.Midstate.cshake256FinishKernel DurableIndex.nodeMidstate node).size
+  IO.println s!"out {out}"
+  per "finish kernel" 2000 t0
+  let hashed := Compiler.Sp800185Cshake256.Midstate.cshake256FinishKernel DurableIndex.nodeMidstate node
+  let t0 ← IO.monoNanosNow
+  let mut dsum := 0
+  for i in [0:2000] do dsum := dsum + (DurableIndex.digestOfArray (hashed.push (UInt8.ofNat i) |>.extract 0 32)).value % 3
+  IO.println s!"digests {dsum}"
+  per "digestOfArray" 2000 t0
 
 /-- Measurement: time the per-state costs a request pays on this Store. -/
 def storeBench (config : NativeHost.Config) : IO Unit := do
