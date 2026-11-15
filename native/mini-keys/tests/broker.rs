@@ -989,6 +989,35 @@ fn a_service_ticket_and_row_are_bound_to_their_caller() {
     assert_eq!(b.call(&json!({"op":"service","action":"ls"}), Duration::from_secs(5)).unwrap_err().code, "op-not-granted");
 }
 
+#[test]
+fn a_broker_that_holds_only_service_bearers_starts_without_a_provider_table() {
+    let f = Fixture::new("svc-only");
+    let mut cfg = f.service_config(f.service_roles(), json!([chat_row(&f.provider.0, json!([peer::euid()]))]));
+    cfg["credentials"].as_object_mut().unwrap().remove("providers");
+    let b = f.start_parsed(cfg.clone()).unwrap();
+    set_service(&b);
+    let body = br#"{"text":"hi"}"#;
+    let t = service_authorize(&b, "POST", "/v1/messages", body).unwrap();
+    assert_eq!(service_forward(&b, t["ticket"].as_str().unwrap(), body).unwrap()["complete"], true);
+    // Every provider-side operation refuses by name, before it reads anything.
+    let model = br#"{"model":"m1","max_tokens":8}"#;
+    for request in [
+        json!({"op":"provider-authorize","kind":"pool","provider":"poolrow","runner":"9","maxTokens":8,"bodySha256":body_sha(model)}),
+        json!({"op":"provider-forward","homelab":"homelab","body":wire::hex(model),"timeoutMs":5000,"maxResponseBytes":1024}),
+        json!({"op":"provider-verify-grant"}),
+        json!({"op":"provider-selected-choice"}),
+        json!({"op":"pool","action":"ls"}),
+    ] {
+        assert_eq!(b.call(&request, Duration::from_secs(10)).unwrap_err().code, "providers-not-configured", "{request}");
+    }
+    assert_eq!(f.member_action(&b, json!({"action":"ls"}))["refused"], "providers-not-configured");
+    assert_eq!(f.provider.1.lock().unwrap().len(), 1, "only the service post was sent");
+    // Neither table: the broker would hold nothing, so it does not start.
+    cfg["credentials"].as_object_mut().unwrap().remove("services");
+    let err = f.start_parsed(cfg).unwrap_err();
+    assert!(err.contains("a provider table, a service table, or both"), "{err}");
+}
+
 fn stats(label: &str, mut v: Vec<Duration>) {
     v.sort();
     let us = |d: Duration| d.as_micros();

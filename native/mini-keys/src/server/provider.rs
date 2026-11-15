@@ -80,7 +80,7 @@ fn configured(broker: &Broker) -> Result<&super::Credentials, Refusal> {
 
 fn table(broker: &Broker) -> Result<ProviderTable, Refusal> {
     let c = configured(broker)?;
-    super::provider_table(&c.providers, broker.config.trust_owner).map_err(|e| refuse("provider-table", e))
+    super::provider_table(c.providers.as_deref(), broker.config.trust_owner).map_err(|e| refuse("provider-table", e))
 }
 
 pub(super) fn store(broker: &Broker) -> Result<CredentialStore, Refusal> {

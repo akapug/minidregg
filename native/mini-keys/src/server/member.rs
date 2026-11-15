@@ -175,7 +175,7 @@ fn binding(broker: &Broker) -> Result<Binding, String> {
         // The pinned digest; the image is re-hashed only if the file changed.
         host_sha: broker.host.as_ref().ok_or("credentials-not-configured")?.current()?,
         config: native::host_config(&c.host_config)?,
-        table_sha: super::provider_table(&c.providers, broker.config.trust_owner)?.sha256,
+        table_sha: super::provider_table(c.providers.as_deref(), broker.config.trust_owner)?.sha256,
         key_sha,
     })
 }
@@ -257,7 +257,7 @@ pub fn exchange(broker: &Broker, _peer: &Peer, stream: &mut UnixStream, note: &m
         }
         let response: Result<Value, String> = (|| {
             let store = CredentialStore::open(&c.root, &c.key)?;
-            let table = super::provider_table(&c.providers, broker.config.trust_owner)?;
+            let table = super::provider_table(c.providers.as_deref(), broker.config.trust_owner)?;
             if table.sha256 != captured.table_sha {
                 return Err("credential service binding changed during exchange".into());
             }

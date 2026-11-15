@@ -134,7 +134,9 @@ pub struct Credentials {
     /// The only uid whose operation-144 answer the broker accepts: the account
     /// serving the Host's public socket.
     pub public_socket_uid: u32,
-    pub providers: PathBuf,
+    /// The provider table. Absent: the broker holds service bearers only, and
+    /// every provider-side operation refuses `providers-not-configured`.
+    pub providers: Option<PathBuf>,
     /// The service table (`mini-service-table-v1`): where a service bearer may
     /// be sent, and by whom. Absent: the broker holds no service bearer.
     pub services: Option<PathBuf>,
@@ -243,6 +245,11 @@ impl Config {
             None => None,
             Some(c) => {
                 fields(c, &["host", "hostSha256", "hostConfig", "publicSocket", "publicSocketUid", "providers", "services", "root", "key", "namespaceHelper", "namespaceHelperSha256"], "credentials")?;
+                let providers = c.get("providers").map(|_| abs(c, "providers")).transpose()?;
+                let services = c.get("services").map(|_| abs(c, "services")).transpose()?;
+                if providers.is_none() && services.is_none() {
+                    return Err("credentials must name a provider table, a service table, or both".into());
+                }
                 let root = abs(c, "root")?;
                 let key = abs(c, "key")?;
                 if key.starts_with(&root) {
@@ -273,8 +280,8 @@ impl Config {
                     host_config: abs(c, "hostConfig")?,
                     public_socket: abs(c, "publicSocket")?,
                     public_socket_uid,
-                    providers: abs(c, "providers")?,
-                    services: c.get("services").map(|_| abs(c, "services")).transpose()?,
+                    providers,
+                    services,
                     root,
                     key,
                     namespace_helper,
@@ -327,7 +334,8 @@ impl Config {
 
 /// The provider table names where money and members' keys may be sent: it
 /// belongs to root or to the config's owner, and nobody else may write it.
-pub fn provider_table(path: &Path, trust_owner: u32) -> Result<credentials::ProviderTable, String> {
+pub fn provider_table(path: Option<&Path>, trust_owner: u32) -> Result<credentials::ProviderTable, String> {
+    let path = path.ok_or("this broker names no provider table")?;
     let owner = std::fs::symlink_metadata(path).map_err(|e| format!("provider table: {e}"))?.uid();
     if owner != 0 && owner != trust_owner {
         return Err("the provider table must belong to root (or the broker config's owner)".into());
@@ -443,13 +451,15 @@ impl Broker {
         if let Some(c) = &config.credentials {
             secret_file(&c.key, "the seal key", 32)?;
             credentials::CredentialStore::open(&c.root, &c.key)?;
-            let table = provider_table(&c.providers, config.trust_owner)?;
-            // Ember's ruling (2026-10-26): the provider-side hard cap on the pool
-            // key is never the first line. A deployed broker holds every pool row
-            // to its own spend ceiling.
-            if !config.single_account {
-                if let Some(row) = table.rows.iter().find(|r| r.caps.is_some_and(|c| c.spend.is_none())) {
-                    return Err(format!("pool row {} has no caps.ceilingMicroUsd/callMicroUsd: a deployed broker never spends the operator's key without its own ceiling", row.name));
+            if c.providers.is_some() {
+                let table = provider_table(c.providers.as_deref(), config.trust_owner)?;
+                // Ember's ruling (2026-10-26): the provider-side hard cap on the pool
+                // key is never the first line. A deployed broker holds every pool row
+                // to its own spend ceiling.
+                if !config.single_account {
+                    if let Some(row) = table.rows.iter().find(|r| r.caps.is_some_and(|c| c.spend.is_none())) {
+                        return Err(format!("pool row {} has no caps.ceilingMicroUsd/callMicroUsd: a deployed broker never spends the operator's key without its own ceiling", row.name));
+                    }
                 }
             }
             if c.services.is_some() {
@@ -639,6 +649,15 @@ impl Broker {
         };
         if !granted {
             let r = refuse("op-not-granted", format!("{op} needs role {}; uid {} holds {:?}", role_for(&op).map(Role::name).unwrap_or("?"), peer.uid, roles.iter().map(|r| r.name()).collect::<Vec<_>>()));
+            self.settle(&peer, &roles, &op, Outcome::Refused(&r), Note::default());
+            let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
+            return;
+        }
+        // A broker that holds service bearers only has no provider table: every
+        // operation that reads one (a provider's, the pool's, a member's) refuses here.
+        let provider_side = role_for(&op) == Some(Role::Provider) || op == "pool" || op == "member-action";
+        if provider_side && self.config.credentials.as_ref().is_some_and(|c| c.providers.is_none()) {
+            let r = refuse("providers-not-configured", "this broker names no provider table: it holds service bearers only");
             self.settle(&peer, &roles, &op, Outcome::Refused(&r), Note::default());
             let _ = wire::send(&mut stream, &wire::refusal(&r.code, &r.detail), end);
             return;

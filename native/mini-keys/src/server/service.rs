@@ -266,9 +266,9 @@ impl ServiceRow {
     }
 }
 
-/// The service table, held against the provider table: a service bearer is
-/// sealed in the operator's namespace under its row's name, so no provider
-/// row may share that name.
+/// The service table, held against the provider table (when the broker names
+/// one): a service bearer is sealed in the operator's namespace under its
+/// row's name, so no provider row may share that name.
 pub fn table_of(c: &Credentials, trust_owner: u32) -> Result<ServiceTable, String> {
     let path = c.services.as_ref().ok_or("this broker names no service table")?;
     let owner = std::fs::symlink_metadata(path).map_err(|e| format!("service table: {e}"))?.uid();
@@ -276,9 +276,11 @@ pub fn table_of(c: &Credentials, trust_owner: u32) -> Result<ServiceTable, Strin
         return Err("the service table must belong to root (or the broker config's owner)".into());
     }
     let table = ServiceTable::load(path, owner)?;
-    let providers = super::provider_table(&c.providers, trust_owner)?;
-    if let Some(row) = table.rows.iter().find(|s| providers.rows.iter().any(|p| p.name == s.name)) {
-        return Err(format!("service row {} is also a provider row: the two share the operator's namespace", row.name));
+    if c.providers.is_some() {
+        let providers = super::provider_table(c.providers.as_deref(), trust_owner)?;
+        if let Some(row) = table.rows.iter().find(|s| providers.rows.iter().any(|p| p.name == s.name)) {
+            return Err(format!("service row {} is also a provider row: the two share the operator's namespace", row.name));
+        }
     }
     Ok(table)
 }
