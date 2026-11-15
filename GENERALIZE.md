@@ -127,6 +127,14 @@ All Lean builds ran on the Fabric. None ran on the laptop hub.
 |---|---|---|---|---|
 | `job_d1a7799fae6b6c63d2d9d99f` | droopy | origin/main `01f25eec2` (baseline) | `lake build Kernel.GenericSimplexReceiverSafety Kernel.GenericSimplexObservationSafety Kernel.AgreementEvidenceRegime SimplexQualification Verify.GenericSimplexAxioms` | 0 (3395 jobs) |
 | `job_ec23fd445233085bc2d166cf` | lassie | lane `251218990b5a` (all Lean changes) | `set -o pipefail; lake build Kernel.GenericSimplexQuorum Kernel.GenericSimplexVAInvariant Kernel.GeneralSimplexReachability Kernel.GenericSimplexCertificateSafety Kernel.GenericSimplexReceiverSafety Kernel.GenericSimplexObservationSafety Kernel.GenericSimplexEngineSafety Kernel.AgreementEvidenceRegime SimplexQualification Verify.GenericSimplexAxioms` | 0 (3395 jobs) |
+| `job_ca2ab9ddc1d80aacf30573f2` | lassie | `7bfcc0db` plus an uncommitted probe file | `lake build Kernel.GenericSimplexReceiverSafety Kernel.GenericSimplexEngineSafety && lake env lean .qprobe/QuorumProbe.lean` (`#check` and `#print axioms` of the headline theorems) | 0 |
+
+The probe job printed `#print axioms` for `committed_prefix_consistency_admitted`,
+`certified_next_record_unique_at` and `ordered_next_payload_unique_at`, and all three depend
+only on `[propext, Classical.choice, Quot.sound]`. `thresholds_small_quorum` and
+`two_f_plus_one_quorum_unsafe_above_legacy` depend only on `[propext, Quot.sound]`. The legacy
+`committed_prefix_consistency` and `actual_committed_prefix_consistency` still state
+`roster.card = 3 * f + 1` and `c.parties = 3 * c.faults + 1` respectively.
 
 The second job's build passed every `#assert_axioms` line, the new ones and the old ones.
 It also compiled every unchanged downstream user of the legacy names: EngineSafety,
