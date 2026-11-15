@@ -1,6 +1,6 @@
 //! The broker: config, custody checks at start, the accept loop, roles, the
-//! audit log, and dispatch. The operations live in [`member`], [`provider`] and
-//! [`discord`].
+//! audit log, and dispatch. The operations live in [`member`], [`provider`],
+//! [`service`] and [`discord`].
 use crate::peer::{self, Peer};
 use crate::wire;
 use serde_json::{json, Map, Value};
@@ -19,16 +19,20 @@ pub mod discord;
 pub mod member;
 pub mod native;
 pub mod provider;
+pub mod service;
 pub mod ticket;
 
 pub const CONFIG_TYPE: &str = "mini-keys-broker-v1";
 const MAX_CONFIG: u64 = 16_384;
 /// Connection slots, by the highest role a peer holds: one class cannot take
 /// another's, so session accounts can never starve the Hermes controller.
-const SLOTS: [(Class, usize); 4] = [(Class::Provider, 8), (Class::Operator, 2), (Class::Discord, 2), (Class::Member, 20)];
+const SLOTS: [(Class, usize); 5] = [(Class::Provider, 8), (Class::Operator, 2), (Class::Discord, 2), (Class::Service, 8), (Class::Member, 20)];
 /// Within the member class, one uid holds at most this many.
 const MEMBER_SLOTS_PER_UID: usize = 4;
-/// Every exchange but a provider forward ends within this.
+/// Within the service class, one uid holds at most this many (a stream holds
+/// its slot for as long as it runs).
+const SERVICE_SLOTS_PER_UID: usize = 4;
+/// Every exchange but a provider forward or a service stream ends within this.
 pub const EXCHANGE: Duration = Duration::from_secs(30);
 pub const CURL: &str = "/usr/bin/curl";
 
@@ -37,6 +41,7 @@ pub enum Role {
     Member,
     Provider,
     Discord,
+    Service,
     Operator,
 }
 
@@ -46,6 +51,7 @@ impl Role {
             Role::Member => "member",
             Role::Provider => "provider",
             Role::Discord => "discord",
+            Role::Service => "service",
             Role::Operator => "operator",
         }
     }
@@ -54,6 +60,7 @@ impl Role {
             "member" => Role::Member,
             "provider" => Role::Provider,
             "discord" => Role::Discord,
+            "service" => Role::Service,
             "operator" => Role::Operator,
             _ => return Err(format!("unknown peer role {name:?}")),
         })
@@ -66,12 +73,13 @@ pub enum Class {
     Provider,
     Operator,
     Discord,
+    Service,
     Member,
 }
 
 impl Class {
     fn of(roles: &[Role]) -> Option<Class> {
-        [(Role::Provider, Class::Provider), (Role::Operator, Class::Operator), (Role::Discord, Class::Discord), (Role::Member, Class::Member)]
+        [(Role::Provider, Class::Provider), (Role::Operator, Class::Operator), (Role::Discord, Class::Discord), (Role::Service, Class::Service), (Role::Member, Class::Member)]
             .into_iter()
             .find(|(r, _)| roles.contains(r))
             .map(|(_, c)| c)
@@ -88,7 +96,7 @@ pub fn first_frame_bound(roles: &[Role]) -> usize {
             Role::Member => 4096,
             Role::Operator => 16_384,
             Role::Discord => 65_536,
-            Role::Provider => 2 * wire::MAX_PROVIDER_REQUEST + 4096,
+            Role::Provider | Role::Service => 2 * wire::MAX_PROVIDER_REQUEST + 4096,
         })
         .max()
         .unwrap_or(1024)
@@ -101,7 +109,8 @@ pub fn role_for(op: &str) -> Option<Role> {
         "member-action" => Role::Member,
         "provider-authorize" | "provider-forward" | "provider-verify-grant" | "provider-selected-choice" => Role::Provider,
         "discord-post" | "discord-read" => Role::Discord,
-        "pool" => Role::Operator,
+        "service-authorize" | "service-forward" | "service-stream" => Role::Service,
+        "pool" | "service" => Role::Operator,
         _ => return None,
     })
 }
@@ -126,6 +135,9 @@ pub struct Credentials {
     /// serving the Host's public socket.
     pub public_socket_uid: u32,
     pub providers: PathBuf,
+    /// The service table (`mini-service-table-v1`): where a service bearer may
+    /// be sent, and by whom. Absent: the broker holds no service bearer.
+    pub services: Option<PathBuf>,
     pub root: PathBuf,
     pub key: PathBuf,
     pub namespace_helper: Option<(PathBuf, String)>,
@@ -230,7 +242,7 @@ impl Config {
         let credentials = match v.get("credentials") {
             None => None,
             Some(c) => {
-                fields(c, &["host", "hostSha256", "hostConfig", "publicSocket", "publicSocketUid", "providers", "root", "key", "namespaceHelper", "namespaceHelperSha256"], "credentials")?;
+                fields(c, &["host", "hostSha256", "hostConfig", "publicSocket", "publicSocketUid", "providers", "services", "root", "key", "namespaceHelper", "namespaceHelperSha256"], "credentials")?;
                 let root = abs(c, "root")?;
                 let key = abs(c, "key")?;
                 if key.starts_with(&root) {
@@ -262,6 +274,7 @@ impl Config {
                     public_socket: abs(c, "publicSocket")?,
                     public_socket_uid,
                     providers: abs(c, "providers")?,
+                    services: c.get("services").map(|_| abs(c, "services")).transpose()?,
                     root,
                     key,
                     namespace_helper,
@@ -439,6 +452,9 @@ impl Broker {
                     return Err(format!("pool row {} has no caps.ceilingMicroUsd/callMicroUsd: a deployed broker never spends the operator's key without its own ceiling", row.name));
                 }
             }
+            if c.services.is_some() {
+                service::table_of(c, config.trust_owner)?;
+            }
             let pin = native::HostPin::new(&c.host, &c.host_sha256);
             pin.current()?;
             host = Some(pin);
@@ -504,7 +520,7 @@ impl Broker {
     }
 
     /// Serve until the listener fails. One thread per connection, within the
-    /// peer's slot class ([`SLOTS`], [`MEMBER_SLOTS_PER_UID`]); a connection over
+    /// peer's slot class ([`SLOTS`], [`MEMBER_SLOTS_PER_UID`], [`SERVICE_SLOTS_PER_UID`]); a connection over
     /// its class's bound is refused `busy` without blocking the accept loop.
     pub fn serve(self: Arc<Self>, listener: UnixListener) -> Result<(), String> {
         for stream in listener.incoming() {
@@ -536,13 +552,18 @@ impl Broker {
 
     fn take_slot(self: &Arc<Self>, class: Class, uid: u32) -> Option<Slot> {
         let bound = SLOTS.iter().find(|(c, _)| *c == class).map(|(_, n)| *n).unwrap_or(0);
+        let per_uid = match class {
+            Class::Member => Some(MEMBER_SLOTS_PER_UID),
+            Class::Service => Some(SERVICE_SLOTS_PER_UID),
+            _ => None,
+        };
         let mut keys = vec![(class, None)];
-        if class == Class::Member {
+        if per_uid.is_some() {
             keys.push((class, Some(uid)));
         }
         let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
         let held = |k: &(Class, Option<u32>)| slots.get(k).copied().unwrap_or(0);
-        if held(&(class, None)) >= bound || (class == Class::Member && held(&(class, Some(uid))) >= MEMBER_SLOTS_PER_UID) {
+        if held(&(class, None)) >= bound || per_uid.is_some_and(|n| held(&(class, Some(uid))) >= n) {
             return None;
         }
         for key in &keys {
@@ -659,6 +680,10 @@ impl Broker {
             "provider-verify-grant" => provider::verify_grant(self, &request, &mut note),
             "provider-selected-choice" => provider::selected_choice(self, &request, &mut note),
             "pool" => provider::pool(self, &request, &mut note),
+            "service-authorize" => service::authorize(self, &peer, &request, &mut note),
+            "service-forward" => service::forward(self, &peer, &request, &mut stream, &mut note),
+            "service-stream" => service::stream(self, &peer, &request, &mut stream, &mut note),
+            "service" => service::operator(self, &request, &mut note),
             "discord-post" => discord::post(self, &request, &mut note),
             "discord-read" => discord::read(self, &request, &mut note),
             _ => Err(refuse("op-unknown", op.clone())),

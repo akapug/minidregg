@@ -18,7 +18,8 @@
 //! | `member`   | session accounts (group mini-sessions) | `member-action` (the signed key-service exchange) |
 //! | `provider` | the Hermes controller (`mini-core`) | `provider-authorize`, `provider-forward`, `provider-verify-grant`, `provider-selected-choice` |
 //! | `discord`  | the Discord mirror's session account | `discord-post`, `discord-read` |
-//! | `operator` | root                                | `pool` |
+//! | `service`  | an account a service-table row names | `service-authorize`, `service-forward`, `service-stream` |
+//! | `operator` | root                                | `pool`, `service` |
 //!
 //! Every request is one line in the broker's audit log (who, role, operation,
 //! outcome, named refusal; digests, never secrets).

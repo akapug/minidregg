@@ -160,6 +160,11 @@ pub fn request_key(peer: u32, kind: &str, provider: &str, runner: &str, owner: O
     super::native::sha256_hex(format!("mini-keys-ticket-request-v1\0{peer}\0{kind}\0{provider}\0{runner}\0{owner}\0{body_sha256}").as_bytes())
 }
 
+/// The same, for a service ticket: one row, one method, one path, one body.
+pub fn service_request_key(peer: u32, service: &str, method: &str, path: &str, body_sha256: &str) -> String {
+    super::native::sha256_hex(format!("mini-keys-service-request-v1\0{peer}\0{service}\0{method}\0{path}\0{body_sha256}").as_bytes())
+}
+
 fn valid_id(id: &str) -> bool {
     id.len() == 64 && wire::unhex(id).is_ok()
 }

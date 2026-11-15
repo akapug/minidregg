@@ -9,6 +9,8 @@
 //!       which roles this account holds at the broker
 //!   mini-keys pool --action set|revoke|ls [--provider NAME] [--secret FILE|-] [--runner R]
 //!       the operator's pool key (root)
+//!   mini-keys service --action set|revoke|ls [--service NAME] [--secret FILE|-]
+//!       the operator's bearer for one service-table row (root)
 //!   mini-keys namespace --config BROKER_CONFIG --subject N --public-key HEX
 //!       public namespace metadata for the root namespace helper; reads no key
 // print!/println!/eprint!/eprintln!: a closed standard output ends the command with 141, never a
@@ -136,7 +138,7 @@ fn read_secret(source: &str) -> String {
 fn run_main() {
     let mut argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.is_empty() {
-        fail("usage: mini-keys serve|relay|hello|pool|namespace ... (see the source header)");
+        fail("usage: mini-keys serve|relay|hello|pool|service|namespace ... (see the source header)");
     }
     let verb = argv.remove(0);
     let mut args = Args(argv);
@@ -172,6 +174,28 @@ fn run_main() {
             }
             if let Some(r) = runner {
                 request["runner"] = json!(r);
+            }
+            if let Some(source) = secret {
+                request["secret"] = json!(read_secret(&source));
+            }
+            let result = b.call(&request, Duration::from_secs(30));
+            if let Some(Value::String(mut s)) = request.as_object_mut().and_then(|m| m.remove("secret")) {
+                unsafe { s.as_bytes_mut().fill(0) };
+            }
+            match result {
+                Ok(v) => println!("{}", v["result"]),
+                Err(r) => fail(r),
+            }
+        }
+        "service" => {
+            let action = args.need("action");
+            let service = args.take("service");
+            let secret = args.take("secret");
+            let b = broker(&mut args);
+            args.done();
+            let mut request = json!({"op":"service","action":action});
+            if let Some(name) = service {
+                request["service"] = json!(name);
             }
             if let Some(source) = secret {
                 request["secret"] = json!(read_secret(&source));

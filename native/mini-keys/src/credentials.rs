@@ -19,6 +19,7 @@
 //!            SUBJECT/PUBLIC-KEY-HEX/PROVIDER.grants.json  runners allowed to use it
 //!            SUBJECT/PUBLIC-KEY-HEX/PROVIDER.usage.json   per-runner day counters
 //!            _pool/PROVIDER.key                           the operator's pool secret
+//!            _pool/SERVICE.key                            a service-table row's bearer (server/service.rs)
 //!            _service/                                    per-member exchange locks
 //!
 //! A friend's namespace is named by the subject AND the public key of the
