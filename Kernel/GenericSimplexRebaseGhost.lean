@@ -627,14 +627,14 @@ theorem ghost_rebase {c : Config} {faulty : Finset Nat} {p base : Nat} {chain ti
           · exfalso
             have disabled := ghost.embed _ (inBefore _ (skipped G.lastCommitted below above))
             obtain ⟨time, output⟩ := member_trace disabled
-            exact committed_not_disabled rules roster faultBound committed' honest output
+            exact committed_not_disabled_at rules th faultBound committed' honest output
           · have stored : (.prepare sender previous block.dropLast : Event) ∈ before :=
               parent.resolve_left (fun genesis => by have := genesis.1; omega)
             have inTrail := ghost.embed _ (inBefore _ stored)
             rw [same] at inTrail
             obtain ⟨t1, prep⟩ := member_trace inTrail
             obtain ⟨t2, comm⟩ := member_trace commitTrail
-            have equal := committed_excludes_other_prepare rules roster faultBound honest honest comm prep
+            have equal := committed_excludes_other_prepare_at rules th faultBound honest honest comm prep
             have emptyParent : found.dropLast = [] := by
               rw [last] at equal
               have cancelled := List.append_cancel_left equal
@@ -649,9 +649,10 @@ theorem ghost_rebase {c : Config} {faulty : Finset Nat} {p base : Nat} {chain ti
               parent.resolve_left (fun genesis => by have := genesis.1; omega)
             have inTrail := ghost.embed _ (inBefore _ stored)
             obtain ⟨t1, prep⟩ := member_trace inTrail
-            obtain ⟨q, hq, earlier, _, vote⟩ := prepared_has_honest_vote rules faultBound honest prep
+            obtain ⟨q, hq, earlier, _, vote⟩ := prepared_has_honest_vote_at rules th.quorumHonest
+              th.candidateHonest th.readyHonest faultBound honest prep
             obtain ⟨parentRest, keptParent⟩ :=
-              strip_extends (vote_extends_commit rules roster faultBound committed' higher hq vote)
+              strip_extends (vote_extends_commit_at rules th faultBound committed' higher hq vote)
             have sameParent : parentRest = found.dropLast := by
               obtain ⟨parentWhole, _⟩ := strip_eq keptParent
               rw [last] at parentWhole
