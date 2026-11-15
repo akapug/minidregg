@@ -1,6 +1,7 @@
 # Generic Simplex safety beyond n = 3f + 1
 
-Ledger row: task/12305 (simbi). Lane `lane/quorum-n-ge-3f1`. This lane changes Lean proofs only.
+Ledger row: task/12305 (simbi). Lane `lane/quorum-n-ge-3f1-upstream`, built on emberian/minidregg
+main `5d607d21d` (a port of akapug `lane/quorum-n-ge-3f1` @ `7bfcc0db`). This lane changes Lean proofs only.
 It changes no executable definition, no Rust, and no runtime behaviour.
 
 ## What changed
@@ -49,12 +50,16 @@ are unchanged.
 - `Kernel/GenericSimplexReceiverSafety.lean`
   - `verifiedCommit_attributed_at` takes the native verifier's own `Config.quorum` signer
     count as the certificate quorum, with NO size premise.
-  - `ordered_next_payload_unique_at` is the consumer join for any `Thresholds`.
+    The certificate names its chain by digest, so `block` is the caller's chain, under the same
+    origin and digest premises as upstream's `verifiedCommit_attributed`.
+  - `ordered_next_payload_unique_at` is the consumer join for any `Thresholds`. Like upstream's
+    `ordered_next_payload_unique`, it takes `leftBlock`/`rightBlock` and the `leftReads`/`rightReads`
+    history equalities.
 
 Every old `n = 3f + 1` statement keeps its name and signature. Each is now a one-line
 corollary built with `thresholds_legacy size`, or is left unchanged where it never used
-`size`. The downstream modules (EngineSafety, ObservationSafety, ActualFaithful,
-AgreementEvidenceRegime, SimplexQualification, Verify) are untouched.
+`size`. The downstream modules (EngineSafety, ObservationSafety, ActualFaithful, Trail,
+SupportExtends, RebaseGhost, AgreementEvidenceRegime, SimplexQualification, Verify) are untouched.
 
 Every new theorem carries `#assert_axioms`. That check fails on `sorryAx`, on a declared
 axiom, and on `native_decide`'s compiler trust.
@@ -72,15 +77,15 @@ axiom, and on `native_decide`'s compiler trust.
 The **executable refinement layer** is still `n = 3f + 1` only. This layer proves that the
 real `GenericSimplex.start/step` satisfies `LocalFaithful`. Its modules are
 `GenericSimplexEmissionSupport`, `GenericSimplexActualFaithful`, `GenericSimplexEngineSafety`
-(`actual_local_faithful`, `actual_committed_prefix_consistency`), `GenericSimplexObservationSafety`
-and `GenericSimplexReceiverSafety.actual_*`. There are two reasons:
+(`actual_local_faithful`, `actual_committed_prefix_consistency`), `GenericSimplexObservationSafety`,
+`GenericSimplexTrail.good_faithful`, `GenericSimplexRebaseGhost` and `GenericSimplexReceiverSafety.actual_*`. There are two reasons:
 
-1. The Lean kernel's `Config.wellFormed` (Kernel/GenericSimplex.lean:33-34) admits only
+1. The Lean kernel's `Config.wellFormed` (Kernel/GenericSimplex.lean:59-60) admits only
    `parties == 3 * faults + 1`. Every other config fails at `start`/`step`, so a
    refinement theorem at `n ≠ 3f + 1` would be vacuously true. Widening `wellFormed` is
    a change to the oracle's runtime behaviour. That is out of this lane's layer. It
    also moves the oracle SHA that clockdag's `crates/mesh-simplex/PROVENANCE.txt` pins.
-2. `EmissionSupport.EventSupported` (lines 42-55) records the READY-core, READY-prepare and
+2. `EmissionSupport.EventSupported` (lines 43-55) records the READY-core, READY-prepare and
    disable supports at `c.quorum` and not at `2 * c.faults + 1`. Those are equal only when
    `n = 3f + 1`, which is why `argumentRules_invariant` needs `size`.
 
@@ -88,10 +93,11 @@ The next slice, mapped:
 - In `EventSupported`, put those three thresholds at `2 * c.faults + 1`. Then
   `argumentRules_invariant` no longer needs `size`.
 - Drop `size` from the `progressView`/`pass`/`pump`/`step` invariants (about 8 sites in
-  EmissionSupport and about 28 `size` sites across Engine/Observation/ActualFaithful/GlobalEmission).
+  EmissionSupport and about 40 `size` sites across Engine/Observation/ActualFaithful/GlobalEmission/
+  Trail/RebaseGhost).
 - Have `localFaithful_of_supported` produce `LocalFaithfulAt … (n - f) (2f+1) (2f+1)`.
 - Widen `Config.wellFormed` to the Rust NF admission (`n ≥ 4`, `f = (n-1)/3`, keeping `n = 1`).
-- Estimate: about 80-140 LoC of proof edits, plus the oracle-hash re-pin and a rerun of the
+- Estimate: about 100-160 LoC of proof edits, plus the oracle-hash re-pin and a rerun of the
   `Verify/GenericSimplex*` harnesses. Widening `wellFormed` is the runtime decision this lane
   does not make.
 
@@ -123,17 +129,4 @@ safety theorem applies to it:
 
 All Lean builds ran on the Fabric. None ran on the laptop hub.
 
-| job | node | tree | command | exit |
-|---|---|---|---|---|
-| `job_d1a7799fae6b6c63d2d9d99f` | droopy | origin/main `01f25eec2` (baseline) | `lake build Kernel.GenericSimplexReceiverSafety Kernel.GenericSimplexObservationSafety Kernel.AgreementEvidenceRegime SimplexQualification Verify.GenericSimplexAxioms` | 0 (3395 jobs) |
-| `job_ec23fd445233085bc2d166cf` | lassie | lane `251218990b5a` (all Lean changes) | `set -o pipefail; lake build Kernel.GenericSimplexQuorum Kernel.GenericSimplexVAInvariant Kernel.GeneralSimplexReachability Kernel.GenericSimplexCertificateSafety Kernel.GenericSimplexReceiverSafety Kernel.GenericSimplexObservationSafety Kernel.GenericSimplexEngineSafety Kernel.AgreementEvidenceRegime SimplexQualification Verify.GenericSimplexAxioms` | 0 (3395 jobs) |
-
-The second job's build passed every `#assert_axioms` line, the new ones and the old ones.
-It also compiled every unchanged downstream user of the legacy names: EngineSafety,
-ObservationSafety, ActualFaithful, AgreementEvidenceRegime, SimplexQualification and
-Verify.GenericSimplexAxioms.
-
-The added lines contain no `sorry`, `admit`, `axiom` or `native_decide`. This command
-prints nothing and exits 1:
-
-    git diff origin/main -U0 -- '*.lean' | grep -n "^+.*\b\(sorry\|admit\|axiom\|native_decide\)\b"
+FABRIC-EVIDENCE-PLACEHOLDER
